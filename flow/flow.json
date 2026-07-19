@@ -1,0 +1,408 @@
+{
+  "start": "env_setup",
+  "state_file": ".mae-flow.json",
+  "source_patterns": [
+    "(^|/)(service|src)/"
+  ],
+  "specs_truth": "(^|/)openspec/specs/",
+  "steps": {
+    "env_setup": {
+      "title": "Phase 0 — 环境就绪",
+      "evidence": [
+        {
+          "type": "env_ok"
+        }
+      ],
+      "next": "config_confirm"
+    },
+    "config_confirm": {
+      "title": "配置确认",
+      "user_ack": true,
+      "require_sets": [
+        "工号",
+        "基线分支",
+        "单号",
+        "单号类型",
+        "需求文档",
+        "编译方式",
+        "UT生成方式",
+        "UT运行命令"
+      ],
+      "next": "workflow_select"
+    },
+    "workflow_select": {
+      "title": "工作流选择",
+      "user_ack": true,
+      "choice_key": "workflow",
+      "choices": [
+        "full",
+        "hotfix",
+        "tweak"
+      ],
+      "next": "branch_create"
+    },
+    "branch_create": {
+      "title": "创建工作分支",
+      "evidence": [
+        {
+          "type": "branch_ok"
+        }
+      ],
+      "next_by": "workflow",
+      "next": {
+        "full": "grill_ask",
+        "hotfix": "hf_open",
+        "tweak": "tw_open"
+      }
+    },
+    "grill_ask": {
+      "title": "需求质询询问",
+      "user_ack": true,
+      "choice_key": "grill",
+      "choices": [
+        "yes",
+        "no"
+      ],
+      "next": {
+        "yes": "grill",
+        "no": "open"
+      }
+    },
+    "grill": {
+      "title": "需求质询(Grill)",
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "docs/grill-prep-{单号}.md"
+          ]
+        },
+        {
+          "type": "content_free",
+          "file": "docs/grill-prep-{单号}.md",
+          "patterns": [
+            "待填"
+          ],
+          "note": "备课工作表未填完:残留「(待填…)」占位。每维给出结论(已覆盖(附出处)/有缺口(候选题四要素))后重试"
+        },
+        {
+          "type": "glob",
+          "any": [
+            "docs/clarifications-{单号}.md"
+          ]
+        },
+        {
+          "type": "clean_paths",
+          "paths": [
+            "docs/clarifications-{单号}.md",
+            "docs/grill-prep-{单号}.md"
+          ]
+        }
+      ],
+      "next": "open"
+    },
+    "open": {
+      "title": "Phase 1 — Open",
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "openspec/changes/{CHANGE_NAME}/proposal.md"
+          ]
+        },
+        {
+          "type": "glob",
+          "any": [
+            "openspec/changes/{CHANGE_NAME}/specs/*/spec.md"
+          ]
+        },
+        {
+          "type": "glob",
+          "any": [
+            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
+          ]
+        },
+        {
+          "type": "clean_paths",
+          "paths": [
+            "openspec/changes/{CHANGE_NAME}"
+          ]
+        }
+      ],
+      "next": "design",
+      "require_sets": [
+        "CHANGE_NAME"
+      ]
+    },
+    "design": {
+      "title": "Phase 2 — Design",
+      "evidence": [
+        {
+          "type": "yaml_field",
+          "field": "design_doc"
+        },
+        {
+          "type": "clean_paths",
+          "paths": [
+            "openspec/changes/{CHANGE_NAME}",
+            "docs/superpowers"
+          ]
+        }
+      ],
+      "next": "story_ask"
+    },
+    "story_ask": {
+      "title": "STORY 生成询问",
+      "user_ack": true,
+      "choice_key": "story",
+      "choices": [
+        "yes",
+        "no"
+      ],
+      "next": {
+        "yes": "story",
+        "no": "build"
+      }
+    },
+    "story": {
+      "title": "Phase 2.5 — 生成 STORY",
+      "require_sets": [
+        "STORY入库"
+      ],
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "docs/story/STORY-{单号}.md"
+          ]
+        },
+        {
+          "type": "agent_ran",
+          "agent": "STORY"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "ASKUSER"
+        },
+        {
+          "type": "content_free",
+          "file": "docs/story/STORY-{单号}.md",
+          "patterns": [
+            "待确认",
+            "不涉及(?!\\s*[（(]\\s*已确认\\s*[）)])"
+          ],
+          "note": "待确认闭环未完成:文档残留『待确认』,或存在未经用户确认的裸『不涉及』。合法终态只有『不涉及(已确认)』——由你用 AskUserQuestion 拿到用户逐项拍板后亲自改写,agent 无权消除标注"
+        }
+      ],
+      "next": "build"
+    },
+    "hf_open": {
+      "title": "hotfix — 轻量 Open",
+      "user_ack": true,
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
+          ]
+        }
+      ],
+      "next": "build",
+      "require_sets": [
+        "CHANGE_NAME"
+      ]
+    },
+    "tw_open": {
+      "title": "tweak — 轻量 Open",
+      "user_ack": true,
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
+          ]
+        }
+      ],
+      "next": "tw_change",
+      "require_sets": [
+        "CHANGE_NAME"
+      ]
+    },
+    "tw_change": {
+      "title": "tweak — 直接改动",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "commit_tagged"
+        }
+      ],
+      "next": "tw_codecheck"
+    },
+    "tw_codecheck": {
+      "title": "tweak — 规范检查(可跳过)",
+      "allow_source_edit": true,
+      "skippable": true,
+      "next": "archive_confirm"
+    },
+    "build": {
+      "title": "Phase 3 — Build",
+      "clear_hint": true,
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "tasks_checked"
+        },
+        {
+          "type": "commit_tagged"
+        }
+      ],
+      "next": "verify_ponytail",
+      "user_ack": true
+    },
+    "verify_ponytail": {
+      "title": "Phase 4.1 — Ponytail Review(先删)",
+      "clear_hint": true,
+      "allow_source_edit": true,
+      "next": "verify_codecheck"
+    },
+    "verify_codecheck": {
+      "title": "Phase 4.2 — CodeCheck(再改,代码定稿)",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "CODECHECK"
+        }
+      ],
+      "next": "verify_ut"
+    },
+    "verify_ut": {
+      "title": "Phase 4.3 — UT(对定稿代码补测)",
+      "allow_source_edit": true,
+      "tests_only": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "UT"
+        }
+      ],
+      "next": "verify_comet"
+    },
+    "verify_comet": {
+      "title": "Phase 4.4 — Comet 验证",
+      "evidence": [
+        {
+          "type": "yaml_field",
+          "field": "verify_result",
+          "equals": "pass"
+        }
+      ],
+      "next": "archive_confirm"
+    },
+    "archive_confirm": {
+      "title": "归档确认(不可逆)",
+      "user_ack": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "ASKUSER"
+        }
+      ],
+      "next": "archive"
+    },
+    "archive": {
+      "title": "Phase 5 — Archive",
+      "allow_specs_write": true,
+      "skippable": true,
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "openspec/archive/*{CHANGE_NAME}*",
+            "openspec/changes/archive/*{CHANGE_NAME}*"
+          ]
+        },
+        {
+          "type": "clean_paths",
+          "paths": [
+            "openspec"
+          ]
+        }
+      ],
+      "next": "push"
+    },
+    "push": {
+      "title": "Phase 6 — Push",
+      "evidence": [
+        {
+          "type": "pushed"
+        }
+      ],
+      "next": "end"
+    },
+    "end": {
+      "title": "交付完成",
+      "terminal": true
+    }
+  },
+  "env_checks": [
+    {
+      "name": "Node.js >= 20.19",
+      "type": "node_min",
+      "value": "20.19.0"
+    },
+    {
+      "name": "OpenSpec CLI",
+      "type": "cmd",
+      "value": "openspec --version"
+    },
+    {
+      "name": "Comet CLI",
+      "type": "cmd",
+      "value": "comet --version"
+    },
+    {
+      "name": "Superpowers 插件",
+      "type": "cmd_contains",
+      "value": "codeagent plugin list",
+      "contains": "superpowers"
+    },
+    {
+      "name": "Ponytail 插件",
+      "type": "cmd_contains",
+      "value": "codeagent plugin list",
+      "contains": "ponytail"
+    },
+    {
+      "name": "CodeCheck 插件",
+      "type": "cmd_contains",
+      "value": "codeagent plugin list",
+      "contains": "codecheck"
+    },
+    {
+      "name": "git 仓库(项目根含 .git)",
+      "type": "path_any",
+      "value": [
+        ".git"
+      ]
+    },
+    {
+      "name": "Comet 项目已 init 且已迁移(.cac/skills 就位)",
+      "type": "path_any",
+      "value": [
+        ".cac/skills"
+      ]
+    },
+    {
+      "name": "auto_transition 已关闭(.comet/config.yaml)",
+      "type": "file_contains",
+      "value": ".comet/config.yaml",
+      "contains": "auto_transition: false"
+    },
+    {
+      "name": "Git Bash(comet 全部 .sh 脚本的运行依赖)",
+      "type": "cmd",
+      "value": "bash --version"
+    }
+  ]
+}

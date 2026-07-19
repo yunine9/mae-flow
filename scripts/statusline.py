@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""mae-flow statusline — 状态栏一行:单号 │ 当前步骤 │ 分支。
+
+接入(settings.json,会话重启生效):
+  "statusLine": {"type": "command", "command": "python \"<插件>/scripts/statusline.py\""}
+读 stdin 的会话 JSON(取 cwd),向上定位 .mae-flow.json。
+状态栏高频刷新:必须快——纯文件读,零子进程,任何异常都降级输出而不是报错。
+"""
+import json, os, sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
+def main():
+    try:
+        d = json.loads(sys.stdin.read() or "{}")
+    except Exception:
+        d = {}
+    cwd = ((d.get("workspace") or {}).get("current_dir")) or d.get("cwd") or os.getcwd()
+    base = os.path.basename(os.path.abspath(cwd)) or cwd
+
+    root, probe = None, os.path.abspath(cwd)
+    while True:
+        if os.path.exists(os.path.join(probe, ".mae-flow.json")):
+            root = probe
+            break
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+
+    if not root:
+        hint = " · mae-flow 空闲" if (os.path.isdir(os.path.join(cwd, "openspec"))
+                                      or os.path.isdir(os.path.join(cwd, ".comet"))) else ""
+        print(f"📁 {base}{hint}")
+        return
+
+    try:
+        st = json.load(open(os.path.join(root, ".mae-flow.json"), encoding="utf-8"))
+    except Exception:
+        print(f"📁 {base} · mae-flow 状态读取失败(doctor 排障)")
+        return
+
+    cfg = st.get("config", {})
+    sid = st.get("current", "?")
+    dan = cfg.get("单号", "未配置")
+    if sid == "end":
+        print(f"✅ {dan} 交付完成 · 下一单直接说需求")
+        return
+
+    title = sid
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        flow = json.load(open(os.path.join(here, "..", "flow", "flow.json"), encoding="utf-8"))
+        title = flow["steps"].get(sid, {}).get("title", sid)
+    except Exception:
+        pass
+    if len(title) > 22:
+        title = title[:21] + "…"
+
+    parts = [f"🚦 {dan}", title]
+    if cfg.get("分支名"):
+        parts.append(cfg["分支名"])
+    print(" │ ".join(parts))
+
+
+if __name__ == "__main__":
+    main()

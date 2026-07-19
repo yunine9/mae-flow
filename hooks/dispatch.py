@@ -333,7 +333,8 @@ def ev_posttooluse(d):
     hit = None
     for pat, tf, label in ((r"docs/story/STORY-.*\.md$", "STORY-TEMPLATE.md", "STORY"),
                            (r"docs/chain/CHAIN-.*\.md$", "CHAIN-TEMPLATE.md", "CHAIN"),
-                           (r"docs/grill-prep-.*\.md$", "GRILL-PREP-TEMPLATE.md", "GRILL-PREP")):
+                           (r"docs/grill-prep-.*\.md$", "GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
+                           (r"docs/review/REVIEW-.*\.md$", "REVIEW-TEMPLATE.md", "REVIEW")):
         if re.search(pat, p, re.I):
             hit = (tf, label)
             break

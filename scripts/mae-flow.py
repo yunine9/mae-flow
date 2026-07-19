@@ -391,7 +391,8 @@ def _step_md_text(sid, st):
         return None
     txt = open(md, encoding="utf-8").read().rstrip()
     for ph, name in (("{STORY_TEMPLATE_PATH}", "STORY-TEMPLATE.md"),
-                     ("{GRILL_PREP_TEMPLATE_PATH}", "GRILL-PREP-TEMPLATE.md")):
+                     ("{GRILL_PREP_TEMPLATE_PATH}", "GRILL-PREP-TEMPLATE.md"),
+                     ("{REVIEW_TEMPLATE_PATH}", "REVIEW-TEMPLATE.md")):
         txt = txt.replace(ph, os.path.abspath(
             os.path.join(HERE, "..", "skills", "mae-flow", "assets", name)))
     return subst(txt, st)
@@ -739,7 +740,7 @@ def cmd_template(flow, args):
     """打印模板绝对路径(story|chain)。子 agent/会话在项目目录里搜不到插件安装目录,
     必须经本命令拿路径。"""
     name = {"story": "STORY-TEMPLATE.md", "chain": "CHAIN-TEMPLATE.md",
-            "grill": "GRILL-PREP-TEMPLATE.md"}[args.kind]
+            "grill": "GRILL-PREP-TEMPLATE.md", "review": "REVIEW-TEMPLATE.md"}[args.kind]
     p = os.path.abspath(os.path.join(HERE, "..", "skills", "mae-flow", "assets", name))
     if not os.path.exists(p):
         die(name + " 模板缺失: " + p)
@@ -916,7 +917,7 @@ def main():
     r = sub.add_parser("report")
     r.add_argument("--all", action="store_true")   # 聚合历史账本(无在途单也可用)
     tp = sub.add_parser("template")
-    tp.add_argument("kind", nargs="?", default="story", choices=["story", "chain", "grill"])
+    tp.add_argument("kind", nargs="?", default="story", choices=["story", "chain", "grill", "review"])
     args = ap.parse_args()
 
     root, _ = find_project_root()

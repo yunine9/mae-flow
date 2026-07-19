@@ -37,7 +37,8 @@
       "choices": [
         "full",
         "hotfix",
-        "tweak"
+        "tweak",
+        "review"
       ],
       "next": "branch_create"
     },
@@ -52,8 +53,62 @@
       "next": {
         "full": "grill_ask",
         "hotfix": "hf_open",
-        "tweak": "tw_open"
+        "tweak": "tw_open",
+        "review": "rf_triage"
       }
+    },
+    "rf_triage": {
+      "title": "评审意见裁决(Review Triage)",
+      "user_ack": true,
+      "evidence": [
+        {
+          "type": "glob",
+          "any": [
+            "docs/review/REVIEW-{单号}.md"
+          ]
+        },
+        {
+          "type": "content_free",
+          "file": "docs/review/REVIEW-{单号}.md",
+          "patterns": [
+            "待裁决"
+          ],
+          "note": "裁决未闭环:文档残留「待裁决」。每条意见须经 AskUserQuestion 拿用户确认后改为 修复(已确认)/反驳(已确认)/转规格轮次(已确认)"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "ASKUSER"
+        },
+        {
+          "type": "clean_paths",
+          "paths": [
+            "docs/review/REVIEW-{单号}.md"
+          ]
+        }
+      ],
+      "next": "rf_fix"
+    },
+    "rf_fix": {
+      "title": "评审修复(仅已裁决项)",
+      "allow_source_edit": true,
+      "user_ack": true,
+      "evidence": [
+        {
+          "type": "commit_tagged"
+        }
+      ],
+      "next": "rf_verify"
+    },
+    "rf_verify": {
+      "title": "评审修复增量验证",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "CODECHECK"
+        }
+      ],
+      "next": "push"
     },
     "grill_ask": {
       "title": "需求质询询问",

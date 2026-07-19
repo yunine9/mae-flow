@@ -1,5 +1,7 @@
 判断工作流类型,用 AskUserQuestion 单选提问(推荐项排第一并标注"(推荐)"+判断依据):
 - full:新功能、跨模块、需设计分析 | hotfix:已定位缺陷修复 | tweak:文案/配置小改
+- review:**仅限评审返工**——本单已交付,现在处理评审/走读/门禁意见(经 /mae-flow review-fix
+  或用户明说"处理评审意见"发起;全新需求禁止选,它跳过设计与归档、不碰规格)
 (工具不可用才展示后结束回复等文本回答。)
-拿到选择后 done --choice full|hotfix|tweak --ack "用户选择原文"。
+拿到选择后 done --choice full|hotfix|tweak|review --ack "用户选择原文"。
 禁止自主选择;用户内联贴的需求描述再详细也只是输入,不构成跳过流程的理由。

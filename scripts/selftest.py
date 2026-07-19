@@ -78,7 +78,7 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
         check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
 
 # 6.5 模板与 dispatch 章节校验同步(posttooluse 路由里必须引用同名模板)
-for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md"):
+for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):
     check(f"dispatch 模板校验引用 {tpl}", tpl in dp)
 
 # 6.6 PostToolUse matcher 必须覆盖令牌/校验所需工具(漏了 = ASKUSER/UTRUN 令牌静默失效)
@@ -93,6 +93,7 @@ if hooks:
 for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md",
           "skills/mae-flow/assets/CHAIN-TEMPLATE.md",
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
+          "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "skills/mae-flow/assets/settings-baseline.json",
           "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))

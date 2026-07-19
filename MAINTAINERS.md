@@ -34,7 +34,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 思想源 | 在流程中的位置 | 融入方式与红线 |
 |---|---|---|
 | **grill-me**（mattpocock/skills 的 grilling） | grill 步（open 之前） | 五铁律原文级还原（追问至共识/决策树逐支/每题带推荐/一次一题/事实自查决策问人），工程化增强：8 维备课（模板化工作表 grill-prep，hook 校验章节 + done 拦「待填」残留）、题目四要素、阻塞性排序、收敛条件。**高度红线：只问需求层（WHAT），技术分歧记入「留给设计阶段」清单，禁止下钻** |
-| **superpowers**（brainstorming/writing-plans/executing-plans 等） | 经 comet 编排进 design/build | brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；build 四项工作方式固化标准答案；批次检查点不等用户；TDD 说教用标准回应化解；编译/测试失败按 systematic-debugging 纪律"先归因再动手"（build 主会话 + UT agent 修复循环，skill 缺失时按内联纪律执行） |
+| **superpowers**（brainstorming/writing-plans/executing-plans 等） | 经 comet 编排进 design/build | brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；build 四项工作方式固化标准答案；批次检查点不等用户；TDD 说教用标准回应化解；编译/测试失败按 systematic-debugging 纪律"先归因再动手"（build 主会话 + UT agent 修复循环，skill 缺失时按内联纪律执行）；评审返工轮次（review workflow）按 receiving-code-review 纪律：先查证再裁决、反驳要依据、禁"您说得对"式照单全收 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT AC_COVERAGE | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
 | **ponytail** | build 全程 + verify 4.1 | 双用：build 写码时 full 档常驻预防（the ladder，源头压缩整条 verify 链的量）+ verify 对 diff 做 review 治疗。**两条红线：YAGNI 不得砍 delta spec 要求的行为（spec 是合同，YAGNI 只管怎么写不管写什么）；禁 ultra 档（质疑需求是 grill 的地盘）** |
 | **compound-engineering**（EveryInc） | end 沉淀 → build/verify 装载 | 每单教训经用户逐条确认后沉淀进 docs/delivery-notes.md，下单 build/codecheck/UT 开工前装载。**红线：只沉淀仓库事实（构建陷阱/告警高发点/mock 策略），禁流程规则——防与插件双源打架；上限 30 条，超限删最旧** |
@@ -65,7 +65,7 @@ hooks/hooks.json            5 个 hook 注册(exec form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
 agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 幂等要求)
 commands/mae-flow.md       /mae-flow 命令的三个模式(完整/setup/story)
-skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP 三份模板(hook 章节校验以此为准,
+skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP / REVIEW 四份模板(hook 章节校验以此为准,
                             全插件唯一)+ settings-baseline.json 权限基线(env-setup 合并进项目 settings)
 ```
 
@@ -237,5 +237,6 @@ CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛�
 - **ack 验真已落地"三级放行"**（done 与 goto 同用）：①ack 与 harness 捕获的近期用户输入（`.mae-flow.json.usermsg`，UserPromptSubmit 的 prompt + AskUserQuestion 的应答）归一化匹配→过；②本步内有 ASKUSER 令牌→过（交互真实性已证）；③存储非空且两者皆无→拒。存储恒空（公司 harness 无 prompt/tool_response 字段）时自动降级为旧行为，永不误卡——字段有无以公司机金丝雀为准。剩余不可验：用户所答内容的语义（固有）。
 - **一仓一单**——并行走 worktree；suspend/resume 未做（等真实需求）。
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
+- **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full；rf_verify 的 UT 增量派发是软判断（纯文案类修复可不派，判断依据须向用户展示）。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。
 - **SubagentStop 二次失败静默放行**——防死循环的代价。

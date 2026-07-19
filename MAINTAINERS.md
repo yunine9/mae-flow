@@ -170,6 +170,19 @@ CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛�
 | ponytail 红线：YAGNI 不砍 spec、禁 ultra 档 | spec 是合同；质疑需求归 grill 阶段 | build.md + verify_ponytail.md |
 | grill 高度分层：WHAT 归 grill，HOW 归 brainstorming | 三层提问不撞车；交接物 = clarifications +「留给设计阶段」清单 | grill.md + open.md + design.md |
 
+**用户话术对照表**（用户界面层彻底封装：用户所见一律左列，右列只活在实现层与维护文档；--choice 代号、目录名、命令是 comet/openspec 的实物，不改）：
+
+| 用户话术 | 上游/内部 |
+|---|---|
+| 标准交付 / 缺陷快修 / 小改快过 / 评审返工 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
+| 提案与规格、规格条目 | openspec proposal / delta spec |
+| 变更目录 | change（openspec/changes/<CHANGE_NAME>） |
+| 规格定稿 | archive / 归档 |
+| 方案讨论 | superpowers brainstorming |
+| 代码精简 | ponytail review |
+
+话术纪律定义在 SKILL.md（面向用户不出现上游术语；doctor/排障输出保留原词，那是给维护人看的）。
+
 **团队推广的四条运营纪律**（经验层，违反不会立刻坏，但会慢性失血）：
 1. **CLAUDE.md 分工**：仓库 CLAUDE.md 只放仓库事实（构建/目录/领域约定），流程规则只活在插件里——两处都写会形成双源打架，弱模型无所适从。
 2. **permissions 基线**：团队 settings 里 `deny` 密钥类文件的 Read（对模型不可见，比 hook 拦更彻底）+ `allow` 常用只读命令（每次权限弹窗打断都是弱模型的跑偏机会）。已固化为 `skills/mae-flow/assets/settings-baseline.json`，env-setup-agent 自动合并进项目 settings（追加缺失、不覆盖既有）；团队按需在该文件增删条目。

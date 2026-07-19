@@ -7,6 +7,11 @@ description: 基于 Comet（OpenSpec + Superpowers）的端到端需求交付工
 # Mae-Flow(mae-flow 驱动)
 
 **全程使用简体中文与用户交流**(代码、命令、报错原文除外),无论用户消息是什么语言或只是一个命令。
+**用户话术纪律(用户界面层彻底封装)**:面向用户的一切展示与提问用公司语言,上游术语不进用户视野——
+comet/openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词不对用户说;统一说法:
+规格条目(=delta spec)、变更目录(=change)、规格定稿(=archive/归档)、方案讨论(=brainstorming)、
+代码精简(=ponytail review)、交付方式=标准交付(full)/缺陷快修(hotfix)/小改快过(tweak)/评审返工(review)。
+内部命令、--choice 代号、文件路径、报错原文照旧;doctor/排障输出保留原词(那是给维护人看的)。
 
 本流程**不由你解释和记忆**,由状态机工具驱动。你的职责只有一个循环:
 

@@ -7,7 +7,7 @@
   "specs_truth": "(^|/)openspec/specs/",
   "steps": {
     "env_setup": {
-      "title": "Phase 0 — 环境就绪",
+      "title": "环境就绪",
       "evidence": [
         {
           "type": "env_ok"
@@ -31,7 +31,7 @@
       "next": "workflow_select"
     },
     "workflow_select": {
-      "title": "工作流选择",
+      "title": "交付方式选择",
       "user_ack": true,
       "choice_key": "workflow",
       "choices": [
@@ -58,7 +58,7 @@
       }
     },
     "rf_triage": {
-      "title": "评审意见裁决(Review Triage)",
+      "title": "评审返工 — 意见裁决",
       "user_ack": true,
       "evidence": [
         {
@@ -89,7 +89,7 @@
       "next": "rf_fix"
     },
     "rf_fix": {
-      "title": "评审修复(仅已裁决项)",
+      "title": "评审返工 — 修复",
       "allow_source_edit": true,
       "user_ack": true,
       "evidence": [
@@ -100,7 +100,7 @@
       "next": "rf_verify"
     },
     "rf_verify": {
-      "title": "评审修复增量验证",
+      "title": "评审返工 — 增量验证",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -111,7 +111,7 @@
       "next": "push"
     },
     "grill_ask": {
-      "title": "需求质询询问",
+      "title": "需求澄清询问",
       "user_ack": true,
       "choice_key": "grill",
       "choices": [
@@ -124,7 +124,7 @@
       }
     },
     "grill": {
-      "title": "需求质询(Grill)",
+      "title": "需求澄清(逐题拍板)",
       "evidence": [
         {
           "type": "glob",
@@ -157,7 +157,7 @@
       "next": "open"
     },
     "open": {
-      "title": "Phase 1 — Open",
+      "title": "提案与规格",
       "evidence": [
         {
           "type": "glob",
@@ -190,7 +190,7 @@
       ]
     },
     "design": {
-      "title": "Phase 2 — Design",
+      "title": "方案设计",
       "evidence": [
         {
           "type": "yaml_field",
@@ -220,7 +220,7 @@
       }
     },
     "story": {
-      "title": "Phase 2.5 — 生成 STORY",
+      "title": "生成 STORY",
       "require_sets": [
         "STORY入库"
       ],
@@ -252,7 +252,7 @@
       "next": "build"
     },
     "hf_open": {
-      "title": "hotfix — 轻量 Open",
+      "title": "缺陷快修 — 轻量提案",
       "user_ack": true,
       "evidence": [
         {
@@ -268,7 +268,7 @@
       ]
     },
     "tw_open": {
-      "title": "tweak — 轻量 Open",
+      "title": "小改快过 — 轻量提案",
       "user_ack": true,
       "evidence": [
         {
@@ -284,7 +284,7 @@
       ]
     },
     "tw_change": {
-      "title": "tweak — 直接改动",
+      "title": "小改快过 — 直接改动",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -294,13 +294,13 @@
       "next": "tw_codecheck"
     },
     "tw_codecheck": {
-      "title": "tweak — 规范检查(可跳过)",
+      "title": "小改快过 — 规范检查(可跳过)",
       "allow_source_edit": true,
       "skippable": true,
       "next": "archive_confirm"
     },
     "build": {
-      "title": "Phase 3 — Build",
+      "title": "编码实现",
       "clear_hint": true,
       "allow_source_edit": true,
       "evidence": [
@@ -315,13 +315,13 @@
       "user_ack": true
     },
     "verify_ponytail": {
-      "title": "Phase 4.1 — Ponytail Review(先删)",
+      "title": "验证 1/4 — 代码精简(先删)",
       "clear_hint": true,
       "allow_source_edit": true,
       "next": "verify_codecheck"
     },
     "verify_codecheck": {
-      "title": "Phase 4.2 — CodeCheck(再改,代码定稿)",
+      "title": "验证 2/4 — 规范检查(代码定稿)",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -332,7 +332,7 @@
       "next": "verify_ut"
     },
     "verify_ut": {
-      "title": "Phase 4.3 — UT(对定稿代码补测)",
+      "title": "验证 3/4 — 补充单元测试",
       "allow_source_edit": true,
       "tests_only": true,
       "evidence": [
@@ -344,7 +344,7 @@
       "next": "verify_comet"
     },
     "verify_comet": {
-      "title": "Phase 4.4 — Comet 验证",
+      "title": "验证 4/4 — 规格符合性",
       "evidence": [
         {
           "type": "yaml_field",
@@ -355,7 +355,7 @@
       "next": "archive_confirm"
     },
     "archive_confirm": {
-      "title": "归档确认(不可逆)",
+      "title": "规格定稿确认(不可逆)",
       "user_ack": true,
       "evidence": [
         {
@@ -366,7 +366,7 @@
       "next": "archive"
     },
     "archive": {
-      "title": "Phase 5 — Archive",
+      "title": "规格定稿",
       "allow_specs_write": true,
       "skippable": true,
       "evidence": [
@@ -387,7 +387,7 @@
       "next": "push"
     },
     "push": {
-      "title": "Phase 6 — Push",
+      "title": "推送分支",
       "evidence": [
         {
           "type": "pushed"

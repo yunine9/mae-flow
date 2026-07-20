@@ -1,5 +1,9 @@
-启动 ut-generator-agent(契约与传入清单见 agents/ut-generator-agent.md;
-docs/delivery-notes.md 存在时把其中 mock 策略/UT 相关条目附进任务提示)。
+启动 ut-generator-agent(契约与传入清单见 agents/ut-generator-agent.md)。
+**派发喂到嘴边(弱模型的轮次是稀缺资源,别让它花几十轮自己找原料——2026-07-20 实战:25 轮烧完还在读文件)**,
+任务提示里直接附上:
+- delta spec 的 **EARS/Scenario 条目原文**(全部粘进去,不是给路径让它自己读);
+- **变更文件清单**(git diff --name-only 基线...HEAD 的结果,标注哪些是新增哪些是修改);
+- docs/delivery-notes.md 里 mock 策略/UT 相关条目(如存在)。
 本步在 Ponytail/CodeCheck 之后,代码形态已定稿,UT 针对最终代码补测,不会因后续重构失效。
 本仓配置了「测试路径」时(config 或 .mae-flow-defaults.json),gate 默认只放行测试路径写入;
 这拦的是"未经用户裁决自行改被测源码",不是死禁——裁决通道见下方 SUSPECTED_BUGS 处理。未配置的仓行为不变。

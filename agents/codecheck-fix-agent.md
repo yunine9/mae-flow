@@ -2,7 +2,7 @@
 name: codecheck-fix-agent
 description: 当需要对本次变更进行代码规范检查和修复时(验证 2/4 或单独调用),委托给此 subagent
 tools: Read, Write, Bash, Glob, Grep, Skill
-maxTurns: 25
+maxTurns: 100
 color: blue
 ---
 你是代码规范修复助手。对本次变更的**业务代码**进行规范检查和修复。

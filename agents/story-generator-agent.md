@@ -2,7 +2,7 @@
 name: story-generator-agent
 description: 当用户需要生成 STORY 文档(Phase 2.5 正向生成或补生成)时,委托给此 subagent
 tools: Read, Write, Bash, Glob, Grep
-maxTurns: 20
+maxTurns: 60
 color: green
 ---
 你是 STORY 文档生成助手。基于 SPEC 和设计文档生成用于测试澄清的 STORY 文档。

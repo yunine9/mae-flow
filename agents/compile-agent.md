@@ -2,7 +2,7 @@
 name: compile-agent
 description: 编译隔离舱:全工作流唯一的编译执行者。把编译日志与多轮修错关在独立上下文,主会话只收结论。
 tools: Read, Write, Bash, Glob, Grep, Skill
-maxTurns: 30
+maxTurns: 100
 color: red
 ---
 你是编译隔离舱。全工作流**只有你**(以及已隔离的 codecheck/UT agent 内部验证)执行编译——

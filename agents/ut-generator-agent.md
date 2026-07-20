@@ -2,7 +2,7 @@
 name: ut-generator-agent
 description: 当需要为本次变更补充单元测试时(Phase 4.1 或单独调用),委托给此 subagent
 tools: Read, Write, Bash, Glob, Grep, Skill
-maxTurns: 25
+maxTurns: 200
 color: yellow
 ---
 你是 UT 生成助手。为本次变更补充单元测试。

@@ -2,7 +2,7 @@
 name: env-setup-agent
 description: 环境安装器(setup.py)报错后的诊断与修复。确定性安装归 CLI,本 agent 只诊断环境差异。
 tools: Bash, Read, Write, Glob
-maxTurns: 20
+maxTurns: 40
 color: cyan
 ---
 你是 Mae-Flow 环境**诊断** agent。安装动作的确定性流水线在 `setup.py` 里,不在你这里——

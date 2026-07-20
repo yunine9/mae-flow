@@ -192,37 +192,42 @@ def main():
         else:
             npm_install(key, prof["npm_packages"][key], offline)
 
-    # ---- codeagent 插件(幂等:list 里有则跳过) ----
+    # ---- codeagent 插件(幂等:装没装只认 plugin list 的复验结果) ----
     rc, listed = sh(prof["plugin_cli"] + " plugin list", timeout=60)
     for pl in prof["plugins"]:
         if pl["name"].lower() in listed.lower():
             mark("OK", "插件 " + pl["name"])
             continue
-        ok = True
         for c in pl["cmds"]:
-            rc, out = sh(c, timeout=600)
-            ok = ok and rc == 0
-        mark("FIXED" if ok else "FAIL", "插件 " + pl["name"],
-             "" if ok else "安装命令失败,见日志 " + LOG + "(装成功后需重启会话)")
+            sh(c, timeout=600)   # 单条命令报错不当致命(marketplace 重复添加会报错),成败以复验为准
+        rc, listed2 = sh(prof["plugin_cli"] + " plugin list", timeout=60)
+        if pl["name"].lower() in listed2.lower():
+            mark("FIXED", "插件 " + pl["name"], "需重启会话生效")
+            listed = listed2
+        else:
+            mark("FAIL", "插件 " + pl["name"],
+                 "装后复验仍不在 plugin list;常见根因是 git 代理不通,见日志 " + LOG)
 
-    # ---- 项目级(仅在项目根执行时) ----
+    # ---- 项目级(仅在项目根执行时;顺序:先验 init,未初始化则全部跳过——没地基不装修) ----
     if os.path.isdir(".git"):
-        ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "auto_transition", "false")
-        ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "review_mode", "standard") or ch
-        mark("FIXED" if ch else "OK", ".comet/config.yaml(auto_transition+review_mode)")
-        if os.path.isdir(".claude") and not os.path.isdir(".cac"):
-            if not DRY:
-                os.rename(".claude", ".cac")
-            mark("FIXED", ".claude → .cac 迁移", "需在会话执行 /reload-skills 或重启会话")
-        elif os.path.isdir(".claude") and os.path.isdir(".cac"):
-            mark("MANUAL", "目录合并", ".claude 与 .cac 并存,请人工确认合并后删除 .claude(有覆盖风险,不自动做)")
-        merge_settings(HERE)
-        if not os.path.isdir(os.path.join(".cac", "skills")) and not os.path.isdir(os.path.join(".claude", "skills")):
+        inited = os.path.isdir(os.path.join(".cac", "skills")) or os.path.isdir(os.path.join(".claude", "skills"))
+        if not inited:
             mark("MANUAL", "comet 项目初始化",
                  "交互式命令必须人工执行(自动化会初始化全部 agent 平台,已被禁止)。三要素:"
-                 "①目录 %s ②命令 comet init --language zh --scope project ③平台只选 Claude Code;跑完重跑本脚本" % os.getcwd())
+                 "①目录 %s ②命令 comet init --language zh --scope project ③平台只选 Claude Code。"
+                 "跑完重跑本脚本,其余项目级配置(comet 开关/状态栏/权限/目录迁移)届时自动补齐" % os.getcwd())
         else:
             mark("OK", "comet 项目初始化")
+            ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "auto_transition", "false")
+            ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "review_mode", "standard") or ch
+            mark("FIXED" if ch else "OK", ".comet/config.yaml(auto_transition+review_mode)")
+            if os.path.isdir(".claude") and not os.path.isdir(".cac"):
+                if not DRY:
+                    os.rename(".claude", ".cac")
+                mark("FIXED", ".claude → .cac 迁移", "需在会话执行 /reload-skills 或重启会话")
+            elif os.path.isdir(".claude") and os.path.isdir(".cac"):
+                mark("MANUAL", "目录合并", ".claude 与 .cac 并存,请人工确认合并后删除 .claude(有覆盖风险,不自动做)")
+            merge_settings(HERE)
     else:
         log("(当前目录无 .git,跳过项目级配置——在项目根重跑本脚本可补齐)")
 

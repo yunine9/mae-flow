@@ -1,26 +1,26 @@
 {
   "hooks": {
     "SessionStart": [
-      {"hooks": [{"type": "command", "command": "python",
-                  "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "sessionstart"], "timeout": 15}]}
+      {"hooks": [{"type": "command",
+                  "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" sessionstart", "timeout": 15}]}
     ],
     "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "python",
-                  "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "userprompt"], "timeout": 15}]}
+      {"hooks": [{"type": "command",
+                  "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" userprompt", "timeout": 15}]}
     ],
     "PreToolUse": [
       {"matcher": "Edit|Write|MultiEdit|Bash",
-       "hooks": [{"type": "command", "command": "python",
-                  "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "pretooluse"], "timeout": 15}]}
+       "hooks": [{"type": "command",
+                  "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" pretooluse", "timeout": 15}]}
     ],
     "PostToolUse": [
       {"matcher": "Write|Edit|MultiEdit|AskUserQuestion|Bash",
-       "hooks": [{"type": "command", "command": "python",
-                  "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "posttooluse"], "timeout": 15}]}
+       "hooks": [{"type": "command",
+                  "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" posttooluse", "timeout": 15}]}
     ],
     "SubagentStop": [
-      {"hooks": [{"type": "command", "command": "python",
-                  "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "subagentstop"], "timeout": 15}]}
+      {"hooks": [{"type": "command",
+                  "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" subagentstop", "timeout": 15}]}
     ]
   }
 }

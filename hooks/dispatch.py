@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 """dispatch.py — 跨平台 hook 分发器(Windows 优先,零 POSIX 依赖)。
 
-用法(hooks.json 中,exec form——Windows 官方推荐,不经 shell,无引号/展开问题):
-  {"command": "python", "args": ["${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py", "<事件>"]}
-事件:pretooluse | userprompt | sessionstart | subagentstop | posttooluse
-若 harness 版本不支持 args(exec form),退回 shell form:
+用法(hooks.json 中,shell form——公司 codeagent 实测**不支持** exec form 的 args 数组:
+只执行 command 本体,payload 落进 python 的 stdin 被当脚本解析,JSON 的 false 炸 NameError,2026-07-20 实战):
   python "${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py" <事件>
-(Windows 上 hook 默认经 Git Bash 执行,${VAR} 同样可展开)
+事件:pretooluse | userprompt | sessionstart | subagentstop | posttooluse
+(Windows 上 hook 经 Git Bash 执行,${VAR} 可展开;路径带引号防空格)
 输入:stdin 的 hook JSON。exit 2 = 拦截/打回(stderr 回传模型);其余一律 0(fail-open)。
 
 防卡死设计(hook 在每条消息上同步执行,任何阻塞都会冻住整个会话):

@@ -106,6 +106,9 @@
         {
           "type": "agent_ran",
           "agent": "CODECHECK"
+        },
+        {
+          "type": "codecheck_clean"
         }
       ],
       "next": "push"
@@ -297,6 +300,11 @@
       "title": "小改快过 — 规范检查(可跳过)",
       "allow_source_edit": true,
       "skippable": true,
+      "evidence": [
+        {
+          "type": "codecheck_clean"
+        }
+      ],
       "next": "archive_confirm"
     },
     "build": {
@@ -309,6 +317,10 @@
         },
         {
           "type": "commit_tagged"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "COMPILE"
         }
       ],
       "next": "verify_ponytail",
@@ -327,6 +339,9 @@
         {
           "type": "agent_ran",
           "agent": "CODECHECK"
+        },
+        {
+          "type": "codecheck_clean"
         }
       ],
       "next": "verify_ut"
@@ -433,6 +448,11 @@
       "type": "cmd_contains",
       "value": "codeagent plugin list",
       "contains": "codecheck"
+    },
+    {
+      "name": "CodeCheck 独立 CLI(fullcheck 可用)",
+      "type": "cmd",
+      "value": "codecheck fullcheck --help"
     },
     {
       "name": "git 仓库(项目根含 .git)",

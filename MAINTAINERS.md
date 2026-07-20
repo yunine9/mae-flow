@@ -13,7 +13,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
   └ comet          —— 管"工程方法":open/design/build/verify/archive 五阶段编排
       ├ openspec   —— 管 WHAT:提案、delta spec、真相源、归档
       └ superpowers—— 管 HOW:brainstorming、写计划、执行计划、收尾
-公司质量 agent(env-setup/ut-generator/codecheck-fix/story-generator/build-fix)—— 管"质量动作"
+公司质量 agent(env-setup/ut-generator/codecheck-fix/story-generator/compile)—— 管"质量动作"
 ```
 
 职责分层的一句话版本：**状态机管路径、证据管推进、hook 管越界、comet 管方法、子 agent 管质量**。
@@ -44,7 +44,8 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 维度 | 谁管 | 何时 | 为什么在这个位置 |
 |---|---|---|---|
 | 复杂度 | Ponytail | build 预防 + verify 4.1 | 先删：不给将死代码修规范/补测 |
-| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账防吞告警；流水线门禁必拦 → 流程无"忽略"选项 |
+| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+复验摘录一致性防吞告警；**done 的 codecheck_clean 现场重跑 CLI 亲数遗留（agent 报数不作数）**；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
+| 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
 | 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
 | 正确性/漏洞 | comet review（standard） | build 收尾 + verify 内 | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
@@ -111,6 +112,7 @@ flow.json 步骤字段语义：
 | `agent_ran` | 本步期间发生过 harness 签发的事件令牌——SubagentStop 验完契约标记发 agent 令牌（STORY/UT/CODECHECK/ENV），PostToolUse 对 AskUserQuestion 发 **ASKUSER 令牌**（"真实问过用户"从此是 harness 记录的事实，不是模型可书写的文本）。令牌文件 gate 双拦 + 手动调 dispatch.py 被拦 + 时间戳须晚于本步进入 + **新鲜度绑定**：令牌记签发时 HEAD，签发后源码（source_patterns）有已提交/未提交变更即判证据过期（旧格式纯时间戳令牌仅验时间，兼容在途单；基点经 amend/rebase 不可解析同样判拒，重跑 agent 即恢复）。**封杀三类造假：主会话代工 agent 产出、未问用户就声称确认过、拿旧证据背新代码的书** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
+| `codecheck_clean` | **done 现场重跑 `codecheck fullcheck -f <本单业务代码>` 亲数遗留**（解析锚点「共有 N 条告警」，全量明细读落盘报告）：0 条或每条(规则,文件)都在 `docs/codecheck-exempt-{单号}.md` 豁免清单内才放行。只查业务代码（测试路径配置/默认特征过滤）；分批防命令行超长；超时 15min。最硬形态：agent 报数不作数，harness 亲测（verify_codecheck/tw_codecheck/rf_verify 在用） |
 
 **新增证据类型**：在 mae-flow.py 写 `ev_xxx(spec, st) -> (bool, 失败原因)`，注册进 `EVIDENCE` 字典，flow.json 里引用。失败原因要写"怎么补救"，它会原样回传给模型。
 

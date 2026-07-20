@@ -207,10 +207,12 @@ def ev_subagentstop(d):
     first_line = last.splitlines()[0] if last else ""
     # 标记本身即身份证明:凡以合法契约标记收尾的 agent,直接验契约+发令牌,
     # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
-    m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|BUILDFIX)_RESULT:\s*(\S+)", first_line)
+    m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", first_line)
     if m:
         if m.group(1) == "CODECHECK":
             _codecheck_contract(m.group(2), last, soft=retry)
+        if m.group(1) == "COMPILE":
+            _compile_contract(m.group(2), last, soft=retry)
         _record_agent_token(m.group(1))
         sys.exit(0)
     if retry:
@@ -222,7 +224,7 @@ def ev_subagentstop(d):
         head = open(tp, encoding="utf-8", errors="replace").read(16000)
     except OSError:
         head = prompt
-    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent|build-fix-agent", head):
+    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent|compile-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
     print("[mae-flow] 子 agent 契约违规:最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"
@@ -339,6 +341,72 @@ def _codecheck_contract(status, report, soft=False):
         bail(f"标记 CLEAN 但 REMAINING_COUNT={nums['REMAINING_COUNT']},自相矛盾。")
     if status == "REMAINING" and nums["REMAINING_COUNT"] == 0:
         bail("标记 REMAINING 但 REMAINING_COUNT=0,自相矛盾。")
+    # 与复验摘录对账:契约要求附「共有 N 条告警」原文,取最后一处(复验)与 REMAINING_COUNT 比对
+    ex = re.findall(r"共有\s*(\d+)\s*条告警", report)
+    if ex and int(ex[-1]) != nums["REMAINING_COUNT"]:
+        bail(f"REMAINING_COUNT({nums['REMAINING_COUNT']})与复验摘录『共有 {ex[-1]} 条告警』矛盾——遗留数必须原样取自复验输出。")
+
+
+def _git_out(cmd):
+    """dispatch 内轻量 git 调用(编码/超时按军规)。失败返回空串,调用方按'不可算'处理。"""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=8)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _compile_net_lines():
+    """编译修复的净行数,git 亲算(agent 报数不作数):
+    未提交改动 + 自 HEAD 回溯的连续「修复编译」commit,只统计代码文件。
+    这是防掏空的机器不变量:删代码换编译通过,在这里得不了分。"""
+    exts = (".c", ".cc", ".cpp", ".h", ".hpp", ".java")
+
+    def net_of(out):
+        n = 0
+        for line in out.splitlines():
+            p = line.split("\t")
+            if len(p) == 3 and p[0].isdigit() and p[1].isdigit() and p[2].lower().endswith(exts):
+                n += int(p[0]) - int(p[1])
+        return n
+
+    total = net_of(_git_out("git -c core.quotepath=false diff --numstat"))
+    for depth in range(10):
+        subj = _git_out(f"git log -1 --skip={depth} --pretty=%s").strip()
+        if "修复编译" not in subj:
+            break
+        total += net_of(_git_out(f"git -c core.quotepath=false show --numstat --pretty=format: HEAD~{depth}"))
+    return total
+
+
+def _compile_contract(status, report, soft=False):
+    """编译 agent 收尾硬校验:格式对账(OK⇔零error)+ 净产出不变量(numstat 亲算防掏空)。
+    优雅三件套之硬层:作弊(删代码换通过)从'被禁止'变'得不了分'。"""
+    def bail(msg):
+        if soft:
+            _log("compile 重答仍违规: " + msg)
+            sys.exit(0)
+        print("[mae-flow] 编译契约违规:" + msg
+              + " 请按契约 Return format 重新真实收尾(EXECUTED_BUILD/BUILD_ERRORS 必填)。", file=sys.stderr)
+        sys.exit(2)
+
+    if status == "FAIL":
+        return   # 诚实上报工具/配置问题,不苛求对账
+    if not re.search(r"EXECUTED_BUILD", report):
+        bail("必须包含 EXECUTED_BUILD(实际执行的编译方式与输出摘录)。")
+    m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
+    if not m:
+        bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")
+    n = int(m.group(1))
+    if status == "OK" and n != 0:
+        bail(f"标记 OK 但 BUILD_ERRORS={n},自相矛盾。")
+    if status == "BLOCKED" and n == 0:
+        bail("标记 BLOCKED 但 BUILD_ERRORS=0,自相矛盾(编译已过应报 OK)。")
+    net = _compile_net_lines()
+    if net < 0 and "SHRINK_EXEMPT" not in report:
+        bail(f"代码净删 {-net} 行(git 亲算:未提交+修复编译 commit)且无 SHRINK_EXEMPT 声明——"
+             "禁止删代码/注释代码换编译通过;确属合理精简须逐项声明并接受下游评审复核。")
 
 
 def ev_posttooluse(d):

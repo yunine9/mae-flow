@@ -16,17 +16,25 @@ executing-plans 的**批次检查点不等用户**:每批完成展示简报后�
 批次交接必须**盘上自足**——本批的结论/偏离/踩坑写进 tasks.md 对应任务的缩进备注行,
 让 /clear 后(或换会话)的你只靠磁盘就能无损接续。
 superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_override 授权,UT 由 verify 阶段 AutoUT 统一补,继续执行。
-按计划迭代,每完成一个任务:实现 → 按配置编译方式编译修复 → delta spec 同步检查(有偏差立即修) → 勾选 tasks.md → git commit -m "[单号][类型]描述"(拒绝 comet 建议的 fix:/tweak:/设计意图式 message)。
-**编译是你的职责,不是用户的**:必须按 config_confirm 配置的编译方式亲自编译并修复,**禁止让用户"自行编译"**。
-若不知道怎么编译(配置为空/是个你调不起来的 skill),那是配置问题——回 config_confirm 与用户确认可用的编译方式,不是把编译甩给用户。
+按计划迭代,每完成一个任务:实现 → delta spec 同步检查(有偏差立即修) → 勾选 tasks.md →
+git commit -m "[单号][类型]描述"(拒绝 comet 建议的 fix:/tweak:/设计意图式 message;
+**先 commit 后编译**是定死的顺序:任务代码可以带着编译错误入库,compile-agent 的修复另行 commit)。
+**积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 派 compile-agent**
+(传:单号类型、编译方式配置原文、本批改动说明):OK → 继续下一批;BLOCKED(含 SUSPECTED_ISSUES
+疑似要改接口/逻辑)→ 停下呈用户裁决,走既有回流通道,禁止自己乱改绕过。
+mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(错误堆成山难定位)。
+**build 收尾铁序**:最后一次改码之后必须再派一次 compile-agent 收尾——新鲜度绑定会强制这一点
+(编译令牌绑签发时代码状态,编译后再改码令牌即作废,done 过不去)。
+**编译总策略(全工作流统一,无例外)**:编译只有一条路——**派 compile-agent(编译隔离舱)**,
+它按配置的编译方式执行(build-fix skill 或命令)。**你(主会话)永不直接执行编译命令、永不自行猜测编译方式、
+更不许让用户"自行编译"**;done 硬校验本步内 compile-agent 真实收尾过(COMPILE 令牌),绕不过去。
+配置为空/调不起来 → 那是配置问题,回 config_confirm 与用户确认,不是现场即兴。
 编译/测试失败的修复纪律(systematic-debugging,superpowers 有此 skill 则启用,没有也按此执行):
 **先复现、读全报错、定位根因,再动手**;同一错误第一轮修复无效 → 停止盲试,写出根因假设与验证方法再改——
 "改一下试试"的乱枪打鸟只会把一个错改成三个错。根因假设与验证结果**写进 tasks.md 对应任务的备注行**,
 不能只留在会话里——/clear 后调试中态全靠它。
-**编译反复卡住(自己修 3 轮仍不过,或大批链接/依赖类报错)→ 派 build-fix-agent 专项修复**
-(契约见 agents/build-fix-agent.md,传入:单号类型、编译方式、当前编译报错):它只修编译、不碰功能逻辑与测试,
-修到编译通过(OK)你再继续;它 BLOCKED(含疑似源码设计缺陷 SUSPECTED_ISSUES)→ 停下带诊断报告用户,
-禁止你自己乱改逻辑绕过编译错误。大多数顺手的编译错自己修即可,派 agent 是卡住时的 offload,不是每次编译都派。
+(编译错误的修复全在 compile-agent 舱内完成,其契约自带 systematic-debugging 纪律与防掏空不变量;
+主会话的调试纪律只适用于**非编译类**失败——脚本、工具、流程问题。)
 **Ponytail(full 档)写码时全程生效**——每段代码先走 the ladder:已有实现可复用?>标准库?>平台原生?>
 已装依赖?>一行能写完?>最少代码。写得少,后面 Ponytail-review 删得少、CodeCheck 告警少、UT 补得少,整条 verify 链都轻。
 两条边界:**YAGNI 不得砍 delta spec 要求的行为**(spec 是合同,只作用于怎么写,不作用于写什么);

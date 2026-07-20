@@ -277,6 +277,98 @@ def ev_commit_tagged(spec, st):
     return False, f"最新 commit「{msg}」不符合 [{dan}][feat|fix]描述 格式"
 
 
+CODE_EXTS = (".c", ".cc", ".cpp", ".h", ".hpp", ".java")
+DEFAULT_TEST_PATS = [r"(^|/)tests?/", r"(^|/)src/test/", r"_test\.(c|cc|cpp|h|hpp)$", r"Test\.java$"]
+
+
+def _is_test_file(path, st):
+    """UT/测试文件判定:配置了「测试路径」用配置,否则用默认特征。codecheck 只查业务代码(团队约定)。"""
+    pats = _test_patterns(st) or DEFAULT_TEST_PATS
+    return any(re.search(p, norm(path), re.I) for p in pats)
+
+
+def _biz_changed_files(st):
+    """本单变更中的业务代码文件(排除测试),codecheck 检查范围的唯一算法——agent 与证据同源。
+    基线分支必须先验证可解析:diff 命令失败若被当成'无变更'会静默放行(冒烟抓过的真缺陷)。"""
+    base = st["config"].get("基线分支", "")
+    if not base:
+        return None, "缺基线分支配置"
+    if not sh(f"git rev-parse --verify {base}"):
+        return None, f"基线分支「{base}」无法解析(不存在/拼写错),diff 无从算起——先修配置"
+    out = sh(f"git -c core.quotepath=false diff --name-only {base}...HEAD")
+    files = [f for f in out.splitlines()
+             if f and f.lower().endswith(CODE_EXTS) and os.path.exists(f) and not _is_test_file(f, st)]
+    return files, ""
+
+
+def _batches(files, maxlen=6000):
+    """按逗号串长度分批(Windows 命令行 8191 上限,留余量)。"""
+    out, cur, ln = [], [], 0
+    for f in files:
+        if cur and ln + len(f) + 1 > maxlen:
+            out.append(cur)
+            cur, ln = [], 0
+        cur.append(f)
+        ln += len(f) + 1
+    if cur:
+        out.append(cur)
+    return out
+
+
+def ev_codecheck_clean(spec, st):
+    """最硬约束:done 现场重跑 codecheck CLI,harness 亲数遗留告警(agent 报数不作数)。
+    0 条,或每条(规则,文件)都在用户豁免清单 docs/codecheck-exempt-{单号}.md 内 → 放行。
+    解析锚点『共有 N 条告警』来自 2026-07-20 实战样本;必须在项目根执行(cwd 已由 main 定位)。"""
+    files, err = _biz_changed_files(st)
+    if err:
+        return False, err
+    if not files:
+        return True, ""
+    total, pairs = 0, []
+    for batch in _batches(files):
+        try:
+            r = subprocess.run("codecheck fullcheck -f " + ",".join(batch), shell=True,
+                               capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=900)
+        except subprocess.TimeoutExpired:
+            return False, "codecheck 现场复核超时(>15min)——批次过大或服务异常;可拆小重试,工具故障则把日志发维护人"
+        out = (r.stdout or "") + (r.stderr or "")
+        m = re.search(r"共有\s*(\d+)\s*条告警", out)
+        if not m:
+            return False, ("codecheck 输出无法解析(未见『共有 N 条告警』锚点)——CLI 版本变了或执行失败,"
+                           "把完整输出发维护人;工具确属故障时由用户裁决处理")
+        total += int(m.group(1))
+        # 全量明细在落盘报告里(stdout 只展示前5条)
+        rp = re.search(r"检查报告已保存到:\s*(.+)", out)
+        rtxt = ""
+        if rp:
+            try:
+                rtxt = open(rp.group(1).strip(), encoding="utf-8", errors="replace").read()
+            except OSError:
+                rtxt = out
+        else:
+            rtxt = out
+        fs = re.findall(r"- \*\*文件\*\*: `([^`]+)`", rtxt)
+        rs = re.findall(r"- \*\*规则\*\*: (\S+)", rtxt)
+        pairs += list(zip(rs, fs))
+    if total == 0:
+        return True, ""
+    ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
+    if not os.path.exists(ex):
+        return False, (f"harness 现场复核实测遗留 {total} 条告警,且无豁免清单({ex})。"
+                       "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),把「规则ID + 文件 + 用户原话」"
+                       f"逐行写入 {ex} 并 commit 后重试——口头豁免无效")
+    extxt = open(ex, encoding="utf-8", errors="replace").read()
+    bad = [f"{r}({os.path.basename(f)})" for r, f in pairs
+           if r not in extxt or os.path.basename(f) not in extxt]
+    if len(pairs) < total and bad == []:
+        bad = [f"(另有 {total - len(pairs)} 条未解析出明细,无法核对豁免)"]
+    if bad:
+        return False, (f"实测遗留 {total} 条告警,以下未被豁免清单覆盖: " + "、".join(bad[:5])
+                       + ("…" if len(bad) > 5 else "") + f"。修掉或补齐 {ex}(须用户裁决原话)后重试")
+    return True, ""
+
+
 ENV_CACHE = os.path.join(os.path.expanduser("~"), ".mae-flow-env-ok")
 ENV_MARK = "mae-flow-env-ok-v1"              # 缓存有效标记:防裸 touch 伪造(空文件/外来内容一律无效)
 FAST_TYPES = ("path_any", "file_contains", "path_absent")   # 项目级快检查:不缓存,每次都跑
@@ -350,7 +442,8 @@ def ev_env_ok(spec, st):
 EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "yaml_field": ev_yaml, "pushed": ev_pushed, "agent_ran": ev_agent_ran,
-            "content_free": ev_content_free, "clean_paths": ev_clean_paths}
+            "content_free": ev_content_free, "clean_paths": ev_clean_paths,
+            "codecheck_clean": ev_codecheck_clean}
 
 
 def _ack_verified(st, ack):

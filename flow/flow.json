@@ -449,6 +449,13 @@
       ]
     },
     {
+      "name": "skill 已加载(迁移后已重启会话,无待重启标记)",
+      "type": "path_absent",
+      "value": [
+        ".mae-flow-need-reload"
+      ]
+    },
+    {
       "name": "auto_transition 已关闭(.comet/config.yaml)",
       "type": "file_contains",
       "value": ".comet/config.yaml",

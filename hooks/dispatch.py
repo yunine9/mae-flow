@@ -140,7 +140,15 @@ def ev_pretooluse(d):
 
 
 def ev_inject(d, session_start=False):
-    if not session_start:
+    if session_start:
+        # 重启会话 = skill 已重新加载:清"待重启"标记(迁移后真空期的唯一合法出口)
+        try:
+            if os.path.exists(".mae-flow-need-reload"):
+                os.remove(".mae-flow-need-reload")
+                _log("cleared need-reload(会话重启,skill 已加载)")
+        except Exception as e:
+            _log("clear need-reload EXC: %s" % e)
+    else:
         # 用户消息原文进 ack 验真存储(payload 无 prompt 字段的 harness 上存储恒空,验真自动降级)
         _capture_usermsg(d.get("prompt") or "")
     me = os.path.abspath(MAEFLOW)

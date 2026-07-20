@@ -279,7 +279,7 @@ def ev_commit_tagged(spec, st):
 
 ENV_CACHE = os.path.join(os.path.expanduser("~"), ".mae-flow-env-ok")
 ENV_MARK = "mae-flow-env-ok-v1"              # 缓存有效标记:防裸 touch 伪造(空文件/外来内容一律无效)
-FAST_TYPES = ("path_any", "file_contains")   # 项目级快检查:不缓存,每次都跑
+FAST_TYPES = ("path_any", "file_contains", "path_absent")   # 项目级快检查:不缓存,每次都跑
 
 
 def run_env_checks(force_all=False):
@@ -310,6 +310,8 @@ def run_env_checks(force_all=False):
                 ok = bool(m) and tuple(map(int, m.groups())) >= tuple(map(int, v.split(".")))
             elif t == "path_any":
                 ok = any(os.path.exists(p) for p in v)
+            elif t == "path_absent":   # 标记文件不存在才算就绪(如"待重启"标记被 SessionStart 清除后)
+                ok = not any(os.path.exists(p) for p in v)
             elif t == "file_contains":
                 ok = os.path.exists(v) and c["contains"] in open(v, encoding="utf-8", errors="replace").read()
         except Exception:
@@ -480,7 +482,7 @@ def cmd_init(flow, args):
 def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
-    lines = [".mae-flow.json*", HISTORY_PATH]
+    lines = [".mae-flow.json*", HISTORY_PATH, ".mae-flow-need-reload"]
     txt = open(gi, encoding="utf-8").read() if os.path.exists(gi) else ""
     add = [l for l in lines if l not in txt]
     if add:
@@ -650,8 +652,9 @@ def cmd_gate(flow, st, args):
         p = norm(args.arg)
         if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
             die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
-        if re.search(r"\.mae-flow\.json(\.\w+)*$|\.mae-flow-history\.jsonl$", p, re.I):
-            die("流程状态/令牌/历史账本文件由 mae-flow 与 hook 维护,禁止直接编辑。推进用 done,人工修复用 goto <step> --force。", 2)
+        if re.search(r"\.mae-flow\.json(\.\w+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$", p, re.I):
+            die("流程状态/令牌/历史账本/待重启标记文件由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
+                "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
         if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I):
             die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
         plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
@@ -699,6 +702,10 @@ def cmd_gate(flow, st, args):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
             die("hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——这是伪造 agent 收尾令牌的通道。", 2)
+        if re.search(r"(mkdir|md|new-item)\b", c, re.I) and hits_path(r"(^|/)openspec/"):
+            die("禁止手动创建 openspec 目录:openspec/changes/ 由 comet 工具建(comet-open 技能 / comet-state init),"
+                "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"
+                "若 /comet-open 调不起来,十有八九是 skill 没加载:先重启会话(检查有无 .mae-flow-need-reload 提示),别手搓绕过。", 2)
         if re.search(r"\bcomet\s+init\b", c):
             die("comet init 是交互式 TUI,禁止在会话内执行(含子 agent、含 echo/yes 管道喂输入等一切自动化变体)——"
                 "非交互执行会把全部 agent 平台的配置初始化出来污染仓库(2026-07-20 实战)。"
@@ -719,8 +726,8 @@ def cmd_gate(flow, st, args):
             die("本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
                 "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。", 2)
         writeish = re.search(WRITEISH, c, re.I)
-        if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl)"):
-            die("流程状态/历史账本文件由 mae-flow 维护,禁止经 Bash 改写/删除。", 2)
+        if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl|-need-reload)"):
+            die("流程状态/历史账本/待重启标记文件由 mae-flow 维护,禁止经 Bash 改写/删除(待重启标记只能靠重启会话清)。", 2)
         if writeish and hits_path(flow["specs_truth"]) and not step.get("allow_specs_write"):
             die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。", 2)
         if writeish and any(hits_path(pat) for pat in flow["source_patterns"]):

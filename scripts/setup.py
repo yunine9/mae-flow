@@ -224,7 +224,12 @@ def main():
             if os.path.isdir(".claude") and not os.path.isdir(".cac"):
                 if not DRY:
                     os.rename(".claude", ".cac")
-                mark("FIXED", ".claude → .cac 迁移", "需在会话执行 /reload-skills 或重启会话")
+                    # 迁移后 skill 在磁盘但会话未加载:打"待重启"标记,只有 SessionStart(重启会话)能清,
+                    # 逼真空期在环境步卡住——否则 /comet-open 不存在,AI 会 mkdir 手搓空壳目录(2026-07-20 实战破案)
+                    open(".mae-flow-need-reload", "w", encoding="utf-8").write(
+                        "skill 已迁移到 .cac,必须重启会话使其加载\n")
+                mark("MANUAL", ".claude → .cac 迁移",
+                     "⚠ skill 已迁移但会话未加载:**重启会话**(最稳;/reload-skills 后若仍提示也请重启),回来说\"继续\"")
             elif os.path.isdir(".claude") and os.path.isdir(".cac"):
                 mark("MANUAL", "目录合并", ".claude 与 .cac 并存,请人工确认合并后删除 .claude(有覆盖风险,不自动做)")
             merge_settings(HERE)

@@ -1,6 +1,8 @@
 执行 /comet-open(comet 技能,内部会经 comet-state 登记 .comet.yaml 状态),输入 = SE 设计文档(含内联需求)+ clarifications(如有)。
-**禁止绕过技能手工创建产物**;若已手工补齐产物,状态登记必须走 comet 脚本
+**禁止绕过技能手工创建产物**(手动 mkdir openspec 目录已被 gate 硬拦);若已手工补齐产物,状态登记必须走 comet 脚本
 (comet-state init <change-name> <workflow>),.comet.yaml/.openspec.yaml 手写会被 gate 拦截——这不是故障,是纠偏。
+**/comet-open 调不起来 / 报技能不存在 → 别 mkdir 手搓顶替**:十有八九是 .claude→.cac 迁移后没重启会话、skill 未加载。
+先重启会话(有 .mae-flow-need-reload 标记时环境步就会拦你),回来说"继续";仍不行则环境未就绪,回退查 env。
 有 clarifications 时明确告知 comet-open:需求澄清已在 Grill 完成(附文档路径),其 Step 1 勿重复质询,直接进入产物生成。
 确认产物:proposal.md、design.md、tasks.md、specs/<domain>/spec.md(delta spec)。
 delta spec 的 Scenario 用 EARS 句式表述(WHEN <条件> THE SYSTEM SHALL <可观测行为>,每条独立可测;

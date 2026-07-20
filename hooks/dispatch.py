@@ -70,14 +70,27 @@ def maeflow(*args):
 
 
 def read_input():
-    """守护线程读 stdin:harness 若不关闭 stdin,read() 会永久阻塞,超时按空输入。"""
+    """守护线程读 stdin。payload 惯例是单行 JSON,用 readline(见换行即返回)而非 read()(等 EOF):
+    公司 harness 写完 payload 后关闭管道晚/不关,read() 等 EOF 会在 3s 兜底处误判超时、把已到的数据丢掉
+    (2026-07-20 实战定位:exec form 时代 python 把 stdin 当脚本能读到完整 JSON,证明数据在管道里,只是 EOF 迟)。
+    readline 解析失败(罕见多行 payload)再补读到 EOF;3s 仍拿不到按空输入,只兜底不阻塞。"""
     box = {}
 
     def _r():
         try:
-            box["d"] = json.loads(sys.stdin.read() or "{}")
+            buf = sys.stdin.readline()
+            try:
+                box["d"] = json.loads(buf or "{}")
+                box["n"] = len(buf)
+                return
+            except Exception:
+                pass
+            buf += sys.stdin.read()
+            box["d"] = json.loads(buf or "{}")
+            box["n"] = len(buf)
         except Exception:
             box["d"] = {}
+            box["n"] = -1
 
     th = threading.Thread(target=_r, daemon=True)
     th.start()
@@ -85,6 +98,8 @@ def read_input():
     if "d" not in box:
         _log("stdin read timeout(%ss) — 按空输入处理" % STDIN_SECS)
         return {}
+    if not box["d"]:
+        _log("stdin empty/unparsed(n=%s) — 按空输入处理" % box.get("n"))
     return box["d"]
 
 

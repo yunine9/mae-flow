@@ -17,10 +17,16 @@ executing-plans 的**批次检查点不等用户**:每批完成展示简报后�
 让 /clear 后(或换会话)的你只靠磁盘就能无损接续。
 superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_override 授权,UT 由 verify 阶段 AutoUT 统一补,继续执行。
 按计划迭代,每完成一个任务:实现 → 按配置编译方式编译修复 → delta spec 同步检查(有偏差立即修) → 勾选 tasks.md → git commit -m "[单号][类型]描述"(拒绝 comet 建议的 fix:/tweak:/设计意图式 message)。
+**编译是你的职责,不是用户的**:必须按 config_confirm 配置的编译方式亲自编译并修复,**禁止让用户"自行编译"**。
+若不知道怎么编译(配置为空/是个你调不起来的 skill),那是配置问题——回 config_confirm 与用户确认可用的编译方式,不是把编译甩给用户。
 编译/测试失败的修复纪律(systematic-debugging,superpowers 有此 skill 则启用,没有也按此执行):
 **先复现、读全报错、定位根因,再动手**;同一错误第一轮修复无效 → 停止盲试,写出根因假设与验证方法再改——
 "改一下试试"的乱枪打鸟只会把一个错改成三个错。根因假设与验证结果**写进 tasks.md 对应任务的备注行**,
 不能只留在会话里——/clear 后调试中态全靠它。
+**编译反复卡住(自己修 3 轮仍不过,或大批链接/依赖类报错)→ 派 build-fix-agent 专项修复**
+(契约见 agents/build-fix-agent.md,传入:单号类型、编译方式、当前编译报错):它只修编译、不碰功能逻辑与测试,
+修到编译通过(OK)你再继续;它 BLOCKED(含疑似源码设计缺陷 SUSPECTED_ISSUES)→ 停下带诊断报告用户,
+禁止你自己乱改逻辑绕过编译错误。大多数顺手的编译错自己修即可,派 agent 是卡住时的 offload,不是每次编译都派。
 **Ponytail(full 档)写码时全程生效**——每段代码先走 the ladder:已有实现可复用?>标准库?>平台原生?>
 已装依赖?>一行能写完?>最少代码。写得少,后面 Ponytail-review 删得少、CodeCheck 告警少、UT 补得少,整条 verify 链都轻。
 两条边界:**YAGNI 不得砍 delta spec 要求的行为**(spec 是合同,只作用于怎么写,不作用于写什么);

@@ -25,6 +25,8 @@
   才定向搜索,列出的每个候选必须标注来源并附摘录供核对。
   done 时状态机硬校验:需求文档路径必须真实存在。这是 grill 和 comet-open 的输入,缺了后面走不动
 - 编译方式(build-fix skill | mvn compile -q | 其他)——按仓库构建体系推断候选,用户拍板;
+  **必须落到一个后面调得起来的具体方式**:是命令就记命令原文;是 skill(如 build-fix)要确认它已安装/加载
+  (调不起来的 skill 会导致 build 阶段无法编译,退化成甩锅用户)。拿不准就和用户确认一条能跑通的编译命令兜底;
   **确认后同步给 comet**:检查仓库根 comet.yaml,缺 build_command/verify_command 则写入
   (值=确认的编译方式与 UT 运行命令;若编译方式是 skill 而非命令,写等价命令行或与用户商定),
   保证 comet-guard 的 build/verify 校验与本流程用同一套命令,不各验各的

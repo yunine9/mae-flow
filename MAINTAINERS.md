@@ -13,7 +13,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
   └ comet          —— 管"工程方法":open/design/build/verify/archive 五阶段编排
       ├ openspec   —— 管 WHAT:提案、delta spec、真相源、归档
       └ superpowers—— 管 HOW:brainstorming、写计划、执行计划、收尾
-公司质量 agent(env-setup/ut-generator/codecheck-fix/story-generator)—— 管"质量动作"
+公司质量 agent(env-setup/ut-generator/codecheck-fix/story-generator/build-fix)—— 管"质量动作"
 ```
 
 职责分层的一句话版本：**状态机管路径、证据管推进、hook 管越界、comet 管方法、子 agent 管质量**。

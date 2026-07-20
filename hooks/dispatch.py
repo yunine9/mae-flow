@@ -207,7 +207,7 @@ def ev_subagentstop(d):
     first_line = last.splitlines()[0] if last else ""
     # 标记本身即身份证明:凡以合法契约标记收尾的 agent,直接验契约+发令牌,
     # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
-    m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL)_RESULT:\s*(\S+)", first_line)
+    m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|BUILDFIX)_RESULT:\s*(\S+)", first_line)
     if m:
         if m.group(1) == "CODECHECK":
             _codecheck_contract(m.group(2), last, soft=retry)
@@ -222,7 +222,7 @@ def ev_subagentstop(d):
         head = open(tp, encoding="utf-8", errors="replace").read(16000)
     except OSError:
         head = prompt
-    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent", head):
+    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent|build-fix-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
     print("[mae-flow] 子 agent 契约违规:最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"

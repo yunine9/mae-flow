@@ -124,6 +124,7 @@ flow.json 步骤字段语义：
 - 源码 `source_patterns`（仅 `allow_source_edit` 步放行；Bash 路按 **token** 匹配——整串匹配对空格后的相对路径永远不命中，历史 bug）
 - git 约定：分支名（checkout -b/-B、switch -c/-C、branch -m）、commit 格式（含不带引号的 -m）、force push（含 +refspec）、`git worktree add`（与状态机不兼容）
 - `.env` 类密钥文件禁写；危险命令 denylist（管道执行远程脚本、`git clean -x`、对 `/`~`*`.`盘根 的递归删除——普通目录的 rm -r 不拦）。注：PreToolUse 硬拦在权限跳过模式下依然生效（hook 跑在 shell 里，提示词注入绕不过）
+- `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）；拦截消息给"目录/命令/平台"三要素话术交用户手动。教训：agent 的"想尽办法装成功"哲学会压过"无法自动化"的措辞——这类禁令必须放硬层
 - verify_ut 的测试路径收紧（`tests_only` × 「测试路径」配置）：配置后仅放行测试路径写入（Edit/Bash 双路），把 UT agent「禁改被测源码」从契约措辞硬化为 gate；未配置的仓行为不变。**这不是死禁**——配套 unlock 裁决通道（原则 8）
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步的测试路径收紧；仅本步实例有效，done/goto 自动失效，历史留痕 `unlock:source`；未启用收紧的仓执行为留痕 no-op。修复提交后新鲜度绑定会强制重跑 UT agent（旧令牌 HEAD 已过期），"改完不验就 done"走不通
 

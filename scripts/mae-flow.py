@@ -699,6 +699,11 @@ def cmd_gate(flow, st, args):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
             die("hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——这是伪造 agent 收尾令牌的通道。", 2)
+        if re.search(r"\bcomet\s+init\b", c):
+            die("comet init 是交互式 TUI,禁止在会话内执行(含子 agent、含 echo/yes 管道喂输入等一切自动化变体)——"
+                "非交互执行会把全部 agent 平台的配置初始化出来污染仓库(2026-07-20 实战)。"
+                "把三要素交给用户手动执行:①目录=项目根 ②命令=comet init --language zh --scope project "
+                "③交互里平台只选 Claude Code。用户跑完说\"好了\"再继续。", 2)
         # 危险命令 denylist(社区共识高信号项;普通目录的 rm -r 不拦,只拦毁灭性目标)
         if re.search(r"(curl|wget|iwr|invoke-webrequest)[^|&;]*\|\s*(sudo\s+)?(sh|bash|zsh|iex|powershell)", c, re.I):
             die("危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。", 2)

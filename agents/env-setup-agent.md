@@ -109,15 +109,21 @@ All installations use CLI commands (not TUI slash commands), so everything can r
    ```
    On failure: retry. Up to 5 rounds.
 
-9. **Project init** — check for comet config in `.cac/skills/` or `.claude/skills/`.
-   If missing, mark BLOCKED with instructions:
+9. **Project init** — check `.cac/skills/`(或 `.claude/skills/`)是否存在。
+   缺失 → **立即 BLOCKED。⛔ 禁止以任何形式自动化执行 comet init**:不许管道喂输入(echo/yes/printf |)、
+   不许 expect、不许找 --yes/--platform 之类的参数、不许改配置绕过交互——你的"想尽办法装成功"哲学
+   **对这一步无效,BLOCKED 就是本步的成功产出**。实战教训(2026-07-20):非交互执行会把二三十个
+   agent 平台的配置全部初始化出来污染仓库;会话内执行已被 gate 硬拦,别试。
+   PENDING_DECISIONS 必须给全三要素,让用户复制即用:
    ```
-   Please run in terminal and then re-run /mae-flow:
-   comet init --language zh --scope project
-   Select Claude Code as platform.
-   跑完直接回来说一声即可,.claude → .cac 的目录改名会在下一轮环境安装中自动完成,无需手动操作。
+   ① 执行目录:<项目根绝对路径,写出来>
+   ② 命令原文:comet init --language zh --scope project
+   ③ 交互选择:平台只选 Claude Code,其余一律不选
+   跑完回来说"好了"即可,.claude → .cac 的目录改名会在下一轮自动完成。
    ```
-   Note: comet init requires interactive platform selection, cannot be automated(已核实源码:纯 TUI,无参数/环境变量兜底)。
+   **污染检测**:项目根若出现多个非本流程的平台目录(.cursor/.windsurf/ 等,且 git status 显示为新增)——
+   这是此前误自动化的残留,记入 PENDING_DECISIONS 列出目录清单并建议用户删除;
+   **你不许自行批量删除**(删除决策归用户)。
    **团队最佳实践**:--scope project 的产物全在仓库内,首个初始化者应将其 commit 进仓库,
    此后所有人 clone 即通过检查,永远走不到本步。检测到产物存在但未纳入 git 时,在 PENDING_DECISIONS 里建议提交。
 

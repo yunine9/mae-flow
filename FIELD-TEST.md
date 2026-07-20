@@ -20,6 +20,15 @@
 - [ ] **0.4 statusline**:状态栏是否常驻"单号│步骤(中文标题)│分支";顺带看 statusline 收到的 JSON
   是否带上下文用量字段(有 → 立"水位仪表"待办)。
 - [ ] **0.5 编码底线**:确认中文 Windows 控制台下 current/done 输出无乱码不炸(✅/emoji 显示为 ? 可接受)。
+- [ ] **0.6 五事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,
+  必须逐事件看"数据依赖行为"真实发生,日志干净不算数:
+  - **PreToolUse**:流程未初始化时让 AI"在 src/ 下随便加一行"→ 必须被拦并提示先走流程(拦了=tool_input 到手);
+  - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
+  - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
+  - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
+  - **SubagentStop**:首单环境步派过 env-setup-agent 后,tokens 里出现 ENV 条目(=transcript 定位与契约校验活着);
+  - **SessionStart**:重启会话,开场自动出现"存在进行中的交付流程"提示。
+  加分项(最强确认,防线不但活着还咬人):在 story/定稿步故意不弹框直接让 AI done → 应被 ASKUSER 证据拒绝。
 
 ## 阶段 1 — 首单实跑校准(半天,选一个小需求,建议 小改快过/缺陷快修)
 

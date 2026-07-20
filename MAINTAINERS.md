@@ -64,6 +64,8 @@ scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/statu
 hooks/hooks.json            5 个 hook 注册(exec form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
 agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 幂等要求)
+scripts/setup.py            环境安装器:确定性流水线(A 类装东西;幂等/dry-run/离线包;日志 %TEMP%/mae-flow-setup.log)
+skills/mae-flow/assets/env-profile.json  公司环境常量单一事实源(镜像/代理/包名/插件命令;换环境只改它)
 commands/mae-flow.md       /mae-flow 命令的三个模式(完整/setup/story)
 skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP / REVIEW 四份模板(hook 章节校验以此为准,
                             全插件唯一)+ settings-baseline.json 权限基线(env-setup 合并进项目 settings)
@@ -149,6 +151,7 @@ CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛�
 
 类型：`cmd`（退出码 0）、`cmd_contains`、`node_min`、`path_any`、`file_contains`。
 **缓存**：机器级慢检查全绿后 touch `~/.mae-flow-env-ok`，24h 内跳过；`FAST_TYPES`（path_any / file_contains，项目级）永远实测；`envcheck` 命令永远全量并刷新缓存。新增检查时想清楚它是机器级还是项目级。
+**安装三层策略**（2026-07-20 实战定型，comet init 全平台初始化事故后重构）：A 类确定性安装 → `setup.py`（零创造力、幂等、失败带诊断线索、终验复用 envcheck）；C 类诊断 → env-setup-agent（读日志修环境参数后**重跑 setup.py**，禁止绕过它手工装——"用另一条路装上"不可复现）；B 类交互 → 人工三要素话术（comet init 会话内 gate 硬拦）。环境常量全在 env-profile.json，换代理/镜像/插件命令只改一处。教训：把智能用在确定性工作上，幺蛾子是创造力的副产品。
 
 ### 3.6 子 agent 契约
 

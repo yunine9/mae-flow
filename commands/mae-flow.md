@@ -6,8 +6,9 @@
 2. 按参数分流:
    - **无参数** — 完整交付流程:项目根已有 .mae-flow.json → `python "<插件>/scripts/mae-flow.py" current` 续跑;
      没有 → 用户已给出单号/需求则 `init`,否则先问用户要交付什么(单号+SE 文档),拿到再 init。
-   - **setup** — 仅环境:执行 `mae-flow envcheck`,有失败项按 env_setup 步骤的规则启动 env-setup-agent 修复;
-     **不 init 流程**,修完汇报结果即结束。
+   - **setup** — 仅环境:执行 `mae-flow envcheck`;有 ❌ → 直接跑 python "<插件>/scripts/setup.py"
+     (确定性安装器)→ ⚠人工项原样转用户、❌ 项才派 env-setup-agent 诊断(传日志路径与 scripts 目录),
+     与 env_setup 步骤同一套三层分流;**不 init 流程**,修完汇报结果即结束。
    - **chain** — 跨仓需求的链路分解,**不 init 流程**,先于任何仓的交付执行。由你(主模型)亲自做,
      禁止外包给子 agent(全程需要与用户问答)。步骤:
      ① 按 config_confirm 的同一套纪律确定单号与需求文档;

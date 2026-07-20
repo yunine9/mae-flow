@@ -1,0 +1,22 @@
+{
+  "说明": "公司环境常量(单一事实源:setup.py 与 env-setup-agent 都读这里;换代理/镜像/命令名只改本文件)",
+  "npm_registry": "http://mirrors.tools.huawei.com/npm/",
+  "proxy": "http://proxysg.huawei.com:8080",
+  "node_min": "20.19.0",
+  "plugin_cli": "codeagent",
+  "npm_packages": {
+    "openspec": "@fission-ai/openspec@latest",
+    "comet": "@rpamis/comet@0.3.x"
+  },
+  "plugins": [
+    {"name": "superpowers",
+     "cmds": ["codeagent plugin marketplace add anthropics/claude-plugins-official",
+              "codeagent plugin install superpowers@claude-plugins-official"]},
+    {"name": "ponytail",
+     "cmds": ["codeagent plugin marketplace add https://github.com/DietrichGebert/ponytail",
+              "codeagent plugin install ponytail@ponytail"]},
+    {"name": "codecheck",
+     "cmds": ["codeagent plugin add codecheck-cac@2.0.1"]}
+  ],
+  "offline_dir": ""
+}

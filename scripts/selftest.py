@@ -17,7 +17,7 @@ def check(name, ok, detail=""):
 
 
 # 1. 语法
-for f in ("scripts/mae-flow.py", "hooks/dispatch.py", "scripts/statusline.py"):
+for f in ("scripts/mae-flow.py", "hooks/dispatch.py", "scripts/statusline.py", "scripts/setup.py"):
     try:
         py_compile.compile(os.path.join(ROOT, f), doraise=True)
         check(f"语法 {f}", True)
@@ -26,7 +26,8 @@ for f in ("scripts/mae-flow.py", "hooks/dispatch.py", "scripts/statusline.py"):
 
 # 2. JSON
 flow = hooks = None
-for f in ("flow/flow.json", "hooks/hooks.json", "skills/mae-flow/assets/settings-baseline.json"):
+for f in ("flow/flow.json", "hooks/hooks.json", "skills/mae-flow/assets/settings-baseline.json",
+          "skills/mae-flow/assets/env-profile.json"):
     try:
         d = json.load(open(os.path.join(ROOT, f), encoding="utf-8"))
         if f == "flow/flow.json":
@@ -95,6 +96,7 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "skills/mae-flow/assets/settings-baseline.json",
+          "skills/mae-flow/assets/env-profile.json", "scripts/setup.py",
           "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))
 

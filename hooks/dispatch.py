@@ -166,6 +166,41 @@ def ev_inject(d, session_start=False):
     sys.exit(0)
 
 
+AUTOPSY = os.path.join(tempfile.gettempdir(), "mae-flow-agent-autopsy.log")
+ERR_PAT = re.compile(r"(command not found|is not recognized|No such file|not found|不可用|不存在|无法|失败|"
+                     r"denied|Exception|Traceback|timeout|超时|error[: ])", re.I)
+
+
+def _autopsy(tp, asst):
+    """子 agent 非正常收尾的尸检:留档 + 提炼一行死因线索(嵌进打回消息喂给主 agent)。
+    治"agent 奇奇怪怪自行退出没人知道为什么"——静默失效是最大的敌人。写档失败不影响主流程。"""
+    turns = len(asst)
+    tails = [a.strip().replace("\n", " ")[-160:] for a in asst[-2:] if a.strip()]
+    errs = []
+    try:
+        full = "\n".join(asst[-8:])
+        for m in ERR_PAT.finditer(full):
+            s = full[max(0, m.start() - 40):m.end() + 60].replace("\n", " ")
+            if s not in errs:
+                errs.append(s)
+            if len(errs) >= 3:
+                break
+    except Exception:
+        pass
+    clue = "约 %s 轮" % turns
+    if errs:
+        clue += ";检出报错特征: " + " | ".join(e[:90] for e in errs[:2])
+    if tails:
+        clue += ";临终输出: …" + tails[-1][:120]
+    try:
+        with open(AUTOPSY, "a", encoding="utf-8") as f:
+            f.write("%s %s\n  turns=%s\n  tails=%s\n  errs=%s\n" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), os.path.basename(tp) or "?", turns, tails, errs))
+    except Exception:
+        pass
+    return clue
+
+
 def ev_subagentstop(d):
     # retry=打回后的重答收尾:此路径禁止再次 exit 2(防死循环),但验证通过仍须发令牌
     # (历史 bug:曾在此处无条件放行,导致"打回→改正→再收尾"的自愈终点拿不到令牌)
@@ -216,7 +251,8 @@ def ev_subagentstop(d):
         _record_agent_token(m.group(1))
         sys.exit(0)
     if retry:
-        _log("subagentstop: 重答后仍无契约标记,放行防死循环(不发令牌,done 会拦)")
+        _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
+        _log("subagentstop: 重答后仍无契约标记,放行防死循环(不发令牌,done 会拦;尸检已留档)")
         sys.exit(0)
     # 无标记:判定是否我方契约 agent——扫 transcript 头部(含 agent 系统提示,必带 agent 名/契约字样),
     # 不依赖任务 prompt 措辞(主模型派"定稿"类子任务时不会写 agent 名——已实际踩过)
@@ -227,8 +263,11 @@ def ev_subagentstop(d):
     if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent|compile-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
+    clue = _autopsy(tp, asst)
     print("[mae-flow] 子 agent 契约违规:最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"
-          "请按你的定义文件顶部「最终回复格式」重新输出完整结果;不确定时用失败/待确认类状态,禁止省略标记。",
+          "请按你的定义文件顶部「最终回复格式」重新输出完整结果;不确定时用失败/待确认类状态,禁止省略标记。\n"
+          "尸检线索(" + clue + ")——若死因是工具不可用/持续报错,按契约「带着情报死」条款以 FAIL/BLOCKED 收尾并写明详情;"
+          "主 agent 重启新实例时必须把此线索转告它。",
           file=sys.stderr)
     sys.exit(2)
 

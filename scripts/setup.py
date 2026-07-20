@@ -66,6 +66,20 @@ def mark(status, name, detail=""):
     log("%s %s%s" % (icon, name, ("" if not detail else " — " + detail.splitlines()[0][:120])))
 
 
+def need_reload(reason):
+    """打"待重启"标记:任何"磁盘变了但会话没加载"的动作(装插件/迁移目录)都要调。
+    只有 SessionStart(重启会话)能清它,env 步的 path_absent 证据据此在最开始拦住,
+    不重启不放行——否则 skill/plugin 没加载就往下走,AI 会手搓空壳绕过(2026-07-20 实战)。"""
+    if DRY:
+        return
+    try:
+        old = open(".mae-flow-need-reload", encoding="utf-8").read() if os.path.exists(".mae-flow-need-reload") else ""
+        if reason not in old:
+            open(".mae-flow-need-reload", "a", encoding="utf-8").write(reason + "\n")
+    except Exception:
+        pass
+
+
 def npm_install(name, spec, offline_dir):
     """幂等安装一个全局 npm 包:失败 → 清缓存重试 → EPERM 换用户级 prefix 重试 → FAIL(带诊断线索)。"""
     if offline_dir:
@@ -203,6 +217,7 @@ def main():
         rc, listed2 = sh(prof["plugin_cli"] + " plugin list", timeout=60)
         if pl["name"].lower() in listed2.lower():
             mark("FIXED", "插件 " + pl["name"], "需重启会话生效")
+            need_reload("新装插件 %s,需重启会话加载" % pl["name"])
             listed = listed2
         else:
             mark("FAIL", "插件 " + pl["name"],
@@ -224,10 +239,7 @@ def main():
             if os.path.isdir(".claude") and not os.path.isdir(".cac"):
                 if not DRY:
                     os.rename(".claude", ".cac")
-                    # 迁移后 skill 在磁盘但会话未加载:打"待重启"标记,只有 SessionStart(重启会话)能清,
-                    # 逼真空期在环境步卡住——否则 /comet-open 不存在,AI 会 mkdir 手搓空壳目录(2026-07-20 实战破案)
-                    open(".mae-flow-need-reload", "w", encoding="utf-8").write(
-                        "skill 已迁移到 .cac,必须重启会话使其加载\n")
+                need_reload("skill 迁移到 .cac,需重启会话加载")
                 mark("MANUAL", ".claude → .cac 迁移",
                      "⚠ skill 已迁移但会话未加载:**重启会话**(最稳;/reload-skills 后若仍提示也请重启),回来说\"继续\"")
             elif os.path.isdir(".claude") and os.path.isdir(".cac"):

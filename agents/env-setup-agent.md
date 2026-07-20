@@ -50,6 +50,7 @@ BLOCKED 并在 PENDING_DECISIONS 注明"缺插件路径,重试时请传入")。
 | EPERM / EACCES | 全局目录无权限 | setup.py 已自动换用户级 prefix;仍炸则查 prefix 目录是否被杀软锁,记入报告 |
 | ETIMEDOUT / ENOTFOUND / ECONNREFUSED | 镜像/代理地址不通 | 实测 profile 里的 registry 与 proxy(curl/ping);确认值错了 → 报告建议改 env-profile.json(团队文件,你不改) |
 | 'xxx' 不是内部或外部命令 | PATH 缺装好的 CLI | 定位实际安装目录,PENDING_DECISIONS 请用户加 PATH 或重开终端 |
+| 存在 .mae-flow-need-reload 标记 | 磁盘装好了会话没加载 | **不是你能修的**:立即 BLOCKED,报告"请重启会话"(只有重启能清标记,你重装也没用) |
 | 装完 list 里没有 | 插件需重启会话加载 | 报告正文第一条写"新装了插件,需重启会话",由主 agent 转告 |
 | 杀软拦截/文件被占用 | 终端/杀软 | PENDING_DECISIONS 请用户处理(白名单/关占用进程) |
 

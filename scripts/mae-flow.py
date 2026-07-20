@@ -326,7 +326,19 @@ def run_env_checks(force_all=False):
     return fails
 
 
+RELOAD_MARK = ".mae-flow-need-reload"
+
+
 def ev_env_ok(spec, st):
+    # 待重启标记优先于一切:磁盘装好了但会话没加载,派 agent/重装都没用,只有重启会话能清标记。
+    # 提到最前面拦——不重启就往下走,skill/plugin 未注册,AI 会手搓空壳绕过(2026-07-20 实战)。
+    if os.path.exists(RELOAD_MARK):
+        try:
+            why = open(RELOAD_MARK, encoding="utf-8", errors="replace").read().strip().replace("\n", ";")
+        except Exception:
+            why = ""
+        return False, ("环境有变更待生效,**必须重启会话**后说\"继续\"(不要派 env-setup-agent、不要重装):" + why
+                       + "。重启会自动清除此标记(/reload-skills 后若仍提示,以重启为准)。")
     fails = run_env_checks()
     if not fails:
         return True, ""

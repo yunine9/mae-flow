@@ -337,8 +337,10 @@ def ev_env_ok(spec, st):
             why = open(RELOAD_MARK, encoding="utf-8", errors="replace").read().strip().replace("\n", ";")
         except Exception:
             why = ""
-        return False, ("环境有变更待生效,**必须重启会话**后说\"继续\"(不要派 env-setup-agent、不要重装):" + why
-                       + "。重启会自动清除此标记(/reload-skills 后若仍提示,以重启为准)。")
+        return False, ("环境有变更待生效(不要派 env-setup-agent、不要重装):" + why
+                       + "。二选一让它生效:①在当前会话执行 **/reload-skills**(装了插件的再执行 /reload-plugins,"
+                       "若你的 codeagent 支持),完成后**用户明确说一声**(如\"刷新好了\"),你再执行 "
+                       "`mae-flow reloaded --ack \"用户原话\"` 清标记继续;②或**重启会话**(自动清标记)后说\"继续\"。")
     fails = run_env_checks()
     if not fails:
         return True, ""
@@ -878,6 +880,27 @@ def cmd_report_all():
           f" · goto 总计 {sum(r.get('goto次数', 0) for r in recs)} 次")
 
 
+def cmd_reloaded(flow, st, args):
+    """用户在当前会话手动 /reload-skills(+/reload-plugins)后清除待重启标记的合法通道。
+    外部脚本测不了 skill 是否真加载,所以靠用户确认(--ack 三级验真,伪造被拒)+ open 步兜底
+    (真没 reload 成功,/comet-open 仍会失败并指回本处)。重启会话则由 SessionStart 自动清,不用本命令。"""
+    if not os.path.exists(RELOAD_MARK):
+        print("[mae-flow] 无待重启标记,无需操作,直接 current 继续。")
+        return
+    if not args.ack:
+        die("reloaded 需携带用户确认原话:--ack \"用户原话\"。必须是用户**明确说过**已执行 /reload-skills"
+            "(或已重启),你不能替用户声称刷新过——没 reload 就清标记,skill 仍没加载,open 步照样卡。", 2)
+    ok, why = _ack_verified(st, args.ack)
+    if not ok:
+        die("reloaded 授权验真失败:" + why, 2)
+    try:
+        os.remove(RELOAD_MARK)
+    except Exception as e:
+        die("清除待重启标记失败: %s" % e)
+    print("[mae-flow] 已确认 skill/plugin 重载,待重启标记已清除。执行 current 继续"
+          "(若后续 /comet-open 等技能仍报不存在,说明 reload 未生效,请改用重启会话)。")
+
+
 def cmd_goto(flow, st, args):
     if not args.force:
         die("goto 是人工修复通道,必须 --force。")
@@ -953,6 +976,7 @@ def main():
     g = sub.add_parser("gate"); g.add_argument("what", choices=["edit", "bash"]); g.add_argument("arg")
     o = sub.add_parser("goto"); o.add_argument("step"); o.add_argument("--force", action="store_true"); o.add_argument("--ack")
     u = sub.add_parser("unlock"); u.add_argument("what", choices=["source"]); u.add_argument("--reason"); u.add_argument("--ack")
+    rl = sub.add_parser("reloaded"); rl.add_argument("--ack")
     sub.add_parser("doctor")
     sub.add_parser("envcheck")
     r = sub.add_parser("report")
@@ -995,6 +1019,8 @@ def main():
         return cmd_goto(flow, st, args)
     if args.cmd == "unlock":
         return cmd_unlock(flow, st, args)
+    if args.cmd == "reloaded":
+        return cmd_reloaded(flow, st, args)
     if args.cmd == "doctor":
         return cmd_doctor(flow, st, args)
     if args.cmd == "report":

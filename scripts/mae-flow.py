@@ -900,8 +900,25 @@ def cmd_unlock(flow, st, args):
               "直接修复源码 → 编译 → 按规范 commit → 重启 ut-generator-agent 重新收尾。")
 
 
+class MFParser(argparse.ArgumentParser):
+    """参数错误即教学:argparse 默认英文 usage 弱模型读不懂会瞎试第二次。
+    报错直接给中文速查 + 可复制的正确命令(错误即文档;子命令解析器自动继承本类)。"""
+
+    def error(self, message):
+        me = os.path.abspath(sys.argv[0])
+        print("[mae-flow] 参数错误: " + message, file=sys.stderr)
+        print("正确用法(高频三条,直接复制):\n"
+              f"  python \"{me}\" current\n"
+              f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
+              f"  python \"{me}\" init\n"
+              "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template(用法见 skill 指令)。\n"
+              "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
+              file=sys.stderr)
+        sys.exit(2)
+
+
 def main():
-    ap = argparse.ArgumentParser(prog="mae-flow")
+    ap = MFParser(prog="mae-flow")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("current")

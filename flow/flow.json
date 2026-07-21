@@ -454,8 +454,9 @@
     },
     {
       "name": "CodeCheck 独立 CLI(fullcheck 可用)",
-      "type": "cmd",
-      "value": "codecheck fullcheck --help"
+      "type": "cmd_contains",
+      "value": "codecheck fullcheck --help",
+      "contains": "fullcheck"
     },
     {
       "name": "git 仓库(项目根含 .git)",

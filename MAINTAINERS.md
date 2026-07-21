@@ -160,6 +160,7 @@ CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛�
 ### 3.5 环境检查（env_checks）
 
 类型：`cmd`（退出码 0）、`cmd_contains`、`node_min`、`path_any`、`file_contains`。
+**判 CLI 可用性别赌 `--help`/`--version` 的退出码**（2026-07-21 实战：`codecheck fullcheck --help` 打印帮助后 exit 1，被 `cmd` 类型误判"不可用"，白派诊断/白拦流程）。commander/Java 系 CLI 的 help 常以非零码退出——用 `cmd_contains` 看输出特征字样（如 `fullcheck`），退出码无关。同理 `ev_codecheck_clean` 判成败也只解析"共有 N 条告警"不看退出码（lint 类工具有告警时常返非零）。
 **缓存**：机器级慢检查全绿后 touch `~/.mae-flow-env-ok`，24h 内跳过；`FAST_TYPES`（path_any / file_contains，项目级）永远实测；`envcheck` 命令永远全量并刷新缓存。新增检查时想清楚它是机器级还是项目级。
 **安装三层策略**（2026-07-20 实战定型，comet init 全平台初始化事故后重构）：A 类确定性安装 → `setup.py`（零创造力、幂等、失败带诊断线索、终验复用 envcheck）；C 类诊断 → env-setup-agent（读日志修环境参数后**重跑 setup.py**，禁止绕过它手工装——"用另一条路装上"不可复现）；B 类交互 → 人工三要素话术（comet init 会话内 gate 硬拦）。环境常量全在 env-profile.json，换代理/镜像/插件命令只改一处。教训：把智能用在确定性工作上，幺蛾子是创造力的副产品。
 

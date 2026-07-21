@@ -16,8 +16,10 @@ NEEDS_CONFIRM→待确认项是**用户的决策,禁止以"判定合理/我认�
 **文档里残留"待确认"字样 = 本步没做完**;反之,零残留但你没走过 AskUserQuestion = 造假,更糟。
 完成后同样展示路径与概览。
 定稿后用 AskUserQuestion 询问用户 STORY 是否入库(一般不入库,仅本地交付给测试):
-要 → git add docs/story/ && git commit -m "[单号][类型]STORY文档";
-不要 → 保持本地不 commit,后续 verify 阶段 dirty-worktree 归因时将其标注为"有意不入库",禁止误删。
+要 → git add docs/story/STORY-{单号}.md && git commit -m "[单号][类型]STORY文档"(精确路径,禁止宽 add);
+不要 → **done 通过后立即移入过程区**:mv docs/story/STORY-{单号}.md .mae-flow-work/story/(目录不存在先建;
+该区已 gitignore,物理上不可能被卷进提交——实战教训:留在 docs/ 会被后续宽 add 卷进 MR),
+把新路径告知用户交给测试;之后 dirty 归因不再涉及它。
 之后 done --set STORY入库=<用户选择原文>。
 done 的硬校验(骗不过去):文档零"待确认"残留、每个"不涉及"必须写作"不涉及(已确认)"
 (裸"不涉及"=未经用户确认的非法状态)、STORY入库 必填——三者共同保证确认闭环真实发生过。

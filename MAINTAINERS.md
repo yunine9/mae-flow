@@ -52,7 +52,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 
 ### 确认点预算（人工停顿的取舍原则）
 
-保留有价值的人工关卡：配置确认、工作流选择、grill 逐题、产物确认（open/design/story）、**计划评审（plan-ready）**、build 终点 ack、REMAINING 裁决（修/正式豁免二选一）、归档确认（不可逆，ASKUSER 令牌硬校验——全流程唯一不可逆点不设软路径）。
+保留有价值的人工关卡：配置确认、工作流选择、grill 逐题、**规格呈审（open，ASKUSER 令牌硬校验：AI 推断/拿不准的条目逐条呈用户拍板，无脑回车机器上过不去——spec 是唯一合同，2026-07-21 治"无脑回车赖工作流"）**、产物确认（design/story）、**计划评审（plan-ready）**、build 终点 ack、REMAINING 裁决（修/正式豁免二选一）、归档确认（不可逆，ASKUSER 令牌硬校验）。
 消灭无价值的碎片等待：build 四项选择（固化）、executing-plans 批次检查点（简报后直行）、TDD 说教（标准回应）、comet 分支/commit 建议（拒绝话术前置）。
 
 ## 二、目录结构
@@ -81,6 +81,11 @@ skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP / REVIEW 
 （gitignored + gate 防篡改；`report --all` 聚合展示，团队度量数据出口），再自动备份为 `.last` 开新档；非终态 `init` 拒绝。
 仓根可提交 `.mae-flow-defaults.json`（团队预设：编译方式/UT生成方式/UT运行命令等恒定项），
 require_sets 步骤的 `current` 会展示预填块；它只是展示层预填，`--set` 逐项确认的硬约束不变。
+**过程区 `.mae-flow-work/`**（gitignored，2026-07-21 治"MR 里 md 泛滥"+STORY 误提交实战）：过程性产物的家——
+grill-prep 工作表、survey 代码勘察笔记、不入库 STORY——物理上不可能被卷进提交。
+**提交白名单**（交付物才 commit）：openspec 全套、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
+REVIEW（返工台账）、delivery-notes（团队沉淀）、STORY（仅用户选入库时）。
+git add 一律精确路径，gate 硬拦 `-A/--all/.`（宽 add 是 STORY 误提交的凶手）。
 
 flow.json 步骤字段语义：
 
@@ -129,6 +134,7 @@ flow.json 步骤字段语义：
 - git 约定：分支名（checkout -b/-B、switch -c/-C、branch -m）、commit 格式（含不带引号的 -m）、force push（含 +refspec）、`git worktree add`（与状态机不兼容）
 - `.env` 类密钥文件禁写；危险命令 denylist（管道执行远程脚本、`git clean -x`、对 `/`~`*`.`盘根 的递归删除——普通目录的 rm -r 不拦）。注：PreToolUse 硬拦在权限跳过模式下依然生效（hook 跑在 shell 里，提示词注入绕不过）
 - `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）；拦截消息给"目录/命令/平台"三要素话术交用户手动。教训：agent 的"想尽办法装成功"哲学会压过"无法自动化"的措辞——这类禁令必须放硬层
+- `git add -A / --all / .` 全禁（宽提交会把无关文件与不入库产物卷进交付分支——STORY 误提交实战；提交必须精确到文件/明确产物目录）
 - verify_ut 的测试路径收紧（`tests_only` × 「测试路径」配置）：配置后仅放行测试路径写入（Edit/Bash 双路），把 UT agent「禁改被测源码」从契约措辞硬化为 gate；未配置的仓行为不变。**这不是死禁**——配套 unlock 裁决通道（原则 8）
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步的测试路径收紧；仅本步实例有效，done/goto 自动失效，历史留痕 `unlock:source`；未启用收紧的仓执行为留痕 no-op。修复提交后新鲜度绑定会强制重跑 UT agent（旧令牌 HEAD 已过期），"改完不验就 done"走不通
 

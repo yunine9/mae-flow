@@ -1,4 +1,5 @@
 仓库存在 docs/delivery-notes.md 时先通读(往单沉淀的仓库事实:构建陷阱/告警高发点/mock 策略),写码时主动规避。
+代码事实先查 .mae-flow-work/survey-{单号}.md(勘察笔记),只做增量探索,禁止全量重读代码。
 **中断/上下文重置(/clear)后恢复,先按序重读再动手**:①superpowers 计划文档 ②tasks.md(勾选与备注=进度真相)
 ③design.md 与 delta spec ④git log {基线分支}..HEAD 与最近 diff。禁止只凭本条指令闷头续写。
 执行 /comet-build 生成实现计划。comet-build「选择工作方式」阻塞点按公司标准回答,禁止现场即兴:

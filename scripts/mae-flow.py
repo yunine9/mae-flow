@@ -589,7 +589,7 @@ def cmd_init(flow, args):
 def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
-    lines = [".mae-flow.json*", HISTORY_PATH, ".mae-flow-need-reload"]
+    lines = [".mae-flow.json*", HISTORY_PATH, ".mae-flow-need-reload", ".mae-flow-work/"]
     txt = open(gi, encoding="utf-8").read() if os.path.exists(gi) else ""
     add = [l for l in lines if l not in txt]
     if add:
@@ -809,6 +809,9 @@ def cmd_gate(flow, st, args):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
             die("hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——这是伪造 agent 收尾令牌的通道。", 2)
+        if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
+            die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
+                "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
         if re.search(r"(mkdir|md|new-item)\b", c, re.I) and hits_path(r"(^|/)openspec/"):
             die("禁止手动创建 openspec 目录:openspec/changes/ 由 comet 工具建(comet-open 技能 / comet-state init),"
                 "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"

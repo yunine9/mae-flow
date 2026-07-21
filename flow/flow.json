@@ -132,12 +132,12 @@
         {
           "type": "glob",
           "any": [
-            "docs/grill-prep-{单号}.md"
+            ".mae-flow-work/grill-prep-{单号}.md"
           ]
         },
         {
           "type": "content_free",
-          "file": "docs/grill-prep-{单号}.md",
+          "file": ".mae-flow-work/grill-prep-{单号}.md",
           "patterns": [
             "待填"
           ],
@@ -152,8 +152,7 @@
         {
           "type": "clean_paths",
           "paths": [
-            "docs/clarifications-{单号}.md",
-            "docs/grill-prep-{单号}.md"
+            "docs/clarifications-{单号}.md"
           ]
         }
       ],
@@ -185,6 +184,10 @@
           "paths": [
             "openspec/changes/{CHANGE_NAME}"
           ]
+        },
+        {
+          "type": "agent_ran",
+          "agent": "ASKUSER"
         }
       ],
       "next": "design",

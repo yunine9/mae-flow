@@ -11,5 +11,5 @@
      提醒用户之后按 hotfix/full 另开轮次处理;
    禁止不查证就全盘接受("您说得对"式照单全收与伪造同罪),也禁止未经用户同意自行反驳。
 全部裁决完(done 硬校验:零「待裁决」残留 + 本步内真实 AskUserQuestion)→ 展示三类汇总 →
-git add docs/review/ && git commit -m "[单号][类型]评审意见裁决" → done --ack "用户裁决原话"。
+git add docs/review/REVIEW-{单号}.md && git commit -m "[单号][类型]评审意见裁决"(精确路径,禁止宽 add) → done --ack "用户裁决原话"。
 中断恢复:读 REVIEW 文档,残留「待裁决」的条目接着查证/裁决,已确认的禁止重问。

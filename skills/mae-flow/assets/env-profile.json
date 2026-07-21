@@ -18,9 +18,7 @@
               "codeagent plugin install superpowers@claude-plugins-official"]},
     {"name": "ponytail",
      "cmds": ["codeagent plugin marketplace add https://github.com/DietrichGebert/ponytail",
-              "codeagent plugin install ponytail@ponytail"]},
-    {"name": "codecheck",
-     "cmds": ["codeagent plugin add codecheck-cac@2.0.1"]}
+              "codeagent plugin install ponytail@ponytail"]}
   ],
   "offline_dir": ""
 }

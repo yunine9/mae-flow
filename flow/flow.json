@@ -447,13 +447,7 @@
       "contains": "ponytail"
     },
     {
-      "name": "CodeCheck 插件",
-      "type": "cmd_contains",
-      "value": "codeagent plugin list",
-      "contains": "codecheck"
-    },
-    {
-      "name": "CodeCheck 独立 CLI(fullcheck 可用)",
+      "name": "CodeCheck CLI(@baize/codecheckcli,fullcheck 可用)",
       "type": "cmd_contains",
       "value": "codecheck fullcheck --help",
       "contains": "fullcheck"

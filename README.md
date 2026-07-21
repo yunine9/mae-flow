@@ -42,8 +42,8 @@
     1) 查基础件 Git Bash / Git / Node≥20.19 …… 缺 → ⚠停，自己装（不代装）
     2) 配 npm 镜像 + 代理 ………………………… 配过跳过
     3) 配 git 代理 ……………………………… 配过跳过
-    4) 装 OpenSpec / Comet(锁 0.3.x) ……… 有则跳过；失败自愈2次 → ❌带诊断线索
-    5) 装 superpowers / ponytail / codecheck … 装成功 → 打「待重启」标记 ★
+    4) 装 CLI:OpenSpec / Comet(锁 0.3.x)/ CodeCheck(@baize/codecheckcli) … 有则跳过；失败自愈2次 → ❌带线索
+    5) 装 codeagent 插件:superpowers / ponytail … 装成功 → 打「待重启」标记 ★
     6) 项目级配置：先查 comet init 跑没跑过
          · 没跑过 → 只给三要素话术，其余全跳过（没地基不装修）
          · 跑过了 → 配 .comet 开关 · .claude→.cac 迁移(→打标记 ★) · 合并 settings

@@ -104,10 +104,6 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "agent_ran",
-          "agent": "CODECHECK"
-        },
-        {
           "type": "codecheck_clean"
         }
       ],
@@ -340,10 +336,6 @@
       "title": "验证 2/4 — 规范检查(代码定稿)",
       "allow_source_edit": true,
       "evidence": [
-        {
-          "type": "agent_ran",
-          "agent": "CODECHECK"
-        },
         {
           "type": "codecheck_clean"
         }

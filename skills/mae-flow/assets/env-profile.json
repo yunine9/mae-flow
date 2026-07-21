@@ -4,9 +4,13 @@
   "proxy": "http://proxysg.huawei.com:8080",
   "node_min": "20.19.0",
   "plugin_cli": "codeagent",
+  "npm_scoped_registries": {
+    "@baize": "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"
+  },
   "npm_packages": {
     "openspec": "@fission-ai/openspec@latest",
-    "comet": "@rpamis/comet@0.3.x"
+    "comet": "@rpamis/comet@0.3.x",
+    "codecheck": "@baize/codecheckcli"
   },
   "plugins": [
     {"name": "superpowers",

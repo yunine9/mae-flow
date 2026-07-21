@@ -198,10 +198,22 @@ def main():
             sh(c, timeout=20)
         mark("FIXED", "git 代理")
 
+    # ---- scoped registries(私有 scope,如 @baize 的 codecheckcli 走 centralrepo,与主镜像不同) ----
+    scoped = prof.get("npm_scoped_registries", {})
+    if scoped:
+        for scope, reg in scoped.items():
+            sh("npm config set %s:registry=%s" % (scope, reg), timeout=30)
+        mark("FIXED", "npm scoped registries", "、".join(scoped))
+
     # ---- CLI 安装(幂等:有则跳过) ----
-    for name, key in (("OpenSpec CLI", "openspec"), ("Comet CLI", "comet")):
-        rc, _ = sh(key.split()[0] + " --version", timeout=30)
-        if rc == 0:
+    # 已装判据:openspec/comet 用 --version 退出码;codecheck 别赌退出码(help/version 常非零退出),
+    # 也别用命令名(未装报错含命令名会误判)——用 fullcheck --help 输出含 "fullcheck"(未装报错不含它)
+    for name, key, probe, pat in (("OpenSpec CLI", "openspec", "openspec --version", None),
+                                  ("Comet CLI", "comet", "comet --version", None),
+                                  ("CodeCheck CLI", "codecheck", "codecheck fullcheck --help", "fullcheck")):
+        rc, out = sh(probe, timeout=30)
+        ok = (rc == 0) if pat is None else bool(re.search(pat, out or "", re.I))
+        if ok:
             mark("OK", name)
         else:
             npm_install(key, prof["npm_packages"][key], offline)

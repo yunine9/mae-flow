@@ -47,6 +47,9 @@ python "<插件目录>/scripts/mae-flow.py" current   # 拿当前步骤指令(�
 
 子 agent 契约在 agents/ 各定义文件中;返回只认 `XXX_RESULT:` 标记,无标记/异常中断一律视同失败。
 失败的处理只有一条路:**重启该 agent**(把上次失败的情况告知它),最多重启 2 次;仍失败 → 停下向用户报告。
+被 **COMET PHASE GUARD** 拦到写入(报错框含 phase/change)→ **禁止换工具硬绕**(Write 被拦就改 bash 是最坏反应,
+造成"时灵时不灵"的假象):先执行 mae-flow doctor 看 comet phase 与活跃 change 数,按哨兵指引处理——
+phase 掉队则补跑对应 guard --apply;活跃 change >1 则清僵尸;确需写 change 目录内文件用 git mv 而非 Write。
 打回消息附「尸检线索」时,**必须把线索原样转告新实例**——死因是某工具持续报错的,提醒新实例按契约
 "带着情报死"条款直接 FAIL/BLOCKED 上报,别让它把同一堵墙再撞一遍。
 重启计数的范围 = **本次进入该步骤内的连续失败**:步骤经 goto/回退重新进入后计数归零;

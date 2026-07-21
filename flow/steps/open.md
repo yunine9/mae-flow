@@ -6,6 +6,8 @@
 **/comet-open 调不起来 / 报技能不存在 → 别 mkdir 手搓顶替**:十有八九是 .claude→.cac 迁移后没重启会话、skill 未加载。
 先重启会话(有 .mae-flow-need-reload 标记时环境步就会拦你),回来说"继续";仍不行则环境未就绪,回退查 env。
 有 clarifications 时明确告知 comet-open:需求澄清已在 Grill 完成(附文档路径),其 Step 1 勿重复质询,直接进入产物生成。
+若需把 clarifications 移入 change 目录:**用 git mv**(change 目录内非白名单文件,comet hook 拦 Write 但放行 git mv;
+且 git mv 保留历史)——绝不用 Write 重建或 cp,那会撞 COMET PHASE GUARD。
 确认产物:proposal.md、design.md、tasks.md、specs/<domain>/spec.md(delta spec)。
 delta spec 的 Scenario 用 EARS 句式表述(WHEN <条件> THE SYSTEM SHALL <可观测行为>,每条独立可测;
 clarifications 里已是 EARS 的答案直接沿用)——UT 阶段将按这些条目逐条对照覆盖,含糊句式=测不了=白写。

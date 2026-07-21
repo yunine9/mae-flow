@@ -4,5 +4,8 @@
 - 文档中已拍板的需求级决策**不得重问**,直接作为设计约束引用;
 - 「留给设计阶段」清单里的技术分歧是本阶段该聚焦的问题,优先展开;
 - brainstorming 中若发现新的**需求级**缺口 → 停下补录进 clarifications 并与用户确认,再继续设计。
-确认设计文档生成;comet-handoff.sh 生成交接上下文;.comet.yaml phase=design。
+确认设计文档生成;comet-handoff.sh 生成交接上下文。
+**收尾自查(闪退/中断防线)**:comet-design 退出时会自跑 guard design --apply 把 phase 推到 build;
+done 前确认 .comet.yaml **phase 已=build**——若仍卡在 design(apply 没跑成/被打断),
+补跑 comet-guard <change> design --apply 再 done,否则下一步 story 写 docs/story 会被 comet 拦(phase=design 不放行)。
 展示设计摘要,结束回复等用户确认方向。确认后 git add openspec/ docs/superpowers/ && git commit -m "[单号][类型]设计文档",再 done --ack。

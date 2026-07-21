@@ -238,6 +238,18 @@ def ev_content_free(spec, st):
     return False, spec.get("note", "内容含禁止残留") + "(命中 pattern: " + " | ".join(hit) + ")"
 
 
+def ev_glob_absent(spec, st):
+    """负向存在证据:pattern 必须一个都匹配不到。用于"动作必须留下'消失'这个事实"——
+    如归档=移动,原 change 目录必须从 changes/ 消失;复制式假归档留了原件,在这里骗不过(2026-07-20 僵尸实战)。"""
+    pats = [subst(p, st) for p in spec.get("any", [])]
+    if any("{" in p and "}" in p for p in pats):
+        return False, "证据 pattern 含未解析占位符: " + " | ".join(pats)
+    hit = [p for p in pats if globmod.glob(p)]
+    if not hit:
+        return True, ""
+    return False, spec.get("note", "以下路径必须已不存在(残留=动作未完成,如复制式假归档)") + ": " + "、".join(hit)
+
+
 def ev_clean_paths(spec, st):
     """指定路径必须已提交且无未提交改动(git 实测)。硬化'产物必须 commit'义务——
     忘提交的产物不进 MR,spec 白写。"""
@@ -443,7 +455,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "yaml_field": ev_yaml, "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
-            "codecheck_clean": ev_codecheck_clean}
+            "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent}
 
 
 def _ack_verified(st, ack):
@@ -491,6 +503,67 @@ def perms_line(step):
     return "允许: " + ("、".join(allow) or "仅本步指令内动作") + ";禁止: " + "、".join(forbid + ["编辑 .comet.yaml"])
 
 
+# mae-flow 步骤 ↔ comet phase 合法区间(阶段互锁哨兵;未列出的步骤不检查)
+# 依据 comet 0.3 语义:comet-design 收尾自带 guard design --apply → build;build 收尾 apply → verify
+COMET_PHASE_EXPECT = {
+    "story_ask": ("build",), "story": ("build",),
+    "build": ("build", "verify"),
+    "verify_ponytail": ("verify",), "verify_codecheck": ("verify",),
+    "verify_ut": ("verify",), "verify_comet": ("verify",),
+    "archive_confirm": ("verify",), "archive": ("verify", "archive"),
+    "design": ("open", "design", "build"),
+}
+
+
+def _comet_phase(st):
+    """读当前 change 的 comet phase(显式用 CHANGE_NAME,绝不学 comet 的字典序抽奖)。"""
+    cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
+    if not cn:
+        return ""
+    p = f"openspec/changes/{cn}/.comet.yaml"
+    if not os.path.exists(p):
+        return ""
+    m = re.search(r"^phase:\s*(\S+)", open(p, encoding="utf-8", errors="replace").read(), re.M)
+    return m.group(1) if m else ""
+
+
+def _active_change_count():
+    """在建区活跃 change 计数(镜像 comet 的判定:排除 archive/ 子目录与 archived: true)。>1 = 僵尸在场。"""
+    n = 0
+    try:
+        for d in os.listdir("openspec/changes"):
+            full = os.path.join("openspec", "changes", d)
+            if not os.path.isdir(full) or d == "archive":
+                continue
+            y = os.path.join(full, ".comet.yaml")
+            if not os.path.exists(y):
+                continue
+            if re.search(r"^archived:\s*true", open(y, encoding="utf-8", errors="replace").read(), re.M):
+                continue
+            n += 1
+    except OSError:
+        pass
+    return n
+
+
+def _sentinel_lines(sid, st):
+    """阶段互锁哨兵:把'谜之写入拦截'变'开局就有诊断'。只警告不硬拒(硬闸在转换点的 phase 证据上)。"""
+    out = []
+    ph = _comet_phase(st)
+    exp = COMET_PHASE_EXPECT.get(sid)
+    if exp and ph and ph not in exp:
+        out.append(f"⚠ 阶段错位:comet phase={ph},本步期望 {'/'.join(exp)}。多为上一步的 comet-guard --apply"
+                   " 未完成(闪退/中断)——按该阶段收尾指引补跑 guard --apply 再继续;"
+                   "被 COMET PHASE GUARD 拦到写入时禁止换工具硬绕,先 doctor。")
+    n = _active_change_count()
+    if n > 1:
+        out.append(f"⚠ 僵尸告警:openspec/changes/ 下有 {n} 个活跃 change(应只有当前单一个)。"
+                   "comet 会按字典序抽一个管全场,极易造成谜之写入拦截。处理:当前单为 "
+                   f"{(st.get('config', {}) or {}).get('CHANGE_NAME', '?')},其余为历史残留——"
+                   "做完没归档的补归档,废弃的经用户确认移除。")
+    return out
+
+
 def _step_md_text(sid, st):
     """步骤指令文本:模板路径与已确认配置全部替换后返回(无该 md 返回 None)。
     占位符替换 = 把"需要模型去拿"的信息直接喂到嘴边(弱模型会跳过"去拿"的动作);
@@ -522,6 +595,8 @@ def print_current(flow, st):
     step = flow["steps"][sid]
     print(f"═══ 当前步骤: {sid} — {step['title']} ═══")
     print(perms_line(step))
+    for _w in _sentinel_lines(sid, st):
+        print(_w)
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:
         print(f"🔓 本步源码修改已解锁(用户裁决: {ul.get('reason', '')};推进后自动失效)")
@@ -893,6 +968,10 @@ def cmd_doctor(flow, st, args):
         print(f"✅ change: {cn},phase={ph.group(1) if ph else '?'}")
     else:
         print(f"{'⚠' if not cn else '❌'} change: " + (cn + " 的 .comet.yaml 不存在" if cn else "CHANGE_NAME 未设置(open 之前属正常)"))
+    nac = _active_change_count()
+    print(("✅" if nac <= 1 else "❌") + f" 活跃 change 数: {nac}" + ("(僵尸在场!comet 会抽错人,清理见下)" if nac > 1 else ""))
+    for _w in _sentinel_lines(sid, st):
+        print("   " + _w)
     fails = check_evidence(step, st)
     if fails:
         print("❌ 当前步证据未满足:")

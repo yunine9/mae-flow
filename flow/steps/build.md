@@ -46,5 +46,6 @@ comet 提示工作流升级条件(hotfix→full)时,停手展示原因,等用户
 实现中发现**设计或 delta spec 本身有误**(实现揭出的矛盾/遗漏/做不到)——这是实现阶段的正常发现,不是事故:
 停手,呈报用户(问题+影响+建议修法),经确认后 goto design(设计误)或 goto open(spec 误)--ack "用户原话"
 回流修订,修订后顺流回来;**禁止不吭声地偏离设计"先做出来再说"**——偏离没有记录,评审和 verify 都会被骗过。
-全部完成且 comet-guard 通过后,展示任务状态与产物摘要,结束回复等用户确认。
+全部完成且 comet-guard 通过后,展示任务状态与产物摘要;**确认 .comet.yaml phase 已=verify**
+(build 收尾 guard build --apply 推进;仍卡 build 则补跑,否则 verify 链的写入会被 comet 拦),结束回复等用户确认。
 done --ack "用户原话"(同时自动校验 tasks 全勾选 + 最新 commit 带单号)。

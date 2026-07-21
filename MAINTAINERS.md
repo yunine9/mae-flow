@@ -117,6 +117,7 @@ flow.json 步骤字段语义：
 | `agent_ran` | 本步期间发生过 harness 签发的事件令牌——SubagentStop 验完契约标记发 agent 令牌（STORY/UT/CODECHECK/ENV），PostToolUse 对 AskUserQuestion 发 **ASKUSER 令牌**（"真实问过用户"从此是 harness 记录的事实，不是模型可书写的文本）。令牌文件 gate 双拦 + 手动调 dispatch.py 被拦 + 时间戳须晚于本步进入 + **新鲜度绑定**：令牌记签发时 HEAD，签发后源码（source_patterns）有已提交/未提交变更即判证据过期（旧格式纯时间戳令牌仅验时间，兼容在途单；基点经 amend/rebase 不可解析同样判拒，重跑 agent 即恢复）。**封杀三类造假：主会话代工 agent 产出、未问用户就声称确认过、拿旧证据背新代码的书** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
+| `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
 | `codecheck_clean` | **done 现场重跑 `codecheck fullcheck -f <本单业务代码>` 亲数遗留**（解析锚点「共有 N 条告警」，全量明细读落盘报告）：0 条或每条(规则,文件)都在 `docs/codecheck-exempt-{单号}.md` 豁免清单内才放行。只查业务代码（测试路径配置/默认特征过滤）；分批防命令行超长；超时 15min。最硬形态：agent 报数不作数，harness 亲测（verify_codecheck/tw_codecheck/rf_verify 在用） |
 
 **新增证据类型**：在 mae-flow.py 写 `ev_xxx(spec, st) -> (bool, 失败原因)`，注册进 `EVIDENCE` 字典，flow.json 里引用。失败原因要写"怎么补救"，它会原样回传给模型。
@@ -206,6 +207,8 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 2. **permissions 基线**：团队 settings 里 `deny` 密钥类文件的 Read（对模型不可见，比 hook 拦更彻底）+ `allow` 常用只读命令（每次权限弹窗打断都是弱模型的跑偏机会）。已固化为 `skills/mae-flow/assets/settings-baseline.json`，env-setup-agent 自动合并进项目 settings（追加缺失、不覆盖既有）；团队按需在该文件增删条目。
 3. **会话卫生**：一单一会话为佳；改插件/agent/settings 后必须重启会话（定义在会话启动时缓存）；长会话行为漂移时 /clear（状态在磁盘，进度不丢）。重上下文步骤（build、verify 链入口）的 `current` 会主动提示 /clear 时机（`clear_hint` 标记）；重步骤 md 内置「中断恢复先读什么」清单（`current` 每次打印，恢复质量不赌模型自觉）；build 的批次 commit 后是安全 /clear 点，批次结论/调试根因假设要求写进 tasks.md 备注行（中间推理不留在会话里）。
 4. **仓库预设**：`.mae-flow-defaults.json` 提交进仓（编译方式/UT生成方式/UT运行命令等恒定项），config_confirm 时 `current` 自动展示预填，新人第二单起免逐项来回；基线分支与需求文档不预设免问。另支持**机器直读键**「测试路径」（正则数组，gate 直接消费，启用 verify_ut 的测试路径收紧）——预填展示类键与机器直读键的区别要在改代码时留意。
+
+**阶段互锁哨兵（2026-07-21，治"comet 与 mae-flow 双状态机冲突像随机 bug"）**：mae-flow 主导、每步核对 comet 跟队。`current`/`doctor` 内置「步骤↔comet phase 合法区间」映射（`COMET_PHASE_EXPECT`），phase 掉队（多为闪退打断 guard --apply）或活跃 change >1（僵尸）时**强预警不硬拒**（硬闸在转换点的 phase 证据/glob_absent 上，哨兵只做诊断避免制造新死锁）。三个真因固化：①僵尸放大器（comet 多活跃按字典序抽一个管全场，`_active_change_count` 检测）②双状态机无互锁（design/build 收尾自查 phase 已推进）③Bash/Write 不对称（comet hook 只拦 Write，SKILL 铁律"被 GUARD 拦禁止换工具硬绕，先 doctor"，change 目录内写用 git mv）。
 
 **升级 comet 版本 checklist**：对照新版 `comet-state.sh` 核实 `design_doc`/`verify_result`/`auto_transition` 字段仍存在且语义不变 → 核实 guard `--apply` 仍是 phase 推进唯一入口 → 核实 comet init 产物目录结构 → 跑一单 tweak 冒烟 → 改 env-setup-agent 的版本号。
 

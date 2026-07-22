@@ -20,8 +20,9 @@ superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_o
 按计划迭代,每完成一个任务:实现 → delta spec 同步检查(有偏差立即修) → 勾选 tasks.md →
 git commit -m "[单号][类型]描述"(拒绝 comet 建议的 fix:/tweak:/设计意图式 message;
 **先 commit 后编译**是定死的顺序:任务代码可以带着编译错误入库,compile-agent 的修复另行 commit)。
-**积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 派 compile-agent**
-(传:单号类型、编译方式配置原文、本批改动说明):OK → 继续下一批;BLOCKED(含 SUSPECTED_ISSUES
+**积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 先执行
+`python "{MAEFLOW_PATH}" agent-task compile --scope "<本批模块/任务>"`，把输出的唯一启动话术原样交给 compile-agent**
+(任务卡由 harness 带齐单号、编译方式和本批范围):OK → 继续下一批;BLOCKED(含 SUSPECTED_ISSUES
 疑似要改接口/逻辑)→ 停下呈用户裁决,走既有回流通道,禁止自己乱改绕过。
 mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(错误堆成山难定位)。
 **build 收尾铁序**:最后一次改码之后必须再派一次 compile-agent 收尾——新鲜度绑定会强制这一点

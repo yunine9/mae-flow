@@ -17,7 +17,7 @@
   - 每次调用在 %TEMP%/mae-flow-hook.log 记 start/end 与耗时,
     只有 start 没有 end = 该次挂起被看门狗击杀,可据此定位。
 """
-import glob, json, os, re, subprocess, sys, tempfile, threading, time
+import glob, hashlib, json, os, re, subprocess, sys, tempfile, threading, time
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -236,6 +236,14 @@ def ev_subagentstop(d):
         return out
 
     users, asst = texts("user"), texts("assistant")
+    tool_calls = []
+    for e in lines:
+        c = (e.get("message", {}) or {}).get("content", e.get("content", ""))
+        if not isinstance(c, list):
+            continue
+        for b in c:
+            if isinstance(b, dict) and b.get("type") in ("tool_use", "tool_call"):
+                tool_calls.append({"name": b.get("name", ""), "input": b.get("input", {})})
     prompt = users[0] if users else ""
     last = (asst[-1] if asst else "").strip()
     # 契约要求标记在第一行:只看首行,不用 re.M(埋在中间不算)
@@ -245,10 +253,12 @@ def ev_subagentstop(d):
     m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", first_line)
     if m:
         if m.group(1) == "CODECHECK":
-            _codecheck_contract(m.group(2), last, soft=retry)
+            _codecheck_contract(m.group(2), last, tool_calls, soft=retry)
+        if m.group(1) == "UT":
+            _ut_contract(m.group(2), last, tool_calls, soft=retry)
         if m.group(1) == "COMPILE":
-            _compile_contract(m.group(2), last, soft=retry)
-        _record_agent_token(m.group(1))
+            _compile_contract(m.group(2), last, tool_calls, soft=retry)
+        _record_agent_token(m.group(1), m.group(2))
         sys.exit(0)
     if retry:
         _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
@@ -282,7 +292,7 @@ def _git_head():
         return ""
 
 
-def _record_agent_token(kind):
+def _record_agent_token(kind, status=""):
     """子 agent 合法收尾的硬令牌:仅由本 hook(harness 调用)写入,是模型无法伪造的证据源——
     令牌文件在 gate 黑名单中(Edit/Bash 双拦),手动调 dispatch.py 也被 gate 拦截。
     mae-flow 的 agent_ran 证据据此判定"本步期间该 agent 真实跑过"。
@@ -293,11 +303,12 @@ def _record_agent_token(kind):
         if os.path.exists(p):
             d = json.loads(open(p, encoding="utf-8").read() or "{}")
         head = _git_head()
-        d[kind] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head}
+        d[kind] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
+                   "status": status}
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False))
         os.replace(tmp, p)
-        _log("agent token: %s @%s" % (kind, head[:9] or "no-git"))
+        _log("agent token: %s/%s @%s" % (kind, status or "-", head[:9] or "no-git"))
     except Exception as e:
         _log("token EXC: %s" % e)
 
@@ -345,34 +356,134 @@ def _maybe_utrun(d):
             ut = (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {}).get("UT运行命令", "")
         ut = re.sub(r"\s+", " ", ut or "").strip()
         if ut and ut in cmd:
-            _record_agent_token("UTRUN")
+            _record_agent_token("UTRUN", "EXECUTED")
     except Exception as e:
         _log("utrun EXC: %s" % e)
 
 
-def _codecheck_contract(status, report, soft=False):
+def _contract_bail(label, msg, soft):
+    if soft:
+        _log(label + " 重答仍违规: " + msg)
+        sys.exit(0)
+    print("[mae-flow] " + label + " 契约违规:" + msg
+          + " 请按 agent 定义的 Return format 重新真实收尾。", file=sys.stderr)
+    sys.exit(2)
+
+
+def _task_card_contract(kind, report, soft=False):
+    """报告必须回传 harness 任务卡指纹；缺配置时不再允许子 agent 边猜边做。"""
+    try:
+        st = json.load(open(STATE, encoding="utf-8"))
+        task = (st.get("agent_tasks", {}) or {}).get(kind, {})
+    except Exception:
+        st, task = {}, {}
+    if not task:
+        _contract_bail(kind, "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。", soft)
+    if task.get("step") != st.get("current"):
+        _contract_bail(kind, "任务卡属于旧步骤,禁止拿旧配置执行当前任务。", soft)
+    m = re.search(r"^TASK_CARD_SHA256:\s*([0-9a-f]{64})\s*$", report, re.M | re.I)
+    if not m or m.group(1).lower() != task.get("sha256", "").lower():
+        _contract_bail(kind, "最终报告缺少当前任务卡的 TASK_CARD_SHA256,说明启动信息不完整。", soft)
+    try:
+        txt = open(task["path"], encoding="utf-8").read()
+        body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
+        actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    except Exception as e:
+        _contract_bail(kind, "任务卡不可读:" + str(e), soft)
+    if actual != task.get("sha256"):
+        _contract_bail(kind, "任务卡内容被修改过,必须重新执行 agent-task 生成。", soft)
+    return task
+
+
+def _state_config():
+    try:
+        return (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {})
+    except Exception:
+        return {}
+
+
+def _field(report, name):
+    m = re.search(r"^\s*" + re.escape(name) + r":\s*(.+?)\s*$", report, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def _same_config(actual, expected):
+    def n(s):
+        return re.sub(r"\s+", "", (s or "")).lower()
+    return bool(n(expected)) and (n(expected) in n(actual) or n(actual) in n(expected))
+
+
+def _required_skill(config_value):
+    v = (config_value or "").lower()
+    if "java-autout" in v:
+        return "java-autout"
+    if "autout" in v:
+        return "autout"
+    if "build-fix" in v:
+        return "build-fix"
+    return ""
+
+
+def _skill_called(tool_calls, wanted):
+    if not wanted:
+        return True
+    for x in tool_calls or []:
+        if str(x.get("name", "")).lower() != "skill":
+            continue
+        try:
+            raw = json.dumps(x.get("input", {}), ensure_ascii=False).lower()
+        except Exception:
+            raw = str(x.get("input", "")).lower()
+        if wanted in raw:
+            return True
+    return False
+
+
+def _bash_called(tool_calls, expected):
+    def n(s):
+        return re.sub(r"\s+", " ", (s or "")).strip().lower()
+    want = n(expected)
+    if not want:
+        return False
+    for x in tool_calls or []:
+        if str(x.get("name", "")).lower() != "bash":
+            continue
+        inp = x.get("input", {}) or {}
+        cmd = inp.get("command", "") if isinstance(inp, dict) else str(inp)
+        if want in n(cmd):
+            return True
+    return False
+
+
+def _codecheck_contract(status, report, tool_calls=None, soft=False):
     """codecheck 报告的硬校验:fullcheck 实际执行 + 三数对账(FOUND=FIXED+REMAINING_COUNT)。
     遗漏告警最常见的形态是马虎吞掉,算术对不上当场打回;CLEAN 必须遗留为 0。
     soft=重答路径:违规不再 exit 2(防死循环),但直接 exit 0 不发令牌,由 done 的 agent_ran 拦截。"""
     def bail(msg):
-        if soft:
-            _log("codecheck 重答仍违规: " + msg)
-            sys.exit(0)
-        print("[mae-flow] codecheck 契约违规:" + msg
-              + " 请重新真实执行并按 Return format 输出完整报告(含 FOUND/FIXED/REMAINING_COUNT 三行)。",
-              file=sys.stderr)
-        sys.exit(2)
+        _contract_bail("CODECHECK", msg, soft)
 
+    _task_card_contract("CODECHECK", report, soft)
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
     if status == "FAIL":
         return   # FAIL 是诚实上报,不再苛求对账字段
+    if not _bash_called(tool_calls, "codecheck fullcheck"):
+        bail("transcript 中没有 codecheck fullcheck 的 Bash 工具调用,报告文字不能替代真实执行。")
     nums = {}
     for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
         mm = re.search(r"^\s*" + k + r":\s*(\d+)\s*$", report, re.M)
         if not mm:
             bail(f"缺少机器对账字段 {k}: <数字>。")
         nums[k] = int(mm.group(1))
+    try:
+        st = json.load(open(STATE, encoding="utf-8"))
+        scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    except Exception:
+        st, scan = {}, {}
+    if st.get("current") == "rf_codecheck" and scan.get("step") == "rf_codecheck":
+        if nums["FOUND"] != scan.get("count"):
+            bail(f"FOUND({nums['FOUND']})与 harness 首检({scan.get('count')})不一致。"
+                 "禁止主会话先修后让 agent 补手续；回到首检状态并由 agent 处理原告警。")
     if nums["FOUND"] != nums["FIXED"] + nums["REMAINING_COUNT"]:
         bail(f"对账不平:FOUND({nums['FOUND']}) != FIXED({nums['FIXED']}) + REMAINING_COUNT({nums['REMAINING_COUNT']})"
              ",有告警被吞掉或数字失实。")
@@ -380,10 +491,44 @@ def _codecheck_contract(status, report, soft=False):
         bail(f"标记 CLEAN 但 REMAINING_COUNT={nums['REMAINING_COUNT']},自相矛盾。")
     if status == "REMAINING" and nums["REMAINING_COUNT"] == 0:
         bail("标记 REMAINING 但 REMAINING_COUNT=0,自相矛盾。")
+    if nums["FIXED"] > 0:
+        build = _field(report, "EXECUTED_BUILD")
+        build_cfg = _state_config().get("编译方式", "")
+        if not build or not _same_config(build, build_cfg):
+            bail("修复了源码但 EXECUTED_BUILD 与配置的编译方式不一致,禁止猜编译命令。")
+        need = _required_skill(build_cfg)
+        if need and not _skill_called(tool_calls, need):
+            bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
+        if not need and not _bash_called(tool_calls, build_cfg):
+            bail("修复源码后 transcript 中没有配置编译命令的 Bash 调用。")
     # 与复验摘录对账:契约要求附「共有 N 条告警」原文,取最后一处(复验)与 REMAINING_COUNT 比对
     ex = re.findall(r"共有\s*(\d+)\s*条告警", report)
     if ex and int(ex[-1]) != nums["REMAINING_COUNT"]:
         bail(f"REMAINING_COUNT({nums['REMAINING_COUNT']})与复验摘录『共有 {ex[-1]} 条告警』矛盾——遗留数必须原样取自复验输出。")
+
+
+def _ut_contract(status, report, tool_calls=None, soft=False):
+    def bail(msg):
+        _contract_bail("UT", msg, soft)
+
+    _task_card_contract("UT", report, soft)
+    if status not in ("PASS", "NEEDS_INPUT", "FAIL"):
+        bail("未知结果状态 " + status)
+    if status != "PASS":
+        return
+    cfg = _state_config()
+    if not _same_config(_field(report, "GENERATOR_USED"), cfg.get("UT生成方式", "")):
+        bail("GENERATOR_USED 与任务卡的 UT生成方式不一致；必须调用配置的 AutoUT/java-autout 等能力。")
+    need = _required_skill(cfg.get("UT生成方式", ""))
+    if need and not _skill_called(tool_calls, need):
+        bail(f"UT 配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用；不能用手写代码冒充 Skill 产出。")
+    if not _same_config(_field(report, "EXECUTED_UT"), cfg.get("UT运行命令", "")):
+        bail("EXECUTED_UT 与配置的 UT运行命令不一致；未真实运行不得 PASS。")
+    if not _bash_called(tool_calls, cfg.get("UT运行命令", "")):
+        bail("transcript 中没有配置 UT运行命令的 Bash 工具调用,不能仅凭报告声称已执行。")
+    known = re.search(r"KNOWN_FAILURES:\s*(.+)", report, re.I)
+    if known and known.group(1).strip().lower() not in ("无", "none", "0"):
+        bail("标记 PASS 但 KNOWN_FAILURES 非空。")
 
 
 def _git_out(cmd):
@@ -400,7 +545,8 @@ def _compile_net_lines():
     """编译修复的净行数,git 亲算(agent 报数不作数):
     未提交改动 + 自 HEAD 回溯的连续「修复编译」commit,只统计代码文件。
     这是防掏空的机器不变量:删代码换编译通过,在这里得不了分。"""
-    exts = (".c", ".cc", ".cpp", ".h", ".hpp", ".java")
+    exts = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+            ".inl", ".ipp", ".tpp", ".java")
 
     def net_of(out):
         n = 0
@@ -419,21 +565,25 @@ def _compile_net_lines():
     return total
 
 
-def _compile_contract(status, report, soft=False):
+def _compile_contract(status, report, tool_calls=None, soft=False):
     """编译 agent 收尾硬校验:格式对账(OK⇔零error)+ 净产出不变量(numstat 亲算防掏空)。
     优雅三件套之硬层:作弊(删代码换通过)从'被禁止'变'得不了分'。"""
     def bail(msg):
-        if soft:
-            _log("compile 重答仍违规: " + msg)
-            sys.exit(0)
-        print("[mae-flow] 编译契约违规:" + msg
-              + " 请按契约 Return format 重新真实收尾(EXECUTED_BUILD/BUILD_ERRORS 必填)。", file=sys.stderr)
-        sys.exit(2)
+        _contract_bail("COMPILE", msg, soft)
 
+    _task_card_contract("COMPILE", report, soft)
     if status == "FAIL":
         return   # 诚实上报工具/配置问题,不苛求对账
     if not re.search(r"EXECUTED_BUILD", report):
         bail("必须包含 EXECUTED_BUILD(实际执行的编译方式与输出摘录)。")
+    build_cfg = _state_config().get("编译方式", "")
+    if not _same_config(_field(report, "EXECUTED_BUILD"), build_cfg):
+        bail("EXECUTED_BUILD 与配置确认的编译方式不一致,禁止自行猜测或替换编译命令。")
+    need = _required_skill(build_cfg)
+    if need and not _skill_called(tool_calls, need):
+        bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
+    if not need and not _bash_called(tool_calls, build_cfg):
+        bail("transcript 中没有配置编译命令的 Bash 工具调用,不能仅凭报告声称已编译。")
     m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
     if not m:
         bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")
@@ -453,7 +603,7 @@ def ev_posttooluse(d):
     # "确认发生过"从此是 harness 签发的事实,不是模型可书写的文本
     if d.get("tool_name") == "AskUserQuestion":
         _capture_usermsg(_text_of(d.get("tool_response")))   # 应答原文进 ack 验真存储
-        _record_agent_token("ASKUSER")
+        _record_agent_token("ASKUSER", "CONFIRMED")
         sys.exit(0)
     if d.get("tool_name") == "Bash":
         _maybe_utrun(d)

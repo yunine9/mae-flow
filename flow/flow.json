@@ -2,7 +2,7 @@
   "start": "env_setup",
   "state_file": ".mae-flow.json",
   "source_patterns": [
-    "(^|/)(service|src)/"
+    "(^|/)(service|src|include|lib|app|modules?)/"
   ],
   "specs_truth": "(^|/)openspec/specs/",
   "steps": {
@@ -97,17 +97,51 @@
           "type": "commit_tagged"
         }
       ],
-      "next": "rf_verify"
+      "next": "rf_compile"
     },
-    "rf_verify": {
-      "title": "评审返工 — 增量验证",
+    "rf_compile": {
+      "title": "评审返工 — 编译验证",
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "codecheck_clean"
+          "type": "review_agent_or_no_code",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
+        }
+      ],
+      "next": "rf_codecheck"
+    },
+    "rf_codecheck": {
+      "title": "评审返工 — 规范检查",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "review_codecheck"
+        }
+      ],
+      "next": "rf_ut"
+    },
+    "rf_ut": {
+      "title": "评审返工 — 增量单元测试",
+      "allow_source_edit": true,
+      "tests_only": true,
+      "source_change_recheck": "rf_compile",
+      "evidence": [
+        {
+          "type": "review_agent_or_no_code",
+          "agent": "UT",
+          "statuses": [
+            "PASS"
+          ]
         }
       ],
       "next": "push"
+    },
+    "rf_verify": {
+      "title": "评审返工 — 旧版验证迁移",
+      "next": "rf_compile"
     },
     "grill_ask": {
       "title": "需求澄清询问",
@@ -236,7 +270,11 @@
         },
         {
           "type": "agent_ran",
-          "agent": "STORY"
+          "agent": "STORY",
+          "statuses": [
+            "DONE",
+            "NEEDS_CONFIRM"
+          ]
         },
         {
           "type": "agent_ran",
@@ -320,7 +358,10 @@
         },
         {
           "type": "agent_ran",
-          "agent": "COMPILE"
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
         }
       ],
       "next": "verify_ponytail",
@@ -331,6 +372,20 @@
       "clear_hint": true,
       "allow_source_edit": true,
       "next": "verify_codecheck"
+    },
+    "verify_recompile": {
+      "title": "验证回流 — 重新编译",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
+        }
+      ],
+      "next": "verify_ponytail"
     },
     "verify_codecheck": {
       "title": "验证 2/4 — 规范检查(代码定稿)",
@@ -346,10 +401,14 @@
       "title": "验证 3/4 — 补充单元测试",
       "allow_source_edit": true,
       "tests_only": true,
+      "source_change_recheck": "verify_recompile",
       "evidence": [
         {
           "type": "agent_ran",
-          "agent": "UT"
+          "agent": "UT",
+          "statuses": [
+            "PASS"
+          ]
         }
       ],
       "next": "verify_comet"

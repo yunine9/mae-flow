@@ -51,7 +51,7 @@
      单号确定同 story 模式(参数带→直接用;.mae-flow.json 或 .last 里有→向用户确认;都没有→问)。
      确认后走标准 init(上一单终态自动备份;存在**非终态**在途单则先问用户续跑还是放弃,禁止直接覆盖),
      config_confirm 以上轮配置为预填,workflow_select 选 review(同单号→同分支名→commit 自动追加进原 MR);
-     此后按 rf_triage / rf_fix / rf_verify 的 current 指令走。红线:review 轮次**不碰规格**,
+     此后按 rf_triage / rf_fix / rf_compile / rf_codecheck / rf_ut 的 current 指令走。红线:review 轮次**不碰规格**,
      涉及行为/规格变更的意见在 rf_triage 分诊转 hotfix/full 轮次。
      用户开场粘贴的意见清单先留存,进 rf_triage 步时原文照录进 REVIEW 文档。
 3. 此后所有流程动作只来自 `mae-flow current` 的输出,禁止预判、禁止跳步。

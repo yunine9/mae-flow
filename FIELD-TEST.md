@@ -63,13 +63,22 @@
 
 - [ ] **2.1 /clear 恢复**:编码实现中途 /clear → 说"继续" → 看它是否按恢复清单先读 计划/tasks/设计/diff 再动手。
 - [ ] **2.2 review-fix 全链**:对首单 MR 造 3-4 条评审意见(混入一条该反驳的、一条涉及行为变更的)→
-  rf_triage 逐条"先查证再裁决"、反驳有依据、行为变更被分诊转常规轮次 → 修复 → 增量验证 → commit 进原 MR。
+  rf_triage 逐条"先查证再裁决"、反驳有依据、行为变更被分诊转常规轮次 → 修复 →
+  rf_compile → rf_codecheck → rf_ut → commit 进原 MR。重点故意验证四个拦截:
+  - CodeCheck 首检有告警时让主 agent 直接修 → 应被「首检前 HEAD/FOUND 对账」拒绝补手续;
+  - 手写豁免文件但不问用户 → done 应报「没有用户审批令牌」;
+  - UT 派发故意漏 AutoUT/UT命令 → 子 agent 无任务卡指纹或无真实 Skill/Bash 调用,SubagentStop 应打回;
+  - compile-agent 故意不传 build-fix → 无任务卡/无 build-fix Skill 调用应打回,FAIL/BLOCKED 令牌不能 done。
 - [ ] **2.3 unlock 裁决通道**:人为造一个 UT 能揪出的源码 bug → agent 自查报告六要素齐全 →
-  三选一裁决 → unlock(伪造 ack 应被拒)→ 修复 → 新鲜度绑定强制重跑 UT(旧令牌应被判过期)。
-- [ ] **2.4 codecheck_clean 现场复核校准**(CLI 已确认、证据已实装,2026-07-20):
+  三选一裁决 → unlock(伪造 ack 应被拒)→ 修复 → done 应自动回流完整质量链（review 回 rf_compile，主流程进 verify_recompile），不得直接去 push/verify_comet，也不得重做 comet-build。
+- [ ] **2.4 测试路径缺省硬边界**:临时移除「测试路径」配置，UT 步 Edit/Bash 写 `src/main.*` 仍应被拦；写 `tests/`/`src/test/` 应放行；非标准测试目录应提示补 `.mae-flow-defaults.json`。
+- [ ] **2.4a 跨仓源码识别**:UT 步分别尝试 Edit/Bash 写顶层 `include/Foo.hpp`、`lib/x.cpp`、根 `CMakeLists.txt`，均应按源码拦截；私有无扩展名目录通过 defaults「源码路径」补充后也应生效。
+- [ ] **2.4b 旧在途状态迁移**:备份后从状态中移除 verify_ut/rf_ut 的 `step_heads`，保留正常 history；current/doctor 应恢复进入 UT 前的 commit，并能发现之后的源码变化，禁止用当前 HEAD 洗白。
+- [ ] **2.4c codecheck_clean 现场复核校准**(CLI 已确认、证据已实装,2026-07-20):
   真实单走到规范检查步,验证——done 时现场重跑的耗时(多文件时是否可接受,超时阈值 15min 够不够)、
-  「共有 N 条告警」锚点在你们 CLI 版本上稳定、豁免落盘→复核放行的闭环、测试文件确实被排除。
-- [ ] **2.4b compile-agent 实测**:mcde 后台执行+轮询是否顺畅(前台会撞工具超时上限)、
+  零告警时即使没有「共有 N 条告警」也能从报告「总计」解析、CLI 退出码 1 不误判、
+  approve-exemption 审批→豁免落盘→复核放行的闭环、测试文件确实被排除。
+- [ ] **2.4d compile-agent 实测**:mcde 后台执行+轮询是否顺畅(前台会撞工具超时上限)、
   单模块编译时长记录、COMPILE 令牌+新鲜度绑定的"最后改码后必须再编译"体感、
   numstat 防掏空不变量有无误拦(合理精简走 SHRINK_EXEMPT 声明)。
 - [ ] **2.5 弱模型压测**:换最弱可用模型跑一单 小改快过,记录全部偏差(话术跑偏/跳步尝试/报错后的自愈质量)。

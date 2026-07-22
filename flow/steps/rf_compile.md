@@ -1,0 +1,10 @@
+评审返工的独立编译步骤。harness 已冻结返工基点，只验证本轮增量。
+
+先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。
+若证据提示需要 COMPILE：
+1. 执行 `python "{MAEFLOW_PATH}" agent-task compile`；
+2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；
+3. compile-agent 必须读取任务卡。配置为 build-fix 时由它调用 build-fix Skill；主会话不编译、不猜命令；
+4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。
+
+任务卡指纹、实际编译方式和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。

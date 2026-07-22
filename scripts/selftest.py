@@ -60,6 +60,46 @@ if flow:
     unreg = used - set(mf.EVIDENCE)
     check("证据类型全部注册", not unreg, str(unreg))
 
+    # 4.5 review-fix 质量链必须保持拆分，禁止退化回一个 rf_verify 大步骤
+    review_chain = ["rf_fix", "rf_compile", "rf_codecheck", "rf_ut", "push"]
+    got, cur = [], "rf_fix"
+    for _ in range(len(review_chain)):
+        got.append(cur)
+        cur = steps.get(cur, {}).get("next")
+    check("review-fix 质量链分阶段", got == review_chain, str(got))
+    check("review 编译只接受 OK",
+          steps.get("rf_compile", {}).get("evidence", [{}])[0].get("statuses") == ["OK"])
+    check("review UT 只接受 PASS",
+          steps.get("rf_ut", {}).get("evidence", [{}])[0].get("statuses") == ["PASS"])
+    check("review UT 改源码后回流编译链",
+          steps.get("rf_ut", {}).get("source_change_recheck") == "rf_compile")
+    check("主流程 UT 改源码后回流专用编译节点",
+          steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
+          and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
+
+    # CodeCheckCLI 的成功退出码/文案不稳定，至少守住三种已知输出
+    parser_cases = [
+        ("💡 提示: 共有 2 条告警。", "", 2),
+        ("[CodeCheck] 代码检查完成", "| **总计** | **0** | **0** |", 0),
+        ("[CodeCheck] 代码检查完成! 未发现代码告警", "", 0),
+    ]
+    check("CodeCheck 告警数多格式解析",
+          all(mf._parse_codecheck_count(a, b) == n for a, b, n in parser_cases))
+
+    mf.FLOW = flow
+    source_cases = {
+        "include/Foo.hpp": True,
+        "lib/core.cpp": True,
+        "app/generated/no_extension": True,
+        "CMakeLists.txt": True,
+        "pom.xml": True,
+        "docs/readme.md": False,
+    }
+    check("跨仓源码识别不依赖 service/src",
+          all(mf._is_source_path(p, {}, flow) == want for p, want in source_cases.items())
+          and mf._is_source_path("vendor/private/schema",
+                                 {"config": {"源码路径": r"(^|/)vendor/private/"}}, flow))
+
     # 5. 占位符白名单
     KNOWN = {"单号", "CHANGE_NAME", "工号", "基线分支", "分支名", "单号类型", "STORY入库", "需求文档"}
     ph = set()
@@ -77,6 +117,22 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
         check(f"dispatch 识别 {name}", name in dp)
         txt = open(os.path.join(ROOT, "agents", f), encoding="utf-8").read()
         check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
+        if name in ("compile-agent", "codecheck-fix-agent", "ut-generator-agent"):
+            check(f"{name} 契约绑定任务卡", "TASK_CARD_SHA256" in txt)
+
+check("dispatch 校验任务卡指纹", "_task_card_contract" in dp and "TASK_CARD_SHA256" in dp)
+check("dispatch 校验 UT 配置", "GENERATOR_USED" in dp and "EXECUTED_UT" in dp)
+check("dispatch 校验真实 Skill/Bash 调用", "_skill_called" in dp and "_bash_called" in dp)
+
+mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
+check("tests_only 缺配置时仍有默认硬边界",
+      "def _effective_test_patterns" in mf_src
+      and mf_src.count('_effective_test_patterns(st) if step.get("tests_only") else []') >= 2)
+check("UT 被测源码变更由 done 自动回流",
+      "source_change_recheck" in mf_src and "source-recheck:" in mf_src)
+check("旧版 UT 在途状态可安全恢复入口 HEAD",
+      "def _ensure_step_entry_head" in mf_src and "recover-step-head" in mf_src
+      and "禁止拿当前 HEAD 补位" in mf_src)
 
 # 6.5 模板与 dispatch 章节校验同步(posttooluse 路由里必须引用同名模板)
 for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):

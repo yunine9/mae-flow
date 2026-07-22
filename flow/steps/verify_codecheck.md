@@ -13,6 +13,7 @@
 这是最常见的正常路径,别把它走成"派个 agent 空跑一趟"。
 
 **N > 0(有告警)→ 才派 codecheck-fix-agent 去修**:
+先执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 agent；
 传入单号类型、基线分支、编译方式配置原文、项目根绝对路径、测试路径配置(如有);
 **喂到嘴边**:把上面算好的文件清单 + 首检告警明细直接附进任务提示(省它重算的轮次,与复核同口径);
 docs/delivery-notes.md 存在时把告警/规范相关条目一并附上。
@@ -25,8 +26,9 @@ CLEAN→done;REMAINING→展示遗留清单并**明确告知用户:线上流水�
 逐项用 AskUserQuestion 让用户裁决(每项两选项:修(附 agent 建议方案摘要)/正式豁免;工具不可用才纯文本),去向:
 - **修** → 逐项单独派 codecheck-fix-agent 实例:每个实例只传这一条告警(文件/行号/规则/建议方案),
   全部轮次预算集中在一个问题上——复杂重构(如拆大函数)靠这个;
-- **正式豁免** → **当场落盘**:把「规则ID + 文件名 + 用户裁决原话 + 理由」逐行追加进
-  docs/codecheck-exempt-{单号}.md,git add && commit -m "[单号][类型]规范告警豁免记录"。
+- **正式豁免** → 用户拍板后执行
+  `python "{MAEFLOW_PATH}" approve-exemption --rule "<规则ID>" --file "<文件>" --reason "<理由>" --ack "<用户原话>"`，
+  由 harness 同时写审批账与 docs/codecheck-exempt-{单号}.md，再精确 git add/commit。
   口头豁免无效——done 的现场复核按这份文件放行,没落盘的豁免等于没豁免。
 **done 硬校验(codecheck_clean,骗不过)**:状态机现场重跑 fullcheck 亲数遗留——
 0 条,或每条都在豁免文件内,才放行;agent 说什么不作数。首次复核约十几秒/文件级,耐心等。

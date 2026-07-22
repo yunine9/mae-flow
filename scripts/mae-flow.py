@@ -19,7 +19,7 @@
   mae-flow.py goto <step> --force        人工修复:强制跳转(留痕)
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
-import argparse, glob as globmod, json, os, re, subprocess, sys, tempfile, time
+import argparse, glob as globmod, hashlib, json, os, re, subprocess, sys, tempfile, time
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -40,6 +40,20 @@ STATE_PATH = ".mae-flow.json"   # 相对项目根;启动时 find_project_root() 
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
+
+# source_patterns 只适合识别目录，不能承担跨仓源码真相（顶层 include/lib/app 已真实漏过）。
+# 扩展名与构建入口作为保守底座；仓库可用 defaults/config 的「源码路径」补私有布局。
+SOURCE_EXTS = (
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
+    ".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".pyi", ".go", ".rs", ".cs",
+    ".js", ".jsx", ".ts", ".tsx", ".vue", ".swift", ".m", ".mm", ".proto", ".sql",
+    ".s", ".asm", ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
+)
+SOURCE_FILENAMES = {
+    "cmakelists.txt", "makefile", "gnumakefile", "pom.xml", "build.gradle", "settings.gradle",
+    "gradle.properties", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "cargo.toml", "cargo.lock", "go.mod", "go.sum", "meson.build", "build.ninja",
+}
 
 
 def find_project_root(start=None):
@@ -99,6 +113,97 @@ def sh(cmd):
                               encoding="utf-8", errors="replace", timeout=15).stdout.strip()
     except Exception:
         return ""
+
+
+def _configured_source_patterns(st):
+    """仓库私有源码布局；config 字符串优先，defaults 支持字符串或正则数组。"""
+    raw = ((st or {}).get("config", {}) or {}).get("源码路径", "")
+    if raw:
+        return ([x.strip() for x in raw.split(",") if x.strip()]
+                if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
+    try:
+        v = json.load(open(DEFAULTS_PATH, encoding="utf-8")).get("源码路径", [])
+        if isinstance(v, str):
+            return [x.strip() for x in v.split(",") if x.strip()]
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _matches_pattern(path, pattern):
+    try:
+        return bool(re.search(pattern, path, re.I))
+    except re.error:
+        return False
+
+
+def _is_source_path(path, st=None, flow=None):
+    """跨仓统一源码判定：扩展名/构建文件 + 通用目录 + 仓库私有路径，任一命中即算。
+
+    Edit gate、Bash gate、令牌新鲜度和 UT 源码回流必须共用它，避免四套口径漂移。
+    """
+    p = norm(path).strip().strip('"\'')
+    if p.endswith("(未提交)"):
+        p = p[:-len("(未提交)")]
+    low = p.lower()
+    base = os.path.basename(low)
+    if low.endswith(SOURCE_EXTS) or base in SOURCE_FILENAMES:
+        return True
+    rules = list((flow or FLOW or {}).get("source_patterns", [])) + _configured_source_patterns(st)
+    return any(_matches_pattern(p, pat) for pat in rules)
+
+
+def _is_review(st):
+    return (st.get("choices", {}) or {}).get("workflow") == "review"
+
+
+def _ensure_review_base(st):
+    """记录评审返工开始前的原 MR HEAD。
+
+    新流程在 branch_create 离开前直接取 HEAD；旧版在途状态优先按进入 rf_triage 的
+    history 时间反推，保证升级后不会把整个原需求 diff 当成本轮增量。
+    """
+    if not _is_review(st):
+        return "", "当前不是评审返工流程"
+    old = st.get("review_base_head", "")
+    if old and sh(f"git cat-file -t {old}") == "commit":
+        return old, ""
+    at = ""
+    for h in st.get("history", []):
+        if h.get("step") == "branch_create":
+            at = h.get("at", "")
+            break
+    base = sh(f'git rev-list -1 --before="{at}" HEAD') if at else ""
+    if not base:
+        review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
+        added = sh(f'git log --diff-filter=A -1 --format=%H -- "{review_doc}"')
+        if added:
+            base = sh(f"git rev-parse {added}^")
+    if not base:
+        return "", ("无法自动恢复返工基点。不要用当前 HEAD 代替，否则增量范围会变成空；"
+                     "请把日志与原 MR 返工前 commit 交维护人处理")
+    st["review_base_head"] = base
+    save_state(st)
+    return base, ""
+
+
+def _scope_base(st):
+    """本轮质量检查的代码基点：review 只看返工增量，其余流程看需求基线。"""
+    if _is_review(st):
+        return _ensure_review_base(st)
+    base = st.get("config", {}).get("基线分支", "")
+    if not base:
+        return "", "缺基线分支配置"
+    if not sh(f"git rev-parse --verify {base}"):
+        return "", f"基线分支「{base}」无法解析(不存在/拼写错),diff 无从算起——先修配置"
+    return base, ""
+
+
+def _scope_diff(st):
+    base, err = _scope_base(st)
+    if err:
+        return "", err
+    return (f"{base}..HEAD" if _is_review(st) else f"{base}...HEAD"), ""
 
 
 # ---------------- 证据校验 ----------------
@@ -162,12 +267,11 @@ def ev_yaml(spec, st):
     return True, ""
 
 
-def _source_changed_since(head):
-    """令牌签发时 HEAD 之后,源码(source_patterns)是否变化:已提交 diff + 工作区未提交改动。
+def _source_changed_since(head, st=None):
+    """令牌签发时 HEAD 之后,源码是否变化:已提交 diff + 工作区未提交改动。
     返回 (变更清单, 错误);基点不可解析(amend/rebase/GC)属错误,由调用方判拒——重签令牌即可恢复。"""
     if not re.fullmatch(r"[0-9a-f]{7,64}", head):
         return None, "令牌基点格式异常"
-    pats = (FLOW or {}).get("source_patterns", [])
     cur = sh("git rev-parse --verify HEAD")
     changed = []
     if cur and cur != head:
@@ -176,15 +280,14 @@ def _source_changed_since(head):
             return None, "令牌基点 commit 不可解析(经历过 amend/rebase?)"
         # core.quotepath=false:否则非 ASCII 文件名被引号+八进制转义,pattern 匹配不到 = 漏检
         out = sh(f"git -c core.quotepath=false diff --name-only {head} {cur}")
-        changed += [f for f in out.splitlines()
-                    if f and any(re.search(p, norm(f), re.I) for p in pats)]
+        changed += [f for f in out.splitlines() if f and _is_source_path(f, st)]
     for line in sh("git -c core.quotepath=false status --porcelain").splitlines():
         # 按空白切"状态 路径",不用列偏移:sh() 会 strip 首行前导空格(' M' → 'M'),偏移取路径会错位
         parts = line.split(None, 1)
         if len(parts) != 2:
             continue
         f = parts[1].split(" -> ")[-1].strip().strip('"')
-        if f and any(re.search(p, norm(f), re.I) for p in pats):
+        if f and _is_source_path(f, st):
             changed.append(f + "(未提交)")
     return changed, ""
 
@@ -202,9 +305,15 @@ def ev_agent_ran(spec, st):
         tok = ""
     ts = tok.get("at", "") if isinstance(tok, dict) else tok
     head = tok.get("head", "") if isinstance(tok, dict) else ""
+    status = tok.get("status", "") if isinstance(tok, dict) else ""
     if ts and ts >= entered:
+        wanted = spec.get("statuses") or ([spec["status"]] if spec.get("status") else [])
+        if wanted and status not in wanted:
+            return False, (f"{kind} 子 agent 虽已收尾,但结果为 {status or '旧令牌未记录状态'},"
+                           f"本步只接受 {'/'.join(wanted)}。FAIL/BLOCKED/NEEDS_INPUT 是有效上报,"
+                           "但不是质量通过证据;处理报告中的问题后重启 agent。")
         if head:
-            changed, err = _source_changed_since(head)
+            changed, err = _source_changed_since(head, st)
             if err:
                 return False, (f"{kind} 证据新鲜度无法核实({err})。"
                                "重新启动对应 agent(ASKUSER 则重新向用户提问)签发绑定当前代码状态的新令牌。")
@@ -221,6 +330,26 @@ def ev_agent_ran(spec, st):
                    "必须真实启动对应 agent 且其**最终回复第一行为 XXX_RESULT: 标记**才会发放令牌——"
                    "主会话代写/口头汇报无效;若你已启动过 agent 仍见此错,原因就是它收尾没带标记,"
                    "重启该 agent 并在任务中明确要求按契约的「最终回复格式」收尾。")
+
+
+def _review_changed_business_files(st):
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    out = sh(f"git -c core.quotepath=false diff --name-only {diff}")
+    files = [f for f in out.splitlines()
+             if f and f.lower().endswith(CODE_EXTS) and os.path.exists(f) and not _is_test_file(f, st)]
+    return files, ""
+
+
+def ev_review_agent_or_no_code(spec, st):
+    """返工没有业务代码改动时自动放行；有代码改动就必须拿到指定成功状态令牌。"""
+    files, err = _review_changed_business_files(st)
+    if err:
+        return False, err
+    if not files:
+        return True, ""
+    return ev_agent_ran(spec, st)
 
 
 def ev_content_free(spec, st):
@@ -289,8 +418,9 @@ def ev_commit_tagged(spec, st):
     return False, f"最新 commit「{msg}」不符合 [{dan}][feat|fix]描述 格式"
 
 
-CODE_EXTS = (".c", ".cc", ".cpp", ".h", ".hpp", ".java")
-DEFAULT_TEST_PATS = [r"(^|/)tests?/", r"(^|/)src/test/", r"_test\.(c|cc|cpp|h|hpp)$", r"Test\.java$"]
+CODE_EXTS = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp", ".java")
+DEFAULT_TEST_PATS = [r"(^|/)tests?/", r"(^|/)src/test/",
+                     r"_test\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp)$", r"Test\.java$"]
 
 
 def _is_test_file(path, st):
@@ -302,12 +432,10 @@ def _is_test_file(path, st):
 def _biz_changed_files(st):
     """本单变更中的业务代码文件(排除测试),codecheck 检查范围的唯一算法——agent 与证据同源。
     基线分支必须先验证可解析:diff 命令失败若被当成'无变更'会静默放行(冒烟抓过的真缺陷)。"""
-    base = st["config"].get("基线分支", "")
-    if not base:
-        return None, "缺基线分支配置"
-    if not sh(f"git rev-parse --verify {base}"):
-        return None, f"基线分支「{base}」无法解析(不存在/拼写错),diff 无从算起——先修配置"
-    out = sh(f"git -c core.quotepath=false diff --name-only {base}...HEAD")
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    out = sh(f"git -c core.quotepath=false diff --name-only {diff}")
     files = [f for f in out.splitlines()
              if f and f.lower().endswith(CODE_EXTS) and os.path.exists(f) and not _is_test_file(f, st)]
     return files, ""
@@ -327,42 +455,96 @@ def _batches(files, maxlen=6000):
     return out
 
 
+def _run_codecheck(files):
+    """执行 CodeCheck 并返回机器结果；scan、done 复核共用，避免两套解析口径漂移。"""
+    total, pairs, commands = 0, [], []
+    for batch in _batches(files):
+        cmd = "codecheck fullcheck -f " + ",".join(batch)
+        commands.append(cmd)
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=900)
+        except subprocess.TimeoutExpired:
+            return None, "codecheck 现场检查超时(>15min)——批次过大或服务异常"
+        out = (r.stdout or "") + (r.stderr or "")
+        rp = re.search(r"检查报告已保存到:\s*(.+)", out)
+        rtxt = out
+        if rp:
+            try:
+                rtxt = open(rp.group(1).strip(), encoding="utf-8", errors="replace").read()
+            except OSError:
+                pass
+        count = _parse_codecheck_count(out, rtxt)
+        if count is None:
+            return None, ("codecheck 已返回但告警数无法解析。已尝试控制台提示、报告汇总表和零告警文案；"
+                          "可能是 CLI 输出格式再次变化或检查未真正完成。把完整输出和报告路径发维护人，"
+                          "禁止把解析失败当成有告警/无告警自行猜测")
+        total += count
+        fs = re.findall(r"- \*\*文件\*\*: `([^`]+)`", rtxt)
+        rs = re.findall(r"- \*\*规则\*\*: (\S+)", rtxt)
+        pairs += list(zip(rs, fs))
+    return {"total": total, "pairs": pairs, "commands": commands}, ""
+
+
+def _parse_codecheck_count(console, report):
+    """CodeCheckCLI 没有稳定 JSON/退出码契约，兼容已见的三种可信输出。
+
+    1) 提示行「共有 N 条告警」；2) Markdown 汇总表「总计」；
+    3) 明确的零告警文案。不能仅凭进程退出码判断（公司 CLI 成功也可能返回 1）。
+    """
+    text = (console or "") + "\n" + (report or "")
+    nums = re.findall(r"共有\s*(\d+)\s*条告警", text)
+    if nums:
+        return int(nums[-1])
+    totals = re.findall(r"\|\s*\*{0,2}总计\*{0,2}\s*\|\s*\*{0,2}(\d+)\*{0,2}\s*\|", text)
+    if totals:
+        return int(totals[-1])
+    zero_patterns = (r"未发现(?:任何)?(?:代码)?告警", r"没有发现(?:任何)?(?:代码)?告警",
+                     r"(?:告警|问题)(?:总数)?\s*[:：]?\s*0\b", r"0\s*条告警")
+    completed = ("代码检查完成" in text or "CodeCheck 检查报告" in text or "检查结果汇总" in text)
+    if completed and any(re.search(p, text, re.I) for p in zero_patterns):
+        return 0
+    return None
+
+
+def _approval_key(rule, path):
+    return (rule + "|" + os.path.basename(path)).lower()
+
+
+def _approved_exemptions(st):
+    return {_approval_key(x.get("rule", ""), x.get("file", ""))
+            for x in st.get("codecheck_exemptions", []) if x.get("rule") and x.get("file")}
+
+
+def _was_exempt_before_review(st, ex, rule, path):
+    """原 MR 已存在的正式豁免不重复询问；本轮新豁免必须有状态机审批记录。"""
+    if not _is_review(st):
+        return False
+    base = st.get("review_base_head", "")
+    if not base:
+        return False
+    try:
+        r = subprocess.run(["git", "show", f"{base}:{ex}"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=8)
+        txt = r.stdout if r.returncode == 0 else ""
+    except Exception:
+        txt = ""
+    return rule in txt and os.path.basename(path) in txt
+
+
 def ev_codecheck_clean(spec, st):
     """最硬约束:done 现场重跑 codecheck CLI,harness 亲数遗留告警(agent 报数不作数)。
-    0 条,或每条(规则,文件)都在用户豁免清单 docs/codecheck-exempt-{单号}.md 内 → 放行。
-    解析锚点『共有 N 条告警』来自 2026-07-20 实战样本;必须在项目根执行(cwd 已由 main 定位)。"""
+    0 条直接放行；遗留告警必须同时有豁免文件和用户审批账。告警数兼容控制台提示、
+    Markdown 汇总表与明确零告警文案；不能依赖 CLI 退出码。必须在项目根执行。"""
     files, err = _biz_changed_files(st)
     if err:
         return False, err
     if not files:
         return True, ""
-    total, pairs = 0, []
-    for batch in _batches(files):
-        try:
-            r = subprocess.run("codecheck fullcheck -f " + ",".join(batch), shell=True,
-                               capture_output=True, text=True, encoding="utf-8", errors="replace",
-                               timeout=900)
-        except subprocess.TimeoutExpired:
-            return False, "codecheck 现场复核超时(>15min)——批次过大或服务异常;可拆小重试,工具故障则把日志发维护人"
-        out = (r.stdout or "") + (r.stderr or "")
-        m = re.search(r"共有\s*(\d+)\s*条告警", out)
-        if not m:
-            return False, ("codecheck 输出无法解析(未见『共有 N 条告警』锚点)——CLI 版本变了或执行失败,"
-                           "把完整输出发维护人;工具确属故障时由用户裁决处理")
-        total += int(m.group(1))
-        # 全量明细在落盘报告里(stdout 只展示前5条)
-        rp = re.search(r"检查报告已保存到:\s*(.+)", out)
-        rtxt = ""
-        if rp:
-            try:
-                rtxt = open(rp.group(1).strip(), encoding="utf-8", errors="replace").read()
-            except OSError:
-                rtxt = out
-        else:
-            rtxt = out
-        fs = re.findall(r"- \*\*文件\*\*: `([^`]+)`", rtxt)
-        rs = re.findall(r"- \*\*规则\*\*: (\S+)", rtxt)
-        pairs += list(zip(rs, fs))
+    result, err = _run_codecheck(files)
+    if err:
+        return False, err
+    total, pairs = result["total"], result["pairs"]
     if total == 0:
         return True, ""
     ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
@@ -378,7 +560,33 @@ def ev_codecheck_clean(spec, st):
     if bad:
         return False, (f"实测遗留 {total} 条告警,以下未被豁免清单覆盖: " + "、".join(bad[:5])
                        + ("…" if len(bad) > 5 else "") + f"。修掉或补齐 {ex}(须用户裁决原话)后重试")
+    approved = _approved_exemptions(st)
+    unauthorized = [f"{r}({os.path.basename(f)})" for r, f in pairs
+                    if _approval_key(r, f) not in approved and not _was_exempt_before_review(st, ex, r, f)]
+    if unauthorized:
+        return False, ("豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: " + "、".join(unauthorized[:5])
+                       + "。逐项 AskUserQuestion 后执行 mae-flow approve-exemption --rule <规则ID> "
+                       "--file <文件> --reason <理由> --ack \"用户原话\"；手写豁免文件不再算授权")
     return True, ""
+
+
+def ev_review_codecheck(spec, st):
+    """返工规范检查协议：必须先由 harness 扫描；有告警必须经过修复 agent；最后现场复核。"""
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    if scan.get("step") != st.get("current"):
+        return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
+    if scan.get("count", 0) == 0:
+        changed, err = _source_changed_since(scan.get("head", ""), st)
+        if err:
+            return False, "CodeCheck 首检基点失效:" + err + "；重新执行 codecheck-scan"
+        if changed:
+            return False, ("CodeCheck 首检为 0 后源码又发生变化: " + "、".join(changed[:5])
+                           + "。旧首检不背新代码的书,重新执行 codecheck-scan")
+    else:
+        ok, why = ev_agent_ran({"agent": "CODECHECK", "statuses": ["CLEAN", "REMAINING"]}, st)
+        if not ok:
+            return False, why
+    return ev_codecheck_clean(spec, st)
 
 
 ENV_CACHE = os.path.join(os.path.expanduser("~"), ".mae-flow-env-ok")
@@ -455,7 +663,9 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "yaml_field": ev_yaml, "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
-            "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent}
+            "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
+            "review_agent_or_no_code": ev_review_agent_or_no_code,
+            "review_codecheck": ev_review_codecheck}
 
 
 def _ack_verified(st, ack):
@@ -564,6 +774,49 @@ def _sentinel_lines(sid, st):
     return out
 
 
+def _resolved_next(flow, st, sid):
+    """按当前 choices 解析某历史步骤的去向，供旧状态恢复入口 HEAD。"""
+    step = flow.get("steps", {}).get(sid, {})
+    nxt = step.get("next")
+    try:
+        if step.get("next_by"):
+            return nxt[st.get("choices", {}).get(step["next_by"])]
+        if isinstance(nxt, dict):
+            return nxt[st.get("choices", {}).get(step.get("choice_key"))]
+    except Exception:
+        return None
+    return nxt
+
+
+def _ensure_step_entry_head(flow, st, sid):
+    """为旧版在途 tests_only 步骤恢复入口 HEAD。
+
+    新版 advance 会直接记录精确 HEAD。旧状态只能从“上一阶段进入当前步骤”的历史时间反推，
+    使用该时间之前最后一个 commit；时间同秒时最多多包含一笔旧改动，只会多验，不会漏验。
+    绝不以当前 HEAD 兜底，因为当前 HEAD 可能已经包含 UT 阶段偷偷修改的源码。
+    """
+    old = (st.get("step_heads", {}) or {}).get(sid, "")
+    if old and sh(f"git cat-file -t {old}") == "commit":
+        return old, ""
+    entered_at = ""
+    for h in reversed(st.get("history", [])):
+        result = str(h.get("result", ""))
+        if result == "goto:" + sid or _resolved_next(flow, st, h.get("step", "")) == sid:
+            entered_at = h.get("at", "")
+            break
+    if not entered_at:
+        return "", f"历史中找不到进入 {sid} 的转换记录"
+    base = sh(f'git rev-list -1 --before="{entered_at}" HEAD')
+    if not base or sh(f"git cat-file -t {base}") != "commit":
+        return "", f"无法按进入时间 {entered_at} 解析安全基点"
+    st.setdefault("step_heads", {})[sid] = base
+    st.setdefault("migrations", []).append({
+        "type": "recover-step-head", "step": sid, "head": base,
+        "from_history_at": entered_at, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    save_state(st)
+    return base, ""
+
+
 def _step_md_text(sid, st):
     """步骤指令文本:模板路径与已确认配置全部替换后返回(无该 md 返回 None)。
     占位符替换 = 把"需要模型去拿"的信息直接喂到嘴边(弱模型会跳过"去拿"的动作);
@@ -577,6 +830,7 @@ def _step_md_text(sid, st):
                      ("{REVIEW_TEMPLATE_PATH}", "REVIEW-TEMPLATE.md")):
         txt = txt.replace(ph, os.path.abspath(
             os.path.join(HERE, "..", "skills", "mae-flow", "assets", name)))
+    txt = txt.replace("{MAEFLOW_PATH}", os.path.abspath(sys.argv[0]))
     return subst(txt, st)
 
 
@@ -600,6 +854,20 @@ def print_current(flow, st):
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:
         print(f"🔓 本步源码修改已解锁(用户裁决: {ul.get('reason', '')};推进后自动失效)")
+    if step.get("tests_only"):
+        if not (st.get("step_heads", {}) or {}).get(sid):
+            head, why = _ensure_step_entry_head(flow, st, sid)
+            if head:
+                print(f"♻ 已从旧版流程历史恢复本步入口 HEAD: {head[:9]}（只会扩大重验范围，不会漏验）")
+            else:
+                print("❌ 旧版 UT 入口 HEAD 无法自动恢复: " + why + "；done 将安全拒绝，禁止拿当前 HEAD 补位")
+        tp = _test_patterns(st)
+        if tp:
+            print("🛡 UT 写入边界:使用仓库配置的测试路径硬拦非测试源码: " + " | ".join(tp))
+        else:
+            print("⚠ UT 写入边界:仓库未配置「测试路径」，当前使用内置保守规则硬拦非测试源码。"
+                  "若本仓测试目录不符合 tests/、test/、src/test/、*_test.*、*Test.java，"
+                  "请先在 .mae-flow-defaults.json 配置「测试路径」，禁止用 unlock 把长期目录差异当单次源码缺陷处理。")
     if step.get("clear_hint"):
         print("💡 会话卫生:本步开始前若会话已较长,建议 /clear 后说「继续」——状态在磁盘,进度不丢,防长上下文行为漂移。")
     if step.get("user_ack"):
@@ -715,6 +983,17 @@ def _append_history(st):
 
 
 def advance(flow, st, sid, step, tag, note=""):
+    # review 的增量边界由 harness 在进入裁决前冻结，后面任何模型都不能拿当前 HEAD 偷换基点。
+    if sid == "branch_create" and st.get("choices", {}).get("workflow") == "review":
+        base = sh("git rev-parse --verify HEAD")
+        if not base:
+            die("无法记录评审返工基点 HEAD,拒绝进入返工流程。", 2)
+        st["review_base_head"] = base
+    # 兼容 2.0.2 已经停在旧 rf_verify 的在途单：按 history 自动恢复返工前 HEAD。
+    if sid == "rf_verify" and st.get("choices", {}).get("workflow") == "review":
+        _, err = _ensure_review_base(st)
+        if err:
+            die(err, 2)
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     nxt = step.get("next")
@@ -723,6 +1002,8 @@ def advance(flow, st, sid, step, tag, note=""):
     elif isinstance(nxt, dict):
         nxt = nxt[st["choices"][step["choice_key"]]]
     st["current"] = nxt
+    if nxt:
+        st.setdefault("step_heads", {})[nxt] = sh("git rev-parse --verify HEAD")
     save_state(st)
     print(f"[mae-flow] {sid} {tag} → 进入 {nxt}\n")
     print_current(flow, st)
@@ -769,6 +1050,41 @@ def cmd_done(flow, st, args):
         if args.choice not in step.get("choices", []):
             die(f"--choice 必须为: {'|'.join(step['choices'])}", 2)
         st["choices"][step["choice_key"]] = args.choice
+    recheck = step.get("source_change_recheck")
+    if recheck:
+        _, migrate_err = _ensure_step_entry_head(flow, st, sid)
+        if migrate_err:
+            save_state(st)
+            die("无法恢复 UT 步骤入口 HEAD:" + migrate_err
+                + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人核对历史。", 2)
+        changed, why = _business_source_changed_since_step(st, sid)
+        if why:
+            save_state(st)
+            die("无法核对 UT 步骤内是否修改过被测源码:" + why
+                + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人恢复步骤入口基点。", 2)
+        if changed:
+            ul = st.get("unlock") or {}
+            if ul.get("scope") != "source" or ul.get("step") != sid:
+                save_state(st)
+                die("UT 步骤内检测到未经 unlock source 用户裁决的被测源码变更: "
+                    + "、".join(changed[:5])
+                    + ("…" if len(changed) > 5 else "")
+                    + "。这是越权修改，不能靠补跑验证洗白；先呈报变更和 UT 自查结论，由用户裁决后再处理。", 2)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            st["history"].append({"step": sid, "result": "source-recheck:" + recheck,
+                                  "note": "UT 裁决后修改被测源码:" + "、".join(changed[:10]), "at": now})
+            st["current"] = recheck
+            st.setdefault("step_heads", {})[recheck] = sh("git rev-parse --verify HEAD")
+            st.pop("unlock", None)
+            # 旧任务卡和首检只描述旧源码。即使令牌新鲜度还能拦住，也主动清掉避免弱模型误用。
+            for kind in ("COMPILE", "CODECHECK", "UT"):
+                (st.get("agent_tasks", {}) or {}).pop(kind, None)
+            (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+            save_state(st)
+            print(f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
+                  "必须重新经过编译、CodeCheck 与 UT；禁止直接推送。\n")
+            print_current(flow, st)
+            return
     fails = check_evidence(step, st)
     if fails:
         save_state(st)
@@ -809,8 +1125,8 @@ def cmd_status(flow, st, args):
 
 
 def _test_patterns(st):
-    """测试路径 pattern(per-repo opt-in):config「测试路径」(逗号分隔的正则)优先,
-    否则读 .mae-flow-defaults.json 的「测试路径」数组;未配置返回 []=不启用收紧,行为与旧版一致。"""
+    """仓库测试路径配置：config「测试路径」逗号分隔正则优先，否则读 defaults 数组。
+    未配置返回 []，调用方使用 DEFAULT_TEST_PATS 保守兜底，不再 fail-open。"""
     raw = ((st or {}).get("config", {}) or {}).get("测试路径", "")
     if raw:
         return [x.strip() for x in raw.split(",") if x.strip()]
@@ -819,6 +1135,32 @@ def _test_patterns(st):
         return v if isinstance(v, list) else []
     except Exception:
         return []
+
+
+def _effective_test_patterns(st):
+    """tests_only 永远有机器边界：仓库配置优先，缺失时使用保守内置规则。
+
+    非标准测试目录应落进 .mae-flow-defaults.json；不能因为团队尚未配置就退化为
+    「UT agent 可以写任意源码」。误拦有 unlock 裁决出口，但 current/doctor 会提示先修长期配置。
+    """
+    return _test_patterns(st) or DEFAULT_TEST_PATS
+
+
+def _business_source_changed_since_step(st, sid):
+    """找出某 tests_only 步骤入口后发生的非测试源码变化（提交和工作区都算）。"""
+    head = (st.get("step_heads", {}) or {}).get(sid, "")
+    if not head:
+        return None, (f"缺少步骤 {sid} 的入口 HEAD（可能是旧版在途状态）"
+                      "，不能把当前 HEAD 当入口，否则会漏检")
+    changed, err = _source_changed_since(head, st)
+    if err:
+        return None, err
+    out = []
+    for raw in changed or []:
+        path = raw[:-len("(未提交)")] if raw.endswith("(未提交)") else raw
+        if not _is_test_file(path, st):
+            out.append(raw)
+    return list(dict.fromkeys(out)), ""
 
 
 # Bash 命令里能落盘的动作(cmd/PowerShell/git-bash 常见写法都算)
@@ -844,16 +1186,16 @@ def cmd_gate(flow, st, args):
             die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
         if re.search(flow["specs_truth"], p, re.I) and not step.get("allow_specs_write"):
             die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。", 2)
-        if any(re.search(pat, p, re.I) for pat in flow["source_patterns"]):
+        if _is_source_path(p, st, flow):
             if not st:
                 die("流程未初始化(无 .mae-flow.json)。禁止直接修改源码——请先按 skill 走 mae-flow init。", 2)
             if not step.get("allow_source_edit"):
                 die(f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。", 2)
-            tp = _test_patterns(st) if step.get("tests_only") else []
+            tp = _effective_test_patterns(st) if step.get("tests_only") else []
             ul = (st or {}).get("unlock") or {}
             unlocked = ul.get("scope") == "source" and ul.get("step") == sid
             if tp and not unlocked and not any(re.search(t, p, re.I) for t in tp):
-                die(f"当前步骤 {sid} 仅允许写测试路径(本仓配置: {'|'.join(tp)})。"
+                die(f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
                     "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
                     "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
                     "禁止未经用户裁决自行改源码。", 2)
@@ -915,22 +1257,174 @@ def cmd_gate(flow, st, args):
             die("流程状态/历史账本/待重启标记文件由 mae-flow 维护,禁止经 Bash 改写/删除(待重启标记只能靠重启会话清)。", 2)
         if writeish and hits_path(flow["specs_truth"]) and not step.get("allow_specs_write"):
             die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。", 2)
-        if writeish and any(hits_path(pat) for pat in flow["source_patterns"]):
+        source_toks = [t for t in toks if _is_source_path(t, st, flow)]
+        if writeish and source_toks:
             if not st:
                 die("流程未初始化(无 .mae-flow.json)。禁止经 Bash 写源码——请先按 skill 走 mae-flow init。", 2)
             if not step.get("allow_source_edit"):
                 die(f"当前步骤 {sid} 禁止经 Bash 写源码文件。", 2)
-            tp = _test_patterns(st) if step.get("tests_only") else []
+            tp = _effective_test_patterns(st) if step.get("tests_only") else []
             ul = (st or {}).get("unlock") or {}
             if tp and not (ul.get("scope") == "source" and ul.get("step") == sid):
-                bad = [t2 for t2 in toks
-                       if any(re.search(pat, t2, re.I) for pat in flow["source_patterns"])
-                       and not any(re.search(t, t2, re.I) for t in tp)]
+                bad = [t2 for t2 in source_toks
+                       if not any(re.search(t, t2, re.I) for t in tp)]
                 if bad:
-                    die(f"当前步骤 {sid} 仅允许写测试路径(本仓配置: {'|'.join(tp)});"
+                    die(f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
                         f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。", 2)
         sys.exit(0)
     die("gate 用法: gate edit <路径> | gate bash <命令>")
+
+
+def _task_scope(st):
+    diff, err = _scope_diff(st)
+    if err:
+        return "", [], err
+    out = sh(f"git -c core.quotepath=false diff --name-status {diff}")
+    return diff, [x for x in out.splitlines() if x.strip()], ""
+
+
+def _requirement_sources(st):
+    out = []
+    doc = st.get("config", {}).get("需求文档", "")
+    if doc and os.path.exists(doc):
+        out.append(os.path.abspath(doc))
+    cn = st.get("config", {}).get("CHANGE_NAME", "")
+    if cn:
+        pats = [f"openspec/changes/{cn}/specs/*/spec.md",
+                f"openspec/changes/archive/*{cn}*/specs/*/spec.md",
+                f"openspec/archive/*{cn}*/specs/*/spec.md"]
+        for p in pats:
+            out.extend(os.path.abspath(x) for x in globmod.glob(p))
+    return list(dict.fromkeys(out))
+
+
+def cmd_agent_task(flow, st, args):
+    """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""
+    kind = args.kind.upper()
+    expected_steps = {"COMPILE": {"build", "rf_compile", "verify_recompile"},
+                      "CODECHECK": {"verify_codecheck", "tw_codecheck", "rf_codecheck", "rf_verify"},
+                      "UT": {"verify_ut", "rf_ut", "rf_verify"}}
+    sid = st["current"]
+    if sid not in expected_steps[kind]:
+        die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
+    if kind == "CODECHECK" and sid == "rf_codecheck":
+        scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+        if scan.get("step") != sid:
+            die("先执行 codecheck-scan 冻结首检结果，再生成 CODECHECK 任务卡。", 2)
+        if scan.get("count", 0) == 0:
+            die("机器首检为 0 告警，不应派 codecheck-fix-agent；直接 done。", 2)
+    diff, changes, err = _task_scope(st)
+    if err:
+        die(err, 2)
+    cfg = st.get("config", {})
+    lines = [
+        f"# Mae-Flow {kind} TASK CARD",
+        "本文件由 harness 生成。不得猜测、替换或省略其中配置；缺项按 agent 契约 FAIL/BLOCKED 收尾。",
+        f"项目根: {os.path.abspath(os.getcwd())}",
+        f"当前步骤: {sid}",
+        f"单号: {cfg.get('单号', '')}",
+        f"单号类型: {cfg.get('单号类型', '')}",
+        f"需求基线分支: {cfg.get('基线分支', '')}",
+        f"本轮检查范围: {diff}",
+        f"本次子任务范围: {args.scope or '任务卡文件清单全部'}",
+        f"编译方式: {cfg.get('编译方式', '')}",
+        f"UT生成方式: {cfg.get('UT生成方式', '')}",
+        f"UT运行命令: {cfg.get('UT运行命令', '')}",
+        "需求/规格依据:",
+    ]
+    sources = _requirement_sources(st)
+    lines.extend("- " + x for x in sources)
+    if not sources:
+        lines.append("- （未找到；UT agent 必须 FAIL，禁止对着实现猜测试）")
+    lines.append("本轮文件清单:")
+    lines.extend("- " + x for x in changes)
+    if not changes:
+        lines.append("- （无代码变更）")
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    if kind == "CODECHECK":
+        lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
+                  "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
+    elif kind == "UT":
+        lines += ["职责:只对任务卡范围补/改测试；必须按 UT生成方式调用对应 Skill；必须真实执行 UT运行命令。",
+                  "评审返工不修改规格，测试依据使用上面列出的既有需求/规格。"]
+    else:
+        lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 build-fix Skill，禁止猜命令。"]
+    body = "\n".join(lines).rstrip() + "\n"
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    body += f"TASK_CARD_SHA256: {digest}\n"
+    d = os.path.abspath(os.path.join(".mae-flow-work", "agent-tasks"))
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{sid}-{kind.lower()}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    st.setdefault("agent_tasks", {})[kind] = {
+        "step": sid, "path": path, "sha256": digest,
+        "head": sh("git rev-parse --verify HEAD"), "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    save_state(st)
+    print(f"[mae-flow] {kind} 任务卡已生成: {path}")
+    print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
+
+
+def cmd_codecheck_scan(flow, st, args):
+    if st["current"] != "rf_codecheck":
+        die("codecheck-scan 当前仅用于 rf_codecheck；其他步骤按 current 指令执行。", 2)
+    entry_head = (st.get("step_heads", {}) or {}).get("rf_codecheck", "")
+    if entry_head:
+        changed, why = _source_changed_since(entry_head, st)
+        if why:
+            die("无法核对规范检查入口 HEAD:" + why, 2)
+        if changed:
+            die("进入规范检查后、机器首检前源码已被修改: " + "、".join(changed[:5])
+                + "。这通常是主会话提前代修；禁止补跑首检洗白。请回退这些改动，先 scan，再由专项 agent 修复。", 2)
+    files, err = _biz_changed_files(st)
+    if err:
+        die(err, 2)
+    result, err = _run_codecheck(files) if files else ({"total": 0, "pairs": [], "commands": []}, "")
+    if err:
+        die(err, 2)
+    st.setdefault("quality", {})["codecheck_scan"] = {
+        "step": st["current"], "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
+        "files": files, "pairs": result["pairs"], "commands": result["commands"]}
+    save_state(st)
+    print(f"[mae-flow] CodeCheck 首检完成:业务文件 {len(files)} 个,告警 {result['total']} 条。")
+    if result["total"]:
+        print("禁止主会话修复。下一步执行 agent-task codecheck 生成完整任务卡，再启动 codecheck-fix-agent。")
+    else:
+        print("零告警，不派修复 agent；直接 done（期间源码若变化，证据会过期并要求重扫）。")
+
+
+def cmd_approve_exemption(flow, st, args):
+    if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
+        die("规范告警豁免只能在 CodeCheck 步骤审批。", 2)
+    if not args.ack or not args.reason:
+        die("approve-exemption 必须带 --reason 和 --ack 用户原话。", 2)
+    asked, why = ev_agent_ran({"agent": "ASKUSER"}, st)
+    if not asked:
+        die("豁免前必须真实使用 AskUserQuestion 逐项呈用户裁决:" + why, 2)
+    ok, why = _ack_verified(st, args.ack)
+    if not ok:
+        die("豁免授权验真失败:" + why, 2)
+    rule, file_name = args.rule.strip(), os.path.basename(args.file.strip())
+    if not rule or not file_name:
+        die("--rule/--file 不能为空。", 2)
+    rec = {"rule": rule, "file": file_name, "reason": args.reason,
+           "ack": args.ack, "step": st["current"], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    rows = st.setdefault("codecheck_exemptions", [])
+    key = _approval_key(rule, file_name)
+    rows[:] = [x for x in rows if _approval_key(x.get("rule", ""), x.get("file", "")) != key]
+    rows.append(rec)
+    ex = os.path.join("docs", "codecheck-exempt-" + st["config"].get("单号", "") + ".md")
+    os.makedirs(os.path.dirname(ex), exist_ok=True)
+    if not os.path.exists(ex):
+        open(ex, "w", encoding="utf-8").write("# CodeCheck 正式豁免记录\n\n")
+    safe_ack = re.sub(r"[\r\n|]+", " ", args.ack).strip()
+    safe_reason = re.sub(r"[\r\n|]+", " ", args.reason).strip()
+    with open(ex, "a", encoding="utf-8") as f:
+        f.write(f"- {rule} | {file_name} | {safe_reason} | 用户原话:{safe_ack}\n")
+    save_state(st)
+    print(f"[mae-flow] 已登记用户批准的正式豁免: {rule} | {file_name}\n"
+          f"记录已写入 {ex}；请精确 git add/commit，禁止手写其他豁免冒充审批。")
 
 
 def cmd_template(flow, args):
@@ -972,6 +1466,10 @@ def cmd_doctor(flow, st, args):
     print(("✅" if nac <= 1 else "❌") + f" 活跃 change 数: {nac}" + ("(僵尸在场!comet 会抽错人,清理见下)" if nac > 1 else ""))
     for _w in _sentinel_lines(sid, st):
         print("   " + _w)
+    if step.get("tests_only"):
+        head, why = _ensure_step_entry_head(flow, st, sid)
+        print(("✅" if head else "❌") + " UT 步骤入口 HEAD: "
+              + ((head[:12] + "（旧状态已自动恢复或原本存在）") if head else why))
     fails = check_evidence(step, st)
     if fails:
         print("❌ 当前步证据未满足:")
@@ -983,6 +1481,16 @@ def cmd_doctor(flow, st, args):
     print(("✅ 环境实测: 全部就绪" if not ef else "❌ 环境实测未就绪: " + "、".join(ef)))
     for k in ("单号", "编译方式", "UT生成方式"):
         print(("✅" if st["config"].get(k) else "❌") + f" 配置 {k}: {st['config'].get(k, '缺失')}")
+    if step.get("tests_only"):
+        tp = _test_patterns(st)
+        if tp:
+            print("✅ 测试路径硬边界: " + " | ".join(tp))
+        else:
+            print("⚠ 测试路径未配置:当前使用内置保守规则硬拦非测试源码;"
+                  "非标准测试目录请在 .mae-flow-defaults.json 补「测试路径」")
+    sp = _configured_source_patterns(st)
+    print(("✅" if sp else "ℹ") + " 私有源码路径: "
+          + (" | ".join(sp) if sp else "未配置（使用跨仓扩展名、构建文件和通用目录规则）"))
     # 观测项(公司机金丝雀关注):ack 验真存储 与 UTRUN 令牌——两者依赖 harness payload 字段
     try:
         n = len(json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]"))
@@ -1091,6 +1599,7 @@ def cmd_goto(flow, st, args):
     st["history"].append({"step": st["current"], "result": "goto:" + args.step,
                           "note": "manual", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     st["current"] = args.step
+    st.setdefault("step_heads", {})[args.step] = sh("git rev-parse --verify HEAD")
     save_state(st)
     print_current(flow, st)
 
@@ -1113,10 +1622,13 @@ def cmd_unlock(flow, st, args):
     st["unlock"] = {"scope": args.what, "step": sid, "at": now, "reason": args.reason}
     st["history"].append({"step": sid, "result": "unlock:" + args.what, "note": args.reason, "at": now})
     save_state(st)
-    if step.get("tests_only") and _test_patterns(st):
+    if step.get("tests_only"):
+        target = step.get("source_change_recheck", "")
         print(f"[mae-flow] 已解锁本步({sid})的源码修改(仅本步有效,推进后自动失效)。"
-              "修复后:编译 → 按 [单号][类型] 规范 commit → 重启 ut-generator-agent 对新代码重新收尾"
-              "(新鲜度绑定:源码已变,旧 UT 证据过期,重跑不是可选项)。")
+              "修复后按 [单号][类型] 规范 commit，再执行 done。"
+              + (f"harness 检测到被测源码变化后会自动回流到 {target}，"
+                 "重跑编译、CodeCheck、UT；不允许就地直接推送。" if target else
+                 "旧 UT 证据会因源码变化失效，必须重跑验证。"))
     else:
         print("[mae-flow] 本仓未启用测试路径收紧,无需实际解锁;裁决已留痕。"
               "直接修复源码 → 编译 → 按规范 commit → 重启 ut-generator-agent 重新收尾。")
@@ -1133,7 +1645,8 @@ class MFParser(argparse.ArgumentParser):
               f"  python \"{me}\" current\n"
               f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
               f"  python \"{me}\" init\n"
-              "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template(用法见 skill 指令)。\n"
+              "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
+              "codecheck-scan|approve-exemption(用法见 current 指令)。\n"
               "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
               file=sys.stderr)
         sys.exit(2)
@@ -1158,6 +1671,13 @@ def main():
     r.add_argument("--all", action="store_true")   # 聚合历史账本(无在途单也可用)
     tp = sub.add_parser("template")
     tp.add_argument("kind", nargs="?", default="story", choices=["story", "chain", "grill", "review"])
+    at = sub.add_parser("agent-task")
+    at.add_argument("kind", choices=["compile", "codecheck", "ut"])
+    at.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")
+    sub.add_parser("codecheck-scan")
+    ae = sub.add_parser("approve-exemption")
+    ae.add_argument("--rule", required=True); ae.add_argument("--file", required=True)
+    ae.add_argument("--reason", required=True); ae.add_argument("--ack", required=True)
     args = ap.parse_args()
 
     root, _ = find_project_root()
@@ -1184,6 +1704,12 @@ def main():
         die("流程未初始化,先执行 init。")
     if args.cmd == "current":
         return print_current(flow, st)
+    if args.cmd == "agent-task":
+        return cmd_agent_task(flow, st, args)
+    if args.cmd == "codecheck-scan":
+        return cmd_codecheck_scan(flow, st, args)
+    if args.cmd == "approve-exemption":
+        return cmd_approve_exemption(flow, st, args)
     if args.cmd == "done":
         return cmd_done(flow, st, args)
     if args.cmd == "skip":

@@ -17,6 +17,8 @@
   mae-flow.py gate edit <路径>           hook 判定:此刻能否编辑该文件(exit 0/2)
   mae-flow.py gate bash <命令>           hook 判定:git 分支/commit 命令是否合规
   mae-flow.py goto <step> --force        人工修复:强制跳转(留痕)
+  mae-flow.py accept-risk <agent> --reason 风险 --ack 用户原话
+                                         用户确认后只放行当前步骤的单个 Agent 令牌
   mae-flow.py exit [--reason 文本] [--ack 用户原话]
                                          保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
@@ -366,13 +368,64 @@ def _source_changed_since(head, st=None):
     return changed, ""
 
 
+RISK_AGENT_LABELS = {
+    "COMPILE": "没有可验证的编译成功证据，代码可能无法构建",
+    "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；现场复核仍会执行，真实遗留告警不会被放过",
+    "UT": "没有可验证的 UT 生成/运行通过证据，回归问题可能进入后续阶段",
+    "STORY": "没有可验证的 STORY 专项 Agent 收尾证据",
+    "ENV": "环境修复 Agent 没有合法收尾，后续工具可能不可用",
+    "GRILL": "需求追问 Agent 没有合法收尾，需求边界可能仍有遗漏",
+    "ASKUSER": "宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话",
+    "UTRUN": "没有观测到 UT 命令真实调起",
+}
+
+
+def _risk_acceptance(kind, st):
+    rec = (st.get("risk_acceptances", {}) or {}).get(kind, {})
+    if not rec:
+        return False, ""
+    if rec.get("step") != st.get("current"):
+        return False, f"旧风险确认属于步骤 {rec.get('step', '?')}"
+    entered = _step_entered_at(st)
+    if rec.get("at", "") < entered:
+        return False, "旧风险确认早于当前步骤"
+    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
+    if rec.get("task_sha256") and rec.get("task_sha256") != task.get("sha256", ""):
+        return False, "风险确认绑定的任务卡已经变化"
+    head = rec.get("head", "")
+    changed, err = _source_changed_since(head, st) if head else ([], "风险确认缺少 HEAD")
+    if err:
+        return False, "风险确认新鲜度无法核实:" + err
+    if changed:
+        return False, "风险确认后代码发生变化:" + "、".join(changed[:5])
+    return True, ""
+
+
+def _risk_option(kind, expired=""):
+    me = os.path.abspath(sys.argv[0])
+    risk = RISK_AGENT_LABELS.get(kind, f"{kind} 专项 Agent 没有可验证的质量证据")
+    prefix = ("已有风险确认已失效(" + expired + ")。" if expired else "")
+    return (prefix + "如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：" + risk
+            + "。用户确认承担风险后执行: python \"" + me + "\" accept-risk " + kind.lower()
+            + " --reason \"" + risk + "\" --ack \"<用户确认原话>\"；"
+              "它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。")
+
+
 def ev_agent_ran(spec, st):
-    """硬证据:本步期间对应子 agent 真实收尾过。令牌由 SubagentStop hook(harness 调用)在
+    """默认硬证据:本步期间对应子 agent 真实收尾过。令牌由 SubagentStop hook(harness 调用)在
     契约标记验证通过后写入,模型无法伪造(令牌文件被 gate 双拦,手动调 dispatch 也被拦)。
     新格式令牌绑定签发时 HEAD:签发后源码再变(提交或未提交),证据即过期——旧证据不背新代码的书。
-    旧格式(纯时间戳字符串)仅验时间,兼容在途单。"""
+    旧格式(纯时间戳字符串)仅验时间,兼容在途单。宿主异常或重跑代价过高时，用户可显式承担风险，
+    只替代当前步骤、当前任务卡与当前 HEAD 的这一枚令牌；其他证据仍由各自 evaluator 检查。"""
     kind = spec["agent"]
     entered = st["history"][-1]["at"] if st["history"] else st["started"]
+    accepted, accept_why = _risk_acceptance(kind, st)
+    if accepted:
+        return True, ""
+
+    def blocked(msg):
+        return False, msg + " " + _risk_option(kind, accept_why)
+
     try:
         tok = json.loads(open(".mae-flow.json.tokens", encoding="utf-8").read()).get(kind, "")
     except Exception:
@@ -383,26 +436,26 @@ def ev_agent_ran(spec, st):
     token_step = tok.get("step", "") if isinstance(tok, dict) else ""
     if ts and ts >= entered:
         if token_step and token_step != st.get("current"):
-            return False, (f"{kind} 令牌属于步骤 {token_step}，当前是 {st.get('current')}。"
+            return blocked(f"{kind} 令牌属于步骤 {token_step}，当前是 {st.get('current')}。"
                            "每个步骤必须重新执行，不能复用上一关同一秒签发的令牌。")
         wanted = spec.get("statuses") or ([spec["status"]] if spec.get("status") else [])
         if wanted and status not in wanted:
-            return False, (f"{kind} 子 agent 虽已收尾,但结果为 {status or '旧令牌未记录状态'},"
+            return blocked(f"{kind} 子 agent 虽已收尾,但结果为 {status or '旧令牌未记录状态'},"
                            f"本步只接受 {'/'.join(wanted)}。FAIL/BLOCKED/NEEDS_INPUT 是有效上报,"
                            "但不是质量通过证据;处理报告中的问题后重启 agent。")
         if head:
             changed, err = _source_changed_since(head, st)
             if err:
-                return False, (f"{kind} 证据新鲜度无法核实({err})。"
+                return blocked(f"{kind} 证据新鲜度无法核实({err})。"
                                "重新启动对应 agent(ASKUSER 则重新向用户提问)签发绑定当前代码状态的新令牌。")
             if changed:
                 more = "…" if len(changed) > 5 else ""
-                return False, (f"{kind} 证据已过期:令牌签发后源码发生变更({'、'.join(changed[:5])}{more})。"
+                return blocked(f"{kind} 证据已过期:令牌签发后源码发生变更({'、'.join(changed[:5])}{more})。"
                                "变更若属本单成果先按规范 commit,然后重新启动对应 agent"
                                "(ASKUSER 则重新向用户确认)对最新代码收尾——旧证据对新代码无效。")
         return True, ""
     if kind == "ASKUSER":
-        return False, (f"本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: {ts or '无'};本步始于 {entered})。"
+        return blocked(f"本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: {ts or '无'};本步始于 {entered})。"
                        "待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。")
     try:
         rejects = json.load(open(STATE_PATH + ".agent-rejections", encoding="utf-8"))
@@ -410,10 +463,10 @@ def ev_agent_ran(spec, st):
     except Exception:
         reject = {}
     if reject.get("at", "") >= entered and reject.get("step") in ("", st.get("current")):
-        return False, (f"{kind} 子 agent 已运行但未签发令牌。真实拒签原因: {reject.get('reason', '未知')} "
+        return blocked(f"{kind} 子 agent 已运行但未签发令牌。真实拒签原因: {reject.get('reason', '未知')} "
                        "如果只是最终报告写法不合规且已有执行凭证，保持源码不变后重答即可复用；"
                        "只有缺少真实执行证据或源码又变化时才需要重跑。")
-    return False, (f"本步内未检测到 {kind} 子 agent 的合法收尾(最近令牌: {ts or '无'};本步始于 {entered})。"
+    return blocked(f"本步内未检测到 {kind} 子 agent 的合法收尾(最近令牌: {ts or '无'};本步始于 {entered})。"
                    "请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。"
                    "主会话代写或口头汇报不算执行证据。")
 
@@ -1156,6 +1209,14 @@ def print_current(flow, st):
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:
         print(f"🔓 本步源码修改已解锁(用户裁决: {ul.get('reason', '')};推进后自动失效)")
+    for kind, rec in sorted((st.get("risk_acceptances", {}) or {}).items()):
+        if rec.get("step") != sid:
+            continue
+        valid, why = _risk_acceptance(kind, st)
+        if valid:
+            print(f"⚠ 用户已承担 {kind} 令牌缺失风险，本步按放行继续；其他证据仍会检查。")
+        else:
+            print(f"⚠ {kind} 风险放行已失效: {why}；需要重新取证或重新让用户确认。")
     if step.get("tests_only"):
         if not (st.get("step_heads", {}) or {}).get(sid):
             head, why = _ensure_step_entry_head(flow, st, sid)
@@ -1318,6 +1379,7 @@ def _resume_direct_mode(ack=""):
     st.pop("unlock", None)
     st.pop("agent_tasks", None)
     st.pop("quality", None)
+    st.pop("risk_acceptances", None)
     st["current"] = target
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     st.setdefault("history", []).append({"step": old_step, "result": "resumed:" + target,
@@ -1406,7 +1468,8 @@ def _append_history(st, outcome="completed"):
                "开始": st.get("started", ""), "结束": ended,
                "耗时秒": int(max(0, ts(ended) - ts(st.get("started", ended)))),
                "goto次数": sum(1 for h in hist if str(h.get("result", "")).startswith("goto:")),
-               "skip次数": sum(1 for h in hist if h.get("result") == "skipped")}
+               "skip次数": sum(1 for h in hist if h.get("result") == "skipped"),
+               "风险放行次数": sum(1 for h in hist if str(h.get("result", "")).startswith("accept-risk:"))}
         rec.update(_friction_from_log(st))
         with open(HISTORY_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -1427,6 +1490,7 @@ def advance(flow, st, sid, step, tag, note=""):
         if err:
             die(err, 2)
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
+    st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     nxt = step.get("next")
     if step.get("next_by"):
@@ -1598,6 +1662,50 @@ def cmd_skip(flow, st, args):
     if step.get("skip_requires_ack"):
         die("本步不能由 Agent 自行 skip；请走当前步骤的用户确认分支。", 2)
     advance(flow, st, sid, step, "skipped", args.reason)
+
+
+def _step_agent_kinds(step):
+    kinds = set()
+    for spec in step.get("evidence", []):
+        typ = spec.get("type")
+        if typ == "review_codecheck":
+            kinds.add("CODECHECK")
+        elif typ in ("agent_ran", "agent_or_no_source", "review_agent_or_no_code") and spec.get("agent"):
+            kinds.add(str(spec["agent"]).upper())
+    return kinds
+
+
+def cmd_accept_risk(flow, st, args):
+    """用户有意识地只放行当前步骤某个 Agent 令牌；不跳过同一步的其他机器证据。"""
+    sid = st["current"]
+    step = flow["steps"][sid]
+    kind = args.agent.upper()
+    required = _step_agent_kinds(step)
+    if kind not in required:
+        die(f"当前步骤 {sid} 不需要 {kind} 令牌，不能预先或跨步骤放行。"
+            + ("本步可放行: " + "、".join(sorted(required)) if required else "本步没有可风险放行的 Agent 令牌。"), 2)
+    if not args.reason:
+        die("accept-risk 必须 --reason 写清具体风险，不能只写『继续』。", 2)
+    if not args.ack:
+        die("accept-risk 必须携带用户明确承担风险的原话:--ack \"用户原话\"。", 2)
+    ok, why = _ack_verified(st, args.ack, exact=True)
+    if not ok:
+        die("accept-risk 授权验真失败:" + why, 2)
+    dirty = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
+    if dirty:
+        die("风险确认必须绑定稳定代码版本，但仍有未提交源码/测试/构建文件: " + "、".join(dirty[:8])
+            + "。先按本单规范提交，再向用户展示风险并重新确认。", 2)
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
+    rec = {"step": sid, "head": sh("git rev-parse --verify HEAD"), "at": now,
+           "task_sha256": task.get("sha256", ""), "reason": args.reason, "ack": args.ack}
+    st.setdefault("risk_acceptances", {})[kind] = rec
+    st.setdefault("history", []).append(
+        {"step": sid, "result": "accept-risk:" + kind, "note": args.reason, "at": now})
+    save_state(st)
+    print(f"[mae-flow] 用户已确认承担 {kind} 令牌缺失风险；仅放行当前步骤 {sid}、当前代码版本。")
+    print("风险: " + args.reason)
+    print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，本次放行自动失效。现在重新执行 done。")
 
 
 def cmd_status(flow, st, args):
@@ -1810,6 +1918,7 @@ def cmd_agent_task(flow, st, args):
                       "CODECHECK": {"verify_codecheck", "tw_codecheck", "rf_codecheck", "rf_verify"},
                       "UT": {"verify_ut", "rf_ut", "tw_ut", "rf_verify"}}
     sid = st["current"]
+    (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if sid not in expected_steps[kind]:
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
     dirty_source = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
@@ -2053,6 +2162,14 @@ def cmd_doctor(flow, st, args):
     print(("✅" if nac <= 1 else "❌") + f" 活跃 change 数: {nac}" + ("(僵尸在场!comet 会抽错人,清理见下)" if nac > 1 else ""))
     for _w in _sentinel_lines(sid, st):
         print("   " + _w)
+    for kind, rec in sorted((st.get("risk_acceptances", {}) or {}).items()):
+        if rec.get("step") != sid:
+            continue
+        valid, why = _risk_acceptance(kind, st)
+        if valid:
+            print(f"⚠ 用户风险放行: {kind}（当前步骤/任务卡/HEAD 有效；其他证据不受影响）")
+        else:
+            print(f"❌ 用户风险放行已失效: {kind}（{why}）")
     if step.get("tests_only"):
         head, why = _ensure_step_entry_head(flow, st, sid)
         print(("✅" if head else "❌") + " UT 步骤入口 HEAD: "
@@ -2116,11 +2233,12 @@ def cmd_report(flow, st, args):
     # 摩擦统计:量化本单的 harness 干预(验收线指标:gate 误拦/单 应为个位数)
     fr = _friction_from_log(st)
     goto_n = sum(1 for h in st["history"] if str(h.get("result", "")).startswith("goto:"))
+    risk_n = sum(1 for h in st["history"] if str(h.get("result", "")).startswith("accept-risk:"))
     if fr:
         print(f"摩擦统计: gate 拦截 {fr['gate拦截']} 次 · 子agent契约打回 {fr['契约打回']} 次"
-              f" · hook 异常 {fr['hook异常']} 次 · goto 人工跳转 {goto_n} 次")
+              f" · hook 异常 {fr['hook异常']} 次 · goto 人工跳转 {goto_n} 次 · 风险放行 {risk_n} 次")
     else:
-        print(f"摩擦统计: hook 日志不可读 · goto 人工跳转 {goto_n} 次")
+        print(f"摩擦统计: hook 日志不可读 · goto 人工跳转 {goto_n} 次 · 风险放行 {risk_n} 次")
 
 
 def cmd_report_all():
@@ -2142,14 +2260,15 @@ def cmd_report_all():
         sec = int(sec)
         return f"{sec // 3600}h{sec % 3600 // 60:02d}m" if sec >= 3600 else f"{sec // 60}m{sec % 60:02d}s"
 
-    print(f"{'单号':<16} {'workflow':<8} {'耗时':>7} {'gate拦':>5} {'打回':>4} {'goto':>4}  完成时间")
+    print(f"{'单号':<16} {'workflow':<8} {'耗时':>7} {'gate拦':>5} {'打回':>4} {'goto':>4} {'风险':>4}  完成时间")
     for r in recs:
         print(f"{r.get('单号', '?'):<16} {r.get('workflow', '?'):<8} {fmt(r.get('耗时秒', 0)):>7} "
               f"{str(r.get('gate拦截', '-')):>5} {str(r.get('契约打回', '-')):>4} "
-              f"{str(r.get('goto次数', '-')):>4}  {r.get('结束', '?')}")
+              f"{str(r.get('goto次数', '-')):>4} {str(r.get('风险放行次数', '-')):>4}  {r.get('结束', '?')}")
     n = len(recs)
     print(f"合计 {n} 单 · 平均耗时 {fmt(sum(r.get('耗时秒', 0) for r in recs) / n)}"
-          f" · goto 总计 {sum(r.get('goto次数', 0) for r in recs)} 次")
+          f" · goto 总计 {sum(r.get('goto次数', 0) for r in recs)} 次"
+          f" · 风险放行总计 {sum(r.get('风险放行次数', 0) for r in recs)} 次")
 
 
 def cmd_reloaded(flow, st, args):
@@ -2185,6 +2304,7 @@ def cmd_goto(flow, st, args):
     if args.step not in flow["steps"]:
         die("未知步骤: " + args.step)
     st.pop("unlock", None)   # 跳转同样使解锁失效
+    st.pop("risk_acceptances", None)
     st["history"].append({"step": st["current"], "result": "goto:" + args.step,
                           "note": "manual", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     st["current"] = args.step
@@ -2327,7 +2447,7 @@ class MFParser(argparse.ArgumentParser):
               f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
               f"  python \"{me}\" init\n"
               "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
-              "codecheck-scan|codecheck-record|approve-exemption|exit(用法见 current/exit 指令)。\n"
+              "accept-risk|codecheck-scan|codecheck-record|approve-exemption|exit(用法见 current/exit 指令)。\n"
               "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
               file=sys.stderr)
         sys.exit(2)
@@ -2345,6 +2465,9 @@ def main():
     g = sub.add_parser("gate"); g.add_argument("what", choices=["edit", "bash"]); g.add_argument("arg")
     o = sub.add_parser("goto"); o.add_argument("step"); o.add_argument("--force", action="store_true"); o.add_argument("--ack")
     u = sub.add_parser("unlock"); u.add_argument("what", choices=["source"]); u.add_argument("--reason"); u.add_argument("--ack")
+    ar = sub.add_parser("accept-risk")
+    ar.add_argument("agent", help="当前步骤报错中显示的 Agent 名称，如 compile/codecheck/ut")
+    ar.add_argument("--reason", required=True); ar.add_argument("--ack", required=True)
     x = sub.add_parser("exit"); x.add_argument("--reason"); x.add_argument("--ack")
     rl = sub.add_parser("reloaded"); rl.add_argument("--ack")
     sub.add_parser("doctor")
@@ -2406,6 +2529,8 @@ def main():
         return cmd_codecheck_record(flow, st, args)
     if args.cmd == "approve-exemption":
         return cmd_approve_exemption(flow, st, args)
+    if args.cmd == "accept-risk":
+        return cmd_accept_risk(flow, st, args)
     if args.cmd == "done":
         return cmd_done(flow, st, args)
     if args.cmd == "skip":

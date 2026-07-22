@@ -3,7 +3,7 @@
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import importlib.util, json, os, py_compile, re, subprocess, sys, tempfile, types
+import importlib.util, json, os, py_compile, re, subprocess, sys, tempfile, time, types
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 
@@ -227,6 +227,79 @@ if flow:
     finally:
         os.chdir(old_cwd)
 
+    # 用户风险放行：只替代当前步骤的 Agent 令牌，必须真实 ack，代码变化/推进后立即失效。
+    old_cwd = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            os.makedirs("src/test")
+            open("src/test/FooTest.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            subprocess.run(["git", "add", "src/test/FooTest.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            risk_ack = "确认承担UT结果未被harness核实的风险并继续"
+            risk_state = {"current": "rf_ut", "config": {}, "choices": {"workflow": "review"},
+                          "history": [], "started": now}
+            mf.save_state(risk_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": risk_ack, "step": "rf_ut", "at": now}], f, ensure_ascii=False)
+            fake_blocked = False
+            try:
+                mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
+                    agent="ut", reason="UT 未核实", ack="模型代答确认"))
+            except SystemExit as exc:
+                fake_blocked = exc.code == 2
+            check("Agent 令牌风险放行必须匹配用户真实原话", fake_blocked)
+            mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
+                agent="ut", reason="UT 结果未被 harness 核实", ack=risk_ack))
+            risk_state = mf.load_state()
+            risk_ok, _ = mf.ev_agent_ran({"agent": "UT", "statuses": ["PASS"]}, risk_state)
+            check("用户确认可只放行当前步骤的 UT 令牌", risk_ok
+                  and not os.path.exists(mf.STATE_PATH + ".tokens")
+                  and any(h.get("result") == "accept-risk:UT" for h in risk_state["history"]))
+            wrong_kind = False
+            try:
+                mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
+                    agent="compile", reason="编译未核实", ack=risk_ack))
+            except SystemExit as exc:
+                wrong_kind = exc.code == 2
+            check("风险放行不能预授权本步骤不需要的令牌", wrong_kind)
+            open("src/test/FooTest.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
+            fresh, fresh_why = mf.ev_agent_ran({"agent": "UT", "statuses": ["PASS"]}, risk_state)
+            check("代码变化后用户风险放行立即失效",
+                  not fresh and "风险确认后代码发生变化" in fresh_why)
+            open("src/test/FooTest.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+
+            # CodeCheck 的风险放行只替代 Agent 令牌，不得跳过最后的机器复核。
+            cc_ack = "确认承担CodeCheck修复Agent令牌缺失风险并继续"
+            cc_state = {"current": "rf_codecheck", "config": {},
+                        "choices": {"workflow": "review"}, "history": [], "started": now,
+                        "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}}}
+            mf.save_state(cc_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": cc_ack, "step": "rf_codecheck", "at": now}],
+                          f, ensure_ascii=False)
+            mf.cmd_accept_risk(flow, cc_state, types.SimpleNamespace(
+                agent="codecheck", reason="CodeCheck 修复 Agent 令牌未签发", ack=cc_ack))
+            cc_state = mf.load_state()
+            old_clean = mf.ev_codecheck_clean
+            try:
+                mf.ev_codecheck_clean = lambda _spec, _st: (False, "现场复核仍有 1 条告警")
+                cc_ok, cc_why = mf.ev_review_codecheck({}, cc_state)
+            finally:
+                mf.ev_codecheck_clean = old_clean
+            check("放行 CodeCheck Agent 令牌仍会执行真实结果复核",
+                  not cc_ok and "现场复核仍有 1 条告警" in cc_why)
+
+            mf.advance(flow, risk_state, "rf_ut", flow["steps"]["rf_ut"], "done")
+            check("进入下一步后用户风险放行不再保留",
+                  "risk_acceptances" not in mf.load_state())
+    finally:
+        os.chdir(old_cwd)
+
     # 5. 占位符白名单
     KNOWN = {"单号", "CHANGE_NAME", "工号", "基线分支", "分支名", "单号类型", "STORY入库", "需求文档"}
     ph = set()
@@ -235,6 +308,17 @@ if flow:
             for p in e.get("any", []) + e.get("paths", []) + ([e["file"]] if "file" in e else []):
                 ph |= set(re.findall(r"\{([^}]+)\}", p))
     check("证据占位符均为已知配置键", ph <= KNOWN, str(ph - KNOWN))
+    token_types = {"agent_ran", "agent_or_no_source", "review_agent_or_no_code"}
+    token_requirements = [
+        (step, "CODECHECK" if e.get("type") == "review_codecheck"
+         else str(e.get("agent", "")).upper())
+        for step in steps.values() for e in step.get("evidence", [])
+        if e.get("type") in token_types or e.get("type") == "review_codecheck"
+    ]
+    all_token_steps_covered = all(
+        kind in mf._step_agent_kinds(step) and kind in mf.RISK_AGENT_LABELS
+        for step, kind in token_requirements)
+    check("所有流程 Agent 令牌证据都能识别统一风险放行", all_token_steps_covered)
 
 # 6. agent 契约与 dispatch 识别同步
 dp = open(os.path.join(ROOT, "hooks", "dispatch.py"), encoding="utf-8").read()
@@ -318,6 +402,81 @@ try:
         check("done 会显示子 Agent 的真实拒签原因",
               not rejected_ok and "缺少真实编译证据（测试原因）" in rejected_why
               and "首行" not in rejected_why)
+
+        # UT:真实工具证据优先于摘要排版；同 HEAD 的报告重答可复用，过滤失败测试仍必须拦。
+        open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+        subprocess.run(["git", "add", "biz_test.cpp"], check=True)
+        subprocess.run(["git", "commit", "-qm", "ut fixture"], check=True)
+        ut_body = "# UT TASK CARD\n"
+        ut_digest = __import__("hashlib").sha256(ut_body.encode("utf-8")).hexdigest()
+        open("ut-task.md", "w", encoding="utf-8").write(
+            ut_body + "TASK_CARD_SHA256: " + ut_digest + "\n")
+        ut_head = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+        ut_task = {"step": "rf_ut", "sha256": ut_digest, "path": os.path.abspath("ut-task.md"),
+                   "head": ut_head}
+        json.dump({"current": "rf_ut",
+                   "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "mcde test --ut"},
+                   "agent_tasks": {"UT": ut_task}},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        ut_report = "\n".join([
+            "UT_RESULT: PASS",
+            "TASK_CARD_SHA256: " + ut_digest,
+            "GENERATOR_USED: AutoUT EXECUTED_UT: mcde test --ut",
+            "- TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "AC_COVERAGE:", "- 场景A -> TestA", "- 场景B -> TestB",
+        ])
+        ut_calls = [
+            {"name": "Skill", "input": {"skill": "mae-flow:AutoUT"},
+             "result_seen": True, "is_error": False, "result": "generated"},
+            {"name": "Bash", "input": {"command": "cd build && mcde test --ut"},
+             "result_seen": True, "is_error": False, "result": "77 passed, 0 skipped"},
+        ]
+        ut_first_ok = True
+        try:
+            dispatch._ut_contract("PASS", ut_report, ut_calls, soft=False)
+        except SystemExit:
+            ut_first_ok = False
+        check("UT 真实 Skill/命令优先于摘要名称且兼容同行数字字段", ut_first_ok)
+        ut_retry_ok = True
+        try:
+            dispatch._ut_contract("PASS", ut_report, [], soft=True)
+        except SystemExit:
+            ut_retry_ok = False
+        check("UT 报告重答复用同版本生成和测试凭证", ut_retry_ok)
+        open("biz_test.cpp", "a", encoding="utf-8").write("int changed_test = 2;\n")
+        check("源码或测试变化后 UT 执行凭证立即失效",
+              dispatch._reusable_ut_receipt("UT_GENERATOR", ut_task, "mae-flow:AutoUT Skill") is None
+              and dispatch._reusable_ut_receipt("UT_RUN", ut_task, "mcde test --ut") is None)
+        open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+
+        risky_report = ut_report.replace(
+            "EXECUTED_UT: mcde test --ut",
+            "EXECUTED_UT: mcde test --ut (NeighborCalculatorTest disabled to avoid pre-existing segfault)")
+        risky_blocked = False
+        try:
+            dispatch._ut_contract("PASS", risky_report, ut_calls, soft=False)
+        except SystemExit as exc:
+            risky_blocked = exc.code == 2
+        check("禁用或跳过失败测试不能冒充 UT PASS", risky_blocked)
+
+        filtered_calls = [ut_calls[0], dict(
+            ut_calls[1], input={"command": "cd build && mcde test --ut --gtest_filter=ProbeGv*"})]
+        filter_blocked = False
+        try:
+            dispatch._ut_contract("PASS", ut_report, filtered_calls, soft=False)
+        except SystemExit as exc:
+            filter_blocked = exc.code == 2
+        check("任务卡外追加测试过滤参数不能冒充全量 PASS", filter_blocked)
+
+        no_skill_blocked = False
+        try:
+            dispatch._ut_contract("PASS", ut_report, ut_calls[1:], soft=False)
+        except SystemExit as exc:
+            no_skill_blocked = exc.code == 2
+        rejection = json.load(open(dispatch.REJECTION_STATE, encoding="utf-8")).get("UT", {})
+        check("只写 GENERATOR_USED 不能冒充真实 AutoUT 调用",
+              no_skill_blocked and "没有成功调用" in rejection.get("reason", ""))
 finally:
     os.chdir(old_cwd)
     dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE = old_dispatch_paths

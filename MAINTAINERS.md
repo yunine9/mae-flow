@@ -27,7 +27,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 5. **路径自锚定，不赌 cwd**。插件文件锚定 `__file__`；项目文件靠 `find_project_root()` 向上定位后 chdir。
 6. **Windows-only**。命令用 `python` 不用 `python3`；子进程 `text=True` 必须显式 `encoding="utf-8"`（中文 Windows 默认 GBK）；路径匹配一律 `re.I`（NTFS 不分大小写）；跨盘符禁用 `relpath`；hook 经 Git Bash 执行。
 7. **用最弱的可用模型压测，用最强的模型生产**。强模型自觉守规则，会掩盖 harness 的洞；弱模型是 harness 的模糊测试器——每个洞都变成立刻可见可修的事故（2026-07-18 用 Haiku 一下午打出八类偏差，全部修复后才算"实战可信"）。改动 harness 后的回归验证同理：拿弱模型跑演习沙箱，别拿强模型的"一次通过"当证据。
-8. **硬禁令必须配裁决出口**。gate 与契约拦的是"未经用户裁决的动作"，不是场景本身——工程现实里被禁动作往往有正当场景（UT 揭出源码真缺陷、既有用例被规格演进淘汰、实现揭出设计/spec 有误、AskUserQuestion 客观不可用）。每条禁令都要回答"该场景的正规出口是什么"：unlock source（UT 缺陷修复）、SUSPECTED_BUGS 呈报（agent 自查后升级）、goto --ack 回流（设计/spec 修订、验真兜底）。禁令没有出口，弱模型只剩"卡死"或"作弊绕过"两个选项，都是事故（ImpossibleBench 实证：给正规弃权通道，作弊率 54%→9%）。新加任何禁令前先写出口，出口必须带用户裁决与留痕。
+8. **硬禁令必须配裁决出口**。gate 与契约拦的是"未经用户裁决的动作"，不是场景本身——工程现实里被禁动作往往有正当场景（UT 揭出源码真缺陷、既有用例被规格演进淘汰、实现揭出设计/spec 有误、AskUserQuestion 客观不可用）。每条禁令都要回答"该场景的正规出口是什么"：unlock source（UT 缺陷修复）、SUSPECTED_BUGS 呈报（agent 自查后升级）、goto --ack 回流（设计/spec 修订）、accept-risk（宿主/收尾异常导致单个 Agent 令牌无法签发）。禁令没有出口，弱模型只剩"卡死"或"作弊绕过"两个选项，都是事故（ImpossibleBench 实证：给正规弃权通道，作弊率 54%→9%）。新加任何禁令前先写出口，出口必须带用户裁决与留痕。
 
 ### 思想图谱（三个开源思想源，各管一段、互不越界）
 
@@ -61,7 +61,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 skills/mae-flow/SKILL.md   触发条件 + 5 条铁律(工具管不住、靠模型自守的部分)
 flow/flow.json              流程定义:步骤图、证据、权限、环境检查项
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
-scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/template/exit)
+scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
 scripts/comet_compat.py     让项目级阶段门禁识别 mae-flow 直接开发标记（setup/exit 幂等补齐）
 hooks/hooks.json            5 个 hook 注册(exec form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
@@ -123,7 +123,7 @@ flow.json 步骤字段语义：
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `yaml_field` | 读本 change `.comet.yaml` 字段：`equals` 精确匹配或非空即过（**首选**——comet-guard 机器写入，不可伪造） |
 | `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送） |
-| `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。**封杀主会话代工、伪确认、失败当成功、旧证据背新代码四类问题** |
+| `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
 | `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
@@ -166,6 +166,12 @@ PostToolUse（STORY/CHAIN/GRILL-PREP 模板校验 + ASKUSER/UTRUN 令牌 + AskUs
 SubagentStop 契约校验：最终回复必须有且只有一个 `XXX_RESULT: <状态>`（仍建议放第一行；模型偶尔在前面多写一句或代码围栏时兼容接受）；CODECHECK 额外硬验三件事——
 `EXECUTED_COMMAND` 含 fullcheck、三数对账 `FOUND = FIXED + REMAINING_COUNT`（吞告警最常见形态是马虎遗漏，算术不平当场打回）、
 CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛求对账）。真实编译调用会留下绑定任务卡、步骤和源码版本的临时凭证；仅因报告格式重答时，同一源码版本可复用，不重复跑长编译，源码一变立即失效。`stop_hook_active` 时仍以 0 退出防打回死循环，但拒签原因写入受保护 sidecar，`done/doctor` 会展示真实原因，不再误报成“首行没标记”。
+UT 同样把真实 AutoUT/java-autout Skill 调用和 UT 命令分别记为临时凭证：报告重答可复用，源码或测试变化立即失效。
+机器字段解析兼容 Markdown bullet/同行字段，真实工具调用高于 `GENERATOR_USED/EXECUTED_UT` 的文字摘要；但实际命令额外追加
+filter/exclude/disable，或输出出现非零 disabled/skipped、segfault 时不得 PASS，必须走问题呈报与用户裁决。
+所有 `agent_ran` 门禁都有统一人工出口 `accept-risk`，但它刻意不是“跳过步骤”：命令先确认当前步骤确实需要该 Agent，
+再用 `_ack_verified(exact=True)` 核对用户当前步骤原话，拒绝脏源码，记录风险/step/task SHA/HEAD；`ev_agent_ran` 只把这一项视为通过。
+CodeCheck 的现场扫描、clean_paths、提交、分支和归档等证据继续执行。新任务卡、源码变化、goto、推进和退出恢复都会废弃放行。
 **非正常收尾自动尸检**（2026-07-20，治"agent 奇怪退出无人知晓死因"）：无标记收尾/重答仍失败时，把轮数、临终输出、检出的报错特征落 `%TEMP%/mae-flow-agent-autopsy.log`，并把一行「尸检线索」嵌进打回消息——主 agent 重启新实例必须转告（SKILL 铁律）；配套五个 agent 契约的"带着情报死"条款（工具连败 2 次→FAIL/BLOCKED 收尾写明详情；轮次过半未完成→提前收尾出部分成果，不许干到被硬切）。
 
 ### 3.5 环境检查（env_checks）

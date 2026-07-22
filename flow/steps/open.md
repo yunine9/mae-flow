@@ -18,6 +18,8 @@ clarifications 里已是 EARS 的答案直接沿用)——UT 阶段将按这些�
 ②**AI 自行推断、没有需求依据的**(逐条列出+推断理由);③AI 拿不准的。
 **②③类必须用 AskUserQuestion 逐条呈用户拍板**——done 硬校验本步内真实问过(ASKUSER 令牌),
 无脑回车在这一步机器上过不去;用户改判的当场改 spec。
+若用户已真实逐条回答,但宿主没有签发 ASKUSER 令牌,按 done 报错展示风险并让用户选择是否
+`accept-risk askuser`;该兜底只替代交互令牌,②③类的规格修订、提交和其他证据仍必须完成。
 确认后 git add openspec/(clarifications 尚在 docs/ 未随迁的,精确补 git add docs/clarifications-{单号}.md;
 **禁止 git add docs/ 或 -A**)&& git commit -m "[单号][类型]提案与规格",
 再 done --ack --set CHANGE_NAME=<change目录名>(校验本 change 的 proposal/delta spec/.comet.yaml 存在)。

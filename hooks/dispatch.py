@@ -514,6 +514,29 @@ def _field(report, name):
     return m.group(1).strip() if m else ""
 
 
+_REPORT_FIELDS = (
+    "TASK_CARD_SHA256", "GENERATOR_USED", "EXECUTED_UT", "EXECUTED_BUILD", "EXECUTED_COMMAND",
+    "TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED", "AC_COVERAGE", "PENDING_QUESTIONS",
+    "KNOWN_FAILURES", "SUSPECTED_BUGS", "FOUND", "FIXED", "REMAINING_COUNT",
+)
+
+
+def _flex_field(report, name):
+    """弱模型常把机器字段挤在一行或加 Markdown bullet；按下一个已知字段切开而非卡排版。"""
+    fields = "|".join(re.escape(x) for x in _REPORT_FIELDS)
+    m = re.search(
+        r"(?:^|(?<=[\s,;]))(?:[-*]\s*)?" + re.escape(name)
+        + r"\s*:\s*(.*?)(?=(?:\s+|,\s*)(?:[-*]\s*)?(?:" + fields + r")\s*:|\Z)",
+        report, re.I | re.S)
+    return m.group(1).strip(" \t\r\n`") if m else None
+
+
+def _number_field(report, name):
+    value = _flex_field(report, name)
+    m = re.match(r"(\d+)\b", value or "")
+    return int(m.group(1)) if m else None
+
+
 def _same_config(actual, expected):
     def n(s):
         return re.sub(r"\s+", "", (s or "")).lower()
@@ -558,6 +581,88 @@ def _record_codecheck_build_receipt(task, tool_calls):
     except Exception as e:
         _log("codecheck receipt EXC: " + str(e))
     return rec
+
+
+_UT_RISK_PAT = re.compile(
+    r"\b(?:disabled|excluded|skipped|pre-existing\s+(?:failure|segfault)|segmentation\s+fault|segfault)\b|"
+    r"禁用|排除|跳过|段错误|绕过失败|屏蔽失败", re.I)
+_UT_FILTER_PAT = re.compile(r"gtest_filter|--?exclude|--?skip|--?disable|--filter|-E(?:\s|=)", re.I)
+
+
+def _bash_segment(call, expected):
+    def n(s):
+        return re.sub(r"\s+", " ", (s or "")).strip()
+    want = n(expected).lower()
+    if not call or not want:
+        return ""
+    inp = call.get("input", {}) or {}
+    cmd = inp.get("command", "") if isinstance(inp, dict) else str(inp)
+    for seg in re.split(r"&&|\|\||[;\n]", n(cmd)):
+        if seg.strip().lower().startswith(want):
+            return seg.strip()
+    return ""
+
+
+def _ut_execution_risk(report, run_call, expected):
+    """PASS 不得靠临时禁用/过滤失败测试取得；配置本身带过滤时视为用户已明确授权。"""
+    configured = re.sub(r"\s+", " ", expected or "").strip()
+    segment = _bash_segment(run_call, configured)
+    extra = segment[len(configured):].strip() if segment.lower().startswith(configured.lower()) else segment
+    summary = _flex_field(report, "EXECUTED_UT") or ""
+    result = (run_call or {}).get("result", "") or ""
+    risk_text = summary + "\n" + result
+    # 常见测试框架会正常打印“0 skipped/0 disabled”，这是全绿统计，不得误伤。
+    risk_text = re.sub(r"\b(?:0|no)\s+(?:tests?\s+)?(?:disabled|excluded|skipped)\b", "",
+                       risk_text, flags=re.I)
+    risk_text = re.sub(r"\b(?:tests?\s+)?(?:disabled|excluded|skipped)\s*[:=]\s*0\b", "",
+                       risk_text, flags=re.I)
+    risk_text = re.sub(r"\bno\s+tests?\s+(?:were\s+)?(?:disabled|excluded|skipped)\b", "",
+                       risk_text, flags=re.I)
+    risk_text = re.sub(r"(?:跳过|禁用|排除)\s*[:：]?\s*0\s*(?:个|项|条|例)?", "", risk_text)
+    text_risk = _UT_RISK_PAT.search(risk_text)
+    filter_risk = _UT_FILTER_PAT.search(extra) and not _UT_FILTER_PAT.search(configured)
+    if text_risk:
+        return "测试报告或执行输出显示存在禁用、跳过或段错误；必须进入 KNOWN_FAILURES/SUSPECTED_BUGS 并用 NEEDS_INPUT，不能 PASS。"
+    if filter_risk:
+        return "实际 UT 命令在任务卡配置之外追加了过滤/排除参数；未经用户确认不能缩小测试范围后报告 PASS。"
+    return ""
+
+
+def _record_ut_receipts(task, report, tool_calls):
+    """保存真实 AutoUT 与 UT 执行事实；后续仅修报告且代码未变时无需重做重活。"""
+    cfg = _state_config()
+    need = _required_skill(cfg.get("UT生成方式", ""))
+    generator = _skill_call(tool_calls, need) if need else None
+    run = _bash_call(tool_calls, cfg.get("UT运行命令", ""))
+    records = {}
+    common = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": task.get("step", ""),
+              "task_sha256": task.get("sha256", ""), "head": _git_head()}
+    if generator and not _call_failed(generator):
+        records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
+    if run and not _call_failed(run) and not _ut_execution_risk(report, run, cfg.get("UT运行命令", "")):
+        records["UT_RUN"] = dict(common, value=cfg.get("UT运行命令", ""))
+    if not records:
+        return
+    try:
+        data = json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+        data.update(records)
+        _atomic_json(EVIDENCE_STATE, data)
+        _log("UT 执行凭证: " + "/".join(sorted(records)) + " @" + common["head"][:9])
+    except Exception as e:
+        _log("ut receipt EXC: " + str(e))
+
+
+def _reusable_ut_receipt(key, task, expected):
+    try:
+        rec = json.load(open(EVIDENCE_STATE, encoding="utf-8")).get(key, {})
+    except Exception:
+        return None
+    if not rec or rec.get("step") != task.get("step") \
+            or rec.get("task_sha256") != task.get("sha256") \
+            or not _same_config(rec.get("value", ""), expected):
+        return None
+    changed, err = _source_changed_since_receipt(rec.get("head", ""), {})
+    return rec if not err and not changed else None
 
 
 def _reusable_codecheck_build_receipt(task):
@@ -806,35 +911,53 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     if status != "PASS":
         return
     cfg = _state_config()
-    if not _same_config(_field(report, "GENERATOR_USED"), cfg.get("UT生成方式", "")):
-        bail("GENERATOR_USED 与任务卡的 UT生成方式不一致；必须调用配置的 AutoUT/java-autout 等能力。")
     need = _required_skill(cfg.get("UT生成方式", ""))
+    _record_ut_receipts(task, report, tool_calls)
     if need:
         call = _skill_call(tool_calls, need)
-        if not call:
-            bail(f"UT 配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用；不能用手写代码冒充 Skill 产出。")
-        if _call_failed(call):
+        reused = _reusable_ut_receipt("UT_GENERATOR", task, cfg.get("UT生成方式", "")) \
+            if soft and not call else None
+        if call and _call_failed(call):
             bail(f"{need} Skill 的工具结果明确失败，不能报告 PASS。")
-    if not _same_config(_field(report, "EXECUTED_UT"), cfg.get("UT运行命令", "")):
-        bail("EXECUTED_UT 与配置的 UT运行命令不一致；未真实运行不得 PASS。")
-    _require_bash_success(tool_calls, cfg.get("UT运行命令", ""), bail, "UT运行")
+        if not call and not reused:
+            bail(f"UT 配置要求 {need} Skill，但 transcript 中没有成功调用，"
+                 "也没有同任务卡、同源码版本的可复用生成凭证；不能用手写测试冒充 Skill 产出。")
+        label = _flex_field(report, "GENERATOR_USED") or ""
+        if call and not _same_config(label, cfg.get("UT生成方式", "")):
+            _log("UT GENERATOR_USED 摘要不准确,以 transcript 的真实 Skill 调用为准")
+    elif not _same_config(_flex_field(report, "GENERATOR_USED") or "", cfg.get("UT生成方式", "")):
+        bail("GENERATOR_USED 与任务卡的 UT生成方式不一致。")
+
+    expected_ut = cfg.get("UT运行命令", "")
+    run = _bash_call(tool_calls, expected_ut)
+    risk = _ut_execution_risk(report, run, expected_ut)
+    if risk:
+        bail(risk)
+    reused_run = _reusable_ut_receipt("UT_RUN", task, expected_ut) if soft and not run else None
+    if run and _call_failed(run):
+        bail("UT运行命令的工具结果明确失败，不能报告 PASS。")
+    if not run and not reused_run:
+        bail("transcript 中没有成功执行任务卡配置的 UT 命令，也没有同任务卡、同源码版本的可复用测试凭证。")
+    if run and not _same_config(_flex_field(report, "EXECUTED_UT") or "", expected_ut):
+        _log("UT EXECUTED_UT 摘要不准确,以 transcript 的真实 Bash 调用为准")
+
     for name in ("PENDING_QUESTIONS", "KNOWN_FAILURES", "SUSPECTED_BUGS"):
-        value = _section(report, name)
+        value = _flex_field(report, name)
         if value is None:
-            bail(f"PASS 报告缺少 {name}: 字段。")
+            continue   # 真正全绿时省略空字段不值得打回；上面的风险扫描负责防隐藏失败
         if not _empty_section(value):
             bail(f"标记 PASS 但 {name} 非空；必须先交主会话和用户处理，不能带问题过关。")
-    coverage = _section(report, "AC_COVERAGE")
-    if coverage is None:
-        bail("PASS 报告缺少 AC_COVERAGE 验收场景对照。")
+    coverage = _flex_field(report, "AC_COVERAGE")
+    if coverage is None or not coverage.strip() or _empty_section(coverage):
+        bail("PASS 报告缺少有效的 AC_COVERAGE 验收场景对照。")
     if re.search(r"缺口|未覆盖|无对应", coverage):
         bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS。")
     nums = {}
     for name in ("TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED"):
-        m = re.search(r"^\s*" + name + r":\s*(\d+)\s*$", report, re.M)
-        if not m:
+        value = _number_field(report, name)
+        if value is None:
             bail(f"PASS 报告缺少 {name}: <数字>。")
-        nums[name] = int(m.group(1))
+        nums[name] = value
     if nums["TESTS_FAILED"] != 0 or nums["TESTS_TOTAL"] != nums["TESTS_PASSED"]:
         bail("UT 数字对账不通过：PASS 必须 TESTS_FAILED=0 且 TOTAL=PASSED。")
 

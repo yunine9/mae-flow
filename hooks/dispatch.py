@@ -535,8 +535,9 @@ def _changed_paths_since(head):
     return list(dict.fromkeys(x.replace("\\", "/") for x in paths))
 
 
-_TEST_PAT = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)src/test/|(^|/)test_[^/]+\.py$|"
-                       r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|py|go|rs|js|jsx|ts|tsx)$|Tests?\.(java|kt|cs)$", re.I)
+_TEST_PAT = re.compile(r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/|(^|/)src/test/|(^|/)test_[^/]+\.py$|"
+                       r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|py|go|rs|js|jsx|ts|tsx)$|"
+                       r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$", re.I)
 _SOURCE_PAT = re.compile(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|java|kt|kts|groovy|scala|py|pyi|go|rs|cs|"
                          r"js|jsx|ts|tsx|vue|swift|m|mm|proto|sql|s|asm|cmake|gradle|sln|vcxproj|props|targets)$|"
                          r"(^|/)(CMakeLists\.txt|Makefile|pom\.xml|build\.gradle|settings\.gradle|package\.json|"

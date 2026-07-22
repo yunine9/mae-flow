@@ -109,11 +109,11 @@ if flow:
               not err and result["total"] == 1 and result["pairs"] == [("R.ONE", "src/Foo.cpp")])
     finally:
         mf.subprocess.run, mf.shutil.which = real_run, real_which
-    win_argv, _ = mf._codecheck_argv(
+    win_argv, win_shell, _ = mf._codecheck_launch(
         ["src/My File.cpp"], executable=r"C:\Users\dev\AppData\Roaming\npm\codecheck.cmd", windows=True)
-    check("Windows npm 的 codecheck.cmd 经 cmd.exe 分流",
-          win_argv[1:4] == ["/d", "/s", "/c"] and "codecheck.cmd" in win_argv[4]
-          and "src/My File.cpp" in win_argv[4])
+    check("Windows CodeCheck 沿用已验证的 shell/PATHEXT 路径",
+          win_shell and isinstance(win_argv, str) and "codecheck fullcheck" in win_argv
+          and '"src/My File.cpp"' in win_argv)
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as f:
         json.dump({"issues": [{"uuid": "1", "rule": "R.ONE", "file": "a/Foo.cpp"},
                               {"uuid": "2", "rule": "R.TWO", "file": "b/Foo.cpp"}]}, f)
@@ -137,6 +137,11 @@ if flow:
           all(mf._is_source_path(p, {}, flow) == want for p, want in source_cases.items())
           and mf._is_source_path("vendor/private/schema",
                                  {"config": {"源码路径": r"(^|/)vendor/private/"}}, flow))
+    check("dt_tests 与 C++ Test 文件不会进入 CodeCheck",
+          mf._is_test_file("service/probe/dt_tests/Foo.cpp", {})
+          and mf._is_test_file("service/probe/FooTest.cpp", {})
+          and mf._is_test_file("service/probe/dt_tests/Foo.cpp",
+                               {"config": {"测试路径": r"(^|/)private_ut/"}}))
     check("评审空模板不会误判为待修代码",
           not mf._review_has_confirmed_fix("合法值: 修复(已确认)\n| # | 意见 | 定性 | 裁决 |\n|---|---|---|---|")
           and mf._review_has_confirmed_fix("| 1 | 空指针 | 属实 | 修复(已确认) |"))

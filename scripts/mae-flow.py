@@ -566,16 +566,17 @@ def ev_review_fix_committed(spec, st):
 
 CODE_EXTS = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp", ".java")
 DEFAULT_TEST_PATS = [
-    r"(^|/)(tests?|__tests__|spec)/", r"(^|/)src/test/",
+    r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/", r"(^|/)src/test/",
     r"(^|/)test_[^/]+\.py$",
     r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|js|jsx|ts|tsx)$",
-    r"Tests?\.(java|kt|cs)$",
+    r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$",
 ]
 
 
 def _is_test_file(path, st):
     """UT/测试文件判定:配置了「测试路径」用配置,否则用默认特征。codecheck 只查业务代码(团队约定)。"""
-    pats = _test_patterns(st) or DEFAULT_TEST_PATS
+    # 仓库配置用于补充私有目录，不应关闭 Test.cpp、dt_tests 等通用识别。
+    pats = DEFAULT_TEST_PATS + _test_patterns(st)
     return any(re.search(p, norm(path), re.I) for p in pats)
 
 
@@ -607,31 +608,31 @@ def _batches(files, maxlen=6000):
     return out
 
 
-def _codecheck_argv(batch, executable=None, windows=None):
-    """构造跨平台 CodeCheck 启动参数；独立函数便于在非 Windows 发版机验证 .cmd 分流。"""
-    resolved = executable or shutil.which("codecheck") or "codecheck"
+def _codecheck_launch(batch, executable=None, windows=None):
+    """构造 CodeCheck 启动方式；Windows 沿用已在公司实机验证过的 shell/PATHEXT 解析。"""
     is_windows = os.name == "nt" if windows is None else windows
     base_argv = ["codecheck", "fullcheck", "-f", ",".join(batch)]
     display = subprocess.list2cmdline(base_argv)
-    if is_windows and resolved.lower().endswith((".cmd", ".bat")):
-        # npm 全局命令在 Windows 通常是 .cmd。CreateProcess 不能稳定地像交互式 cmd 那样
-        # 解析 PATHEXT，所以明确经 cmd.exe 启动；/d 禁 AutoRun，/s 统一引号处理。
-        def cq(s):
-            return '"' + str(s).replace("%", "%%").replace('"', '""') + '"'
-        command_line = " ".join(cq(x) for x in [resolved, "fullcheck", "-f", ",".join(batch)])
-        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line], display
-    return [resolved, "fullcheck", "-f", ",".join(batch)], display
+    if is_windows:
+        # npm 全局 CLI 是 codecheck.cmd。旧版 shell=True 已在公司 Windows 实机稳定执行；
+        # 不再手工套 cmd.exe /s /c，避免 cmd 的首尾引号规则破坏本来可用的命令。
+        return display, True, display
+    resolved = executable or shutil.which("codecheck")
+    if resolved:
+        return [resolved, "fullcheck", "-f", ",".join(batch)], False, display
+    # 其他平台找不到实体时也保留 shell 恢复路径。
+    return display, True, display
 
 
 def _run_codecheck(files):
     """执行 CodeCheck 并返回机器结果；scan、done 复核共用，避免两套解析口径漂移。"""
     total, pairs, commands = 0, [], []
     for batch in _batches(files):
-        argv, cmd = _codecheck_argv(batch)
+        launch, use_shell, cmd = _codecheck_launch(batch)
         commands.append(cmd)
         started = time.time()
         try:
-            r = subprocess.run(argv, shell=False, capture_output=True, text=True,
+            r = subprocess.run(launch, shell=use_shell, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=900)
         except subprocess.TimeoutExpired:
             return None, "codecheck 现场检查超时(>15min)——批次过大或服务异常"
@@ -1477,7 +1478,7 @@ def _effective_test_patterns(st):
     非标准测试目录应落进 .mae-flow-defaults.json；不能因为团队尚未配置就退化为
     「UT agent 可以写任意源码」。误拦有 unlock 裁决出口，但 current/doctor 会提示先修长期配置。
     """
-    return _test_patterns(st) or DEFAULT_TEST_PATS
+    return DEFAULT_TEST_PATS + _test_patterns(st)
 
 
 def _business_source_changed_since_step(st, sid):

@@ -94,7 +94,7 @@
       "user_ack": true,
       "evidence": [
         {
-          "type": "commit_tagged"
+          "type": "review_fix_committed"
         }
       ],
       "next": "rf_compile"
@@ -104,7 +104,7 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "review_agent_or_no_code",
+          "type": "agent_or_no_source",
           "agent": "COMPILE",
           "statuses": [
             "OK"
@@ -130,7 +130,7 @@
       "source_change_recheck": "rf_compile",
       "evidence": [
         {
-          "type": "review_agent_or_no_code",
+          "type": "agent_or_no_source",
           "agent": "UT",
           "statuses": [
             "PASS"
@@ -158,6 +158,7 @@
     },
     "grill": {
       "title": "需求澄清(逐题拍板)",
+      "user_ack": true,
       "evidence": [
         {
           "type": "glob",
@@ -185,6 +186,10 @@
           "paths": [
             "docs/clarifications-{单号}.md"
           ]
+        },
+        {
+          "type": "agent_ran",
+          "agent": "ASKUSER"
         }
       ],
       "next": "open"
@@ -329,18 +334,47 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "commit_tagged"
+          "type": "commit_tagged_after_entry"
+        }
+      ],
+      "next": "tw_compile"
+    },
+    "tw_compile": {
+      "title": "小改 — 编译验证",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "agent_or_no_source",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
         }
       ],
       "next": "tw_codecheck"
     },
     "tw_codecheck": {
-      "title": "小改快过 — 规范检查(可跳过)",
+      "title": "小改 — 规范检查",
       "allow_source_edit": true,
-      "skippable": true,
       "evidence": [
         {
-          "type": "codecheck_clean"
+          "type": "review_codecheck"
+        }
+      ],
+      "next": "tw_ut"
+    },
+    "tw_ut": {
+      "title": "小改 — 单元测试",
+      "allow_source_edit": true,
+      "tests_only": true,
+      "source_change_recheck": "tw_compile",
+      "evidence": [
+        {
+          "type": "agent_or_no_source",
+          "agent": "UT",
+          "statuses": [
+            "PASS"
+          ]
         }
       ],
       "next": "archive_confirm"
@@ -354,7 +388,7 @@
           "type": "tasks_checked"
         },
         {
-          "type": "commit_tagged"
+          "type": "commit_tagged_after_entry"
         },
         {
           "type": "agent_ran",
@@ -371,6 +405,21 @@
       "title": "验证 1/4 — 代码精简(先删)",
       "clear_hint": true,
       "allow_source_edit": true,
+      "source_change_next": "verify_post_ponytail_compile",
+      "next": "verify_codecheck"
+    },
+    "verify_post_ponytail_compile": {
+      "title": "验证 — 精简后重新编译",
+      "allow_source_edit": true,
+      "evidence": [
+        {
+          "type": "agent_ran",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
+        }
+      ],
       "next": "verify_codecheck"
     },
     "verify_recompile": {
@@ -392,7 +441,7 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "codecheck_clean"
+          "type": "review_codecheck"
         }
       ],
       "next": "verify_ut"
@@ -438,7 +487,6 @@
     "archive": {
       "title": "规格定稿",
       "allow_specs_write": true,
-      "skippable": true,
       "evidence": [
         {
           "type": "glob",

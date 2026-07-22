@@ -1,19 +1,22 @@
 **本步结构是"先检查、后按结果分岔"——codecheck-fix-agent 是修复工,不是检查工,没告警就别派它。**
 
-第 0 步 先自己跑一次检查(主会话直接做,不派 agent):
+第 0 步执行 `python "{MAEFLOW_PATH}" codecheck-scan`，由 harness 统一计算文件并运行检查：
 - 算「变更业务代码文件清单」:git diff --name-only 基线...HEAD 过滤代码文件、排除测试文件;
   **清单为空(本单没改业务代码)→ 无需检查,直接 done**;
-- 在项目根执行 `codecheck fullcheck -f <清单>`(禁 increcheck)。
+- harness 在项目根执行 `codecheck fullcheck -f <清单>`(禁 increcheck)。
   **可用性只认这一条命令能不能跑**——裸 `codecheck`、`codecheck --help` 之类报"不可用"一律不算数,
   别据此判定"codecheck 坏了"更别派 agent 去"修复 codecheck"(它是修代码规范的,不修工具);
   真的 `codecheck fullcheck` 本身跑不起来(报错/命令不存在)→ 这是环境问题,停下报告用户,不是派 agent。
+- 如果 CLI 完成了但输出格式暂时无法解析，harness 会把完整现场保存到
+  `.mae-flow-work/codecheck-diagnostics/`。先重试一次；仍失败时让用户看过报告后执行错误信息给出的
+  `codecheck-record` 命令。记录绑定当前 HEAD 和文件清单，代码一变即失效；它是兼容恢复口，不是告警豁免。
 - 读输出的「共有 N 条告警」:
 
-**N = 0(干净)→ 不派任何 agent,直接 done**(done 的 codecheck_clean 会再复核一次,一致即过)。
+**N = 0(干净)→ 不派任何 agent,直接 done**(源码变化会让首检失效)。
 这是最常见的正常路径,别把它走成"派个 agent 空跑一趟"。
 
 **N > 0(有告警)→ 才派 codecheck-fix-agent 去修**:
-先执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 agent；
+执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 agent；
 传入单号类型、基线分支、编译方式配置原文、项目根绝对路径、测试路径配置(如有);
 **喂到嘴边**:把上面算好的文件清单 + 首检告警明细直接附进任务提示(省它重算的轮次,与复核同口径);
 docs/delivery-notes.md 存在时把告警/规范相关条目一并附上。

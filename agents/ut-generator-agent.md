@@ -21,7 +21,7 @@ UT_RESULT: NEEDS_INPUT
 UT_RESULT: FAIL
 ```
 
-- `PASS` 的唯一条件:**你亲自运行了配置的 UT 运行命令,且用例全部通过,且已 commit,且无 BLOCKED 方法**。任一不满足即不是 PASS(批次模式下的范围与运行口径见「批次模式」节)
+- `PASS` 的唯一条件:**你亲自运行了配置的 UT 运行命令,且用例全部通过,且已 commit,且无 BLOCKED 方法、待确认问题、疑似源码缺陷或验收缺口**。任一不满足即不是 PASS(批次模式下的范围与运行口径见「批次模式」节)
 - `NEEDS_INPUT` = 存在 BLOCKED 方法等待用户决策(其余方法已完成并通过);此时**不 commit**,等用户答复后的第二轮全部解决再 commit
 - `FAIL` = 缺失传入配置、修复超限、存在 known_failures、UT 没实际跑过
 - 无论中途发生什么,最终回复都必须以此标记开头。**"应该能通过"、"大概率没问题"不是 PASS,谎报 PASS 是最严重的失败。**
@@ -106,11 +106,12 @@ UT_RESULT: FAIL
 
 ## Return format(与顶部「最终回复格式」配套)
 
-第一行:`UT_RESULT: PASS` 或 `UT_RESULT: FAIL`(规则见顶部)。
+第一行:`UT_RESULT: PASS` / `UT_RESULT: NEEDS_INPUT` / `UT_RESULT: FAIL`(规则见顶部)。
 
 第一行之后,给出:
 
-1. 新增 UT 文件列表 + 用例数 / 通过数 / 失败数统计
+1. 新增 UT 文件列表，并给出三个独立机器字段：
+   `TESTS_TOTAL: <数字>`、`TESTS_PASSED: <数字>`、`TESTS_FAILED: <数字>`
 2. `TASK_CARD_SHA256: <任务卡中的64位指纹>`
 3. `GENERATOR_USED: <实际使用的UT生成方式/Skill名>`（必须与任务卡配置一致）
 4. `EXECUTED_UT: <实际执行的UT运行命令>`（必须与任务卡配置一致）
@@ -118,7 +119,7 @@ UT_RESULT: FAIL
    **公司环境没有覆盖率工具,禁止报告任何覆盖率百分比——出现百分比即视为编造**
 6. `PENDING_QUESTIONS:` BLOCKED 方法的问题清单(方法名 | 疑问 | 已完成的查证 | 候选方案);没有则写 `PENDING_QUESTIONS: 无`
 7. `KNOWN_FAILURES:` 失败用例清单(文件、用例名、失败原因、已尝试的修复);没有则写 `KNOWN_FAILURES: 无`
-8. `SUSPECTED_BUGS:` 疑似源码缺陷/规格演进清单(每项六要素齐全,六要素不全会被主 agent 打回补查);没有则写 `SUSPECTED_BUGS: 无`
+8. `SUSPECTED_BUGS:` 疑似源码缺陷/规格演进清单(每项六要素齐全,六要素不全会被主 agent 打回补查);没有则写 `SUSPECTED_BUGS: 无`。非空时不得 PASS，使用 NEEDS_INPUT
 9. FAIL 且因缺失配置时:缺失项清单
 
 **禁止**只输出自然语言总结而不带 `UT_RESULT:` 标记。

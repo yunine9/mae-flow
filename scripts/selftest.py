@@ -3,7 +3,7 @@
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import importlib.util, json, os, py_compile, re, sys
+import importlib.util, json, os, py_compile, re, sys, tempfile, types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -76,6 +76,19 @@ if flow:
     check("主流程 UT 改源码后回流专用编译节点",
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
+    tweak_chain = ["tw_change", "tw_compile", "tw_codecheck", "tw_ut", "archive_confirm"]
+    got, cur = [], "tw_change"
+    for _ in range(len(tweak_chain)):
+        got.append(cur)
+        cur = steps.get(cur, {}).get("next")
+    check("小改流程也经过编译、规范检查和 UT", got == tweak_chain, str(got))
+    check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
+    check("精简改源码后自动进入专用编译步骤",
+          steps.get("verify_ponytail", {}).get("source_change_next") == "verify_post_ponytail_compile"
+          and steps.get("verify_post_ponytail_compile", {}).get("next") == "verify_codecheck")
+    check("三条流程共用 CodeCheck 机器协议",
+          all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
+              for x in ("verify_codecheck", "tw_codecheck", "rf_codecheck")))
 
     # CodeCheckCLI 的成功退出码/文案不稳定，至少守住三种已知输出
     parser_cases = [
@@ -85,6 +98,31 @@ if flow:
     ]
     check("CodeCheck 告警数多格式解析",
           all(mf._parse_codecheck_count(a, b) == n for a, b, n in parser_cases))
+    real_run, real_which = mf.subprocess.run, mf.shutil.which
+    try:
+        sample = """[CodeCheck] 代码检查完成!\n### 1. [Minor] R.ONE 示例\n- **文件**: `Foo.cpp`\n- **规则**: R.ONE 示例\n💡 提示: 共有 1 条告警。"""
+        mf.shutil.which = lambda _: "/fake/codecheck"
+        mf.subprocess.run = lambda *a, **k: types.SimpleNamespace(
+            stdout=sample, stderr="", returncode=1)
+        result, err = mf._run_codecheck(["src/Foo.cpp"])
+        check("CodeCheck 成功不依赖退出码 0",
+              not err and result["total"] == 1 and result["pairs"] == [("R.ONE", "src/Foo.cpp")])
+    finally:
+        mf.subprocess.run, mf.shutil.which = real_run, real_which
+    win_argv, _ = mf._codecheck_argv(
+        ["src/My File.cpp"], executable=r"C:\Users\dev\AppData\Roaming\npm\codecheck.cmd", windows=True)
+    check("Windows npm 的 codecheck.cmd 经 cmd.exe 分流",
+          win_argv[1:4] == ["/d", "/s", "/c"] and "codecheck.cmd" in win_argv[4]
+          and "src/My File.cpp" in win_argv[4])
+    with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as f:
+        json.dump({"issues": [{"uuid": "1", "rule": "R.ONE", "file": "a/Foo.cpp"},
+                              {"uuid": "2", "rule": "R.TWO", "file": "b/Foo.cpp"}]}, f)
+        codecheck_json = f.name
+    try:
+        count, pairs = mf._parse_codecheck_json(codecheck_json)
+        check("CodeCheck JSON 兜底解析", count == 2 and len(pairs) == 2)
+    finally:
+        os.unlink(codecheck_json)
 
     mf.FLOW = flow
     source_cases = {
@@ -99,6 +137,17 @@ if flow:
           all(mf._is_source_path(p, {}, flow) == want for p, want in source_cases.items())
           and mf._is_source_path("vendor/private/schema",
                                  {"config": {"源码路径": r"(^|/)vendor/private/"}}, flow))
+    check("评审空模板不会误判为待修代码",
+          not mf._review_has_confirmed_fix("合法值: 修复(已确认)\n| # | 意见 | 定性 | 裁决 |\n|---|---|---|---|")
+          and mf._review_has_confirmed_fix("| 1 | 空指针 | 属实 | 修复(已确认) |"))
+    check("配置只能在声明步骤写入",
+          mf._allowed_set_keys(steps["config_confirm"]) >= {"基线分支", "分支名", "编译方式"}
+          and not mf._allowed_set_keys(steps["verify_codecheck"]))
+    check("同名文件豁免键不会碰撞",
+          mf._approval_key("R", "a/Foo.cpp") != mf._approval_key("R", "b/Foo.cpp"))
+    check("豁免规则与文件必须在同一条记录",
+          not mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp\n- R.TWO | b/Bar.cpp", "R.ONE", "b/Bar.cpp")
+          and mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp", "R.ONE", "a/Foo.cpp"))
 
     # 5. 占位符白名单
     KNOWN = {"单号", "CHANGE_NAME", "工号", "基线分支", "分支名", "单号类型", "STORY入库", "需求文档"}
@@ -111,6 +160,9 @@ if flow:
 
 # 6. agent 契约与 dispatch 识别同步
 dp = open(os.path.join(ROOT, "hooks", "dispatch.py"), encoding="utf-8").read()
+dspec = importlib.util.spec_from_file_location("dispatch", os.path.join(ROOT, "hooks", "dispatch.py"))
+dispatch = importlib.util.module_from_spec(dspec)
+dspec.loader.exec_module(dispatch)
 for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
     if f.endswith(".md"):
         name = f[:-3]
@@ -123,6 +175,18 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
 check("dispatch 校验任务卡指纹", "_task_card_contract" in dp and "TASK_CARD_SHA256" in dp)
 check("dispatch 校验 UT 配置", "GENERATOR_USED" in dp and "EXECUTED_UT" in dp)
 check("dispatch 校验真实 Skill/Bash 调用", "_skill_called" in dp and "_bash_called" in dp)
+check("Bash 证据不接受 echo 冒充",
+      dispatch._bash_call([{"name": "Bash", "input": {"command": "echo codecheck fullcheck -f a.cpp"}}],
+                          "codecheck fullcheck") is None
+      and dispatch._bash_call([{"name": "Bash", "input": {"command": "codecheck fullcheck -f a.cpp"}}],
+                              "codecheck fullcheck") is not None)
+check("空的精简豁免不能绕过净删检查",
+      dispatch._empty_section("无") and dispatch._empty_section("none")
+      and not dispatch._empty_section("删除重复分支，行为不变"))
+check("空配置不能冒充已执行命令", not dispatch._same_config("", "mcde build -i"))
+check("子 Agent 令牌和用户确认均绑定当前步骤",
+      '"step": step' in dp and 'm.get("step") == sid' in open(
+          os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read())
 
 mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
 check("tests_only 缺配置时仍有默认硬边界",
@@ -133,6 +197,17 @@ check("UT 被测源码变更由 done 自动回流",
 check("旧版 UT 在途状态可安全恢复入口 HEAD",
       "def _ensure_step_entry_head" in mf_src and "recover-step-head" in mf_src
       and "禁止拿当前 HEAD 补位" in mf_src)
+check("CodeCheck 解析失败有绑定现场的恢复入口",
+      "def cmd_codecheck_record" in mf_src and "diagnostic_sha256" in mf_src
+      and "代码一变自动失效" in mf_src)
+check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
+      'st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck")' in mf_src
+      and 'expected_steps = {"COMPILE"' in mf_src)
+check("Bash 任意解释器不能直碰流程状态文件",
+      "禁止经 Bash 直接访问" in mf_src and "mae-flow status/current/doctor" in mf_src)
+check("STORY 不入库会在推送前检查提交树", "git ls-tree -r --name-only HEAD" in mf_src)
+check("STORY 不入库由 done 自动移入过程区",
+      'if sid == "story"' in mf_src and 'os.path.join(".mae-flow-work", "story")' in mf_src)
 
 # 6.5 模板与 dispatch 章节校验同步(posttooluse 路由里必须引用同名模板)
 for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):

@@ -149,7 +149,8 @@ def ev_inject(d, session_start=False):
         except Exception as e:
             _log("clear need-reload EXC: %s" % e)
     else:
-        # 用户消息原文进 ack 验真存储(payload 无 prompt 字段的 harness 上存储恒空,验真自动降级)
+        # 用户消息原文进 ack 验真存储。payload 无 prompt 字段时确认步骤会明确拒绝并要求用户
+        # 再发一条普通消息，不再降级成模型自行填写 ack。
         _capture_usermsg(d.get("prompt") or "")
     me = os.path.abspath(MAEFLOW)
     readme = os.path.abspath(os.path.join(HERE, "..", "README.md"))
@@ -236,14 +237,28 @@ def ev_subagentstop(d):
         return out
 
     users, asst = texts("user"), texts("assistant")
-    tool_calls = []
+    tool_calls, by_id = [], {}
     for e in lines:
         c = (e.get("message", {}) or {}).get("content", e.get("content", ""))
         if not isinstance(c, list):
             continue
         for b in c:
             if isinstance(b, dict) and b.get("type") in ("tool_use", "tool_call"):
-                tool_calls.append({"name": b.get("name", ""), "input": b.get("input", {})})
+                call = {"id": b.get("id", ""), "name": b.get("name", ""),
+                        "input": b.get("input", {}), "result_seen": False,
+                        "is_error": False, "result": ""}
+                tool_calls.append(call)
+                if call["id"]:
+                    by_id[call["id"]] = call
+            if isinstance(b, dict) and b.get("type") in ("tool_result", "tool_response"):
+                call = by_id.get(b.get("tool_use_id") or b.get("tool_call_id") or b.get("id"))
+                if call:
+                    content = b.get("content", "")
+                    if isinstance(content, list):
+                        content = "\n".join(str(x.get("text", x)) if isinstance(x, dict) else str(x) for x in content)
+                    call["result_seen"] = True
+                    call["is_error"] = bool(b.get("is_error") or b.get("isError"))
+                    call["result"] = str(content)
     prompt = users[0] if users else ""
     last = (asst[-1] if asst else "").strip()
     # 契约要求标记在第一行:只看首行,不用 re.M(埋在中间不算)
@@ -303,8 +318,13 @@ def _record_agent_token(kind, status=""):
         if os.path.exists(p):
             d = json.loads(open(p, encoding="utf-8").read() or "{}")
         head = _git_head()
+        step = ""
+        try:
+            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+        except Exception:
+            pass
         d[kind] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
-                   "status": status}
+                   "status": status, "step": step}
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False))
         os.replace(tmp, p)
@@ -337,7 +357,12 @@ def _capture_usermsg(text):
             msgs = json.loads(open(p, encoding="utf-8").read() or "[]")
         except Exception:
             msgs = []
-        msgs.append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text[:2000]})
+        step = ""
+        try:
+            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+        except Exception:
+            pass
+        msgs.append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": step, "text": text[:2000]})
         msgs = msgs[-10:]
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(json.dumps(msgs, ensure_ascii=False))
@@ -392,6 +417,12 @@ def _task_card_contract(kind, report, soft=False):
         _contract_bail(kind, "任务卡不可读:" + str(e), soft)
     if actual != task.get("sha256"):
         _contract_bail(kind, "任务卡内容被修改过,必须重新执行 agent-task 生成。", soft)
+    head = task.get("head", "")
+    if not re.fullmatch(r"[0-9a-f]{7,64}", head or ""):
+        _contract_bail(kind, "任务卡缺少可验证的基点 HEAD。", soft)
+    base = _git_out(f"git merge-base {head} HEAD").strip()
+    if base != head and head != _git_head():
+        _contract_bail(kind, "任务卡基点已不在当前提交历史中(amend/rebase/切分支)，请重新生成任务卡。", soft)
     return task
 
 
@@ -410,7 +441,7 @@ def _field(report, name):
 def _same_config(actual, expected):
     def n(s):
         return re.sub(r"\s+", "", (s or "")).lower()
-    return bool(n(expected)) and (n(expected) in n(actual) or n(actual) in n(expected))
+    return bool(n(actual)) and bool(n(expected)) and n(expected) in n(actual)
 
 
 def _required_skill(config_value):
@@ -424,9 +455,19 @@ def _required_skill(config_value):
     return ""
 
 
-def _skill_called(tool_calls, wanted):
-    if not wanted:
+def _call_failed(call):
+    if not call or not call.get("result_seen"):
+        return False   # 老版本 transcript 没带 tool_result 时兼容放行；done/现场复核仍会兜底
+    if call.get("is_error"):
         return True
+    text = call.get("result", "") or ""
+    return bool(re.search(r"(?:exit(?:ed)?\s*(?:code|status)?|return\s*code)\s*[:= ]\s*[1-9]\d*|"
+                          r"command failed|tool[_ ]?error", text, re.I))
+
+
+def _skill_call(tool_calls, wanted):
+    if not wanted:
+        return None
     for x in tool_calls or []:
         if str(x.get("name", "")).lower() != "skill":
             continue
@@ -435,24 +476,113 @@ def _skill_called(tool_calls, wanted):
         except Exception:
             raw = str(x.get("input", "")).lower()
         if wanted in raw:
-            return True
-    return False
+            return x
+    return None
 
 
-def _bash_called(tool_calls, expected):
+def _skill_called(tool_calls, wanted):
+    return bool(_skill_call(tool_calls, wanted)) if wanted else True
+
+
+def _bash_call(tool_calls, expected):
     def n(s):
         return re.sub(r"\s+", " ", (s or "")).strip().lower()
     want = n(expected)
     if not want:
-        return False
-    for x in tool_calls or []:
+        return None
+    for x in reversed(tool_calls or []):
         if str(x.get("name", "")).lower() != "bash":
             continue
         inp = x.get("input", {}) or {}
         cmd = inp.get("command", "") if isinstance(inp, dict) else str(inp)
-        if want in n(cmd):
-            return True
+        # 只接受某个真实命令段以目标命令开头；echo/printf "目标命令" 不算执行。
+        segs = re.split(r"&&|\|\||[;\n]", n(cmd))
+        if any(seg.strip().startswith(want) for seg in segs):
+            return x
+    return None
+
+
+def _bash_called(tool_calls, expected):
+    return bool(_bash_call(tool_calls, expected))
+
+
+def _require_bash_success(tool_calls, expected, bail, label):
+    call = _bash_call(tool_calls, expected)
+    if not call:
+        bail(f"transcript 中没有真实执行配置的{label}命令；echo/文字提及不算执行。")
+    if _call_failed(call):
+        bail(f"最后一次{label}命令的工具结果明确失败，不能报告成功。")
+    return call
+
+
+def _section(report, name):
+    m = re.search(r"^\s*" + re.escape(name) + r":\s*(.*?)(?=^\s*[A-Z][A-Z0-9_]+:\s*|\Z)",
+                  report, re.M | re.S)
+    return m.group(1).strip() if m else None
+
+
+def _empty_section(value):
+    return value is not None and re.sub(r"[\s`*_-]+", "", value).lower() in ("无", "none", "0", "暂无")
+
+
+def _changed_paths_since(head):
+    out = _git_out(f"git -c core.quotepath=false diff --name-only {head}..HEAD")
+    paths = [x.strip() for x in out.splitlines() if x.strip()]
+    for line in _git_out("git -c core.quotepath=false status --porcelain").splitlines():
+        p = line.split(None, 1)
+        if len(p) == 2:
+            paths.append(p[1].split(" -> ")[-1].strip().strip('"'))
+    return list(dict.fromkeys(x.replace("\\", "/") for x in paths))
+
+
+_TEST_PAT = re.compile(r"(^|/)(tests?|__tests__|spec)/|(^|/)src/test/|(^|/)test_[^/]+\.py$|"
+                       r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|py|go|rs|js|jsx|ts|tsx)$|Tests?\.(java|kt|cs)$", re.I)
+_SOURCE_PAT = re.compile(r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|java|kt|kts|groovy|scala|py|pyi|go|rs|cs|"
+                         r"js|jsx|ts|tsx|vue|swift|m|mm|proto|sql|s|asm|cmake|gradle|sln|vcxproj|props|targets)$|"
+                         r"(^|/)(CMakeLists\.txt|Makefile|pom\.xml|build\.gradle|settings\.gradle|package\.json|"
+                         r"Cargo\.toml|go\.mod|meson\.build)$|(^|/)(service|src|include|lib|app|modules?)/", re.I)
+
+
+def _test_like(path):
+    if _TEST_PAT.search(path):
+        return True
+    pats = []
+    try:
+        v = (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {}).get("测试路径", [])
+        pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
+    except Exception:
+        pass
+    try:
+        v = json.load(open(".mae-flow-defaults.json", encoding="utf-8")).get("测试路径", [])
+        pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
+    except Exception:
+        pass
+    for pat in pats:
+        try:
+            if re.search(pat, path, re.I):
+                return True
+        except re.error:
+            continue
     return False
+
+
+def _enforce_agent_scope(kind, task, bail):
+    changed = [p for p in _changed_paths_since(task.get("head", "")) if _SOURCE_PAT.search(p)]
+    if kind == "COMPILE":
+        bad = [p for p in changed if _test_like(p)]
+        if bad:
+            bail("compile-agent 越权修改了测试文件: " + "、".join(bad[:5]))
+    elif kind == "CODECHECK":
+        allowed = {str(x).replace("\\", "/").lower() for x in task.get("allowed_files", [])}
+        bad = [p for p in changed if p.lower() not in allowed]
+        if bad:
+            bail("codecheck-fix-agent 修改了首检范围外文件: " + "、".join(bad[:5]))
+    elif kind == "UT":
+        bad = [p for p in changed if not _test_like(p)]
+        if bad:
+            bail("ut-generator-agent 修改了非测试源码: " + "、".join(bad[:5])
+                 + "；源码缺陷必须先交用户裁决。")
+    return changed
 
 
 def _codecheck_contract(status, report, tool_calls=None, soft=False):
@@ -462,13 +592,13 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
     def bail(msg):
         _contract_bail("CODECHECK", msg, soft)
 
-    _task_card_contract("CODECHECK", report, soft)
+    task = _task_card_contract("CODECHECK", report, soft)
+    _enforce_agent_scope("CODECHECK", task, bail)
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
     if status == "FAIL":
         return   # FAIL 是诚实上报,不再苛求对账字段
-    if not _bash_called(tool_calls, "codecheck fullcheck"):
-        bail("transcript 中没有 codecheck fullcheck 的 Bash 工具调用,报告文字不能替代真实执行。")
+    _require_bash_success(tool_calls, "codecheck fullcheck", bail, "CodeCheck")
     nums = {}
     for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
         mm = re.search(r"^\s*" + k + r":\s*(\d+)\s*$", report, re.M)
@@ -480,7 +610,8 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     except Exception:
         st, scan = {}, {}
-    if st.get("current") == "rf_codecheck" and scan.get("step") == "rf_codecheck":
+    if st.get("current") in ("rf_codecheck", "tw_codecheck", "verify_codecheck") \
+            and scan.get("step") == st.get("current"):
         if nums["FOUND"] != scan.get("count"):
             bail(f"FOUND({nums['FOUND']})与 harness 首检({scan.get('count')})不一致。"
                  "禁止主会话先修后让 agent 补手续；回到首检状态并由 agent 处理原告警。")
@@ -497,10 +628,14 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         if not build or not _same_config(build, build_cfg):
             bail("修复了源码但 EXECUTED_BUILD 与配置的编译方式不一致,禁止猜编译命令。")
         need = _required_skill(build_cfg)
-        if need and not _skill_called(tool_calls, need):
-            bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
-        if not need and not _bash_called(tool_calls, build_cfg):
-            bail("修复源码后 transcript 中没有配置编译命令的 Bash 调用。")
+        if need:
+            call = _skill_call(tool_calls, need)
+            if not call:
+                bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
+            if _call_failed(call):
+                bail(f"{need} Skill 的工具结果明确失败，不能把本轮修复计为已编译。")
+        else:
+            _require_bash_success(tool_calls, build_cfg, bail, "编译")
     # 与复验摘录对账:契约要求附「共有 N 条告警」原文,取最后一处(复验)与 REMAINING_COUNT 比对
     ex = re.findall(r"共有\s*(\d+)\s*条告警", report)
     if ex and int(ex[-1]) != nums["REMAINING_COUNT"]:
@@ -511,7 +646,8 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     def bail(msg):
         _contract_bail("UT", msg, soft)
 
-    _task_card_contract("UT", report, soft)
+    task = _task_card_contract("UT", report, soft)
+    _enforce_agent_scope("UT", task, bail)
     if status not in ("PASS", "NEEDS_INPUT", "FAIL"):
         bail("未知结果状态 " + status)
     if status != "PASS":
@@ -520,15 +656,34 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     if not _same_config(_field(report, "GENERATOR_USED"), cfg.get("UT生成方式", "")):
         bail("GENERATOR_USED 与任务卡的 UT生成方式不一致；必须调用配置的 AutoUT/java-autout 等能力。")
     need = _required_skill(cfg.get("UT生成方式", ""))
-    if need and not _skill_called(tool_calls, need):
-        bail(f"UT 配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用；不能用手写代码冒充 Skill 产出。")
+    if need:
+        call = _skill_call(tool_calls, need)
+        if not call:
+            bail(f"UT 配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用；不能用手写代码冒充 Skill 产出。")
+        if _call_failed(call):
+            bail(f"{need} Skill 的工具结果明确失败，不能报告 PASS。")
     if not _same_config(_field(report, "EXECUTED_UT"), cfg.get("UT运行命令", "")):
         bail("EXECUTED_UT 与配置的 UT运行命令不一致；未真实运行不得 PASS。")
-    if not _bash_called(tool_calls, cfg.get("UT运行命令", "")):
-        bail("transcript 中没有配置 UT运行命令的 Bash 工具调用,不能仅凭报告声称已执行。")
-    known = re.search(r"KNOWN_FAILURES:\s*(.+)", report, re.I)
-    if known and known.group(1).strip().lower() not in ("无", "none", "0"):
-        bail("标记 PASS 但 KNOWN_FAILURES 非空。")
+    _require_bash_success(tool_calls, cfg.get("UT运行命令", ""), bail, "UT运行")
+    for name in ("PENDING_QUESTIONS", "KNOWN_FAILURES", "SUSPECTED_BUGS"):
+        value = _section(report, name)
+        if value is None:
+            bail(f"PASS 报告缺少 {name}: 字段。")
+        if not _empty_section(value):
+            bail(f"标记 PASS 但 {name} 非空；必须先交主会话和用户处理，不能带问题过关。")
+    coverage = _section(report, "AC_COVERAGE")
+    if coverage is None:
+        bail("PASS 报告缺少 AC_COVERAGE 验收场景对照。")
+    if re.search(r"缺口|未覆盖|无对应", coverage):
+        bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS。")
+    nums = {}
+    for name in ("TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED"):
+        m = re.search(r"^\s*" + name + r":\s*(\d+)\s*$", report, re.M)
+        if not m:
+            bail(f"PASS 报告缺少 {name}: <数字>。")
+        nums[name] = int(m.group(1))
+    if nums["TESTS_FAILED"] != 0 or nums["TESTS_TOTAL"] != nums["TESTS_PASSED"]:
+        bail("UT 数字对账不通过：PASS 必须 TESTS_FAILED=0 且 TOTAL=PASSED。")
 
 
 def _git_out(cmd):
@@ -541,28 +696,20 @@ def _git_out(cmd):
         return ""
 
 
-def _compile_net_lines():
+def _compile_net_lines(head):
     """编译修复的净行数,git 亲算(agent 报数不作数):
     未提交改动 + 自 HEAD 回溯的连续「修复编译」commit,只统计代码文件。
     这是防掏空的机器不变量:删代码换编译通过,在这里得不了分。"""
-    exts = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
-            ".inl", ".ipp", ".tpp", ".java")
-
     def net_of(out):
         n = 0
         for line in out.splitlines():
             p = line.split("\t")
-            if len(p) == 3 and p[0].isdigit() and p[1].isdigit() and p[2].lower().endswith(exts):
+            if len(p) == 3 and p[0].isdigit() and p[1].isdigit() and _SOURCE_PAT.search(p[2].replace("\\", "/")):
                 n += int(p[0]) - int(p[1])
         return n
 
-    total = net_of(_git_out("git -c core.quotepath=false diff --numstat"))
-    for depth in range(10):
-        subj = _git_out(f"git log -1 --skip={depth} --pretty=%s").strip()
-        if "修复编译" not in subj:
-            break
-        total += net_of(_git_out(f"git -c core.quotepath=false show --numstat --pretty=format: HEAD~{depth}"))
-    return total
+    return (net_of(_git_out(f"git -c core.quotepath=false diff --numstat {head}..HEAD"))
+            + net_of(_git_out("git -c core.quotepath=false diff --numstat HEAD")))
 
 
 def _compile_contract(status, report, tool_calls=None, soft=False):
@@ -571,7 +718,8 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
     def bail(msg):
         _contract_bail("COMPILE", msg, soft)
 
-    _task_card_contract("COMPILE", report, soft)
+    task = _task_card_contract("COMPILE", report, soft)
+    _enforce_agent_scope("COMPILE", task, bail)
     if status == "FAIL":
         return   # 诚实上报工具/配置问题,不苛求对账
     if not re.search(r"EXECUTED_BUILD", report):
@@ -580,10 +728,14 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
     if not _same_config(_field(report, "EXECUTED_BUILD"), build_cfg):
         bail("EXECUTED_BUILD 与配置确认的编译方式不一致,禁止自行猜测或替换编译命令。")
     need = _required_skill(build_cfg)
-    if need and not _skill_called(tool_calls, need):
-        bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
-    if not need and not _bash_called(tool_calls, build_cfg):
-        bail("transcript 中没有配置编译命令的 Bash 工具调用,不能仅凭报告声称已编译。")
+    if need:
+        call = _skill_call(tool_calls, need)
+        if not call:
+            bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
+        if _call_failed(call):
+            bail(f"{need} Skill 的工具结果明确失败，不能报告编译成功。")
+    else:
+        _require_bash_success(tool_calls, build_cfg, bail, "编译")
     m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
     if not m:
         bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")
@@ -592,8 +744,9 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
         bail(f"标记 OK 但 BUILD_ERRORS={n},自相矛盾。")
     if status == "BLOCKED" and n == 0:
         bail("标记 BLOCKED 但 BUILD_ERRORS=0,自相矛盾(编译已过应报 OK)。")
-    net = _compile_net_lines()
-    if net < 0 and "SHRINK_EXEMPT" not in report:
+    net = _compile_net_lines(task.get("head", ""))
+    shrink = _section(report, "SHRINK_EXEMPT")
+    if net < 0 and (shrink is None or _empty_section(shrink)):
         bail(f"代码净删 {-net} 行(git 亲算:未提交+修复编译 commit)且无 SHRINK_EXEMPT 声明——"
              "禁止删代码/注释代码换编译通过;确属合理精简须逐项声明并接受下游评审复核。")
 

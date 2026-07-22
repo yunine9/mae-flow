@@ -69,7 +69,8 @@ COMPILE_RESULT: FAIL
 1. `TASK_CARD_SHA256: <任务卡中的64位指纹>`
 2. `EXECUTED_BUILD:` 实际执行的编译方式(skill 名或命令原文)+ 最终一次编译输出的关键摘录
 3. `BUILD_ERRORS: <数字>`(最终一次编译的 error 数;OK 必须为 0)
-4. 修复清单:文件 + 每处对应哪条报错;`SHRINK_EXEMPT:` 净删豁免逐项说明(无则写 无)
+4. 修复清单:文件 + 每处对应哪条报错;`SHRINK_EXEMPT:` 净删豁免逐项说明(无则写 无)。注意：
+   harness 会区分“无”和真实说明，写 `SHRINK_EXEMPT: 无` 不能再绕过净删检查
 5. `SUSPECTED_ISSUES:` 疑似需改接口/逻辑清单(根因+建议;无则写 无)
 6. BLOCKED 时:剩余报错 + 每轮假设与结果;FAIL 时:缺失项/工具报错
 

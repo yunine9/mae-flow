@@ -108,6 +108,7 @@ flow.json 步骤字段语义：
 | `clear_hint` | `current` 打印「建议 /clear」提示（重上下文步骤入口的会话卫生引导；状态在磁盘，/clear 零成本） |
 | `tests_only` | 把本步源码写权限收窄到测试路径；优先用「测试路径」配置（config 逗号分隔正则 / defaults 数组），缺失时使用保守内置规则，不再 fail-open；用户裁决后 `unlock source` 临时放行 |
 | `source_change_recheck` | tests_only 步骤经 unlock 改了被测源码后，done 不走原 next，自动回流到指定质量链入口（rf_ut→rf_compile，verify_ut→verify_recompile） |
+| `source_change_next` | 可选精简步骤如果实际改了源码，done 自动改走专用编译节点；没有源码变化才走普通 next。源码必须先形成当前步骤的新提交，避免任务卡漏掉未提交文件 |
 | `terminal` | 终态；打印同名 md 作收尾指令 |
 
 ### 3.2 证据系统（EVIDENCE 表）
@@ -125,9 +126,9 @@ flow.json 步骤字段语义：
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
 | `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
-| `codecheck_clean` | **done 现场重跑 `codecheck fullcheck -f <业务代码>` 亲数遗留**。告警数按控制台「共有 N」→报告汇总表「总计」→明确零告警文案多路解析，不依赖 CLI 退出码。遗留除豁免文件外还必须有 `approve-exemption` 写入的用户审批账；手写文件不算授权（review 基点前已有的历史豁免继续承认） |
-| `review_agent_or_no_code` | review 本轮没有业务代码改动自动过；有代码改动时强制指定 agent 的成功状态（rf_compile=COMPILE/OK，rf_ut=UT/PASS） |
-| `review_codecheck` | 必须先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警必须有 CODECHECK agent 合法收尾，首检 0 后源码变化会令扫描过期；最后再走 codecheck_clean 现场复核 |
+| `codecheck_clean` | **done 现场重跑 `codecheck fullcheck -f <业务代码>` 亲数遗留**。告警数按控制台「共有 N」→报告汇总表「总计」→问题明细标题→JSON 结果→明确零告警文案多路解析，不依赖 CLI 退出码。解析失败不等于有告警：保存完整现场，让用户核对后走绑定式恢复。遗留除豁免文件外还必须有 `approve-exemption` 写入的用户审批账；手写文件不算授权（review 基点前已有的历史豁免继续承认） |
+| `agent_or_no_source` | 本轮没有源码、测试或构建文件改动时自动过；只要有改动就强制指定 agent 的成功状态。适用于主流程、小改和评审返工，不再只认 C++/Java |
+| `review_codecheck` | 三条流程统一先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警才允许派 CODECHECK agent，首检 0 后源码变化会令扫描过期；最后再走 codecheck_clean 现场复核。输出格式无法解析时保存完整诊断，并允许用户核对后用 `codecheck-record` 登记数量；记录绑定步骤、HEAD、文件清单和诊断哈希，不是无条件放行 |
 
 **新增证据类型**：在 mae-flow.py 写 `ev_xxx(spec, st) -> (bool, 失败原因)`，注册进 `EVIDENCE` 字典，flow.json 里引用。失败原因要写"怎么补救"，它会原样回传给模型。
 
@@ -169,7 +170,7 @@ CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛�
 ### 3.5 环境检查（env_checks）
 
 类型：`cmd`（退出码 0）、`cmd_contains`、`node_min`、`path_any`、`file_contains`。
-**判 CLI 可用性别赌 `--help`/`--version` 的退出码**（2026-07-21 实战：`codecheck fullcheck --help` 打印帮助后 exit 1，被 `cmd` 类型误判"不可用"，白派诊断/白拦流程）。commander/Java 系 CLI 的 help 常以非零码退出——用 `cmd_contains` 看输出特征字样（如 `fullcheck`），退出码无关。同理 `ev_codecheck_clean` 判成败也只解析"共有 N 条告警"不看退出码（lint 类工具有告警时常返非零）。
+**判 CLI 可用性别赌 `--help`/`--version` 的退出码**（2026-07-21 实战：`codecheck fullcheck --help` 打印帮助后 exit 1，被 `cmd` 类型误判"不可用"，白派诊断/白拦流程）。commander/Java 系 CLI 的 help 常以非零码退出——用 `cmd_contains` 看输出特征字样（如 `fullcheck`），退出码无关。同理 `ev_codecheck_clean` 不看退出码，而是解析提示行、Markdown 汇总/明细或 JSON；全都不认识时保存现场并走用户核对恢复口。
 **缓存**：机器级慢检查全绿后 touch `~/.mae-flow-env-ok`，24h 内跳过；`FAST_TYPES`（path_any / file_contains，项目级）永远实测；`envcheck` 命令永远全量并刷新缓存。新增检查时想清楚它是机器级还是项目级。
 **安装三层策略**（2026-07-20 实战定型，comet init 全平台初始化事故后重构）：A 类确定性安装 → `setup.py`（零创造力、幂等、失败带诊断线索、终验复用 envcheck）；C 类诊断 → env-setup-agent（读日志修环境参数后**重跑 setup.py**，禁止绕过它手工装——"用另一条路装上"不可复现）；B 类交互 → 人工三要素话术（comet init 会话内 gate 硬拦）。环境常量全在 env-profile.json，换代理/镜像/插件命令只改一处。教训：把智能用在确定性工作上，幺蛾子是创造力的副产品。
 
@@ -273,12 +274,12 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 - **verify_ponytail 零证据**——跳过无人知；兜底：复杂度维度有 build 期 ponytail 常驻 + codecheck + comet review 三重冗余。
 - **codecheck REMAINING 的用户决策语义仍不可完全验真**——但 `approve-exemption` 已要求本步 ASKUSER 令牌、用户原话验真并写状态审批账；手写豁免文件不能放行。
-- **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——不可验真（固有），价值在显式动作 + 留痕可审计。archive_confirm 已加 ASKUSER 令牌硬证据（「真实问过」可验；「用户答的是什么」仍不可验）。
+- **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——现在会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。宿主拿不到选项应答正文时，让用户再发一条普通消息即可恢复；不再静默降级成模型可自填。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 
 - **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
-- **ack 验真已落地"三级放行"**（done 与 goto 同用）：①ack 与 harness 捕获的近期用户输入（`.mae-flow.json.usermsg`，UserPromptSubmit 的 prompt + AskUserQuestion 的应答）归一化匹配→过；②本步内有 ASKUSER 令牌→过（交互真实性已证）；③存储非空且两者皆无→拒。存储恒空（公司 harness 无 prompt/tool_response 字段）时自动降级为旧行为，永不误卡——字段有无以公司机金丝雀为准。剩余不可验：用户所答内容的语义（固有）。
+- **ack 验真按步骤绑定**（done / goto / unlock / 豁免 / CodeCheck 人工恢复共用）：只接受当前步骤进入后捕获到的用户原话；令牌与用户消息都记录 step，不能跨关复用。若公司 harness 没回传 AskUserQuestion 的选项正文，要求用户用普通消息重复确认一次。这里选择“显式多确认一次”而不是 fail-open，因为这些命令会改变流程或放宽约束。
 - **一仓一单**——并行走 worktree；suspend/resume 未做（等真实需求）。
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧 2.0.2 的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。

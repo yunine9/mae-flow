@@ -17,9 +17,8 @@ NEEDS_CONFIRM→待确认项是**用户的决策,禁止以"判定合理/我认�
 完成后同样展示路径与概览。
 定稿后用 AskUserQuestion 询问用户 STORY 是否入库(一般不入库,仅本地交付给测试):
 要 → git add docs/story/STORY-{单号}.md && git commit -m "[单号][类型]STORY文档"(精确路径,禁止宽 add);
-不要 → **done 通过后立即移入过程区**:mv docs/story/STORY-{单号}.md .mae-flow-work/story/(目录不存在先建;
-该区已 gitignore,物理上不可能被卷进提交——实战教训:留在 docs/ 会被后续宽 add 卷进 MR),
-把新路径告知用户交给测试;之后 dirty 归因不再涉及它。
-之后 done --set STORY入库=<用户选择原文>。
+不要 → 不要手动移动，也不要 `git add`；直接执行 done --set STORY入库=<用户选择原文>。
+证据通过后 harness 会自动把文件移入 `.mae-flow-work/story/`，该区已 gitignore，随后把新路径告知用户交给测试。
+如果文件已经被误加入 Git，done 会明确拒绝并给出精确移出方法；推送前还会再检查一次。
 done 的硬校验(骗不过去):文档零"待确认"残留、每个"不涉及"必须写作"不涉及(已确认)"
 (裸"不涉及"=未经用户确认的非法状态)、STORY入库 必填——三者共同保证确认闭环真实发生过。

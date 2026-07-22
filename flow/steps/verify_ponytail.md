@@ -6,5 +6,6 @@
   确认后 goto open --ack 回流修订 spec,再顺流回来(裁决通道,不是死路);
 - correctness/security 类问题不归本步(ponytail-review 明确出界),记下来交 comet 审查
   (review_mode=standard 的最终审查/verify 阶段的轻量审查)处理。
-精简后 → 重新编译、存量 UT(如有)跑一遍确认无回归 → git commit -m "[单号][类型]精简代码"。
+精简后 → git commit -m "[单号][类型]精简代码" → done。状态机会检测本步是否真的改了源码：
+改了就自动进入独立 compile-agent 节点，没改才直接进入 CodeCheck。主会话不要自己编译。
 (本步排在 CodeCheck 与 UT 之前:先删掉该死的代码,再修规范、再补测,不做无用功。)

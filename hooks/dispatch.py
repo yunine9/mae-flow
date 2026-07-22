@@ -28,6 +28,7 @@ for _s in (sys.stdout, sys.stderr):
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAEFLOW = os.path.join(HERE, "..", "scripts", "mae-flow.py")
 STATE = ".mae-flow.json"
+EXIT_STATE = ".mae-flow.json.exited"
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
 STDIN_SECS = 3
@@ -105,12 +106,13 @@ def read_input():
 
 def _chdir_root(d):
     """hook 进程的 cwd 是 codeagent 启动目录,未必是项目根。
-    以 hook JSON 的 cwd 为基准向上找 .mae-flow.json 并 chdir;
+    以 hook JSON 的 cwd 为基准向上找 .mae-flow.json 或退出标记并 chdir;
     找不到则退回 JSON cwd(init 之前属正常)。mae-flow 自身还会再定位一次,双保险。"""
     base = d.get("cwd") or os.getcwd()
     probe = os.path.abspath(base)
     while True:
-        if os.path.exists(os.path.join(probe, STATE)):
+        if (os.path.exists(os.path.join(probe, STATE))
+                or os.path.exists(os.path.join(probe, EXIT_STATE))):
             if probe != os.getcwd():
                 _log("chdir 项目根: " + probe)
             os.chdir(probe)
@@ -369,6 +371,23 @@ def _capture_usermsg(text):
         os.replace(tmp, p)
     except Exception as e:
         _log("usermsg EXC: %s" % e)
+
+
+def _capture_direct_prompt(text):
+    """直接模式也只为“用户明确重新启用”保留最近原话；不恢复任何旧流程令牌。"""
+    try:
+        text = (text or "").strip()
+        if not text or not os.path.isfile(EXIT_STATE):
+            return
+        rec = json.load(open(EXIT_STATE, encoding="utf-8"))
+        msgs = rec.get("direct_messages", []) or []
+        msgs.append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text[:2000]})
+        rec["direct_messages"] = msgs[-10:]
+        tmp = EXIT_STATE + ".tmp"
+        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False, indent=2))
+        os.replace(tmp, EXIT_STATE)
+    except Exception as e:
+        _log("direct prompt EXC: %s" % e)
 
 
 def _maybe_utrun(d):
@@ -809,7 +828,17 @@ def main():
     try:
         d = read_input()
         _chdir_root(d)
-        if ev == "pretooluse":
+        if os.path.exists(EXIT_STATE):
+            # 用户已明确退出：MAE-FLOW 完整让出控制权。不能只跳过源码 gate 而继续发令牌/注入步骤，
+            # 否则会形成“表面直接开发，后台仍在推进旧流程”的半退出状态。
+            if ev in ("userprompt", "sessionstart"):
+                if ev == "userprompt":
+                    _capture_direct_prompt(d.get("prompt") or "")
+                print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
+                      "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
+            _log("direct mode: bypass " + ev)
+            rc = 0
+        elif ev == "pretooluse":
             ev_pretooluse(d)
         elif ev == "userprompt":
             ev_inject(d)

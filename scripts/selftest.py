@@ -3,7 +3,9 @@
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import importlib.util, json, os, py_compile, re, sys, tempfile, types
+import importlib.util, json, os, py_compile, re, subprocess, sys, tempfile, types
+
+from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -17,7 +19,8 @@ def check(name, ok, detail=""):
 
 
 # 1. 语法
-for f in ("scripts/mae-flow.py", "hooks/dispatch.py", "scripts/statusline.py", "scripts/setup.py"):
+for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
+          "scripts/statusline.py", "scripts/setup.py"):
     try:
         py_compile.compile(os.path.join(ROOT, f), doraise=True)
         check(f"语法 {f}", True)
@@ -154,6 +157,76 @@ if flow:
           not mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp\n- R.TWO | b/Bar.cpp", "R.ONE", "b/Bar.cpp")
           and mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp", "R.ONE", "a/Foo.cpp"))
 
+    # 退出必须保留业务现场、归档状态并使直接模式标记立即可见。
+    old_cwd = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            open("keep.cpp", "w", encoding="utf-8").write("int keep = 1;\n")
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            subprocess.run(["git", "add", "keep.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            now = "2026-07-22 20:00:00"
+            st = {"current": "config_confirm", "config": {"单号": "REQEXIT1"},
+                  "choices": {}, "history": [], "started": now}
+            mf.save_state(st)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                response = json.dumps({"answers": {"exit": "确认退出流程并保留代码"}}, ensure_ascii=False)
+                json.dump([{"text": response, "step": "config_confirm", "at": now}],
+                          f, ensure_ascii=False)
+            mf.cmd_exit(flow, st, types.SimpleNamespace(ack="", reason=""))
+            check("exit 只预览时不会解除门禁",
+                  os.path.isfile(mf.STATE_PATH) and not os.path.exists(mf.EXIT_PATH))
+            mf.cmd_exit(flow, st, types.SimpleNamespace(
+                ack="确认退出流程并保留代码", reason="改为直接开发"))
+            rec = json.load(open(mf.EXIT_PATH, encoding="utf-8"))
+            snap = rec.get("snapshot", "")
+            check("exit 保留业务文件并归档流程现场",
+                  open("keep.cpp", encoding="utf-8").read() == "int keep = 1;\n"
+                  and not os.path.exists(mf.STATE_PATH)
+                  and os.path.isfile(os.path.join(snap, mf.STATE_PATH))
+                  and os.path.isfile(os.path.join(snap, "exit-record.json")))
+            check("exit 记录步骤、原因与旧证据失效边界",
+                  rec.get("step") == "config_confirm" and rec.get("reason") == "改为直接开发"
+                  and bool(re.fullmatch(r"[0-9a-f]{40}", rec.get("head", ""))))
+            reenable_blocked = False
+            try:
+                mf._resume_direct_mode()
+            except SystemExit as exc:
+                reenable_blocked = exc.code == 2
+            check("Agent 不能自行重新启用流程",
+                  reenable_blocked and os.path.exists(mf.EXIT_PATH))
+            rec["direct_messages"] = [{"text": "重新使用 mae-flow 交付新需求"}]
+            mf._write_json_atomic(mf.EXIT_PATH, rec)
+            restored = mf._resume_direct_mode("重新使用 mae-flow 交付新需求")
+            check("用户明确确认后恢复原断点且清空旧令牌",
+                  not os.path.exists(mf.EXIT_PATH) and restored.get("current") == "config_confirm"
+                  and os.path.isfile(mf.STATE_PATH) and not os.path.exists(mf.STATE_PATH + ".tokens"))
+
+            # 晚阶段退出后直接改过源码：恢复时不得回到原步骤继续吃旧证据。
+            restored["current"] = "verify_ut"
+            restored["choices"] = {"workflow": "full"}
+            restored["quality"] = {"codecheck_scan": {"total": 0}}
+            restored["agent_tasks"] = {"UT": {"head": rec["head"]}}
+            mf.save_state(restored)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "确认再次退出", "step": "verify_ut", "at": now}], f,
+                          ensure_ascii=False)
+            mf.cmd_exit(flow, restored, types.SimpleNamespace(ack="确认再次退出", reason="临时直接修复"))
+            open("keep.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
+            rec2 = json.load(open(mf.EXIT_PATH, encoding="utf-8"))
+            rec2["direct_messages"] = [{"text": "重新接回 mae-flow"}]
+            mf._write_json_atomic(mf.EXIT_PATH, rec2)
+            resumed2 = mf._resume_direct_mode("重新接回 mae-flow")
+            check("退出期间改过源码会回退质量链并废弃旧证据",
+                  resumed2.get("current") == "verify_recompile"
+                  and "quality" not in resumed2 and "agent_tasks" not in resumed2
+                  and not os.path.exists(mf.STATE_PATH + ".tokens"))
+    finally:
+        os.chdir(old_cwd)
+
     # 5. 占位符白名单
     KNOWN = {"单号", "CHANGE_NAME", "工号", "基线分支", "分支名", "单号类型", "STORY入库", "需求文档"}
     ph = set()
@@ -192,6 +265,29 @@ check("空配置不能冒充已执行命令", not dispatch._same_config("", "mcd
 check("子 Agent 令牌和用户确认均绑定当前步骤",
       '"step": step' in dp and 'm.get("step") == sid' in open(
           os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read())
+check("dispatch 在直接模式完整停止旧流程接管",
+      "direct mode: bypass" in dp and "不要运行 current/done" in dp)
+
+# 6.1 Comet 阶段门禁只增加一个幂等标记检查；从子目录调用也能找到项目根退出标记。
+with tempfile.TemporaryDirectory() as td:
+    guard = os.path.join(td, ".cac", "skills", "comet", "scripts", "comet-hook-guard.sh")
+    os.makedirs(os.path.dirname(guard), exist_ok=True)
+    open(guard, "w", encoding="utf-8").write(
+        "#!/bin/bash\nset -euo pipefail\necho blocked >&2\nexit 2\n")
+    found1, patched1, errors1 = ensure_direct_mode_compat(td)
+    found2, patched2, errors2 = ensure_direct_mode_compat(td)
+    os.makedirs(os.path.join(td, "src", "nested"))
+    open(os.path.join(td, ".mae-flow.json.exited"), "w", encoding="utf-8").write("{}\n")
+    direct = subprocess.run(["bash", guard], cwd=os.path.join(td, "src", "nested"),
+                            capture_output=True, text=True)
+    os.remove(os.path.join(td, ".mae-flow.json.exited"))
+    managed = subprocess.run(["bash", guard], cwd=td, capture_output=True, text=True)
+    guard_text = open(guard, encoding="utf-8").read()
+    check("Comet Hook 退出兼容幂等且可从子目录识别",
+          len(found1) == 1 and len(patched1) == 1 and not errors1
+          and len(found2) == 1 and not patched2 and not errors2
+          and guard_text.count(COMET_COMPAT_BEGIN) == 1
+          and direct.returncode == 0 and managed.returncode == 2)
 
 mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
 check("tests_only 缺配置时仍有默认硬边界",
@@ -232,7 +328,7 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "skills/mae-flow/assets/settings-baseline.json",
-          "skills/mae-flow/assets/env-profile.json", "scripts/setup.py",
+          "skills/mae-flow/assets/env-profile.json", "scripts/setup.py", "scripts/comet_compat.py",
           "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))
 

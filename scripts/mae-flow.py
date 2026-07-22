@@ -17,9 +17,13 @@
   mae-flow.py gate edit <路径>           hook 判定:此刻能否编辑该文件(exit 0/2)
   mae-flow.py gate bash <命令>           hook 判定:git 分支/commit 命令是否合规
   mae-flow.py goto <step> --force        人工修复:强制跳转(留痕)
+  mae-flow.py exit [--reason 文本] [--ack 用户原话]
+                                         保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
 import argparse, glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+
+from comet_compat import ensure_direct_mode_compat
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -37,6 +41,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FLOW_PATH = os.path.join(HERE, "..", "flow", "flow.json")
 STEPS_DIR = os.path.join(HERE, "..", "flow", "steps")
 STATE_PATH = ".mae-flow.json"   # 相对项目根;启动时 find_project_root() 自动 chdir,不赌调用方 cwd
+EXIT_PATH = ".mae-flow.json.exited"  # 复用既有 .mae-flow.json* ignore;存在时 Hook 不再接管普通开发
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
@@ -58,13 +63,13 @@ SOURCE_FILENAMES = {
 
 def find_project_root(start=None):
     """从 start(默认 cwd)向上定位项目根,消除"模型 cd 进子目录后调用"的错位:
-    优先找已有 .mae-flow.json;没有(init 场景)则找 .git / openspec 标记;
+    优先找已有 .mae-flow.json 或退出标记;没有(init 场景)则找 .git / openspec 标记;
     都没有就留在原地。返回 (root, 是否已有状态文件)。"""
     d = os.path.abspath(start or os.getcwd())
     probe = d
     while True:
-        if os.path.exists(os.path.join(probe, STATE_PATH)):
-            return probe, True
+        if os.path.exists(os.path.join(probe, STATE_PATH)) or os.path.exists(os.path.join(probe, EXIT_PATH)):
+            return probe, os.path.exists(os.path.join(probe, STATE_PATH))
         parent = os.path.dirname(probe)
         if parent == probe:
             break
@@ -931,7 +936,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
             "review_codecheck": ev_review_codecheck}
 
 
-def _ack_verified(st, ack):
+def _ack_verified(st, ack, exact=False):
     """ack 必须来自当前步骤之后的真实用户输入；旧步骤的“可以”不能循环使用。
 
     如果宿主拿不到 AskUserQuestion 的应答正文，用户再发一条普通消息即可恢复；不允许静默降级为
@@ -953,7 +958,30 @@ def _ack_verified(st, ack):
     entered = _step_entered_at(st)
     current_msgs = [m for m in msgs
                     if m.get("at", "") >= entered and (not m.get("step") or m.get("step") == sid)]
-    if na and any(na in nt(m.get("text", "")) for m in current_msgs):
+
+    def candidates(text):
+        """AskUserQuestion 在不同宿主里可能存成 JSON；精确确认应匹配其中一个真实字符串值。"""
+        out = [text or ""]
+        try:
+            value = json.loads(text)
+
+            def walk(v):
+                if isinstance(v, str):
+                    out.append(v)
+                elif isinstance(v, dict):
+                    for item in v.values():
+                        walk(item)
+                elif isinstance(v, list):
+                    for item in v:
+                        walk(item)
+            walk(value)
+        except Exception:
+            pass
+        return [nt(v) for v in out if nt(v)]
+
+    actual = [v for m in current_msgs for v in candidates(m.get("text", ""))]
+    matched = any((na == v if exact else na in v) for v in actual) if na else False
+    if matched:
         return True, ""
     return False, ("--ack 与当前步骤开始后的用户真实输入不匹配。"
                    "ack 必须是用户回复/选项的**原文复制**(禁止转述、概括、代答);"
@@ -1176,7 +1204,132 @@ def print_current(flow, st):
 
 # ---------------- 命令 ----------------
 
+def _state_sidecars():
+    return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg", STATE_PATH + ".tmp"]
+
+
+def _unique_exit_dir(st):
+    ticket = re.sub(r"[^A-Za-z0-9._-]+", "-", (st.get("config", {}) or {}).get("单号", "unknown"))
+    base = os.path.join(".mae-flow-work", "exited",
+                        time.strftime("%Y%m%d-%H%M%S") + "-" + (ticket or "unknown"))
+    path, n = base, 2
+    while os.path.exists(path):
+        path, n = base + "-" + str(n), n + 1
+    os.makedirs(path, exist_ok=False)
+    return path
+
+
+def _snapshot_state_files(dst):
+    """复制流程状态到可恢复目录；只处理明确白名单，不扫、不删用户文件。"""
+    copied = []
+    for src in _state_sidecars():
+        if os.path.isfile(src):
+            target = os.path.join(dst, os.path.basename(src))
+            shutil.copy2(src, target)
+            copied.append((src, target))
+    return copied
+
+
+def _write_json_atomic(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _reopen_comet_archive(st):
+    cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
+    scripts = [os.path.join(base, "skills", "comet", "scripts", "comet-state.sh")
+               for base in (".cac", ".claude")]
+    script = next((p for p in scripts if os.path.isfile(p)), "")
+    if not cn or not script:
+        return False, "缺 CHANGE_NAME 或 comet-state.sh"
+    try:
+        result = subprocess.run(["bash", script, "transition", cn, "archive-reopen"],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                timeout=30)
+    except Exception as exc:
+        return False, str(exc)
+    if result.returncode != 0:
+        return False, ((result.stdout or "") + (result.stderr or "")).strip()[-1000:]
+    return True, ""
+
+
+def _resume_direct_mode(ack=""):
+    """恢复退出前现场；直接开发期间若改过源码，只回退到必要的质量链入口。"""
+    if not os.path.exists(EXIT_PATH):
+        return None
+    try:
+        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+    except Exception:
+        rec = {}
+    normalized_ack = re.sub(r"\s+", "", ack or "")
+    direct_messages = [re.sub(r"\s+", "", m.get("text", ""))
+                       for m in (rec.get("direct_messages", []) or [])]
+    if not normalized_ack or normalized_ack not in direct_messages:
+        die("当前项目处于普通开发模式。重新启用 mae-flow 会恢复门禁，必须由用户明确提出，并执行 "
+            "init --ack \"用户原话\"；普通改码请求不能由 Agent 自行解释成重新启用。", 2)
+    dst = rec.get("snapshot", "")
+    saved_state = os.path.join(dst, STATE_PATH) if dst else ""
+    if not saved_state or not os.path.isfile(saved_state):
+        die("退出现场缺少状态快照，不能自动恢复：%s。退出标记仍保留，请交维护人处理。" %
+            (saved_state or "(无 snapshot)"), 2)
+    try:
+        st = json.load(open(saved_state, encoding="utf-8"))
+    except Exception as exc:
+        die("退出状态快照不可解析，不能自动恢复：%s" % exc, 2)
+
+    changed, err = _source_changed_since(rec.get("head", ""), st)
+    if err:
+        die("无法判断退出期间的源码变化，不能安全恢复：" + err, 2)
+    source_changed = any(_is_source_path(
+        p[:-len("(未提交)")] if p.endswith("(未提交)") else p, st)
+        for p in (changed or []))
+    old_step = st.get("current", "")
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    target = old_step
+    if source_changed:
+        if workflow == "review" and old_step in ("rf_compile", "rf_codecheck", "rf_ut", "push", "end"):
+            target = "rf_compile"
+        elif workflow == "tweak" and old_step in (
+                "tw_compile", "tw_codecheck", "tw_ut", "archive_confirm", "archive", "push", "end"):
+            target = "tw_compile"
+        elif old_step in ("verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
+                          "verify_codecheck", "verify_ut", "verify_comet", "archive_confirm",
+                          "archive", "push", "end"):
+            if _comet_phase(st) == "archive":
+                ok, why = _reopen_comet_archive(st)
+                if not ok:
+                    die("源码已变化且底层处于定稿阶段，但正规回退失败；尚未重新启用：" + why, 2)
+            target = "verify_recompile"
+
+    for path in _state_sidecars():
+        if os.path.exists(path):
+            os.remove(path)
+    st.pop("unlock", None)
+    st.pop("agent_tasks", None)
+    st.pop("quality", None)
+    st["current"] = target
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    st.setdefault("history", []).append({"step": old_step, "result": "resumed:" + target,
+                                          "note": "direct-source-changed" if source_changed else "no-source-change",
+                                          "at": now})
+    if target != old_step:
+        st.setdefault("step_heads", {})[target] = rec.get("head", "")
+    save_state(st)
+    os.remove(EXIT_PATH)
+    print("[mae-flow] 已重新启用流程，退出现场仍保留在 %s；旧 agent/CodeCheck 令牌已清空。"
+          % (dst or ".mae-flow-work/exited/"))
+    if target != old_step:
+        print("检测到退出期间改过源码：%s → %s，重新执行后续质量链。" % (old_step, target))
+    return st
+
+
 def cmd_init(flow, args):
+    resumed = _resume_direct_mode(args.ack or "")
+    if resumed is not None:
+        print_current(flow, resumed)
+        return
     old = load_state()
     if old:
         sid = old.get("current")
@@ -1201,7 +1354,7 @@ def cmd_init(flow, args):
 def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
-    lines = [".mae-flow.json*", HISTORY_PATH, ".mae-flow-need-reload", ".mae-flow-work/"]
+    lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-need-reload", ".mae-flow-work/"]
     txt = open(gi, encoding="utf-8").read() if os.path.exists(gi) else ""
     add = [l for l in lines if l not in txt]
     if add:
@@ -1228,7 +1381,7 @@ def _friction_from_log(st):
     return {"gate拦截": gate, "契约打回": bounce, "hook异常": anom}
 
 
-def _append_history(st):
+def _append_history(st, outcome="completed"):
     """终态备份前把本单摘要追加进历史账本(团队度量/推广数据)。
     失败不阻塞开新单,但必须可见(stderr)。"""
     try:
@@ -1240,6 +1393,7 @@ def _append_history(st):
 
         rec = {"单号": st.get("config", {}).get("单号", "?"),
                "workflow": st.get("choices", {}).get("workflow", "?"),
+               "结果": outcome,
                "开始": st.get("started", ""), "结束": ended,
                "耗时秒": int(max(0, ts(ended) - ts(st.get("started", ended)))),
                "goto次数": sum(1 for h in hist if str(h.get("result", "")).startswith("goto:")),
@@ -2060,6 +2214,98 @@ def cmd_unlock(flow, st, args):
               "直接修复源码 → 编译 → 按规范 commit → 重启 ut-generator-agent 重新收尾。")
 
 
+def _print_exit_preview(flow, st):
+    sid = st.get("current", "?")
+    title = (flow.get("steps", {}).get(sid, {}) or {}).get("title", "未知步骤")
+    branch = sh("git branch --show-current") or "(无法读取)"
+    head = sh("git rev-parse --short HEAD") or "(无法读取)"
+    dirty = _dirty_paths()
+    print("[mae-flow] 准备退出流程（尚未执行）")
+    print("  当前步骤: %s — %s" % (sid, title))
+    print("  当前分支/HEAD: %s / %s" % (branch, head))
+    print("  未提交文件: %s" % ("、".join(dirty) if dirty else "无"))
+    print("  退出会保留全部代码、提交和文档，不回滚、不删除业务文件。")
+    print("  退出后按普通开发处理，不再强制执行本流程的编译、CodeCheck、UT、归档和提交检查。")
+    print("  若之后明确重新接回 mae-flow，会恢复原断点；源码变过则回退质量链，旧质量结果不会复用。")
+
+
+def cmd_exit(flow, st, args):
+    """保留现场并解除项目接管。高风险降级动作必须由本步之后的用户原话精确确认。"""
+    _print_exit_preview(flow, st)
+    if not args.ack:
+        print("\n请用户明确回复，例如：确认退出 mae-flow，保留当前代码并改为直接开发")
+        print("拿到回复后原文复制执行：")
+        print('python "%s" exit --reason "<退出原因>" --ack "<用户确认原话>"'
+              % os.path.abspath(sys.argv[0]))
+        return
+    if not args.reason:
+        die("exit 必须 --reason 记录为什么退出，不能只写‘用户要求’。", 2)
+    ok, why = _ack_verified(st, args.ack, exact=True)
+    if not ok:
+        die("exit 授权验真失败（退出会解除质量约束，因此要求整条原话精确匹配）:" + why, 2)
+
+    found, patched, errors = ensure_direct_mode_compat(os.getcwd())
+    if errors:
+        die("底层阶段门禁兼容更新失败，尚未退出：" + "；".join(errors), 2)
+    if _active_change_count() > 0 and not found:
+        die("检测到仍有在建规格，但没找到项目级 Comet Hook，无法保证退出后源码不再被拦。"
+            "请先执行 mae-flow setup 修复项目初始化，再重试 exit；本次尚未退出。", 2)
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    sid = st.get("current", "")
+    st.pop("unlock", None)
+    st.setdefault("history", []).append(
+        {"step": sid, "result": "exited", "note": args.reason, "at": now})
+    save_state(st)
+    _append_history(st, outcome="用户主动退出")
+
+    snapshot = _unique_exit_dir(st)
+    copied = _snapshot_state_files(snapshot)
+    record = {
+        "version": 1,
+        "status": "exited",
+        "at": now,
+        "reason": args.reason,
+        "ack": args.ack,
+        "step": sid,
+        "title": (flow.get("steps", {}).get(sid, {}) or {}).get("title", ""),
+        "ticket": (st.get("config", {}) or {}).get("单号", ""),
+        "workflow": (st.get("choices", {}) or {}).get("workflow", ""),
+        "head": sh("git rev-parse --verify HEAD"),
+        "branch": sh("git branch --show-current"),
+        "dirty_paths": _dirty_paths(),
+        "snapshot": norm(snapshot),
+        "comet_guard_paths": [norm(p) for p in found],
+    }
+    _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
+    _write_json_atomic(EXIT_PATH, record)
+    cleanup_errors = []
+    for src, _ in copied:
+        try:
+            os.remove(src)
+        except OSError as exc:
+            cleanup_errors.append("%s: %s" % (src, exc))
+
+    print("\n[mae-flow] 已退出流程。代码、提交和文档均已保留；流程现场已保存到 " + norm(snapshot))
+    if patched:
+        print("已让项目阶段门禁识别直接开发模式：" + "、".join(norm(p) for p in patched))
+    if cleanup_errors:
+        print("⚠ 部分旧状态文件未清理，但退出标记已生效：" + "；".join(cleanup_errors), file=sys.stderr)
+    print("现在可以直接让 AI 修改代码或补 UT。后续质量检查由用户自行决定。")
+
+
+def print_direct_mode_status():
+    try:
+        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+    except Exception:
+        rec = {}
+    print("[mae-flow] 当前项目已退出流程，正在按普通开发方式工作。")
+    print("退出时间: %s  原步骤: %s  原因: %s" %
+          (rec.get("at", "?"), rec.get("step", "?"), rec.get("reason", "?")))
+    print("现场保留在: " + rec.get("snapshot", ".mae-flow-work/exited/"))
+    print("只有用户明确要求重新接回原流程时才执行 init；init 会恢复原断点并重新取证。另一张新单请另开 worktree。")
+
+
 class MFParser(argparse.ArgumentParser):
     """参数错误即教学:argparse 默认英文 usage 弱模型读不懂会瞎试第二次。
     报错直接给中文速查 + 可复制的正确命令(错误即文档;子命令解析器自动继承本类)。"""
@@ -2072,7 +2318,7 @@ class MFParser(argparse.ArgumentParser):
               f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
               f"  python \"{me}\" init\n"
               "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
-              "codecheck-scan|codecheck-record|approve-exemption(用法见 current 指令)。\n"
+              "codecheck-scan|codecheck-record|approve-exemption|exit(用法见 current/exit 指令)。\n"
               "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
               file=sys.stderr)
         sys.exit(2)
@@ -2081,7 +2327,7 @@ class MFParser(argparse.ArgumentParser):
 def main():
     ap = MFParser(prog="mae-flow")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init")
+    i = sub.add_parser("init"); i.add_argument("--ack")
     sub.add_parser("current")
     d = sub.add_parser("done")
     d.add_argument("--ack"); d.add_argument("--choice"); d.add_argument("--set", action="append")
@@ -2090,6 +2336,7 @@ def main():
     g = sub.add_parser("gate"); g.add_argument("what", choices=["edit", "bash"]); g.add_argument("arg")
     o = sub.add_parser("goto"); o.add_argument("step"); o.add_argument("--force", action="store_true"); o.add_argument("--ack")
     u = sub.add_parser("unlock"); u.add_argument("what", choices=["source"]); u.add_argument("--reason"); u.add_argument("--ack")
+    x = sub.add_parser("exit"); x.add_argument("--reason"); x.add_argument("--ack")
     rl = sub.add_parser("reloaded"); rl.add_argument("--ack")
     sub.add_parser("doctor")
     sub.add_parser("envcheck")
@@ -2131,8 +2378,15 @@ def main():
         return cmd_gate(flow, st, args)
     if args.cmd == "report" and args.all:
         return cmd_report_all()   # 账本聚合是无状态命令,不要求存在在途单
+    if os.path.exists(EXIT_PATH):
+        if args.cmd in ("current", "status", "doctor", "exit"):
+            return print_direct_mode_status()
+        die("当前项目已退出 mae-flow，普通开发不需要执行流程命令。"
+            "若用户明确要重新进入流程，请执行 init；旧质量证据不会复用。", 2)
     if st is None:
         die("流程未初始化,先执行 init。")
+    if args.cmd == "exit":
+        return cmd_exit(flow, st, args)
     if args.cmd == "current":
         return print_current(flow, st)
     if args.cmd == "agent-task":

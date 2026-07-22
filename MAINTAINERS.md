@@ -61,7 +61,8 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 skills/mae-flow/SKILL.md   触发条件 + 5 条铁律(工具管不住、靠模型自守的部分)
 flow/flow.json              流程定义:步骤图、证据、权限、环境检查项
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
-scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/template)
+scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/template/exit)
+scripts/comet_compat.py     让项目级阶段门禁识别 mae-flow 直接开发标记（setup/exit 幂等补齐）
 hooks/hooks.json            5 个 hook 注册(exec form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
 agents/*.md                 5 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
@@ -282,7 +283,8 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 - **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
 - **ack 验真按步骤绑定**（done / goto / unlock / 豁免 / CodeCheck 人工恢复共用）：只接受当前步骤进入后捕获到的用户原话；令牌与用户消息都记录 step，不能跨关复用。若公司 harness 没回传 AskUserQuestion 的选项正文，要求用户用普通消息重复确认一次。这里选择“显式多确认一次”而不是 fail-open，因为这些命令会改变流程或放宽约束。
-- **一仓一单**——并行走 worktree；suspend/resume 未做（等真实需求）。
+- **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时走 `exit`：精确确认、现场快照、
+  项目标记和 Comet Hook 兼容四件事原子化完成，代码不回滚。禁止重新引入“手删状态文件”的假逃生口。
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧 2.0.2 的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。

@@ -4,7 +4,7 @@
 
 接入(settings.json,会话重启生效):
   "statusLine": {"type": "command", "command": "python \"<插件>/scripts/statusline.py\""}
-读 stdin 的会话 JSON(取 cwd),向上定位 .mae-flow.json。
+读 stdin 的会话 JSON(取 cwd),向上定位 .mae-flow.json 或退出标记。
 状态栏高频刷新:必须快——纯文件读,零子进程,任何异常都降级输出而不是报错。
 """
 import json, os, sys
@@ -23,8 +23,11 @@ def main():
     cwd = ((d.get("workspace") or {}).get("current_dir")) or d.get("cwd") or os.getcwd()
     base = os.path.basename(os.path.abspath(cwd)) or cwd
 
-    root, probe = None, os.path.abspath(cwd)
+    root, exited, probe = None, False, os.path.abspath(cwd)
     while True:
+        if os.path.exists(os.path.join(probe, ".mae-flow.json.exited")):
+            root, exited = probe, True
+            break
         if os.path.exists(os.path.join(probe, ".mae-flow.json")):
             root = probe
             break
@@ -37,6 +40,10 @@ def main():
         hint = " · mae-flow 空闲" if (os.path.isdir(os.path.join(cwd, "openspec"))
                                       or os.path.isdir(os.path.join(cwd, ".comet"))) else ""
         print(f"📁 {base}{hint}")
+        return
+
+    if exited:
+        print(f"📁 {base} · mae-flow 已退出 │ 普通开发")
         return
 
     try:

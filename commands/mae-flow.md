@@ -4,8 +4,15 @@
 
 1. 定位插件目录(定位不了就 Glob 搜 `**/mae-flow.py`),通读 skills/mae-flow/SKILL.md 并全程遵守其铁律。
 2. 按参数分流:
+   - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。必须先运行 `mae-flow.py exit` 展示
+     当前步骤/分支/HEAD/未提交文件与退出影响，再取得用户明确确认；拿到后以用户原话执行
+     `mae-flow.py exit --reason "<具体原因>" --ack "<用户确认原话>"`。命令成功前禁止直接改代码，
+     成功后禁止继续 current/done。没有在途流程时只说明当前无需退出，不创建新流程。
    - **无参数** — 完整交付流程:项目根已有 .mae-flow.json → `python "<插件>/scripts/mae-flow.py" current` 续跑;
-     没有 → 用户已给出单号/需求则 `init`,否则先问用户要交付什么(单号+SE 文档),拿到再 init。
+     有 `.mae-flow.json.exited` → 当前是普通开发模式，只有用户本条消息明确要求重新接回原流程时才执行
+     `init --ack "<用户本条原话>"`，否则不要 init；若用户要开另一张新单，建议另开 worktree，不覆盖退出现场；
+     两者都没有 → 用户已给出单号/需求则 `init`,
+     否则先问用户要交付什么(单号+SE 文档),拿到再 init。
    - **setup** — 仅环境:执行 `mae-flow envcheck`;有 ❌ → 直接跑 python "<插件>/scripts/setup.py"
      (确定性安装器)→ ⚠人工项原样转用户、❌ 项才派 env-setup-agent 诊断(传日志路径与 scripts 目录),
      与 env_setup 步骤同一套三层分流;**不 init 流程**,修完汇报结果即结束。

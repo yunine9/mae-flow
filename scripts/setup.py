@@ -16,6 +16,8 @@
 """
 import argparse, glob, json, os, re, subprocess, sys, tempfile, time
 
+from comet_compat import comet_guard_paths, ensure_direct_mode_compat
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -245,6 +247,18 @@ def main():
                  "跑完重跑本脚本,其余项目级配置(comet 开关/状态栏/权限/目录迁移)届时自动补齐" % os.getcwd())
         else:
             mark("OK", "comet 项目初始化")
+            if DRY:
+                guards = [p for p in comet_guard_paths(os.getcwd()) if os.path.isfile(p)]
+                mark("OK" if guards else "FAIL", "直接开发逃生通道",
+                     "将为项目阶段门禁加入退出标记兼容" if guards else "未找到 comet-hook-guard.sh")
+            else:
+                guards, patched, errors = ensure_direct_mode_compat(os.getcwd())
+                if errors or not guards:
+                    mark("FAIL", "直接开发逃生通道",
+                         "；".join(errors) if errors else "未找到项目级 comet-hook-guard.sh，请重新执行 comet init/update")
+                else:
+                    mark("FIXED" if patched else "OK", "直接开发逃生通道",
+                         "已让阶段门禁识别 mae-flow 退出标记" if patched else "")
             ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "auto_transition", "false")
             ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "review_mode", "standard") or ch
             mark("FIXED" if ch else "OK", ".comet/config.yaml(auto_transition+review_mode)")

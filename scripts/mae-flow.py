@@ -404,10 +404,18 @@ def ev_agent_ran(spec, st):
     if kind == "ASKUSER":
         return False, (f"本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: {ts or '无'};本步始于 {entered})。"
                        "待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。")
+    try:
+        rejects = json.load(open(STATE_PATH + ".agent-rejections", encoding="utf-8"))
+        reject = rejects.get(kind, {}) or rejects.get("SUBAGENT", {})
+    except Exception:
+        reject = {}
+    if reject.get("at", "") >= entered and reject.get("step") in ("", st.get("current")):
+        return False, (f"{kind} 子 agent 已运行但未签发令牌。真实拒签原因: {reject.get('reason', '未知')} "
+                       "如果只是最终报告写法不合规且已有执行凭证，保持源码不变后重答即可复用；"
+                       "只有缺少真实执行证据或源码又变化时才需要重跑。")
     return False, (f"本步内未检测到 {kind} 子 agent 的合法收尾(最近令牌: {ts or '无'};本步始于 {entered})。"
-                   "必须真实启动对应 agent 且其**最终回复第一行为 XXX_RESULT: 标记**才会发放令牌——"
-                   "主会话代写/口头汇报无效;若你已启动过 agent 仍见此错,原因就是它收尾没带标记,"
-                   "重启该 agent 并在任务中明确要求按契约的「最终回复格式」收尾。")
+                   "请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。"
+                   "主会话代写或口头汇报不算执行证据。")
 
 
 def _changed_source_files(st, include_tests=True):
@@ -1205,7 +1213,8 @@ def print_current(flow, st):
 # ---------------- 命令 ----------------
 
 def _state_sidecars():
-    return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg", STATE_PATH + ".tmp"]
+    return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg",
+            STATE_PATH + ".agent-rejections", STATE_PATH + ".agent-evidence", STATE_PATH + ".tmp"]
 
 
 def _unique_exit_dir(st):

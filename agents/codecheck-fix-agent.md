@@ -91,7 +91,9 @@ cd <项目根> && codecheck fullcheck -f 相对路径1,相对路径2,...
 第一行之后,给出:
 1. `TASK_CARD_SHA256: <任务卡中的64位指纹>`
 2. `EXECUTED_COMMAND:` 实际执行的检查命令原文(含 fullcheck;分批则列全部)
-3. 修复数大于 0 时必须给 `EXECUTED_BUILD: <实际编译方式>`；无修复写 `EXECUTED_BUILD: 无需`
+3. 修复数大于 0 时必须给 `EXECUTED_BUILD: <实际编译方式>`；无修复写 `EXECUTED_BUILD: 无需`。
+   如果 harness 因最终报告格式问题要求重答，而源码从上次真实编译后没有变化，可按重答提示只重跑
+   `codecheck fullcheck` 并写 `EXECUTED_BUILD: 复用上次已验证编译凭证`；凭证不存在或源码变化时仍须重新编译。
 4. 三个机器对账字段(hook 硬校验 FOUND = FIXED + REMAINING_COUNT):
    ```
    FOUND: <首次检查告警总数>

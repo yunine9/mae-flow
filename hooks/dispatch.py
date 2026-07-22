@@ -29,6 +29,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAEFLOW = os.path.join(HERE, "..", "scripts", "mae-flow.py")
 STATE = ".mae-flow.json"
 EXIT_STATE = ".mae-flow.json.exited"
+REJECTION_STATE = STATE + ".agent-rejections"
+EVIDENCE_STATE = STATE + ".agent-evidence"
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
 STDIN_SECS = 3
@@ -263,11 +265,21 @@ def ev_subagentstop(d):
                     call["result"] = str(content)
     prompt = users[0] if users else ""
     last = (asst[-1] if asst else "").strip()
-    # 契约要求标记在第一行:只看首行,不用 re.M(埋在中间不算)
+    # 标记本身即身份证明。优先第一行；兼容模型在前面多写一句话/代码围栏的情况，
+    # 只要最终回复中恰好有一个契约标记就继续验完整契约。格式小毛病不值得重跑重活。
     first_line = last.splitlines()[0] if last else ""
-    # 标记本身即身份证明:凡以合法契约标记收尾的 agent,直接验契约+发令牌,
-    # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
+    matches = list(re.finditer(
+        r"^\s*(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", last, re.M))
     m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", first_line)
+    if len(matches) > 1:
+        kinds = {x.group(1) + "/" + x.group(2) for x in matches}
+        _record_rejection("SUBAGENT", "最终回复包含多个结果标记，无法判断真实结果: " + "、".join(sorted(kinds)))
+        m = None
+    elif not m and len(matches) == 1:
+        m = matches[0]
+        _log("subagentstop: 契约标记不在第一行,兼容接受并继续验完整契约")
+    # 凡以唯一合法契约标记收尾的 agent,直接验契约+发令牌,
+    # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
     if m:
         if m.group(1) == "CODECHECK":
             _codecheck_contract(m.group(2), last, tool_calls, soft=retry)
@@ -279,6 +291,7 @@ def ev_subagentstop(d):
         sys.exit(0)
     if retry:
         _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
+        _record_rejection("SUBAGENT", "重答后仍未找到唯一的 XXX_RESULT 结果标记。")
         _log("subagentstop: 重答后仍无契约标记,放行防死循环(不发令牌,done 会拦;尸检已留档)")
         sys.exit(0)
     # 无标记:判定是否我方契约 agent——扫 transcript 头部(含 agent 系统提示,必带 agent 名/契约字样),
@@ -330,6 +343,7 @@ def _record_agent_token(kind, status=""):
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False))
         os.replace(tmp, p)
+        _clear_rejection(kind)
         _log("agent token: %s/%s @%s" % (kind, status or "-", head[:9] or "no-git"))
     except Exception as e:
         _log("token EXC: %s" % e)
@@ -405,7 +419,50 @@ def _maybe_utrun(d):
         _log("utrun EXC: %s" % e)
 
 
+def _atomic_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _record_rejection(label, msg):
+    """把真实拒签原因留给 done/doctor；Hook stderr 被宿主吞掉时也不能让主模型猜。"""
+    try:
+        data = json.load(open(REJECTION_STATE, encoding="utf-8")) if os.path.exists(REJECTION_STATE) else {}
+        try:
+            st = json.load(open(STATE, encoding="utf-8"))
+        except Exception:
+            st = {}
+        task = (st.get("agent_tasks", {}) or {}).get(label, {})
+        data[label] = {
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "step": st.get("current", ""),
+            "head": _git_head(),
+            "task_sha256": task.get("sha256", ""),
+            "reason": msg,
+        }
+        _atomic_json(REJECTION_STATE, data)
+        _log(label + " 拒签: " + msg)
+    except Exception as e:
+        _log("rejection EXC: " + str(e))
+
+
+def _clear_rejection(label):
+    try:
+        if not os.path.exists(REJECTION_STATE):
+            return
+        data = json.load(open(REJECTION_STATE, encoding="utf-8"))
+        if label in data or "SUBAGENT" in data:
+            data.pop(label, None)
+            data.pop("SUBAGENT", None)
+            _atomic_json(REJECTION_STATE, data)
+    except Exception as e:
+        _log("clear rejection EXC: " + str(e))
+
+
 def _contract_bail(label, msg, soft):
+    _record_rejection(label, msg)
     if soft:
         _log(label + " 重答仍违规: " + msg)
         sys.exit(0)
@@ -472,6 +529,69 @@ def _required_skill(config_value):
     if "build-fix" in v:
         return "build-fix"
     return ""
+
+
+def _codecheck_build_call(tool_calls, build_cfg):
+    """返回当前 transcript 中与配置一致且未明确失败的编译调用。"""
+    need = _required_skill(build_cfg)
+    call = _skill_call(tool_calls, need) if need else _bash_call(tool_calls, build_cfg)
+    return call if call and not _call_failed(call) else None
+
+
+def _record_codecheck_build_receipt(task, tool_calls):
+    """报告格式即使被打回，也保留已经真实发生的编译证据，供同一 HEAD 的重答复用。"""
+    build_cfg = _state_config().get("编译方式", "")
+    if not build_cfg or not _codecheck_build_call(tool_calls, build_cfg):
+        return None
+    rec = {
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "step": task.get("step", ""),
+        "task_sha256": task.get("sha256", ""),
+        "head": _git_head(),
+        "build": build_cfg,
+    }
+    try:
+        data = json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+        data["CODECHECK_BUILD"] = rec
+        _atomic_json(EVIDENCE_STATE, data)
+        _log("CODECHECK 编译凭证: @%s" % (rec["head"][:9] or "no-git"))
+    except Exception as e:
+        _log("codecheck receipt EXC: " + str(e))
+    return rec
+
+
+def _reusable_codecheck_build_receipt(task):
+    """仅同任务卡、同步骤且源码未变化时复用；代码一变就必须重新编译。"""
+    try:
+        rec = json.load(open(EVIDENCE_STATE, encoding="utf-8")).get("CODECHECK_BUILD", {})
+    except Exception:
+        return None
+    if not rec or rec.get("step") != task.get("step") \
+            or rec.get("task_sha256") != task.get("sha256") \
+            or not _same_config(rec.get("build", ""), _state_config().get("编译方式", "")):
+        return None
+    head = rec.get("head", "")
+    if not head:
+        return None
+    try:
+        st = json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return None
+    changed, err = _source_changed_since_receipt(head, st)
+    return rec if not err and not changed else None
+
+
+def _source_changed_since_receipt(head, st):
+    """dispatch 侧的轻量源码新鲜度检查，语义与 mae-flow 令牌检查一致。"""
+    current = _git_head()
+    if not current:
+        return [], "当前 HEAD 不可读"
+    if _git_out(f"git cat-file -t {head}").strip() != "commit":
+        return [], "编译凭证 HEAD 不可解析"
+    paths = [] if current == head else [p for p in _git_out(
+        f"git -c core.quotepath=false diff --name-only {head} {current}").splitlines() if p.strip()]
+    paths += [p for p in _changed_paths_since(current) if p]
+    return [p for p in dict.fromkeys(paths) if _SOURCE_PAT.search(p)], ""
 
 
 def _call_failed(call):
@@ -614,6 +734,8 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
 
     task = _task_card_contract("CODECHECK", report, soft)
     _enforce_agent_scope("CODECHECK", task, bail)
+    # 先记真实编译调用：后续哪怕只因报告字段写法被打回，也无需把十几分钟编译重跑一遍。
+    _record_codecheck_build_receipt(task, tool_calls)
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
     if status == "FAIL":
@@ -645,17 +767,28 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
     if nums["FIXED"] > 0:
         build = _field(report, "EXECUTED_BUILD")
         build_cfg = _state_config().get("编译方式", "")
-        if not build or not _same_config(build, build_cfg):
-            bail("修复了源码但 EXECUTED_BUILD 与配置的编译方式不一致,禁止猜编译命令。")
-        need = _required_skill(build_cfg)
-        if need:
-            call = _skill_call(tool_calls, need)
-            if not call:
-                bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
-            if _call_failed(call):
-                bail(f"{need} Skill 的工具结果明确失败，不能把本轮修复计为已编译。")
+        current_call = _codecheck_build_call(tool_calls, build_cfg)
+        reused = _reusable_codecheck_build_receipt(task) if soft and not current_call else None
+        if current_call:
+            # 工具调用是事实，字段只是摘要；不因摘要写成“无需”等小格式问题重跑长编译。
+            if not _same_config(build, build_cfg):
+                _log("CODECHECK EXECUTED_BUILD 摘要不准确,以 transcript 的真实编译调用为准")
+        elif reused:
+            _log("CODECHECK 重答复用编译凭证 @" + reused.get("head", "")[:9])
         else:
-            _require_bash_success(tool_calls, build_cfg, bail, "编译")
+            need = _required_skill(build_cfg)
+            if need:
+                call = _skill_call(tool_calls, need)
+                if call and _call_failed(call):
+                    bail(f"{need} Skill 的工具结果明确失败，不能把本轮修复计为已编译。")
+                bail(f"编译配置要求 {need} Skill，但本轮 transcript 中没有成功调用，"
+                     "也没有同任务卡、同源码版本的可复用编译凭证。")
+            else:
+                call = _bash_call(tool_calls, build_cfg)
+                if call and _call_failed(call):
+                    bail("配置的编译命令明确失败，不能把本轮修复计为已编译。")
+                bail("本轮 transcript 中没有成功执行配置的编译命令，"
+                     "也没有同任务卡、同源码版本的可复用编译凭证。")
     # 与复验摘录对账:契约要求附「共有 N 条告警」原文,取最后一处(复验)与 REMAINING_COUNT 比对
     ex = re.findall(r"共有\s*(\d+)\s*条告警", report)
     if ex and int(ex[-1]) != nums["REMAINING_COUNT"]:

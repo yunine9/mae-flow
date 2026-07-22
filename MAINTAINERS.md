@@ -163,9 +163,9 @@ PostToolUse（STORY/CHAIN/GRILL-PREP 模板校验 + ASKUSER/UTRUN 令牌 + AskUs
 - 调 mae-flow 的子进程 8s 超时
 - 每次调用记 `%TEMP%\mae-flow-hook.log`：`start/end + rc + 耗时`；只有 start 没 end = 被看门狗击杀
 
-SubagentStop 契约校验：最终回复**第一行**必须 `XXX_RESULT: <状态>`；CODECHECK 额外硬验三件事——
+SubagentStop 契约校验：最终回复必须有且只有一个 `XXX_RESULT: <状态>`（仍建议放第一行；模型偶尔在前面多写一句或代码围栏时兼容接受）；CODECHECK 额外硬验三件事——
 `EXECUTED_COMMAND` 含 fullcheck、三数对账 `FOUND = FIXED + REMAINING_COUNT`（吞告警最常见形态是马虎遗漏，算术不平当场打回）、
-CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛求对账）。`stop_hook_active` 时放行（防打回死循环，代价是二次失败静默通过）。
+CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛求对账）。真实编译调用会留下绑定任务卡、步骤和源码版本的临时凭证；仅因报告格式重答时，同一源码版本可复用，不重复跑长编译，源码一变立即失效。`stop_hook_active` 时仍以 0 退出防打回死循环，但拒签原因写入受保护 sidecar，`done/doctor` 会展示真实原因，不再误报成“首行没标记”。
 **非正常收尾自动尸检**（2026-07-20，治"agent 奇怪退出无人知晓死因"）：无标记收尾/重答仍失败时，把轮数、临终输出、检出的报错特征落 `%TEMP%/mae-flow-agent-autopsy.log`，并把一行「尸检线索」嵌进打回消息——主 agent 重启新实例必须转告（SKILL 铁律）；配套五个 agent 契约的"带着情报死"条款（工具连败 2 次→FAIL/BLOCKED 收尾写明详情；轮次过半未完成→提前收尾出部分成果，不许干到被硬切）。
 
 ### 3.5 环境检查（env_checks）
@@ -179,7 +179,7 @@ Windows 上 npm 全局 CLI 实体是 `codecheck.cmd`：执行层沿用公司实�
 
 ### 3.6 子 agent 契约
 
-三条不可违背：**第一行标记**（SubagentStop 强制）、**无状态幂等**（先检查后动作，禁止"我下次再"话术——没有下次，是下一个实例接手）、**不能与用户对话**（决策进 PENDING_DECISIONS）。
+三条不可违背：**唯一结果标记**（推荐第一行，SubagentStop 兼容小格式偏差但不接受多个冲突结果）、**无状态幂等**（先检查后动作，禁止"我下次再"话术——没有下次，是下一个实例接手）、**不能与用户对话**（决策进 PENDING_DECISIONS）。
 **派发三原则**（2026-07-20 轮次经济学实战定型，生产模型 Glm-5.1 且 thinking 关闭，每轮只干一小步）：
 ①**喂到嘴边**——原料原文进任务提示（spec 条目/文件清单/告警明细），不给路径让它自己花轮次读；
 ②**分批小实例**——复杂工作切批逐实例（UT 每批 3-5 方法带收口批、codecheck >30 告警按文件分批、编译按模块），单实例马拉松 60-80 轮后被上下文裁剪拖垮，加轮次预算救不了；
@@ -288,4 +288,4 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧 2.0.2 的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。
-- **SubagentStop 二次失败静默放行**——防死循环的代价。
+- **SubagentStop 二次失败对宿主返回 0**——这是防打回死循环的必要权衡；真实拒签原因已持久化并由 `done/doctor` 展示，返回 0 不再等于静默丢失诊断。

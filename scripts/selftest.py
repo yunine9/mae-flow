@@ -258,6 +258,69 @@ check("Bash 证据不接受 echo 冒充",
                           "codecheck fullcheck") is None
       and dispatch._bash_call([{"name": "Bash", "input": {"command": "codecheck fullcheck -f a.cpp"}}],
                               "codecheck fullcheck") is not None)
+old_cwd = os.getcwd()
+old_dispatch_paths = (dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE)
+try:
+    with tempfile.TemporaryDirectory() as td:
+        os.chdir(td)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+        subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+        open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+        subprocess.run(["git", "add", "biz.cpp"], check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+        dispatch.STATE = ".mae-flow.json"
+        dispatch.REJECTION_STATE = dispatch.STATE + ".agent-rejections"
+        dispatch.EVIDENCE_STATE = dispatch.STATE + ".agent-evidence"
+        body = "# CODECHECK TASK CARD\n"
+        digest = __import__("hashlib").sha256(body.encode("utf-8")).hexdigest()
+        open("task.md", "w", encoding="utf-8").write(body + "TASK_CARD_SHA256: " + digest + "\n")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        task = {"step": "rf_codecheck", "sha256": digest, "path": os.path.abspath("task.md"),
+                "head": head, "allowed_files": ["biz.cpp"]}
+        json.dump({"current": "rf_codecheck", "config": {"编译方式": "build-fix skill"},
+                   "agent_tasks": {"CODECHECK": task},
+                   "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}}},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        build_calls = [{"name": "Skill", "input": {"skill": "build-fix"},
+                        "result_seen": True, "is_error": False, "result": "BUILD_ERRORS: 0"}]
+        receipt = dispatch._record_codecheck_build_receipt(task, build_calls)
+        check("CodeCheck 报告重答可复用同版本真实编译凭证",
+              bool(receipt) and bool(dispatch._reusable_codecheck_build_receipt(task)))
+        open("biz.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
+        check("源码变化后 CodeCheck 编译凭证立即失效",
+              dispatch._reusable_codecheck_build_receipt(task) is None)
+        open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+        check("CodeCheck 编译凭证不能跨任务卡复用",
+              dispatch._reusable_codecheck_build_receipt(
+                  {"step": "rf_codecheck", "sha256": "b" * 64}) is None)
+        retry_report = "\n".join([
+            "CODECHECK_RESULT: CLEAN",
+            "TASK_CARD_SHA256: " + digest,
+            "EXECUTED_COMMAND: codecheck fullcheck -f biz.cpp",
+            "EXECUTED_BUILD: 无需",
+            "FOUND: 1", "FIXED: 1", "REMAINING_COUNT: 0",
+            "复验锚点: 共有 0 条告警",
+        ])
+        retry_calls = [{"name": "Bash", "input": {"command": "codecheck fullcheck -f biz.cpp"},
+                        "result_seen": True, "is_error": False, "result": "共有 0 条告警"}]
+        retry_ok = True
+        try:
+            dispatch._codecheck_contract("CLEAN", retry_report, retry_calls, soft=True)
+        except SystemExit:
+            retry_ok = False
+        check("CodeCheck 格式重答无需重复长编译", retry_ok)
+        dispatch._record_rejection("CODECHECK", "缺少真实编译证据（测试原因）")
+        rejected_ok, rejected_why = mf.ev_agent_ran(
+            {"agent": "CODECHECK", "statuses": ["CLEAN"]},
+            {"current": "rf_codecheck", "started": "2000-01-01 00:00:00", "history": []})
+        check("done 会显示子 Agent 的真实拒签原因",
+              not rejected_ok and "缺少真实编译证据（测试原因）" in rejected_why
+              and "首行" not in rejected_why)
+finally:
+    os.chdir(old_cwd)
+    dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE = old_dispatch_paths
 check("空的精简豁免不能绕过净删检查",
       dispatch._empty_section("无") and dispatch._empty_section("none")
       and not dispatch._empty_section("删除重复分支，行为不变"))

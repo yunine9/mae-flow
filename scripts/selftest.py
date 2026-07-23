@@ -6,7 +6,6 @@ agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退�
 import importlib.util, json, os, py_compile, re, subprocess, sys, tempfile, time, types
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 fails = []
@@ -20,12 +19,26 @@ def check(name, ok, detail=""):
 
 # 1. 语法
 for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
-          "scripts/statusline.py", "scripts/setup.py"):
+          "scripts/statusline.py", "scripts/setup.py",
+          "scripts/mae_flow_core/__init__.py",
+          "scripts/mae_flow_core/cli_parser.py",
+          "scripts/mae_flow_core/runtime.py",
+          "scripts/mae_flow_core/state_store.py",
+          "scripts/mae_flow_core/standalone.py",
+          "scripts/mae_flow_core/moonlight.py",
+          "scripts/tests/test_state_core.py"):
     try:
         py_compile.compile(os.path.join(ROOT, f), doraise=True)
         check(f"语法 {f}", True)
     except Exception as e:
         check(f"语法 {f}", False, str(e))
+
+# 1.5 共享状态内核使用独立测试文件，避免 selftest 再长成第二个单体。
+core_tests = subprocess.run(
+    [sys.executable, os.path.join(ROOT, "scripts", "tests", "test_state_core.py")],
+    text=True, capture_output=True, timeout=90)
+check("共享状态内核回归", core_tests.returncode == 0,
+      (core_tests.stdout + core_tests.stderr)[-3000:])
 
 # 2. JSON
 flow = hooks = None
@@ -459,6 +472,9 @@ if flow:
             check("代码变化后用户风险放行立即失效",
                   not fresh and "风险确认后代码发生变化" in fresh_why)
             open("src/test/FooTest.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+            mf.advance(flow, risk_state, "rf_ut", flow["steps"]["rf_ut"], "done")
+            check("进入下一步后用户风险放行不再保留",
+                  "risk_acceptances" not in mf.load_state())
 
             # CodeCheck 的风险放行只替代 Agent 令牌，不得跳过最后的机器复核。
             cc_ack = "确认承担CodeCheck修复Agent令牌缺失风险并继续"
@@ -480,10 +496,6 @@ if flow:
                 mf.ev_codecheck_clean = old_clean
             check("放行 CodeCheck Agent 令牌仍会执行真实结果复核",
                   not cc_ok and "现场复核仍有 1 条告警" in cc_why)
-
-            mf.advance(flow, risk_state, "rf_ut", flow["steps"]["rf_ut"], "done")
-            check("进入下一步后用户风险放行不再保留",
-                  "risk_acceptances" not in mf.load_state())
     finally:
         os.chdir(old_cwd)
 
@@ -740,8 +752,13 @@ if flow:
             check("晨间修复会先处理环境遗留再回到质量链而不重跑需求流程",
                   env_route_ok and mf.load_state().get("current") == "rf_compile")
 
-            mf.save_state(morning)
-            mf.cmd_moonlight(flow, morning, types.SimpleNamespace(
+            # 这里是在同一个临时仓库中构造另一条晨间修复分支，不是拿生产中的
+            # 旧快照覆盖新状态；去掉 CAS 字段，明确表达“测试夹具重新装载”。
+            morning_fixture = json.loads(json.dumps(morning))
+            morning_fixture.pop("revision", None)
+            morning_fixture.pop("updated_at", None)
+            mf.save_state(morning_fixture)
+            mf.cmd_moonlight(flow, morning_fixture, types.SimpleNamespace(
                 action="repair", ack=None, reason=None))
             repairing = mf.load_state()
             check("月光宝盒按报告从工作流编译入口开启修复轮",

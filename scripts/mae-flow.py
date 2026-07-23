@@ -29,9 +29,37 @@
                                          保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
-import argparse, glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+import glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
+from mae_flow_core import (
+    RuntimeMode,
+    StateStoreError,
+    action_work_dir as core_action_work_dir,
+    archive_action as core_archive_action,
+    archive_corrupt_action as core_archive_corrupt_action,
+    atomic_write_json,
+    atomic_write_text,
+    find_project_root as core_find_project_root,
+    load_action as core_load_action,
+    normalize_document,
+    resolve_runtime,
+    safe_read_json,
+    save_action as core_save_action,
+    save_versioned_json,
+    update_json,
+)
+from mae_flow_core.moonlight import (
+    QUALITY_STEPS as MOONLIGHT_QUALITY_STEPS,
+    REPAIR_ENTRY as MOONLIGHT_REPAIR_ENTRY,
+    can_hard_block as moonlight_can_hard_block,
+    data as moonlight_data,
+    enabled as moonlight_enabled,
+    resolve_kind as moonlight_resolve_kind,
+    step_kind as moonlight_step_kind,
+    unresolved as moonlight_unresolved,
+)
+from mae_flow_core.cli_parser import parse_args
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -59,31 +87,6 @@ DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):re
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
 MOONLIGHT_REPORT_PATH = os.path.join(".mae-flow-work", "moonlight-report.md")
 
-# 月光宝盒允许“尽力后带遗留推进”的步骤。普通模式完全不读取这张表。
-# build 同时承担实现收口和首次编译；只有工作区已经提交稳定后才能 defer。
-MOONLIGHT_QUALITY_STEPS = {
-    "env_setup": "environment",
-    "build": "compile",
-    "rf_compile": "compile",
-    "tw_compile": "compile",
-    "verify_post_ponytail_compile": "compile",
-    "verify_recompile": "compile",
-    "rf_codecheck": "codecheck",
-    "tw_codecheck": "codecheck",
-    "verify_codecheck": "codecheck",
-    "rf_ut": "ut",
-    "tw_ut": "ut",
-    "verify_ut": "ut",
-    "verify_comet": "comet",
-}
-
-MOONLIGHT_REPAIR_ENTRY = {
-    "review": "rf_compile",
-    "tweak": "tw_compile",
-    "full": "verify_recompile",
-    "hotfix": "verify_recompile",
-}
-
 # source_patterns 只适合识别目录，不能承担跨仓源码真相（顶层 include/lib/app 已真实漏过）。
 # 扩展名与构建入口作为保守底座；仓库可用 defaults/config 的「源码路径」补私有布局。
 SOURCE_EXTS = (
@@ -104,19 +107,8 @@ def find_project_root(start=None):
     每层先找已有 .mae-flow.json 或退出标记，再判断 .git / openspec 项目边界；
     不越过最近仓库去捡父目录的陈旧状态。都没有就留在原地。
     返回 (root, 是否已有状态文件)。"""
-    d = os.path.abspath(start or os.getcwd())
-    probe = d
-    while True:
-        if os.path.exists(os.path.join(probe, STATE_PATH)) or os.path.exists(os.path.join(probe, EXIT_PATH)):
-            return probe, os.path.exists(os.path.join(probe, STATE_PATH))
-        # .git 在 worktree 中是文件而不是目录，必须使用 exists。
-        if os.path.exists(os.path.join(probe, ".git")) or os.path.isdir(os.path.join(probe, "openspec")):
-            return probe, False
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
-    return d, False
+    root = core_find_project_root(start)
+    return root, os.path.exists(os.path.join(root, STATE_PATH))
 
 
 def load_flow():
@@ -127,52 +119,64 @@ def load_flow():
 def load_state():
     if not os.path.exists(STATE_PATH):
         return None
-    with open(STATE_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    raw, err = safe_read_json(STATE_PATH)
+    if err:
+        raise ValueError(err)
+    return normalize_document(raw, "flow")
 
 
 def save_state(st):
-    # 原子写:Windows 上杀软锁文件/中途崩溃写坏 JSON 会让所有 gate 静默失效(fail-open)
-    tmp = STATE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(st, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, STATE_PATH)
+    # 共享 StateStore 同时提供原子写、revision/CAS 和跨 Hook 进程锁。
+    try:
+        save_versioned_json(STATE_PATH, st, "flow")
+    except StateStoreError as exc:
+        die("流程状态存在并发更新或不可读，已拒绝覆盖：" + str(exc)
+            + "。重新执行 current 获取最新状态；若仍失败可直接 `/mae-flow exit` 保存现场并退出。", 2)
+
+
+def _drop_agent_token(kind):
+    """清理单个令牌时保留其他并发 Hook 刚签发的事实。"""
+    path = STATE_PATH + ".tokens"
+
+    def remove_one(tokens):
+        if not isinstance(tokens, dict):
+            tokens = {}
+        tokens.pop(kind, None)
+        return tokens
+
+    try:
+        update_json(path, remove_one, default={}, recover_corrupt=True)
+    except Exception:
+        # token 清理是防旧证据复用；文件损坏时删除当前内存任务卡仍会让 done
+        # 拒绝推进，不能反过来让恢复命令因附属文件故障卡死。
+        pass
 
 
 def _moonlight(st):
-    return bool(((st or {}).get("moonlight") or {}).get("enabled"))
+    return moonlight_enabled(st)
 
 
 def _moonlight_data(st):
-    return (st or {}).setdefault("moonlight", {})
+    return moonlight_data(st)
 
 
 def _moonlight_unresolved(st):
-    return [x for x in (_moonlight_data(st).get("issues") or []) if not x.get("resolved_at")]
+    return moonlight_unresolved(st)
 
 
 def _moonlight_resolve_kind(st, kind):
     """某一质量关真实通过后，关闭之前同类遗留；新一轮 defer 会另建记录。"""
-    if not _moonlight(st):
-        return
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    for issue in _moonlight_unresolved(st):
-        if issue.get("kind") == kind:
-            issue["resolved_at"] = now
-            issue["resolved_head"] = sh("git rev-parse --verify HEAD")
+    moonlight_resolve_kind(st, kind, sh("git rev-parse --verify HEAD"))
 
 
 def _moonlight_step_kind(sid):
-    return MOONLIGHT_QUALITY_STEPS.get(sid, "")
+    return moonlight_step_kind(sid)
 
 
 def _moonlight_can_block(sid):
     """硬阻塞出口用于非质量工作；质量关有 defer，push 有 push-failed。build 例外：
     它既是实现步骤，也可能遇到需求/依赖阻塞。"""
-    return sid == "build" or (
-        sid not in MOONLIGHT_QUALITY_STEPS
-        and sid not in ("push", "moonlight_review", "end")
-    )
+    return moonlight_can_hard_block(sid)
 
 
 def _moonlight_issue_context(st):
@@ -1155,24 +1159,26 @@ def _ack_failure(st, reason="", success=False):
     """记录确认通道连续失败；第二次起明确熔断，防弱模型无限重复提问。"""
     sid = (st or {}).get("current", "")
     key = "ack:" + sid
-    try:
-        data = json.load(open(FAILURE_PATH, encoding="utf-8")) if os.path.exists(FAILURE_PATH) else {}
-    except Exception:
-        data = {}
-    if success:
-        if key in data:
+    result = [0]
+
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        if success:
             data.pop(key, None)
-            _write_json_atomic(FAILURE_PATH, data)
-        return 0
-    previous = data.get(key, {})
-    count = int(previous.get("count", 0)) + 1
-    data[key] = {
-        "count": count,
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "reason": reason[:1000],
-    }
-    _write_json_atomic(FAILURE_PATH, data)
-    return count
+            return data
+        previous = data.get(key, {})
+        result[0] = int(previous.get("count", 0)) + 1
+        data[key] = {
+            "count": result[0],
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": reason[:1000],
+        }
+        return data
+
+    update_json(
+        FAILURE_PATH, mutate, default={}, recover_corrupt=True)
+    return result[0]
 
 
 def _ack_verified(st, ack, exact=False):
@@ -1539,29 +1545,25 @@ def _snapshot_state_files(dst):
 
 
 def _write_json_atomic(path, data):
-    tmp = path + ".tmp"
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    atomic_write_json(path, data)
 
 
 def _load_action():
-    try:
-        action = json.load(open(ACTION_PATH, encoding="utf-8")) if os.path.isfile(ACTION_PATH) else None
-        if action and float(action.get("expires_epoch", 0) or 0) < time.time():
-            _archive_action(action, "expired", "独立任务超过 24 小时自动失效")
-            return None
-        return action
-    except Exception as exc:
-        die("独立任务状态损坏：%s。它不会拦普通开发；可执行 action cancel 归档坏现场。" % exc, 2)
+    action, err, expired = core_load_action()
+    if err:
+        die("独立任务状态损坏：%s。它不会拦普通开发；可执行 action cancel 归档坏现场。" % err, 2)
+    if action and expired:
+        _archive_action(action, "expired", "独立任务超过 24 小时自动失效")
+        return None
+    return action
 
 
 def _save_action(action):
-    action["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    _write_json_atomic(ACTION_PATH, action)
+    try:
+        core_save_action(action)
+    except StateStoreError as exc:
+        die("独立任务状态存在并发更新或不可读，拒绝覆盖：" + str(exc)
+            + "。重新执行 action status 后继续。", 2)
 
 
 def _git_local_runtime_ignore():
@@ -1587,24 +1589,16 @@ def _git_local_runtime_ignore():
 
 
 def _action_dir(action):
-    return os.path.abspath(action.get("work_dir") or os.path.join(
-        ".mae-flow-work", "standalone", action.get("id", "unknown")))
+    return core_action_work_dir(action)
 
 
 def _archive_action(action, outcome, note=""):
     """结束独立任务只移除控制指针，不删除代码和报告，也不触碰主流程现场。"""
-    action["status"] = outcome
-    action["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    if note:
-        action["note"] = note
-    work = _action_dir(action)
-    os.makedirs(work, exist_ok=True)
-    _write_json_atomic(os.path.join(work, "action.json"), action)
     try:
-        os.remove(ACTION_PATH)
-    except OSError:
-        pass
-    return work
+        return core_archive_action(action, outcome, note)
+    except StateStoreError as exc:
+        die("独立任务在归档前发生并发更新或状态不可读：" + str(exc)
+            + "。重新执行 action status 后继续。", 2)
 
 
 def _standalone_config():
@@ -1675,9 +1669,7 @@ def _action_request(action, request="", source=""):
         request = (request.strip() + "\n\n" if request.strip() else "") + text
     if request.strip():
         path = os.path.join(work, "request.md")
-        with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
-            f.write("# 独立任务输入\n\n" + request.strip() + "\n")
-        os.replace(path + ".tmp", path)
+        atomic_write_text(path, "# 独立任务输入\n\n" + request.strip() + "\n")
         sources.insert(0, path)
     return sources
 
@@ -1742,9 +1734,7 @@ def _action_task_card(action, kind, stage=""):
     os.makedirs(work, exist_ok=True)
     suffix = ("-" + stage) if stage else ""
     path = os.path.join(work, f"{label.lower()}{suffix}-task.md")
-    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
-        f.write(body)
-    os.replace(path + ".tmp", path)
+    atomic_write_text(path, body)
     initial = {
         p: _path_fingerprint(p)
         for p in _dirty_paths()
@@ -1922,19 +1912,11 @@ def cmd_action_finish(args):
 
 
 def cmd_action_cancel():
-    try:
-        action = json.load(open(ACTION_PATH, encoding="utf-8")) if os.path.isfile(ACTION_PATH) else None
-    except Exception as exc:
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        work = os.path.abspath(os.path.join(".mae-flow-work", "standalone", stamp + "-corrupt"))
-        os.makedirs(work, exist_ok=True)
-        shutil.copy2(ACTION_PATH, os.path.join(work, "standalone-action.json.bad"))
-        try:
-            os.remove(ACTION_PATH)
-        except OSError:
-            pass
+    action, err, _ = core_load_action()
+    if err:
+        work = core_archive_corrupt_action()
         print("[mae-flow] 独立任务状态已损坏，但取消成功；坏现场保存在 %s。"
-              "普通开发从未被它拦截。原因：%s" % (norm(work), exc))
+              "普通开发从未被它拦截。原因：%s" % (norm(work or "无"), err))
         return
     if not action:
         print("[mae-flow] 当前没有独立任务，无需取消。")
@@ -2010,10 +1992,7 @@ def cmd_requirement_record(st, args):
         "<!-- %s %s -->\n"
         "%s\n" % (source_desc, REQ_SHA_MARKER, digest, text)
     )
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(content)
-    os.replace(tmp, path)
+    atomic_write_text(path, content)
     ok, why = _validate_requirement_document(path)
     if not ok:
         die("需求文件写后回读校验失败：" + why + "。文件保留供诊断，禁止进入下一阶段。", 2)
@@ -2805,15 +2784,7 @@ def cmd_codecheck_scan(flow, st, args):
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
         "files": files, "pairs": result["pairs"], "commands": result["commands"]}
     # 每次重扫都是新一轮；旧 Agent 令牌不能替新告警背书。
-    try:
-        p = STATE_PATH + ".tokens"
-        toks = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
-        toks.pop("CODECHECK", None)
-        tmp = p + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(toks, ensure_ascii=False))
-        os.replace(tmp, p)
-    except Exception:
-        pass
+    _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
     print(f"[mae-flow] CodeCheck 首检完成:业务文件 {len(files)} 个,告警 {result['total']} 条。")
@@ -2854,15 +2825,7 @@ def cmd_codecheck_record(flow, st, args):
     st["quality"]["codecheck_scan"] = {"step": st["current"], "head": head,
         "files": files, "pairs": [], "commands": ["人工核对诊断文件:" + diag],
         "count": args.count, "at": rec["at"], "manual": True}
-    try:
-        p = STATE_PATH + ".tokens"
-        toks = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
-        toks.pop("CODECHECK", None)
-        tmp = p + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(toks, ensure_ascii=False))
-        os.replace(tmp, p)
-    except Exception:
-        pass
+    _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
     print(f"[mae-flow] 已记录人工核对结果: {args.count} 条，绑定 HEAD {head[:12]} 与诊断 SHA256 {digest[:12]}。")
@@ -2926,6 +2889,17 @@ def cmd_doctor(flow, st, args):
     sid = st["current"]
     step = flow["steps"][sid]
     print(f"项目根(状态文件所在): {os.getcwd()}")
+    runtime = resolve_runtime(os.getcwd())
+    print("✅ 运行模式: " + runtime.mode)
+    if runtime.conflicts:
+        print("⚠ 状态冲突: " + "、".join(runtime.conflicts)
+              + "（完整流程具有唯一控制权，陈旧标记不会绕过当前门禁）")
+        if "flow_and_action" in runtime.conflicts:
+            print("   清理方式: 确认独立任务不再需要后执行 action cancel")
+        if "flow_and_exit" in runtime.conflicts:
+            print("   清理方式: 当前完整流程可正常继续；下次正常 exit/init 会重建退出标记")
+    for error in runtime.errors:
+        print("⚠ 非主控状态不可读: " + error)
     print(f"当前步骤: {sid} — {step['title']}")
     cur = sh("git branch --show-current")
     want = st["config"].get("分支名", "(未设置)")
@@ -3132,10 +3106,7 @@ def _moonlight_report_text(flow, st):
 def _write_moonlight_report(flow, st):
     os.makedirs(os.path.dirname(MOONLIGHT_REPORT_PATH), exist_ok=True)
     text = _moonlight_report_text(flow, st)
-    tmp = MOONLIGHT_REPORT_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, MOONLIGHT_REPORT_PATH)
+    atomic_write_text(MOONLIGHT_REPORT_PATH, text)
     return text
 
 
@@ -3752,7 +3723,7 @@ def cmd_exit(flow, st, args):
         "compat_warnings": compat_warnings,
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
-    _write_json_atomic(EXIT_PATH, record)
+    save_versioned_json(EXIT_PATH, record, "exit")
     cleanup_errors = []
     for src, _ in copied:
         try:
@@ -3780,6 +3751,52 @@ def print_direct_mode_status():
           (rec.get("at", "?"), rec.get("step", "?"), rec.get("reason", "?")))
     print("现场保留在: " + rec.get("snapshot", ".mae-flow-work/exited/"))
     print("只有用户明确要求重新接回原流程时才执行 init；init 会恢复原断点并重新取证。另一张新单请另开 worktree。")
+
+
+def cmd_runtime_doctor(runtime, args, state_error=""):
+    """No-state diagnostic path: auxiliary corruption must never deadlock repair."""
+    print("项目根(状态文件所在): " + os.getcwd())
+    print("❌ 运行模式: corrupt（Hook 已 fail-open，普通改码不受阻）")
+    for error in runtime.errors:
+        print("   - " + error)
+    if os.path.isfile(STATE_PATH):
+        print("完整流程状态损坏。发送 `/mae-flow exit` 可保存坏现场并退出；"
+              "Hook 同时损坏时由用户在真实终端执行 exit --interactive。")
+        if getattr(args, "repair_state", False):
+            die("完整流程状态包含唯一断点，doctor 不会自动覆盖。"
+                "请使用独立 exit 逃生链保存现场。", 2)
+        return
+    if os.path.isfile(ACTION_PATH):
+        print("独立任务控制指针损坏；普通开发已放行。"
+              "可执行 doctor --repair-state 保存坏文件并清理指针。")
+        if getattr(args, "repair_state", False):
+            return cmd_action_cancel()
+        return
+    if os.path.isfile(EXIT_PATH):
+        print("退出标记损坏；普通开发已放行，但重新接回流程前需要修复。"
+              "可执行 doctor --repair-state 保存坏文件并重建退出标记。")
+        if not getattr(args, "repair_state", False):
+            return
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        base = os.path.abspath(os.path.join(
+            ".mae-flow-work", "state-recovery", stamp))
+        recovery, suffix = base, 2
+        while os.path.exists(recovery):
+            recovery, suffix = base + "-" + str(suffix), suffix + 1
+        os.makedirs(recovery, exist_ok=False)
+        bad = os.path.join(recovery, os.path.basename(EXIT_PATH) + ".bad")
+        shutil.move(EXIT_PATH, bad)
+        record = {
+            "status": "exited",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "reason": "doctor 修复损坏退出标记",
+            "snapshot": "",
+            "recovered_bad_marker": norm(bad),
+        }
+        save_versioned_json(EXIT_PATH, record, "exit")
+        print("[mae-flow] 损坏退出标记已保存到 %s，并重建普通开发模式标记。" % norm(bad))
+        return
+    print("未找到可识别的 Mae-Flow 标记；可按未初始化项目处理。")
 
 
 def cmd_exit_corrupt_state(args, state_error):
@@ -3831,7 +3848,7 @@ def cmd_exit_corrupt_state(args, state_error):
         "comet_guard_paths": [norm(p) for p in found], "compat_warnings": errors,
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
-    _write_json_atomic(EXIT_PATH, record)
+    save_versioned_json(EXIT_PATH, record, "exit")
     for src, _ in copied:
         try:
             os.remove(src)
@@ -3845,95 +3862,8 @@ def cmd_exit_corrupt_state(args, state_error):
         print("⚠ 兼容提示：" + "；".join(errors), file=sys.stderr)
 
 
-class MFParser(argparse.ArgumentParser):
-    """参数错误即教学:argparse 默认英文 usage 弱模型读不懂会瞎试第二次。
-    报错直接给中文速查 + 可复制的正确命令(错误即文档;子命令解析器自动继承本类)。"""
-
-    def error(self, message):
-        me = os.path.abspath(sys.argv[0])
-        print("[mae-flow] 参数错误: " + message, file=sys.stderr)
-        print("正确用法(高频三条,直接复制):\n"
-              f"  python \"{me}\" current\n"
-              f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
-              f"  python \"{me}\" init\n"
-              "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
-              "accept-risk|moonlight|action|messages|requirement-record|codecheck-scan|"
-              "codecheck-record|approve-exemption|exit"
-              "(用法见 current/exit 指令)。\n"
-              "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
-              file=sys.stderr)
-        sys.exit(2)
-
-
 def main():
-    ap = MFParser(prog="mae-flow")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    i = sub.add_parser("init"); i.add_argument("--ack")
-    sub.add_parser("current")
-    d = sub.add_parser("done")
-    d.add_argument("--ack"); d.add_argument("--choice"); d.add_argument("--set", action="append")
-    s = sub.add_parser("skip"); s.add_argument("--reason")
-    t = sub.add_parser("status"); t.add_argument("--inject", action="store_true")
-    g = sub.add_parser("gate"); g.add_argument("what", choices=["edit", "bash"]); g.add_argument("arg")
-    o = sub.add_parser("goto"); o.add_argument("step"); o.add_argument("--force", action="store_true"); o.add_argument("--ack")
-    u = sub.add_parser("unlock"); u.add_argument("what", choices=["source"]); u.add_argument("--reason"); u.add_argument("--ack")
-    ar = sub.add_parser("accept-risk")
-    ar.add_argument("agent", help="当前步骤报错中显示的 Agent 名称，如 compile/codecheck/ut")
-    ar.add_argument("--reason", required=True); ar.add_argument("--ack", required=True)
-    ml = sub.add_parser("moonlight")
-    ml.add_argument("action", choices=[
-        "on", "continue", "off", "report", "push-failed",
-        "unlock-source", "defer", "blocked", "repair", "finalize"])
-    ml.add_argument("--reason"); ml.add_argument("--ack")
-    x = sub.add_parser("exit")
-    x.add_argument("--reason"); x.add_argument("--ack")
-    x.add_argument("--intent", help=argparse.SUPPRESS)
-    x.add_argument("--interactive", action="store_true",
-                   help="Hook/ack 损坏时，由用户在真实终端输入 EXIT 的紧急出口")
-    action = sub.add_parser("action")
-    actions = action.add_subparsers(dest="action", required=True)
-    ast = actions.add_parser("start")
-    ast.add_argument("kind", choices=["ut", "codecheck", "grill"])
-    ast.add_argument("--request")
-    ast.add_argument("--source")
-    ast.add_argument("--files", action="append")
-    ast.add_argument("--build")
-    ast.add_argument("--generator")
-    ast.add_argument("--ut-command")
-    ast.add_argument("--check-only", action="store_true")
-    actions.add_parser("status")
-    ac = actions.add_parser("critic")
-    ac.add_argument("--stage", choices=["prep", "final"], required=True)
-    ac.add_argument("--document", required=True)
-    af = actions.add_parser("finish")
-    af.add_argument("--report")
-    actions.add_parser("cancel")
-    sub.add_parser("messages")
-    rr = sub.add_parser("requirement-record")
-    rr.add_argument("--message-id")
-    rr.add_argument("--source")
-    rr.add_argument("--ticket")
-    rr.add_argument("--replace", action="store_true")
-    rl = sub.add_parser("reloaded"); rl.add_argument("--ack")
-    sub.add_parser("doctor")
-    sub.add_parser("envcheck")
-    r = sub.add_parser("report")
-    r.add_argument("--all", action="store_true")   # 聚合历史账本(无在途单也可用)
-    tp = sub.add_parser("template")
-    tp.add_argument("kind", nargs="?", default="story", choices=["story", "chain", "grill", "review"])
-    at = sub.add_parser("agent-task")
-    at.add_argument("kind", choices=["compile", "codecheck", "ut"])
-    at.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")
-    sub.add_parser("codecheck-scan")
-    cr = sub.add_parser("codecheck-record")
-    cr.add_argument("--count", required=True, type=int)
-    cr.add_argument("--diagnostic", required=True)
-    cr.add_argument("--reason", required=True)
-    cr.add_argument("--ack", required=True)
-    ae = sub.add_parser("approve-exemption")
-    ae.add_argument("--rule", required=True); ae.add_argument("--file", required=True)
-    ae.add_argument("--reason", required=True); ae.add_argument("--ack", required=True)
-    args = ap.parse_args()
+    args = parse_args()
 
     root, _ = find_project_root()
     if root != os.getcwd():
@@ -3944,11 +3874,14 @@ def main():
     global FLOW
     flow = load_flow()
     FLOW = flow
+    runtime = resolve_runtime(os.getcwd())
     try:
         st = load_state()
     except Exception as state_error:
         if args.cmd == "exit":
             return cmd_exit_corrupt_state(args, state_error)
+        if args.cmd == "doctor":
+            return cmd_runtime_doctor(runtime, args, state_error)
         die("流程状态文件损坏，不能安全判断当前步骤：%s。不要删除或手改状态；"
             "用户可直接发送 `/mae-flow exit`，Hook 会保存坏文件并退出；"
             "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
@@ -3957,8 +3890,14 @@ def main():
     if args.cmd == "template":
         return cmd_template(flow, args)
     if args.cmd == "init":
+        if runtime.mode == RuntimeMode.STANDALONE:
+            die("当前有独立任务正在运行，不能同时初始化完整流程。"
+                "先执行 action finish 或 action cancel。", 2)
         return cmd_init(flow, args)
     if args.cmd == "moonlight" and args.action in ("on", "continue"):
+        if runtime.mode == RuntimeMode.STANDALONE:
+            die("当前有独立任务正在运行，不能叠加月光宝盒。"
+                "先执行 action finish 或 action cancel。", 2)
         return cmd_moonlight(flow, st, args)
     if args.cmd == "gate":
         return cmd_gate(flow, st, args)
@@ -3975,11 +3914,18 @@ def main():
             return cmd_action_cancel()
     if args.cmd == "report" and args.all:
         return cmd_report_all()   # 账本聚合是无状态命令,不要求存在在途单
-    if os.path.exists(EXIT_PATH):
+    if runtime.mode == RuntimeMode.DIRECT:
         if args.cmd in ("current", "status", "doctor", "exit"):
             return print_direct_mode_status()
         die("当前项目已退出 mae-flow，普通开发不需要执行流程命令。"
             "若用户明确要重新进入流程，请执行 init；旧质量证据不会复用。", 2)
+    if runtime.mode == RuntimeMode.STANDALONE:
+        if args.cmd in ("current", "status", "doctor"):
+            return cmd_action_status()
+        die("当前只运行独立任务，不存在可推进的完整交付步骤。"
+            "执行 action status 查看，或 action finish/action cancel 结束。", 2)
+    if runtime.mode == RuntimeMode.CORRUPT and args.cmd in ("current", "status", "doctor"):
+        return cmd_runtime_doctor(runtime, args)
     if st is None:
         die("流程未初始化,先执行 init。")
     if args.cmd == "exit":

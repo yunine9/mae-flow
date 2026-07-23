@@ -1,0 +1,227 @@
+"""Versioned, cross-process-safe JSON persistence for Mae-Flow.
+
+`os.replace` prevents torn JSON but does not prevent two Hook processes from
+overwriting each other's read-modify-write updates.  This module adds one short
+project-scoped lock plus a monotonically increasing revision.
+"""
+
+import copy
+import hashlib
+import json
+import os
+import tempfile
+import time
+
+
+CURRENT_SCHEMA_VERSION = 2
+
+
+class StateStoreError(RuntimeError):
+    pass
+
+
+class StateLockTimeout(StateStoreError):
+    pass
+
+
+class StateConflictError(StateStoreError):
+    pass
+
+
+def _lock_dir(project_root):
+    root = os.path.normcase(os.path.abspath(project_root or os.getcwd()))
+    key = hashlib.sha256(root.encode("utf-8", errors="replace")).hexdigest()[:24]
+    return os.path.join(tempfile.gettempdir(), "mae-flow-state-locks", key + ".lock")
+
+
+class ProjectStateLock:
+    """Portable lock based on atomic directory creation.
+
+    The lock lives in the OS temp directory, so pre-init operations do not add
+    `.mae-flow-work/` to an otherwise untouched repository.
+    """
+
+    def __init__(self, project_root=None, timeout=2.0, stale_after=30.0):
+        self.path = _lock_dir(project_root or os.getcwd())
+        self.timeout = timeout
+        self.stale_after = stale_after
+        self.acquired = False
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                os.mkdir(self.path)
+                self.acquired = True
+                return self
+            except FileExistsError:
+                try:
+                    age = time.time() - os.path.getmtime(self.path)
+                    if age > self.stale_after:
+                        os.rmdir(self.path)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise StateLockTimeout(
+                        "等待 Mae-Flow 状态锁超时；另一 Hook/命令可能仍在写状态")
+                time.sleep(0.01)
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.acquired:
+            try:
+                os.rmdir(self.path)
+            except OSError:
+                pass
+        self.acquired = False
+
+
+def read_json(path):
+    with open(path, encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+def safe_read_json(path):
+    if not os.path.isfile(path):
+        return None, None
+    try:
+        return read_json(path), None
+    except Exception as exc:
+        return None, "%s: %s" % (type(exc).__name__, exc)
+
+
+def atomic_write_json(path, data):
+    text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    atomic_write_text(path, text)
+
+
+def atomic_write_text(path, text):
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    tmp = "%s.tmp.%s.%s" % (path, os.getpid(), time.time_ns())
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+            stream.flush()
+            try:
+                os.fsync(stream.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+
+
+def normalize_document(data, kind):
+    """Migrate an old document in memory without discarding unknown fields."""
+    if not isinstance(data, dict):
+        raise ValueError("%s 状态必须是 JSON object" % kind)
+    out = copy.deepcopy(data)
+    version = int(out.get("schema_version", 0) or 0)
+    if version > CURRENT_SCHEMA_VERSION:
+        raise ValueError(
+            "%s 状态版本 %s 高于当前支持版本 %s" %
+            (kind, version, CURRENT_SCHEMA_VERSION))
+
+    if kind == "flow":
+        out.setdefault("config", {})
+        out.setdefault("choices", {})
+        out.setdefault("history", [])
+        if not isinstance(out.get("current"), str) or not out.get("current"):
+            raise ValueError("flow 状态缺少 current")
+    elif kind == "action":
+        out.setdefault("tokens", {})
+        out.setdefault("rejections", {})
+        out.setdefault("quality", {})
+        if not isinstance(out.get("kind"), str) or not out.get("kind"):
+            raise ValueError("action 状态缺少 kind")
+    elif kind == "exit":
+        out.setdefault("status", "exited")
+
+    out["schema_version"] = CURRENT_SCHEMA_VERSION
+    out["revision"] = int(out.get("revision", 0) or 0)
+    return out
+
+
+def save_versioned_json(path, data, kind, project_root=None, expected_revision=None):
+    """Save a complete versioned document with optional compare-and-swap."""
+    root = project_root or os.getcwd()
+    with ProjectStateLock(root):
+        current, err = safe_read_json(path)
+        if err:
+            raise StateStoreError(
+                "%s 当前状态不可读，拒绝覆盖坏现场（%s）" % (kind, err))
+        if current is not None:
+            current = normalize_document(current, kind)
+        current_revision = int((current or {}).get("revision", 0) or 0)
+        wanted = expected_revision
+        if wanted is None and isinstance(data, dict) and "revision" in data:
+            wanted = int(data.get("revision", 0) or 0)
+        if wanted is not None and current is not None and wanted != current_revision:
+            raise StateConflictError(
+                "%s revision 已从 %s 变为 %s，拒绝用旧快照覆盖新状态" %
+                (kind, wanted, current_revision))
+        saved = normalize_document(data, kind)
+        saved["revision"] = current_revision + 1
+        saved["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        atomic_write_json(path, saved)
+        if isinstance(data, dict):
+            data.clear()
+            data.update(copy.deepcopy(saved))
+        return saved
+
+
+def _quarantine_corrupt(path):
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    base = "%s.corrupt.%s.%s" % (path, stamp, os.getpid())
+    target, suffix = base, 2
+    while os.path.exists(target):
+        target, suffix = base + "." + str(suffix), suffix + 1
+    os.replace(path, target)
+    return target
+
+
+def update_json(path, mutator, default=None, project_root=None,
+                recover_corrupt=False):
+    """Locked read-modify-write for sidecars that intentionally have no schema."""
+    root = project_root or os.getcwd()
+    with ProjectStateLock(root):
+        current, err = safe_read_json(path)
+        if err:
+            if not recover_corrupt:
+                raise ValueError("状态文件不可读 %s (%s)" % (path, err))
+            _quarantine_corrupt(path)
+            current = copy.deepcopy(default)
+        if current is None:
+            current = copy.deepcopy(default)
+        result = mutator(current)
+        if result is None:
+            result = current
+        atomic_write_json(path, result)
+        return result
+
+
+def update_versioned_json(path, kind, mutator, default=None, project_root=None):
+    """Locked read-modify-write for flow/action/exit documents."""
+    root = project_root or os.getcwd()
+    with ProjectStateLock(root):
+        current, err = safe_read_json(path)
+        if err:
+            raise ValueError("状态文件不可读 %s (%s)" % (path, err))
+        if current is None:
+            current = copy.deepcopy(default or {})
+        current = normalize_document(current, kind)
+        revision = int(current.get("revision", 0) or 0)
+        result = mutator(current)
+        if result is None:
+            result = current
+        result = normalize_document(result, kind)
+        result["revision"] = revision + 1
+        result["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        atomic_write_json(path, result)
+        return result

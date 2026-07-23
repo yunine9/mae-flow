@@ -33,6 +33,10 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
     轻量控制层，不创建 `.mae-flow.json`，也不启用阶段源码门禁。三类任务共享任务卡、指纹、契约和报告机制；
     只有匹配当前任务卡的 SubagentStop 会被校验，普通 Edit/Bash/子 Agent 继续放行。独立任务默认不 commit，
     24 小时失效，取消只移除控制指针并保留现场。禁止为增加第四个单项能力复制一套新状态机。
+11. **运行模式只能有一个裁决源**。CLI 和 Hook 一律调用 `mae_flow_core.resolve_runtime()`，禁止再用
+    `exists(.mae-flow.json)` / `exists(standalone-action.json)` 各自排列优先级。完整流程、独立任务、退出标记
+    意外共存时，完整流程具有唯一控制权；冲突只告警，不得因此放开源码门禁。所有 JSON 状态写入必须经
+    `StateStore` 的项目锁、schema 迁移和 revision/CAS；禁止恢复固定 `.tmp` 或手写 read-modify-write。
 
 ### 思想图谱（三个开源思想源，各管一段、互不越界）
 
@@ -67,6 +71,7 @@ skills/mae-flow/SKILL.md   触发条件 + 5 条铁律(工具管不住、靠模�
 flow/flow.json              流程定义:步骤图、证据、权限、环境检查项
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
 scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
+scripts/mae_flow_core/      CLI/Hook 共用内核：运行模式裁决、带锁状态存储、独立任务生命周期、月光策略
 scripts/comet_compat.py     让项目级阶段门禁识别 mae-flow 直接开发标记（setup/exit 幂等补齐）
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
@@ -82,7 +87,18 @@ skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP / REVIEW 
 
 ### 3.1 状态机（flow.json + .mae-flow.json）
 
-状态存项目根 `.mae-flow.json`（gitignored，`.mae-flow.json*` 模式），原子写（tmp + `os.replace`）。
+状态存项目根 `.mae-flow.json`（gitignored，`.mae-flow.json*` 模式）。`mae_flow_core/state_store.py`
+统一负责 schema 迁移、revision/CAS、项目级跨进程锁与唯一临时文件 + `os.replace`；这既防半截 JSON，
+也防 UserPromptSubmit、SubagentStop、PostToolUse 同时 read-modify-write 时互相覆盖。
+旧状态首次保存会原地升级，未知字段保留；高于当前代码支持的 schema 明确报错，不能猜。
+主状态或独立任务指针损坏时保留现场并 fail-open；令牌、用户消息、拒签原因等可重建 sidecar 损坏时，
+首次写入会先改名为 `.corrupt.<时间>.<pid>` 再重建，不能让一个附属 JSON 把 Agent 卡进无限重跑。
+
+**运行模式不是“哪个文件先被 if 命中”**。`mae_flow_core/runtime.py` 同时读取完整流程、独立任务和退出标记，
+输出唯一模式：`inactive / flow / direct / standalone / corrupt`。安全优先级是：
+有效完整流程 > 有效独立任务 > 退出标记 > 未启用；过期独立任务忽略。完整流程与其他标记共存时仍执行完整
+流程门禁，并把冲突交给 doctor 展示，避免历史上“陈旧 standalone 指针让完整流程 Edit 直接放行”的事故。
+损坏主状态进入 `corrupt`，Hook fail-open 保普通开发，但保留 `/mae-flow exit` 的独立逃生路径。
 终态后 `init` 先把本单摘要（耗时/goto/摩擦统计）追加进 `.mae-flow-history.jsonl`
 （gitignored + gate 防篡改；`report --all` 聚合展示，团队度量数据出口），再自动备份为 `.last` 开新档；非终态 `init` 拒绝。
 仓根可提交 `.mae-flow-defaults.json`（团队预设：编译方式/UT生成方式/UT运行命令等恒定项），

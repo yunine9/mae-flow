@@ -261,6 +261,7 @@ AI 会列清单等你裁决，两选一：现在修（AI 会为每个问题单�
 | 执行 mae-flow status | 看原始进度数据 |
 | 执行 mae-flow current | 看当前步骤的完整指令 |
 | 执行 mae-flow doctor | 全套体检（排障首选） |
+| 执行 mae-flow doctor --repair-state | 仅在 doctor 明确提示辅助状态损坏时使用：先保存坏现场，再修复独立任务/退出标记；不会覆盖完整流程断点 |
 | 执行 mae-flow report | 各阶段耗时 + 摩擦统计（拦截/打回/跳转次数） |
 | 执行 mae-flow report --all | 本仓历史交付统计（每单耗时/拦截/打回聚合，交付完成自动记账） |
 | 执行 mae-flow envcheck | 全量重测环境（绕过缓存） |

@@ -19,21 +19,41 @@
 """
 import glob, hashlib, json, locale, os, re, subprocess, sys, tempfile, threading, time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+from mae_flow_core import (
+    ACTION_FILE,
+    EXIT_FILE,
+    FLOW_FILE,
+    RuntimeMode,
+    atomic_write_json,
+    atomic_write_text,
+    find_project_root,
+    load_action as core_load_action,
+    normalize_document,
+    resolve_runtime,
+    safe_read_json,
+    update_json,
+    update_versioned_json,
+)
+
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 MAEFLOW = os.path.join(HERE, "..", "scripts", "mae-flow.py")
-STATE = ".mae-flow.json"
-EXIT_STATE = ".mae-flow.json.exited"
+STATE = FLOW_FILE
+EXIT_STATE = EXIT_FILE
 MOONLIGHT_INTENT = STATE + ".moonlight-intent"
 EXIT_INTENT = STATE + ".exit-intent"
 REJECTION_STATE = STATE + ".agent-rejections"
 EVIDENCE_STATE = STATE + ".agent-evidence"
-ACTION_STATE = os.path.join(".mae-flow-work", "standalone-action.json")
+ACTION_STATE = ACTION_FILE
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
 STDIN_SECS = 3
@@ -148,26 +168,11 @@ def _chdir_root(d):
     以 hook JSON 的 cwd 为基准向上定位；最近仓库边界会阻断更高层的陈旧状态，
     避免一个父目录流程误接管从未启用 mae-flow 的独立子仓。"""
     base = d.get("cwd") or os.getcwd()
-    probe = os.path.abspath(base)
-    while True:
-        if (os.path.exists(os.path.join(probe, STATE))
-                or os.path.exists(os.path.join(probe, EXIT_STATE))):
-            if probe != os.getcwd():
-                _log("chdir 项目根: " + probe)
-            os.chdir(probe)
-            return
-        if (os.path.exists(os.path.join(probe, ".git"))
-                or os.path.isdir(os.path.join(probe, "openspec"))):
-            if probe != os.getcwd():
-                _log("chdir 项目根(init前): " + probe)
-            os.chdir(probe)
-            return
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
+    root = find_project_root(base)
     try:
-        os.chdir(base)
+        if root != os.getcwd():
+            _log("chdir 项目根: " + root)
+        os.chdir(root)
     except Exception:
         pass
 
@@ -457,35 +462,40 @@ def _record_agent_token(kind, status="", report=""):
             work = action.get("work_dir") or os.path.dirname(os.path.abspath(ACTION_STATE))
             os.makedirs(work, exist_ok=True)
             report_path = os.path.join(work, "result-" + kind.lower() + ".md")
-            with open(report_path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
-                f.write((report or "").rstrip() + "\n")
-            os.replace(report_path + ".tmp", report_path)
-            task = (action.get("agent_tasks", {}) or {}).get(kind, {})
-            action.setdefault("tokens", {})[kind] = {
-                "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
-                "status": status, "step": "standalone_" + action.get("kind", ""),
-                "task_sha256": task.get("sha256", ""), "report_path": report_path,
-            }
-            _atomic_json(ACTION_STATE, action)
-            _clear_rejection(kind)
+            atomic_write_text(report_path, (report or "").rstrip() + "\n")
+
+            def update_action(current):
+                task = (current.get("agent_tasks", {}) or {}).get(kind, {})
+                current.setdefault("tokens", {})[kind] = {
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
+                    "status": status, "step": "standalone_" + current.get("kind", ""),
+                    "task_sha256": task.get("sha256", ""), "report_path": report_path,
+                }
+                current.setdefault("rejections", {}).pop(kind, None)
+                current["rejections"].pop("SUBAGENT", None)
+                return current
+
+            update_versioned_json(ACTION_STATE, "action", update_action)
             _log("standalone agent token: %s/%s @%s" % (
                 kind, status or "-", head[:9] or "no-git"))
             return
         p = ".mae-flow.json.tokens"
-        d = {}
-        if os.path.exists(p):
-            d = json.loads(open(p, encoding="utf-8").read() or "{}")
         head = _git_head()
         step = ""
         try:
-            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+            raw, err = safe_read_json(STATE)
+            step = normalize_document(raw, "flow").get("current", "") if not err and raw else ""
         except Exception:
             pass
-        d[kind] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
-                   "status": status, "step": step}
-        tmp = p + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False))
-        os.replace(tmp, p)
+
+        def update_tokens(tokens):
+            tokens[kind] = {
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
+                "status": status, "step": step,
+            }
+            return tokens
+
+        update_json(p, update_tokens, default={}, recover_corrupt=True)
         _clear_rejection(kind)
         _log("agent token: %s/%s @%s" % (kind, status or "-", head[:9] or "no-git"))
     except Exception as e:
@@ -512,31 +522,32 @@ def _capture_usermsg(text):
         if not text or not os.path.exists(STATE):
             return
         p = STATE + ".usermsg"
-        try:
-            msgs = json.loads(open(p, encoding="utf-8").read() or "[]")
-        except Exception:
-            msgs = []
         step = ""
         try:
-            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+            raw, err = safe_read_json(STATE)
+            step = normalize_document(raw, "flow").get("current", "") if not err and raw else ""
         except Exception:
             pass
         captured = text[:2000]
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         msg_id = hashlib.sha256(
             (stamp + "\0" + step + "\0" + captured).encode("utf-8")).hexdigest()[:12]
-        msgs.append({
+        row = {
             "id": msg_id,
             "at": stamp,
             "step": step,
             "text": captured,
             "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
             "input_encoding": _INPUT_ENCODING or "unknown",
-        })
-        msgs = msgs[-10:]
-        tmp = p + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(msgs, ensure_ascii=False))
-        os.replace(tmp, p)
+        }
+
+        def append_message(msgs):
+            if not isinstance(msgs, list):
+                msgs = []
+            msgs.append(row)
+            return msgs[-10:]
+
+        update_json(p, append_message, default=[], recover_corrupt=True)
     except Exception as e:
         _log("usermsg EXC: %s" % e)
 
@@ -576,9 +587,7 @@ def _capture_exit_intent(text):
             "text": text[:2000],
             "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         }
-        tmp = EXIT_INTENT + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False))
-        os.replace(tmp, EXIT_INTENT)
+        atomic_write_json(EXIT_INTENT, rec)
         _log("captured explicit exit intent step=%s id=%s" % (step, nonce))
         return nonce
     except Exception as exc:
@@ -594,15 +603,13 @@ def _capture_moonlight_intent(text):
     """
     try:
         text = (text or "").strip()
-        if not text or os.path.exists(STATE) or os.path.exists(EXIT_STATE) or os.path.exists(ACTION_STATE):
+        if not text or resolve_runtime(os.getcwd()).mode != RuntimeMode.INACTIVE:
             return
         if not re.search(r"月光宝盒|moonlight", text, re.I):
             return
         rec = {"at": time.strftime("%Y-%m-%d %H:%M:%S"),
                "epoch": time.time(), "text": text[:2000]}
-        tmp = MOONLIGHT_INTENT + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False))
-        os.replace(tmp, MOONLIGHT_INTENT)
+        atomic_write_json(MOONLIGHT_INTENT, rec)
         _log("captured pre-init moonlight intent")
     except Exception as e:
         _log("moonlight intent EXC: %s" % e)
@@ -614,13 +621,15 @@ def _capture_direct_prompt(text):
         text = (text or "").strip()
         if not text or not os.path.isfile(EXIT_STATE):
             return
-        rec = json.load(open(EXIT_STATE, encoding="utf-8"))
-        msgs = rec.get("direct_messages", []) or []
-        msgs.append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text[:2000]})
-        rec["direct_messages"] = msgs[-10:]
-        tmp = EXIT_STATE + ".tmp"
-        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False, indent=2))
-        os.replace(tmp, EXIT_STATE)
+        row = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text[:2000]}
+
+        def append_direct(rec):
+            msgs = rec.get("direct_messages", []) or []
+            msgs.append(row)
+            rec["direct_messages"] = msgs[-10:]
+            return rec
+
+        update_versioned_json(EXIT_STATE, "exit", append_direct)
     except Exception as e:
         _log("direct prompt EXC: %s" % e)
 
@@ -640,33 +649,23 @@ def _maybe_utrun(d):
         _log("utrun EXC: %s" % e)
 
 
-def _atomic_json(path, data):
-    tmp = path + ".tmp"
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
-
-
 def _load_action():
-    try:
-        action = json.load(open(ACTION_STATE, encoding="utf-8")) if os.path.isfile(ACTION_STATE) else None
-        if action and float(action.get("expires_epoch", 0) or 0) < time.time():
-            _log("standalone action expired: " + action.get("id", "?"))
-            return None
-        return action
-    except Exception as exc:
-        _log("standalone action unreadable: " + str(exc))
+    action, err, expired = core_load_action()
+    if err:
+        _log("standalone action unreadable: " + err)
         return None
+    if action and expired:
+        _log("standalone action expired: " + action.get("id", "?"))
+        return None
+    return action
 
 
 def _contract_state():
     """完整流程与独立任务共用契约器，但独立任务绝不创建主状态或启用源码 gate。"""
     try:
         if os.path.isfile(STATE):
-            return json.load(open(STATE, encoding="utf-8"))
+            raw, err = safe_read_json(STATE)
+            return normalize_document(raw, "flow") if not err and raw else {}
     except Exception:
         return {}
     action = _load_action()
@@ -695,21 +694,25 @@ def _evidence_data():
 def _save_evidence(data):
     action = _load_action()
     if action and not os.path.isfile(STATE):
-        action["evidence"] = data
-        _atomic_json(ACTION_STATE, action)
+        def merge_action(current):
+            current.setdefault("evidence", {}).update(data)
+            return current
+        update_versioned_json(ACTION_STATE, "action", merge_action)
     else:
-        _atomic_json(EVIDENCE_STATE, data)
+        def merge_evidence(current):
+            current.update(data)
+            return current
+        update_json(
+            EVIDENCE_STATE, merge_evidence, default={}, recover_corrupt=True)
 
 
 def _record_rejection(label, msg):
     """把真实拒签原因留给 done/doctor；Hook stderr 被宿主吞掉时也不能让主模型猜。"""
     try:
         action = _load_action() if not os.path.isfile(STATE) else None
-        data = dict(action.get("rejections", {}) or {}) if action else (
-            json.load(open(REJECTION_STATE, encoding="utf-8")) if os.path.exists(REJECTION_STATE) else {})
         st = _contract_state()
         task = (st.get("agent_tasks", {}) or {}).get(label, {})
-        data[label] = {
+        rejection = {
             "at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "step": st.get("current", ""),
             "head": _git_head(),
@@ -717,10 +720,16 @@ def _record_rejection(label, msg):
             "reason": msg,
         }
         if action:
-            action["rejections"] = data
-            _atomic_json(ACTION_STATE, action)
+            def reject_action(current):
+                current.setdefault("rejections", {})[label] = rejection
+                return current
+            update_versioned_json(ACTION_STATE, "action", reject_action)
         else:
-            _atomic_json(REJECTION_STATE, data)
+            def reject_flow(data):
+                data[label] = rejection
+                return data
+            update_json(
+                REJECTION_STATE, reject_flow, default={}, recover_corrupt=True)
         _log(label + " 拒签: " + msg)
     except Exception as e:
         _log("rejection EXC: " + str(e))
@@ -730,19 +739,21 @@ def _clear_rejection(label):
     try:
         action = _load_action() if not os.path.isfile(STATE) else None
         if action:
-            data = dict(action.get("rejections", {}) or {})
+            def clear_action(current):
+                data = current.setdefault("rejections", {})
+                data.pop(label, None)
+                data.pop("SUBAGENT", None)
+                return current
+            update_versioned_json(ACTION_STATE, "action", clear_action)
         else:
             if not os.path.exists(REJECTION_STATE):
                 return
-            data = json.load(open(REJECTION_STATE, encoding="utf-8"))
-        if label in data or "SUBAGENT" in data:
-            data.pop(label, None)
-            data.pop("SUBAGENT", None)
-            if action:
-                action["rejections"] = data
-                _atomic_json(ACTION_STATE, action)
-            else:
-                _atomic_json(REJECTION_STATE, data)
+            def clear_flow(data):
+                data.pop(label, None)
+                data.pop("SUBAGENT", None)
+                return data
+            update_json(
+                REJECTION_STATE, clear_flow, default={}, recover_corrupt=True)
     except Exception as e:
         _log("clear rejection EXC: " + str(e))
 
@@ -1504,8 +1515,31 @@ def main():
     try:
         d = read_input()
         _chdir_root(d)
-        action_active = bool(_load_action())
-        if action_active and ev == "pretooluse":
+        runtime = resolve_runtime(os.getcwd())
+        if runtime.has_conflict:
+            _log("runtime conflict: " + ",".join(runtime.conflicts))
+            if ev in ("userprompt", "sessionstart"):
+                print("[mae-flow] ⚠ 检测到流程状态冲突：%s。完整流程继续作为唯一控制源；"
+                      "请执行 mae-flow doctor 查看并清理陈旧独立任务。"
+                      % "、".join(runtime.conflicts))
+        action_active = runtime.mode == RuntimeMode.STANDALONE
+        if runtime.mode == RuntimeMode.CORRUPT:
+            _log("runtime corrupt: " + ";".join(runtime.errors))
+            if ev in ("userprompt", "sessionstart"):
+                if os.path.isfile(STATE):
+                    print("[mae-flow] ⚠ 完整流程状态损坏，Hook 已按 fail-open 放行普通开发。"
+                          "发送 `/mae-flow exit` 可保存坏现场并解除流程；不要手删状态。")
+                elif os.path.isfile(ACTION_STATE):
+                    print("[mae-flow] ⚠ 独立任务状态损坏，Hook 已按 fail-open 放行普通开发。"
+                          "执行 `mae-flow action cancel` 可保存坏现场并清理控制指针。")
+                else:
+                    print("[mae-flow] ⚠ 退出标记损坏，Hook 已按 fail-open 放行普通开发。"
+                          "执行 `mae-flow doctor` 查看现场；不要直接删除文件。")
+                # 保留损坏主状态下的一键退出通道；status 失败不会阻止普通对话。
+                if os.path.isfile(STATE):
+                    ev_inject(d, session_start=(ev == "sessionstart"))
+            rc = 0
+        elif action_active and ev == "pretooluse":
             ev_action_pretooluse(d)
         elif action_active and ev == "subagentstop":
             ev_subagentstop(d)
@@ -1513,7 +1547,7 @@ def main():
             # 退出过完整流程后仍会保留 EXIT_STATE；独立任务是用户此刻的新意图，
             # 状态注入必须优先于旧的“普通开发模式”提示，否则主 Agent 会丢失单项任务上下文。
             ev_inject(d, session_start=(ev == "sessionstart"))
-        elif os.path.exists(EXIT_STATE):
+        elif runtime.mode == RuntimeMode.DIRECT:
             # 用户已明确退出：MAE-FLOW 完整让出控制权。不能只跳过源码 gate 而继续发令牌/注入步骤，
             # 否则会形成“表面直接开发，后台仍在推进旧流程”的半退出状态。
             if ev in ("userprompt", "sessionstart"):
@@ -1523,7 +1557,7 @@ def main():
                       "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
             _log("direct mode: bypass " + ev)
             rc = 0
-        elif not os.path.exists(STATE) and ev in (
+        elif runtime.mode == RuntimeMode.INACTIVE and ev in (
                 "pretooluse", "posttooluse", "subagentstop", "stop"):
             # 安装插件不等于启用工作流。没有在途状态时，任何工具调用都必须完整旁路；
             # 否则全局插件 Hook 会让从未使用 mae-flow 的普通项目也无法修改源码。

@@ -520,6 +520,10 @@
       ],
       "next": "end"
     },
+    "moonlight_review": {
+      "title": "月光宝盒 — 等待早晨检查",
+      "next": "end"
+    },
     "end": {
       "title": "交付完成",
       "terminal": true

@@ -94,6 +94,14 @@ SHA-256；SubagentStop 要求报告回传同一指纹并复算文件内容。主
 对配置声明为 AutoUT/java-autout/build-fix 的任务，SubagentStop 还从子会话 transcript 验真实 Skill 工具调用；
 UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报告里写“执行过”不算证据。
 
+**月光宝盒**是普通状态机上的显式运行策略，不是另一套流程。UserPromptSubmit 在新项目尚无状态文件时，
+把十分钟内的明确授权写入一次性 `.mae-flow.json.moonlight-intent`；脚本验真并消费后才建状态，解决首次
+启动的先后顺序问题。在途流程原地切换，已退出流程先恢复现场并清空旧质量证据。运行中 PreToolUse 硬拦
+AskUserQuestion；编译、CodeCheck、UT、环境和最终验证仍先执行，失败只能用 `moonlight defer` 记录真实问题，
+不能伪造通过。push 仍以本地 HEAD == 上游为硬证据，成功后停在 `moonlight_review`，规格定稿留给早晨。
+报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，若有环境遗留则
+先回 env_setup，结束后直接回质量链，不重跑需求和设计；`finalize` 才恢复普通归档流程。
+
 flow.json 步骤字段语义：
 
 | 字段 | 含义 |

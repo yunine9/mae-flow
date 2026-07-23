@@ -9,7 +9,7 @@
                   "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" userprompt", "timeout": 15}]}
     ],
     "PreToolUse": [
-      {"matcher": "Edit|Write|MultiEdit|Bash",
+      {"matcher": "Edit|Write|MultiEdit|Bash|AskUserQuestion",
        "hooks": [{"type": "command",
                   "command": "python \"${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py\" pretooluse", "timeout": 15}]}
     ],

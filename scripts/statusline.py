@@ -55,6 +55,7 @@ def main():
     cfg = st.get("config", {})
     sid = st.get("current", "?")
     dan = cfg.get("单号", "未配置")
+    moonlight = bool((st.get("moonlight") or {}).get("enabled"))
     if sid == "end":
         print(f"✅ {dan} 交付完成 · 下一单直接说需求")
         return
@@ -69,7 +70,13 @@ def main():
     if len(title) > 22:
         title = title[:21] + "…"
 
-    parts = [f"🚦 {dan}", title]
+    parts = [f"{'🌙' if moonlight else '🚦'} {dan}", title]
+    if moonlight:
+        unresolved = len([
+            x for x in ((st.get("moonlight") or {}).get("issues") or [])
+            if not x.get("resolved_at")
+        ])
+        parts.append("无人值守" + (f"·遗留{unresolved}" if unresolved else ""))
     if cfg.get("分支名"):
         parts.append(cfg["分支名"])
     print(" │ ".join(parts))

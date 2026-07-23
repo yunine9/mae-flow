@@ -4,6 +4,17 @@
 
 1. 定位插件目录(定位不了就 Glob 搜 `**/mae-flow.py`),通读 skills/mae-flow/SKILL.md 并全程遵守其铁律。
 2. 按参数分流:
+   - **moonlight / 月光宝盒** — 无人值守交付。若后续参数是 `report|repair|finalize|off`，直接执行对应
+     `mae-flow.py moonlight <动作>`；其中 report/repair 不询问用户，finalize 发现仍有遗留时才展示报告并
+     等用户明确接受后携带原话重试。其他参数视为本次需求描述：
+     - 从用户本条消息取真实出现的 `月光宝盒` 或 `moonlight` 作为短 `--ack`，执行
+       `mae-flow.py moonlight on --ack "<原词>"`；没有状态会自动初始化，有在途状态会从当前步骤切换；
+     - 将本条消息中的单号、需求描述和已有文档作为后续 config_confirm 输入，不再反问；
+     - 随后持续执行 current → 当前步骤 → done，禁止 AskUserQuestion、禁止结束回复等待；
+     - 选择项按不扩大范围原则自动决定：明显评审意见选 review，明确缺陷选 hotfix，极小局部改动选 tweak，
+       其余选 full；full 默认做需求质询，STORY 仅在用户明确要求或需求涉及测试协同时生成；
+     - 质量步骤真实尝试后仍失败，使用 current 输出的 `moonlight defer` 留痕继续，最终必须尝试 push；
+       push 后停在晨间检查，不自动定稿规格。
    - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。必须先运行 `mae-flow.py exit` 展示
      当前步骤/分支/HEAD/未提交文件与退出影响，再取得用户明确确认；拿到后以用户原话执行
      `mae-flow.py exit --reason "<具体原因>" --ack "<用户确认原话>"`。命令成功前禁止直接改代码，

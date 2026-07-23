@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAEFLOW = os.path.join(HERE, "..", "scripts", "mae-flow.py")
 STATE = ".mae-flow.json"
 EXIT_STATE = ".mae-flow.json.exited"
+MOONLIGHT_INTENT = STATE + ".moonlight-intent"
 REJECTION_STATE = STATE + ".agent-rejections"
 EVIDENCE_STATE = STATE + ".agent-evidence"
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
@@ -109,7 +110,7 @@ def read_input():
 def _chdir_root(d):
     """hook 进程的 cwd 是 codeagent 启动目录,未必是项目根。
     以 hook JSON 的 cwd 为基准向上找 .mae-flow.json 或退出标记并 chdir;
-    找不到则退回 JSON cwd(init 之前属正常)。mae-flow 自身还会再定位一次,双保险。"""
+    init 之前再按 .git / openspec 定位，保证首次月光宝盒授权和随后创建的状态落在同一目录。"""
     base = d.get("cwd") or os.getcwd()
     probe = os.path.abspath(base)
     while True:
@@ -117,6 +118,18 @@ def _chdir_root(d):
                 or os.path.exists(os.path.join(probe, EXIT_STATE))):
             if probe != os.getcwd():
                 _log("chdir 项目根: " + probe)
+            os.chdir(probe)
+            return
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    probe = os.path.abspath(base)
+    while True:
+        if (os.path.isdir(os.path.join(probe, ".git"))
+                or os.path.isdir(os.path.join(probe, "openspec"))):
+            if probe != os.getcwd():
+                _log("chdir 项目根(init前): " + probe)
             os.chdir(probe)
             return
         parent = os.path.dirname(probe)
@@ -132,6 +145,18 @@ def _chdir_root(d):
 def ev_pretooluse(d):
     tool = d.get("tool_name", "")
     ti = d.get("tool_input") or {}
+    if tool == "AskUserQuestion":
+        try:
+            st = json.load(open(STATE, encoding="utf-8"))
+            moonlight = bool((st.get("moonlight") or {}).get("enabled"))
+        except Exception:
+            moonlight = False
+        if moonlight:
+            print("[mae-flow] 月光宝盒处于无人值守模式，禁止询问用户。"
+                  "请根据需求、代码和仓库规则采用不扩大范围的保守结论并留痕；"
+                  "质量步骤有限尝试后仍失败，使用 current 输出的 moonlight defer 记录遗留并继续。",
+                  file=sys.stderr)
+            sys.exit(2)
     if tool in ("Edit", "Write", "MultiEdit"):
         p = ti.get("file_path", "") or ""
         if p:
@@ -155,7 +180,9 @@ def ev_inject(d, session_start=False):
     else:
         # 用户消息原文进 ack 验真存储。payload 无 prompt 字段时确认步骤会明确拒绝并要求用户
         # 再发一条普通消息，不再降级成模型自行填写 ack。
-        _capture_usermsg(d.get("prompt") or "")
+        prompt = d.get("prompt") or ""
+        _capture_moonlight_intent(prompt)
+        _capture_usermsg(prompt)
     me = os.path.abspath(MAEFLOW)
     readme = os.path.abspath(os.path.join(HERE, "..", "README.md"))
     if os.path.exists(STATE):
@@ -385,6 +412,28 @@ def _capture_usermsg(text):
         os.replace(tmp, p)
     except Exception as e:
         _log("usermsg EXC: %s" % e)
+
+
+def _capture_moonlight_intent(text):
+    """全新项目尚无 STATE 时，暂存本轮明确的月光宝盒授权。
+
+    启动脚本只接受十分钟内、且 --ack 能命中原文的记录，并在消费后删除。
+    它只解决“先有用户指令还是先有状态文件”的鸡生蛋问题，不替代正常 ack 验真。
+    """
+    try:
+        text = (text or "").strip()
+        if not text or os.path.exists(STATE) or os.path.exists(EXIT_STATE):
+            return
+        if not re.search(r"月光宝盒|moonlight", text, re.I):
+            return
+        rec = {"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+               "epoch": time.time(), "text": text[:2000]}
+        tmp = MOONLIGHT_INTENT + ".tmp"
+        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False))
+        os.replace(tmp, MOONLIGHT_INTENT)
+        _log("captured pre-init moonlight intent")
+    except Exception as e:
+        _log("moonlight intent EXC: %s" % e)
 
 
 def _capture_direct_prompt(text):

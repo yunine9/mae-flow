@@ -300,6 +300,194 @@ if flow:
     finally:
         os.chdir(old_cwd)
 
+    # 月光宝盒：普通门禁不变；仅显式启用后替代在线确认，质量失败留痕推进，
+    # push 后停在晨间检查，并可按报告重新进入完整质量链。
+    old_cwd = os.getcwd()
+    try:
+        # 全新项目没有 .mae-flow.json：UserPromptSubmit 先留下十分钟内的一次性授权，
+        # 脚本消费后再创建状态，保证“一句话开启”不是鸡生蛋。
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run(["git", "init", "-q", td], check=True)
+            child = os.path.join(td, "service", "module")
+            os.makedirs(child)
+            payload = json.dumps({
+                "cwd": child,
+                "prompt": "今晚开启月光宝盒，把这个需求尽力开发完并推送",
+            }, ensure_ascii=False) + "\n"
+            hook = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+                cwd=child, input=payload, text=True, capture_output=True, timeout=10)
+            os.chdir(td)
+            intent_at_root = os.path.isfile(mf.MOONLIGHT_INTENT_PATH)
+            mf.cmd_moonlight(flow, None, types.SimpleNamespace(
+                action="on", ack="月光宝盒", reason=None))
+            fresh = mf.load_state()
+            check("全新项目可从子目录一句话开启月光宝盒",
+                  hook.returncode == 0 and intent_at_root and mf._moonlight(fresh)
+                  and not os.path.exists(mf.MOONLIGHT_INTENT_PATH))
+
+        # 已明确退出的项目也可切到月光宝盒；恢复旧断点但清空旧质量凭证。
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            head = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+            snapshot = os.path.join(".mae-flow-work", "exited", "fixture")
+            os.makedirs(snapshot)
+            direct_state = {
+                "current": "rf_codecheck", "config": {"单号": "REQMOON0"},
+                "choices": {"workflow": "review"}, "history": [],
+                "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "agent_tasks": {"CODECHECK": {"old": True}},
+            }
+            with open(os.path.join(snapshot, mf.STATE_PATH), "w", encoding="utf-8") as f:
+                json.dump(direct_state, f)
+            with open(mf.EXIT_PATH, "w", encoding="utf-8") as f:
+                json.dump({
+                    "snapshot": snapshot, "head": head,
+                    "direct_messages": [{"text": "切换月光宝盒继续做"}],
+                }, f)
+            mf.cmd_moonlight(flow, None, types.SimpleNamespace(
+                action="continue", ack="月光宝盒", reason=None))
+            resumed = mf.load_state()
+            check("普通开发模式可由用户明确切换到月光宝盒",
+                  mf._moonlight(resumed) and resumed.get("current") == "rf_codecheck"
+                  and "agent_tasks" not in resumed and not os.path.exists(mf.EXIT_PATH))
+
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            ml_state = {
+                "current": "rf_codecheck", "config": {"单号": "REQMOON1"},
+                "choices": {"workflow": "review"}, "history": [], "started": now,
+            }
+            mf.save_state(ml_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "开启月光宝盒继续开发", "step": "rf_codecheck", "at": now}],
+                          f, ensure_ascii=False)
+            mf.cmd_moonlight(flow, ml_state, types.SimpleNamespace(
+                action="on", ack="月光宝盒", reason=None))
+            ml_state = mf.load_state()
+            ask_ok, _ = mf.ev_agent_ran({"agent": "ASKUSER"}, ml_state)
+            check("月光宝盒必须由真实用户消息开启且替代在线确认",
+                  mf._moonlight(ml_state) and ask_ok)
+
+            defer_reason = "CodeCheck仍有1条环境相关告警，已复查并尝试修复两次，继续会重复消耗"
+            mf.cmd_moonlight(flow, ml_state, types.SimpleNamespace(
+                action="defer", ack=None, reason=defer_reason))
+            deferred = mf.load_state()
+            unresolved = mf._moonlight_unresolved(deferred)
+            check("月光宝盒质量失败留痕后继续而不伪装通过",
+                  deferred.get("current") == "rf_ut"
+                  and len(unresolved) == 1
+                  and unresolved[0].get("kind") == "codecheck"
+                  and os.path.isfile(mf.MOONLIGHT_REPORT_PATH))
+
+            # UT 发现源码缺陷可用夜间自查结论解锁，仍由 done 自动回流质量链。
+            mf.cmd_moonlight(flow, deferred, types.SimpleNamespace(
+                action="unlock-source", ack=None,
+                reason="失败用例TestA与规格场景A冲突，最小复现确认断言无误，倾向源码缺陷"))
+            unlocked = mf.load_state()
+            check("月光宝盒可记录UT自查后解锁源码修复",
+                  (unlocked.get("unlock") or {}).get("moonlight") is True
+                  and (unlocked.get("unlock") or {}).get("step") == "rf_ut")
+
+            # 模拟 UT 已尽力但仍有遗留，随后 push 成功应停在晨间检查而不是 end。
+            unlocked.pop("unlock", None)
+            mf.save_state(unlocked)
+            mf.cmd_moonlight(flow, unlocked, types.SimpleNamespace(
+                action="defer", ack=None,
+                reason="UT仍有1个历史环境失败，已重跑并排除本次代码逻辑问题，记录后继续推送"))
+            before_push = mf.load_state()
+            check("评审月光轮质量链最终进入push", before_push.get("current") == "push")
+            mf.cmd_moonlight(flow, before_push, types.SimpleNamespace(
+                action="push-failed", ack=None,
+                reason="远端认证临时失败，已重新登录并重试一次仍未恢复"))
+            push_waiting = mf.load_state()
+            check("月光宝盒不会把push失败伪装成远端成功",
+                  push_waiting.get("current") == "push"
+                  and any(x.get("kind") == "push"
+                          for x in mf._moonlight_unresolved(push_waiting)))
+            mf.advance(flow, push_waiting, "push", flow["steps"]["push"], "done")
+            morning = mf.load_state()
+            check("月光宝盒push后停在晨间检查且暂不归档",
+                  morning.get("current") == "moonlight_review"
+                  and (morning.get("moonlight") or {}).get("pushed_head")
+                  and not any(x.get("kind") == "push"
+                              for x in mf._moonlight_unresolved(morning))
+                  and os.path.isfile(mf.MOONLIGHT_REPORT_PATH))
+
+            env_morning = json.loads(json.dumps(morning))
+            env_morning["moonlight"]["issues"].append({
+                "id": "ML-003", "kind": "environment", "step": "env_setup",
+                "at": now, "head": mf.sh("git rev-parse --verify HEAD"),
+                "reason": "夜间环境安装后需要人工刷新插件，尚未完成现场复验",
+            })
+            mf.save_state(env_morning)
+            mf.cmd_moonlight(flow, env_morning, types.SimpleNamespace(
+                action="repair", ack=None, reason=None))
+            env_repair = mf.load_state()
+            env_route_ok = (
+                env_repair.get("current") == "env_setup"
+                and (env_repair.get("moonlight") or {}).get("repair_after_environment")
+                == "rf_compile")
+            mf.advance(flow, env_repair, "env_setup", flow["steps"]["env_setup"], "done")
+            check("晨间修复会先处理环境遗留再回到质量链而不重跑需求流程",
+                  env_route_ok and mf.load_state().get("current") == "rf_compile")
+
+            mf.save_state(morning)
+            mf.cmd_moonlight(flow, morning, types.SimpleNamespace(
+                action="repair", ack=None, reason=None))
+            repairing = mf.load_state()
+            check("月光宝盒按报告从工作流编译入口开启修复轮",
+                  repairing.get("current") == "rf_compile"
+                  and (repairing.get("moonlight") or {}).get("cycle") == 2
+                  and "agent_tasks" not in repairing and "quality" not in repairing)
+            mf._moonlight_resolve_kind(repairing, "codecheck")
+            mf._moonlight_resolve_kind(repairing, "ut")
+            repairing["current"] = "moonlight_review"
+            mf.save_state(repairing)
+            mf.cmd_moonlight(flow, repairing, types.SimpleNamespace(
+                action="finalize", ack=None, reason=None))
+            finalized = mf.load_state()
+            check("评审返工晨间修复完成后可直接结束",
+                  finalized.get("current") == "end" and not mf._moonlight(finalized))
+
+            # full/tweak/hotfix 的夜间路径跳过不可逆归档，晨间 finalize 才恢复归档确认。
+            full_state = {
+                "current": "verify_comet", "config": {"单号": "REQMOON2", "CHANGE_NAME": "moon"},
+                "choices": {"workflow": "full"}, "history": [], "started": now,
+                "moonlight": {"enabled": True, "activated_at": now, "cycle": 1, "issues": []},
+            }
+            mf.save_state(full_state)
+            mf.advance(flow, full_state, "verify_comet", flow["steps"]["verify_comet"], "done")
+            skipped_archive = mf.load_state()
+            check("标准交付月光轮先跳过归档进入push",
+                  skipped_archive.get("current") == "push"
+                  and any(h.get("result") == "moonlight:archive-deferred"
+                          for h in skipped_archive.get("history", [])))
+            mf.advance(flow, skipped_archive, "push", flow["steps"]["push"], "done")
+            full_morning = mf.load_state()
+            mf.cmd_moonlight(flow, full_morning, types.SimpleNamespace(
+                action="finalize", ack=None, reason=None))
+            full_finalized = mf.load_state()
+            check("标准交付晨间finalize恢复普通规格定稿",
+                  full_finalized.get("current") == "archive_confirm"
+                  and not mf._moonlight(full_finalized))
+    finally:
+        os.chdir(old_cwd)
+
     # 5. 占位符白名单
     KNOWN = {"单号", "CHANGE_NAME", "工号", "基线分支", "分支名", "单号类型", "STORY入库", "需求文档"}
     ph = set()
@@ -569,6 +757,11 @@ if hooks:
         m = h.get("matcher", "") or m
     for need in ("AskUserQuestion", "Bash", "Write"):
         check(f"PostToolUse matcher 含 {need}", need in m)
+    pre = " ".join(
+        h.get("matcher", "") or ""
+        for h in (hooks.get("hooks", {}).get("PreToolUse", []) or []))
+    check("月光宝盒可在工具层禁止 AskUserQuestion",
+          "AskUserQuestion" in pre and "月光宝盒处于无人值守模式" in dp)
 
 # 7. 关键文件
 for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md",
@@ -577,7 +770,7 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "skills/mae-flow/assets/settings-baseline.json",
           "skills/mae-flow/assets/env-profile.json", "scripts/setup.py", "scripts/comet_compat.py",
-          "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
+          "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))
 
 print(f"\n{'全部通过 ✅' if not fails else f'失败 {len(fails)} 项 ❌'}")

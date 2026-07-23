@@ -23,6 +23,8 @@
                                          无人值守开发、带遗留推送与晨间修复闭环
   mae-flow.py messages                    查看当前步骤捕获的用户消息 ID/编码
   mae-flow.py requirement-record ...      将用户原话/已有文本规范化为 UTF-8 需求入口
+  mae-flow.py action start|status|critic|finish|cancel
+                                         独立运行 UT/CodeCheck/Grill，不启动完整流程
   mae-flow.py exit [--reason 文本] [--ack 用户原话]
                                          保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
@@ -51,6 +53,7 @@ EXIT_PATH = ".mae-flow.json.exited"  # 复用既有 .mae-flow.json* ignore;存�
 MOONLIGHT_INTENT_PATH = STATE_PATH + ".moonlight-intent"
 EXIT_INTENT_PATH = STATE_PATH + ".exit-intent"
 FAILURE_PATH = STATE_PATH + ".failures"
+ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
@@ -1537,9 +1540,407 @@ def _snapshot_state_files(dst):
 
 def _write_json_atomic(path, data):
     tmp = path + ".tmp"
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
+
+def _load_action():
+    try:
+        action = json.load(open(ACTION_PATH, encoding="utf-8")) if os.path.isfile(ACTION_PATH) else None
+        if action and float(action.get("expires_epoch", 0) or 0) < time.time():
+            _archive_action(action, "expired", "独立任务超过 24 小时自动失效")
+            return None
+        return action
+    except Exception as exc:
+        die("独立任务状态损坏：%s。它不会拦普通开发；可执行 action cancel 归档坏现场。" % exc, 2)
+
+
+def _save_action(action):
+    action["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    _write_json_atomic(ACTION_PATH, action)
+
+
+def _git_local_runtime_ignore():
+    """独立任务不改团队 .gitignore，只把本机运行现场加入当前仓的本地排除。"""
+    path = sh("git rev-parse --git-path info/exclude")
+    if not path:
+        return
+    path = os.path.abspath(path)
+    marker = "/.mae-flow-work/"
+    try:
+        old = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        if marker in {line.strip() for line in old.splitlines()}:
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            if old and not old.endswith("\n"):
+                f.write("\n")
+            f.write("# mae-flow local runtime\n" + marker + "\n")
+    except OSError as exc:
+        # 排除失败不应阻止用户工作，但必须说清楚，避免过程文件被误提交。
+        print("[mae-flow] ⚠ 无法写 Git 本地排除文件：%s；请勿提交 .mae-flow-work/。" % exc,
+              file=sys.stderr)
+
+
+def _action_dir(action):
+    return os.path.abspath(action.get("work_dir") or os.path.join(
+        ".mae-flow-work", "standalone", action.get("id", "unknown")))
+
+
+def _archive_action(action, outcome, note=""):
+    """结束独立任务只移除控制指针，不删除代码和报告，也不触碰主流程现场。"""
+    action["status"] = outcome
+    action["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if note:
+        action["note"] = note
+    work = _action_dir(action)
+    os.makedirs(work, exist_ok=True)
+    _write_json_atomic(os.path.join(work, "action.json"), action)
+    try:
+        os.remove(ACTION_PATH)
+    except OSError:
+        pass
+    return work
+
+
+def _standalone_config():
+    """独立任务只继承项目运行方式，不继承单号、步骤、令牌或质量结论。"""
+    merged = {}
+    candidates = []
+    if os.path.isfile(STATE_PATH + ".last"):
+        candidates.append(STATE_PATH + ".last")
+    if os.path.isfile(EXIT_PATH):
+        try:
+            rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+            saved = os.path.join(rec.get("snapshot", ""), STATE_PATH)
+            if os.path.isfile(saved):
+                candidates.append(saved)
+        except Exception:
+            pass
+    for path in candidates:
+        try:
+            cfg = json.load(open(path, encoding="utf-8")).get("config", {}) or {}
+            for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
+                if cfg.get(key):
+                    merged[key] = cfg[key]
+        except Exception:
+            pass
+    try:
+        defaults = json.load(open(DEFAULTS_PATH, encoding="utf-8")) if os.path.isfile(DEFAULTS_PATH) else {}
+        for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
+            if defaults.get(key):
+                merged[key] = defaults[key]
+    except Exception:
+        pass
+    return merged
+
+
+def _action_files(raw, st=None):
+    values = []
+    for item in raw or []:
+        values.extend(x.strip() for x in item.split(",") if x.strip())
+    if not values:
+        values = [p for p in _dirty_paths() if _is_source_path(p, st or {}, FLOW or {})]
+    out = []
+    root = os.path.abspath(os.getcwd())
+    for value in values:
+        path = os.path.abspath(value)
+        try:
+            rel = norm(os.path.relpath(path, root))
+        except ValueError:
+            die("独立任务文件必须位于当前项目内：" + value, 2)
+        if rel == ".." or rel.startswith("../"):
+            die("独立任务文件必须位于当前项目内：" + value, 2)
+        if not os.path.exists(path):
+            die("独立任务文件不存在：" + value, 2)
+        if rel not in out:
+            out.append(rel)
+    return out
+
+
+def _action_request(action, request="", source=""):
+    work = _action_dir(action)
+    os.makedirs(work, exist_ok=True)
+    sources = []
+    if source:
+        src = os.path.abspath(source)
+        text, _, err = _read_text_source(src, normalize=True)
+        if err:
+            die("独立任务输入材料不可读：" + err, 2)
+        sources.append(src)
+        request = (request.strip() + "\n\n" if request.strip() else "") + text
+    if request.strip():
+        path = os.path.join(work, "request.md")
+        with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+            f.write("# 独立任务输入\n\n" + request.strip() + "\n")
+        os.replace(path + ".tmp", path)
+        sources.insert(0, path)
+    return sources
+
+
+def _action_task_card(action, kind, stage=""):
+    """为独立任务生成与主流程同等级的受指纹保护任务卡。"""
+    label = kind.upper()
+    config = action.get("config", {}) or {}
+    head = sh("git rev-parse --verify HEAD")
+    sid = "standalone_" + action["kind"]
+    files = action.get("files", [])
+    scan = action.get("quality", {}).get("codecheck_scan", {})
+    lines = [
+        f"# Mae-Flow Standalone {label} TASK CARD",
+        "本文件由 harness 生成。运行模式是独立任务：不启动完整交付流程，不得自行扩大范围。",
+        f"独立任务ID: {action['id']}",
+        f"运行模式: standalone",
+        f"当前步骤: {sid}",
+        f"项目根: {os.path.abspath(os.getcwd())}",
+        f"任务卡基点 HEAD: {head}",
+        f"提交策略: 禁止提交（保留工作区改动给用户检查）",
+        f"任务说明: {action.get('request', '') or '按任务卡文件范围完成本项工作'}",
+        f"本次子任务范围: {'、'.join(files) if files else action.get('request', '用户描述范围')}",
+        f"编译方式: {config.get('编译方式', '')}",
+        f"UT生成方式: {config.get('UT生成方式', '')}",
+        f"UT运行命令: {config.get('UT运行命令', '')}",
+    ]
+    if stage:
+        lines.append("质询检查阶段: " + stage)
+    lines.append("需求/规格依据:")
+    sources = action.get("sources", [])
+    lines.extend("- " + os.path.abspath(x) for x in sources)
+    if not sources:
+        lines.append("- 用户未提供独立文档；以任务说明和点名代码为依据，不得发明业务要求")
+    lines.append("本轮文件清单:")
+    lines.extend("- " + x for x in files)
+    if not files:
+        lines.append("- （按任务说明定向查找，不得全仓无目的扩张）")
+    if label == "CODECHECK":
+        lines += [
+            f"Harness首检告警数: {scan.get('count', '未执行')}",
+            "Harness首检文件: " + "、".join(scan.get("files", [])),
+            "Harness首检告警(规则|文件): "
+            + "、".join(r + "|" + f for r, f in scan.get("pairs", [])),
+            "职责:仅处理首检范围内业务代码告警；修复后按配置编译并重新 fullcheck；禁止自动豁免。",
+        ]
+    elif label == "UT":
+        lines += [
+            "职责:仅新增/修改测试代码；按配置调用 UT 生成能力并真实运行测试；"
+            "疑似源码问题完成自查后上报，禁止自行改被测源码。",
+            "独立任务默认不 commit；PASS 不以 commit 为条件，但测试必须真实全绿。",
+        ]
+    elif label == "GRILL":
+        lines += [
+            "职责:只读审查需求材料、代码勘察笔记和当前澄清文档，寻找遗漏的需求决策分支；"
+            "禁止替用户拍板、禁止修改任何文件。",
+        ]
+    body = "\n".join(lines).rstrip() + "\n"
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    body += f"TASK_CARD_SHA256: {digest}\n"
+    work = _action_dir(action)
+    os.makedirs(work, exist_ok=True)
+    suffix = ("-" + stage) if stage else ""
+    path = os.path.join(work, f"{label.lower()}{suffix}-task.md")
+    with open(path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+        f.write(body)
+    os.replace(path + ".tmp", path)
+    initial = {
+        p: _path_fingerprint(p)
+        for p in _dirty_paths()
+        if _is_source_path(p, {}, FLOW or {})
+    }
+    action.setdefault("agent_tasks", {})[label] = {
+        "step": sid, "path": path, "sha256": digest, "head": head,
+        "scope": action.get("request", ""), "allowed_files": scan.get("files", []) if label == "CODECHECK" else [],
+        "initial_source_fingerprints": initial, "standalone": True, "stage": stage,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    action.setdefault("tokens", {}).pop(label, None)
+    action.setdefault("rejections", {}).pop(label, None)
+    _save_action(action)
+    agent = {"UT": "ut-generator-agent", "CODECHECK": "codecheck-fix-agent",
+             "GRILL": "grill-critic-agent"}[label]
+    print(f"[mae-flow] 独立 {label} 任务卡已生成: {path}")
+    print("启动 %s 时只传这一句:\n读取并严格执行任务卡 \"%s\"；"
+          "最终报告必须原样带 TASK_CARD_SHA256: %s" % (agent, path, digest))
+    return path
+
+
+def cmd_action_start(flow, st, args):
+    if st is not None:
+        die("当前有完整交付流程正在运行，不能叠加独立任务。"
+            "若确定只做单项工作，先发送 `/mae-flow exit`，退出后重试。", 2)
+    current = _load_action()
+    if current:
+        die("已有独立任务 %s(%s) 未收尾。它不会拦普通开发；"
+            "继续用 action status，放弃用 action cancel。" % (
+                current.get("id", "?"), current.get("kind", "?")), 2)
+    kind = args.kind
+    defaults = _standalone_config()
+    config = {
+        "编译方式": args.build or defaults.get("编译方式", ""),
+        "UT生成方式": args.generator or defaults.get("UT生成方式", ""),
+        "UT运行命令": args.ut_command or defaults.get("UT运行命令", ""),
+        "测试路径": defaults.get("测试路径", ""),
+    }
+    if kind == "ut":
+        missing = [k for k in ("UT生成方式", "UT运行命令") if not config.get(k)]
+        if missing:
+            die("独立 UT 缺少 %s。先从项目实际能力确认后，用 --generator/--ut-command 传入；"
+                "禁止让 Agent 猜。" % "、".join(missing), 2)
+    if kind == "codecheck" and not args.check_only and not config.get("编译方式"):
+        die("独立 CodeCheck 修复模式缺少编译方式。用 --build 传入项目真实编译方式；"
+            "如果只想看报告，使用 --check-only。", 2)
+    if kind == "grill" and not (args.request or args.source):
+        die("独立质询必须提供 --request 用户需求原话或 --source 需求文本路径。", 2)
+    _git_local_runtime_ignore()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    # 同一秒内取消后重开同类任务也必须使用全新目录，避免旧任务卡/报告混入新现场。
+    nonce = hashlib.sha256(("%s:%s" % (time.time_ns(), os.getpid())).encode()).hexdigest()[:8]
+    action_id = f"{stamp}-{nonce}-{kind}"
+    action = {
+        "version": 1, "id": action_id, "kind": kind, "status": "active",
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "expires_epoch": time.time() + 24 * 3600,
+        "work_dir": os.path.abspath(os.path.join(".mae-flow-work", "standalone", action_id)),
+        "request": (args.request or "").strip(), "config": config,
+        "base_head": sh("git rev-parse --verify HEAD"),
+        "commit_policy": "forbid", "tokens": {}, "rejections": {}, "quality": {},
+    }
+    action["sources"] = _action_request(action, args.request or "", args.source or "")
+    action["files"] = _action_files(args.files)
+    if kind == "codecheck":
+        files = [p for p in action["files"]
+                 if _is_source_path(p, {}, flow) and not _is_test_file(p, {"config": config})]
+        action["files"] = files
+        if not files:
+            _archive_action(action, "failed", "未找到需要检查的业务代码文件")
+            die("独立 CodeCheck 没有找到业务代码文件。请用 --files 明确指定；UT/测试文件不会参与检查。", 2)
+        result, err = _run_codecheck(files)
+        if err:
+            work = _archive_action(action, "failed", err)
+            die(err + "。原始诊断已保留在 " + norm(work), 2)
+        scan = {
+            "step": "standalone_codecheck", "head": action["base_head"],
+            "count": result["total"], "files": files, "pairs": result["pairs"],
+            "commands": result["commands"], "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        action["quality"]["codecheck_scan"] = scan
+        _save_action(action)
+        if result["total"] == 0 or args.check_only:
+            report = os.path.join(_action_dir(action), "codecheck-report.md")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("# 独立 CodeCheck 结果\n\n检查文件：%d\n\n告警：%d\n\n命令：\n%s\n"
+                        % (len(files), result["total"],
+                           "\n".join("- `" + x + "`" for x in result["commands"])))
+            outcome = "clean" if result["total"] == 0 else "check-only"
+            work = _archive_action(action, outcome, "机器首检完成")
+            print("[mae-flow] 独立 CodeCheck 已完成：%d 条告警。报告：%s"
+                  % (result["total"], norm(report)))
+            print("未启动完整流程，也没有修改或提交代码。")
+            return
+        print("[mae-flow] 首检发现 %d 条告警，开始专项修复。" % result["total"])
+        return _action_task_card(action, "codecheck")
+    _save_action(action)
+    if kind == "ut":
+        return _action_task_card(action, "ut")
+    work = _action_dir(action)
+    prep = os.path.join(work, "grill-prep.md")
+    clarification = os.path.join(work, "clarifications.md")
+    action["grill"] = {"prep": prep, "clarifications": clarification, "questions_answered": 0}
+    _save_action(action)
+    print("[mae-flow] 独立需求质询已开启，不会进入设计或编码。")
+    print("先定向阅读需求与相关代码，把八维检查和候选问题写入：%s" % prep)
+    print("随后一次只问用户一个问题，每次回答后先检查模糊词、新名词、矛盾和衍生边界，"
+          "答案增量写入：%s" % clarification)
+    print("备课完成后执行 action critic --stage prep --document \"%s\" 做第一次对抗检查。"
+          % prep)
+
+
+def cmd_action_critic(args):
+    action = _load_action()
+    if not action or action.get("kind") != "grill":
+        die("当前没有独立 Grill 任务。", 2)
+    document = os.path.abspath(args.document or "")
+    if not os.path.isfile(document):
+        die("质询检查材料不存在：" + (args.document or "(空)"), 2)
+    action.setdefault("grill", {})["last_critic_document"] = document
+    action["grill"]["last_critic_stage"] = args.stage
+    if document not in action.setdefault("sources", []):
+        action["sources"].append(document)
+    return _action_task_card(action, "grill", args.stage)
+
+
+def cmd_action_status():
+    action = _load_action()
+    if not action:
+        print("[mae-flow] 当前没有独立任务；普通开发完全不受 mae-flow 接管。")
+        return
+    print(json.dumps(action, ensure_ascii=False, indent=2))
+
+
+def cmd_action_finish(args):
+    action = _load_action()
+    if not action:
+        die("当前没有独立任务。", 2)
+    kind = action.get("kind")
+    if kind == "grill":
+        report = os.path.abspath(args.report or action.get("grill", {}).get("clarifications", ""))
+        if not os.path.isfile(report):
+            die("独立质询结果文档不存在；用 --report 指定最终澄清文档。", 2)
+        text, _, err = _read_text_source(report, normalize=False)
+        if err:
+            die("独立质询结果不可读：" + err, 2)
+        if re.search(r"\{\{[^}]+\}\}|待确认|TODO|TBD", text, re.I):
+            die("澄清文档仍有待确认项，不能宣称质询完成。继续追问或把未决项明确列为用户决定暂缓。", 2)
+        grill_token = (action.get("tokens", {}) or {}).get("GRILL", {})
+        if not grill_token or (action.get("agent_tasks", {}).get("GRILL", {}) or {}).get("stage") != "final":
+            die("收尾前还没有执行 final 对抗检查。先 action critic --stage final --document <澄清文档>；"
+                "它只找遗漏，不会阻塞普通开发。", 2)
+        work = _archive_action(action, "completed", "独立需求质询完成")
+        print("[mae-flow] 独立需求质询已完成：%s" % report)
+        if grill_token.get("status") == "GAPS":
+            print("⚠ final critic 仍报告潜在遗漏，已保留在 %s；这是风险提示，不会卡住后续开发。"
+                  % grill_token.get("report_path", work))
+        print("没有启动完整交付流程，也没有自动进入设计或编码。")
+        return
+    label = kind.upper()
+    token = (action.get("tokens", {}) or {}).get(label, {})
+    if not token:
+        rejection = (action.get("rejections", {}) or {}).get(label, {})
+        detail = rejection.get("reason", "尚未收到专项 Agent 的合法收尾")
+        die(detail + "。继续修正 Agent 报告，或执行 action cancel 结束独立任务；"
+            "无论哪种情况都不会拦普通开发。", 2)
+    report = token.get("report_path", "")
+    work = _archive_action(action, "completed", "%s/%s" % (label, token.get("status", "")))
+    print("[mae-flow] 独立 %s 已结束，结果：%s" % (label, token.get("status", "?")))
+    print("报告：" + (norm(report) if report else norm(work)))
+    if token.get("status") not in ("PASS", "CLEAN", "CLEAR"):
+        print("⚠ 结果包含失败、待确认或遗留项；已如实保留，但不会自动豁免，也不会卡住普通开发。")
+    print("本任务没有自动提交或推送代码。")
+
+
+def cmd_action_cancel():
+    try:
+        action = json.load(open(ACTION_PATH, encoding="utf-8")) if os.path.isfile(ACTION_PATH) else None
+    except Exception as exc:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        work = os.path.abspath(os.path.join(".mae-flow-work", "standalone", stamp + "-corrupt"))
+        os.makedirs(work, exist_ok=True)
+        shutil.copy2(ACTION_PATH, os.path.join(work, "standalone-action.json.bad"))
+        try:
+            os.remove(ACTION_PATH)
+        except OSError:
+            pass
+        print("[mae-flow] 独立任务状态已损坏，但取消成功；坏现场保存在 %s。"
+              "普通开发从未被它拦截。原因：%s" % (norm(work), exc))
+        return
+    if not action:
+        print("[mae-flow] 当前没有独立任务，无需取消。")
+        return
+    work = _archive_action(action, "cancelled", "用户取消独立任务")
+    print("[mae-flow] 独立任务已取消，现场保留在 %s；代码未回滚，普通开发继续放行。" % norm(work))
 
 
 def _captured_user_messages(st):
@@ -1712,6 +2113,11 @@ def _resume_direct_mode(ack=""):
 
 
 def cmd_init(flow, args):
+    action = _load_action()
+    if action:
+        die("独立任务 %s(%s) 尚未收尾。先 action finish 或 action cancel；"
+            "独立任务不会自动升级成完整流程。" % (
+                action.get("id", "?"), action.get("kind", "?")), 2)
     resumed = _resume_direct_mode(args.ack or "")
     if resumed is not None:
         print_current(flow, resumed)
@@ -3451,7 +3857,7 @@ class MFParser(argparse.ArgumentParser):
               f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
               f"  python \"{me}\" init\n"
               "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
-              "accept-risk|moonlight|messages|requirement-record|codecheck-scan|"
+              "accept-risk|moonlight|action|messages|requirement-record|codecheck-scan|"
               "codecheck-record|approve-exemption|exit"
               "(用法见 current/exit 指令)。\n"
               "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
@@ -3484,6 +3890,24 @@ def main():
     x.add_argument("--intent", help=argparse.SUPPRESS)
     x.add_argument("--interactive", action="store_true",
                    help="Hook/ack 损坏时，由用户在真实终端输入 EXIT 的紧急出口")
+    action = sub.add_parser("action")
+    actions = action.add_subparsers(dest="action", required=True)
+    ast = actions.add_parser("start")
+    ast.add_argument("kind", choices=["ut", "codecheck", "grill"])
+    ast.add_argument("--request")
+    ast.add_argument("--source")
+    ast.add_argument("--files", action="append")
+    ast.add_argument("--build")
+    ast.add_argument("--generator")
+    ast.add_argument("--ut-command")
+    ast.add_argument("--check-only", action="store_true")
+    actions.add_parser("status")
+    ac = actions.add_parser("critic")
+    ac.add_argument("--stage", choices=["prep", "final"], required=True)
+    ac.add_argument("--document", required=True)
+    af = actions.add_parser("finish")
+    af.add_argument("--report")
+    actions.add_parser("cancel")
     sub.add_parser("messages")
     rr = sub.add_parser("requirement-record")
     rr.add_argument("--message-id")
@@ -3538,6 +3962,17 @@ def main():
         return cmd_moonlight(flow, st, args)
     if args.cmd == "gate":
         return cmd_gate(flow, st, args)
+    if args.cmd == "action":
+        if args.action == "start":
+            return cmd_action_start(flow, st, args)
+        if args.action == "status":
+            return cmd_action_status()
+        if args.action == "critic":
+            return cmd_action_critic(args)
+        if args.action == "finish":
+            return cmd_action_finish(args)
+        if args.action == "cancel":
+            return cmd_action_cancel()
     if args.cmd == "report" and args.all:
         return cmd_report_all()   # 账本聚合是无状态命令,不要求存在在途单
     if os.path.exists(EXIT_PATH):

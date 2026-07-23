@@ -218,6 +218,124 @@ if flow:
           not mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp\n- R.TWO | b/Bar.cpp", "R.ONE", "b/Bar.cpp")
           and mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp", "R.ONE", "a/Foo.cpp"))
 
+    # 独立能力：不创建主流程状态、支持未提交代码、默认不提交，完成/取消都不留下源码门禁。
+    old_cwd = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            open("biz.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
+            base_head = mf.sh("git rev-parse HEAD")
+
+            common = dict(source=None, build="build-fix skill", check_only=False)
+            mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                kind="ut", request="为 biz.cpp 当前改动补充边界测试", files=["biz.cpp"],
+                generator="AutoUT", ut_command="mcde test --ut", **common))
+            action = mf._load_action()
+            ut_task = action.get("agent_tasks", {}).get("UT", {})
+            check("独立 UT 为未提交代码生成任务卡但不启用主流程",
+                  action.get("kind") == "ut" and ut_task.get("standalone")
+                  and os.path.isfile(ut_task.get("path", ""))
+                  and not os.path.exists(mf.STATE_PATH)
+                  and mf.sh("git rev-parse HEAD") == base_head)
+            action.setdefault("tokens", {})["UT"] = {
+                "status": "PASS", "report_path": os.path.join(action["work_dir"], "result-ut.md")}
+            mf._save_action(action)
+            mf.cmd_action_finish(types.SimpleNamespace(report=None))
+            check("独立 UT 完成后自动解除控制且不自动提交",
+                  not os.path.exists(mf.ACTION_PATH) and mf.sh("git rev-parse HEAD") == base_head
+                  and ".mae-flow-work" not in mf.sh("git status --short")
+                  and not os.path.exists(".gitignore"))
+
+            old_run = mf._run_codecheck
+            try:
+                mf._run_codecheck = lambda files: (
+                    {"total": 0, "pairs": [], "commands": ["codecheck fullcheck -f " + ",".join(files)]}, "")
+                mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                    kind="codecheck", request="检查当前业务改动", files=["biz.cpp"],
+                    generator=None, ut_command=None, **common))
+            finally:
+                mf._run_codecheck = old_run
+            check("独立 CodeCheck 机器首检为零时不派 Agent",
+                  not os.path.exists(mf.ACTION_PATH)
+                  and not os.path.exists(mf.STATE_PATH)
+                  and mf.sh("git rev-parse HEAD") == base_head)
+
+            mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                kind="grill", request="支持按名称查询基站", files=[],
+                generator=None, ut_command=None, **common))
+            grill = mf._load_action()
+            prep = grill["grill"]["prep"]
+            clarification = grill["grill"]["clarifications"]
+            open(prep, "w", encoding="utf-8").write("# 备课\n\n八维检查已完成。\n")
+            open(clarification, "w", encoding="utf-8").write(
+                "# 澄清结果\n\nWHEN 输入名称为空 THE SYSTEM SHALL 返回参数错误。\n")
+            mf.cmd_action_critic(types.SimpleNamespace(
+                stage="final", document=clarification))
+            grill = mf._load_action()
+            grill.setdefault("tokens", {})["GRILL"] = {
+                "status": "CLEAR", "report_path": os.path.join(grill["work_dir"], "result-grill.md")}
+            mf._save_action(grill)
+            mf.cmd_action_finish(types.SimpleNamespace(report=clarification))
+            check("独立 Grill 只产出澄清结果且不进入设计编码",
+                  not os.path.exists(mf.ACTION_PATH)
+                  and not os.path.exists(mf.STATE_PATH)
+                  and mf.sh("git rev-parse HEAD") == base_head)
+            os.makedirs(os.path.dirname(mf.ACTION_PATH), exist_ok=True)
+            open(mf.ACTION_PATH, "w", encoding="utf-8").write("{broken")
+            mf.cmd_action_cancel()
+            check("独立任务状态损坏也能取消且不影响普通开发",
+                  not os.path.exists(mf.ACTION_PATH) and not os.path.exists(mf.STATE_PATH))
+            running = {"current": "config_confirm", "config": {}, "choices": {},
+                       "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+            mf.save_state(running)
+            overlap_blocked = False
+            try:
+                mf.cmd_action_start(flow, running, types.SimpleNamespace(
+                    kind="grill", request="测试需求", source=None, files=[],
+                    build=None, generator=None, ut_command=None, check_only=False))
+            except SystemExit as exc:
+                overlap_blocked = exc.code == 2
+            check("完整流程运行时不会叠加独立任务",
+                  overlap_blocked and not os.path.exists(mf.ACTION_PATH))
+            os.remove(mf.STATE_PATH)
+
+            # 走真实 argparse/子进程入口，并模拟 Windows 中文控制台编码。
+            cli_env = dict(os.environ)
+            cli_env["PYTHONIOENCODING"] = "cp936"
+            cli_request = "为中文类补充空名称和超长名称边界测试"
+            cli = subprocess.run([
+                sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+                "action", "start", "ut",
+                "--request", cli_request,
+                "--files", "biz.cpp",
+                "--generator", "AutoUT",
+                "--ut-command", "mcde test --ut",
+            ], env=cli_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                encoding="cp936", errors="replace")
+            cli_action = mf._load_action()
+            cli_sources = cli_action.get("sources", []) if cli_action else []
+            request_text = (open(cli_sources[0], encoding="utf-8").read()
+                            if cli_sources and os.path.isfile(cli_sources[0]) else "")
+            check("独立任务真实 CLI 在 Windows 中文编码下保持需求原文",
+                  cli.returncode == 0 and cli_request in request_text
+                  and not os.path.exists(mf.STATE_PATH), cli.stdout)
+            cancel = subprocess.run([
+                sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+                "action", "cancel",
+            ], env=cli_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                encoding="cp936", errors="replace")
+            check("独立任务真实 CLI 可取消并立即解除控制",
+                  cancel.returncode == 0 and not os.path.exists(mf.ACTION_PATH),
+                  cancel.stdout)
+    finally:
+        os.chdir(old_cwd)
+
     # 退出必须保留业务现场、归档状态并使直接模式标记立即可见。
     old_cwd = os.getcwd()
     try:
@@ -695,7 +813,8 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
         check(f"dispatch 识别 {name}", name in dp)
         txt = open(os.path.join(ROOT, "agents", f), encoding="utf-8").read()
         check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
-        if name in ("compile-agent", "codecheck-fix-agent", "ut-generator-agent"):
+        if name in ("compile-agent", "codecheck-fix-agent", "ut-generator-agent",
+                    "grill-critic-agent"):
             check(f"{name} 契约绑定任务卡", "TASK_CARD_SHA256" in txt)
 
 check("dispatch 校验任务卡指纹", "_task_card_contract" in dp and "TASK_CARD_SHA256" in dp)
@@ -870,6 +989,95 @@ try:
 finally:
     os.chdir(old_cwd)
     dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE = old_dispatch_paths
+
+old_cwd = os.getcwd()
+try:
+    with tempfile.TemporaryDirectory() as td:
+        os.chdir(td)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+        subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+        open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+        subprocess.run(["git", "add", "biz.cpp"], check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+        open("biz.cpp", "a", encoding="utf-8").write("int dirty_before_task = 2;\n")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+        body = "# STANDALONE UT TASK\n"
+        digest = __import__("hashlib").sha256(body.encode("utf-8")).hexdigest()
+        work = os.path.join(td, ".mae-flow-work", "standalone", "test-ut")
+        os.makedirs(work, exist_ok=True)
+        task_path = os.path.join(work, "ut-task.md")
+        open(task_path, "w", encoding="utf-8").write(
+            body + "TASK_CARD_SHA256: " + digest + "\n")
+        task = {
+            "step": "standalone_ut", "sha256": digest, "path": task_path,
+            "head": head, "standalone": True,
+            "initial_source_fingerprints": {"biz.cpp": dispatch._path_fingerprint("biz.cpp")},
+        }
+        action = {
+            "id": "test-ut", "kind": "ut", "status": "active",
+            "expires_epoch": time.time() + 3600, "work_dir": work,
+            "config": {"UT生成方式": "AutoUT", "UT运行命令": "mcde test --ut"},
+            "agent_tasks": {"UT": task}, "tokens": {}, "rejections": {},
+        }
+        os.makedirs(os.path.dirname(dispatch.ACTION_STATE), exist_ok=True)
+        json.dump(action, open(dispatch.ACTION_STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+        report = "\n".join([
+            "UT_RESULT: PASS", "TASK_CARD_SHA256: " + digest,
+            "GENERATOR_USED: AutoUT", "EXECUTED_UT: mcde test --ut",
+            "TESTS_TOTAL: 1", "TESTS_PASSED: 1", "TESTS_FAILED: 0",
+            "AC_COVERAGE: 当前改动 -> TestValue",
+            "PENDING_QUESTIONS: 无", "KNOWN_FAILURES: 无", "SUSPECTED_BUGS: 无",
+        ])
+        calls = [
+            {"name": "Skill", "input": {"skill": "AutoUT"},
+             "result_seen": True, "is_error": False, "result": "generated"},
+            {"name": "Bash", "input": {"command": "mcde test --ut"},
+             "result_seen": True, "is_error": False, "result": "1 passed"},
+        ]
+        standalone_ok = True
+        try:
+            dispatch._ut_contract("PASS", report, calls, soft=False)
+            dispatch._record_agent_token("UT", "PASS", report)
+        except SystemExit:
+            standalone_ok = False
+        saved_action = json.load(open(dispatch.ACTION_STATE, encoding="utf-8"))
+        check("独立 UT 契约允许原有未提交源码但只接受测试改动",
+              standalone_ok and saved_action.get("tokens", {}).get("UT", {}).get("status") == "PASS"
+              and not os.path.exists(dispatch.STATE))
+        grill_body = "# STANDALONE GRILL TASK\n"
+        grill_digest = __import__("hashlib").sha256(grill_body.encode("utf-8")).hexdigest()
+        grill_task_path = os.path.join(work, "grill-final-task.md")
+        open(grill_task_path, "w", encoding="utf-8").write(
+            grill_body + "TASK_CARD_SHA256: " + grill_digest + "\n")
+        grill_task = {
+            "step": "standalone_grill", "sha256": grill_digest,
+            "path": grill_task_path, "head": head, "standalone": True, "stage": "final",
+            "initial_source_fingerprints": {
+                "biz.cpp": dispatch._path_fingerprint("biz.cpp"),
+                "biz_test.cpp": dispatch._path_fingerprint("biz_test.cpp"),
+            },
+        }
+        action.update({
+            "kind": "grill", "config": {}, "agent_tasks": {"GRILL": grill_task},
+            "tokens": {}, "rejections": {},
+        })
+        json.dump(action, open(dispatch.ACTION_STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        grill_report = "\n".join([
+            "GRILL_RESULT: CLEAR", "TASK_CARD_SHA256: " + grill_digest,
+            "STAGE: final", "GAPS_FOUND: 0", "MISSING_BRANCHES: 无",
+        ])
+        grill_ok = True
+        try:
+            dispatch._grill_contract("CLEAR", grill_report, [], soft=False)
+        except SystemExit:
+            grill_ok = False
+        check("独立 Grill critic 契约接受 CLEAR 并核对阶段与缺口数", grill_ok)
+finally:
+    os.chdir(old_cwd)
+
 check("空的精简豁免不能绕过净删检查",
       dispatch._empty_section("无") and dispatch._empty_section("none")
       and not dispatch._empty_section("删除重复分支，行为不变"))
@@ -913,6 +1121,44 @@ with tempfile.TemporaryDirectory() as td:
           captured.returncode == 0
           and messages[-1]["text"] == "我确认中文需求：支持基站名称查询"
           and messages[-1].get("input_encoding") == "utf-8-sig")
+
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run(["git", "init", "-q", td], check=True)
+    action_dir = os.path.join(td, ".mae-flow-work", "standalone", "test-action")
+    os.makedirs(action_dir)
+    action_path = os.path.join(td, ".mae-flow-work", "standalone-action.json")
+    json.dump({"id": "test-action", "kind": "ut", "status": "active",
+               "expires_epoch": time.time() + 3600, "work_dir": action_dir,
+               "config": {}, "agent_tasks": {}, "tokens": {}},
+              open(action_path, "w", encoding="utf-8"))
+    ordinary_payload = json.dumps({
+        "cwd": td, "tool_name": "Edit",
+        "tool_input": {"file_path": os.path.join(td, "src", "ordinary.cpp")},
+    }) + "\n"
+    internal_payload = json.dumps({
+        "cwd": td, "tool_name": "Edit",
+        "tool_input": {"file_path": os.path.join(action_dir, "ut-task.md")},
+    }) + "\n"
+    ordinary = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "pretooluse"],
+        cwd=td, input=ordinary_payload, text=True, capture_output=True, timeout=10)
+    internal = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "pretooluse"],
+        cwd=td, input=internal_payload, text=True, capture_output=True, timeout=10)
+    check("独立任务只保护任务卡而不拦普通源码编辑",
+          ordinary.returncode == 0 and internal.returncode == 2)
+    # 完整流程退出记录会长期保留；独立任务提示必须覆盖旧的普通开发提示。
+    json.dump({"snapshot": "old-flow"},
+              open(os.path.join(td, ".mae-flow.json.exited"), "w", encoding="utf-8"))
+    prompt_payload = json.dumps({"cwd": td, "prompt": "继续补单元测试"},
+                                ensure_ascii=False) + "\n"
+    injected = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+        cwd=td, input=prompt_payload, text=True, capture_output=True, timeout=10)
+    check("退出完整流程后独立任务状态仍优先注入",
+          injected.returncode == 0
+          and "当前有独立 UT 任务 test-action" in injected.stdout
+          and "不要运行 current/done" not in injected.stdout)
 
 with tempfile.TemporaryDirectory() as td:
     # 父目录的旧状态不能越过最近 .git 边界接管一个独立子仓。

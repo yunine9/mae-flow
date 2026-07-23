@@ -33,6 +33,7 @@ MOONLIGHT_INTENT = STATE + ".moonlight-intent"
 EXIT_INTENT = STATE + ".exit-intent"
 REJECTION_STATE = STATE + ".agent-rejections"
 EVIDENCE_STATE = STATE + ".agent-evidence"
+ACTION_STATE = os.path.join(".mae-flow-work", "standalone-action.json")
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
 STDIN_SECS = 3
@@ -197,6 +198,35 @@ def ev_pretooluse(d):
     sys.exit(0)
 
 
+def ev_action_pretooluse(d):
+    """独立任务只保护自己的控制文件；普通源码、命令和用户开发行为一律不接管。"""
+    tool = d.get("tool_name", "")
+    ti = d.get("tool_input") or {}
+
+    def protected(value):
+        path = str(value or "").replace("\\", "/").lower()
+        return (
+            ".mae-flow-work/standalone-action.json" in path
+            or (
+                ".mae-flow-work/standalone/" in path
+                and bool(re.search(r"(?:-task\.md|/action\.json|/result-[^/\s\"']+\.md)", path))
+            )
+        )
+
+    if tool in ("Edit", "Write", "MultiEdit"):
+        if protected(ti.get("file_path") or ti.get("path")):
+            print("[mae-flow] 独立任务状态和任务卡由 harness 维护，禁止直接编辑；"
+                  "普通业务代码不受此限制。", file=sys.stderr)
+            sys.exit(2)
+    if tool == "Bash":
+        cmd = str(ti.get("command", "") or "").replace("\\", "/").lower()
+        if protected(cmd) or "dispatch.py" in cmd:
+            print("[mae-flow] 禁止通过命令修改独立任务状态、任务卡或手工调用 Hook。"
+                  "查看用 action status，退出用 action cancel。", file=sys.stderr)
+            sys.exit(2)
+    sys.exit(0)
+
+
 def ev_inject(d, session_start=False):
     if session_start:
         # 重启会话 = skill 已重新加载:清"待重启"标记(迁移后真空期的唯一合法出口)
@@ -228,11 +258,17 @@ def ev_inject(d, session_start=False):
         if session_start:
             print(f"[mae-flow] 存在进行中的交付流程。续跑先执行 python \"{me}\" current 获取当前步骤指令。"
                   f"用户问 mae-flow 用法/流程类问题时,先读 \"{readme}\" 再按其内容作答,禁止凭记忆即兴。")
-    elif session_start and (os.path.isdir("openspec") or os.path.isdir(".comet")):
-        # 交付项目 + 无在途单:给新用户一行发现入口(仅会话启动时,不打扰后续消息)
-        print(f"[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说「交付 <单号> + SE 文档」"
-              f"或敲 /mae-flow;新手指南敲 /mae-flow help。(流程脚本: python \"{me}\";"
-              f"用户问用法/流程类问题时,先读 \"{readme}\" 再作答,禁止凭记忆即兴)")
+    else:
+        action = _load_action()
+        if action:
+            print("[mae-flow] 当前有独立 %s 任务 %s；它不启用完整流程，也不限制普通改码。"
+                  "继续请执行 action status，完成后 action finish，随时可 action cancel。"
+                  % (str(action.get("kind", "")).upper(), action.get("id", "?")))
+        elif session_start and (os.path.isdir("openspec") or os.path.isdir(".comet")):
+            # 交付项目 + 无在途单:给新用户一行发现入口(仅会话启动时,不打扰后续消息)
+            print(f"[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说「交付 <单号> + SE 文档」"
+                  f"或敲 /mae-flow;新手指南敲 /mae-flow help。(流程脚本: python \"{me}\";"
+                  f"用户问用法/流程类问题时,先读 \"{readme}\" 再作答,禁止凭记忆即兴)")
     sys.exit(0)
 
 
@@ -343,6 +379,15 @@ def ev_subagentstop(d):
     elif not m and len(matches) == 1:
         m = matches[0]
         _log("subagentstop: 契约标记不在第一行,兼容接受并继续验完整契约")
+    runtime = _contract_state()
+    standalone_expected = ""
+    if runtime.get("_standalone"):
+        standalone_expected = {
+            "ut": "UT", "codecheck": "CODECHECK", "grill": "GRILL",
+        }.get(str(runtime.get("current", "")).replace("standalone_", ""), "")
+        if m and m.group(1) != standalone_expected:
+            _log("standalone action ignores unrelated contract agent: " + m.group(1))
+            sys.exit(0)
     # 凡以唯一合法契约标记收尾的 agent,直接验契约+发令牌,
     # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
     if m:
@@ -352,7 +397,9 @@ def ev_subagentstop(d):
             _ut_contract(m.group(2), last, tool_calls, soft=retry)
         if m.group(1) == "COMPILE":
             _compile_contract(m.group(2), last, tool_calls, soft=retry)
-        _record_agent_token(m.group(1), m.group(2))
+        if m.group(1) == "GRILL":
+            _grill_contract(m.group(2), last, tool_calls, soft=retry)
+        _record_agent_token(m.group(1), m.group(2), last)
         sys.exit(0)
     if retry:
         _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
@@ -365,7 +412,18 @@ def ev_subagentstop(d):
         head = open(tp, encoding="utf-8", errors="replace").read(16000)
     except OSError:
         head = prompt
-    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|story-generator-agent|compile-agent", head):
+    if standalone_expected:
+        expected_agent = {
+            "UT": "ut-generator-agent",
+            "CODECHECK": "codecheck-fix-agent",
+            "GRILL": "grill-critic-agent",
+        }.get(standalone_expected, "")
+        if expected_agent not in head and not re.search(
+                r"\b" + re.escape(standalone_expected) + r"_RESULT:", head):
+            _log("standalone action ignores unrelated subagent without expected contract")
+            sys.exit(0)
+    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|"
+                     r"story-generator-agent|compile-agent|grill-critic-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
     clue = _autopsy(tp, asst)
@@ -387,12 +445,32 @@ def _git_head():
         return ""
 
 
-def _record_agent_token(kind, status=""):
+def _record_agent_token(kind, status="", report=""):
     """子 agent 合法收尾的硬令牌:仅由本 hook(harness 调用)写入,是模型无法伪造的证据源——
     令牌文件在 gate 黑名单中(Edit/Bash 双拦),手动调 dispatch.py 也被 gate 拦截。
     mae-flow 的 agent_ran 证据据此判定"本步期间该 agent 真实跑过"。
     令牌同时绑定签发时 HEAD(新鲜度):签发后源码再变,证据即过期(mae-flow 侧校验)。"""
     try:
+        action = _load_action() if not os.path.isfile(STATE) else None
+        if action:
+            head = _git_head()
+            work = action.get("work_dir") or os.path.dirname(os.path.abspath(ACTION_STATE))
+            os.makedirs(work, exist_ok=True)
+            report_path = os.path.join(work, "result-" + kind.lower() + ".md")
+            with open(report_path + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+                f.write((report or "").rstrip() + "\n")
+            os.replace(report_path + ".tmp", report_path)
+            task = (action.get("agent_tasks", {}) or {}).get(kind, {})
+            action.setdefault("tokens", {})[kind] = {
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
+                "status": status, "step": "standalone_" + action.get("kind", ""),
+                "task_sha256": task.get("sha256", ""), "report_path": report_path,
+            }
+            _atomic_json(ACTION_STATE, action)
+            _clear_rejection(kind)
+            _log("standalone agent token: %s/%s @%s" % (
+                kind, status or "-", head[:9] or "no-git"))
+            return
         p = ".mae-flow.json.tokens"
         d = {}
         if os.path.exists(p):
@@ -516,7 +594,7 @@ def _capture_moonlight_intent(text):
     """
     try:
         text = (text or "").strip()
-        if not text or os.path.exists(STATE) or os.path.exists(EXIT_STATE):
+        if not text or os.path.exists(STATE) or os.path.exists(EXIT_STATE) or os.path.exists(ACTION_STATE):
             return
         if not re.search(r"月光宝盒|moonlight", text, re.I):
             return
@@ -564,19 +642,72 @@ def _maybe_utrun(d):
 
 def _atomic_json(path, data):
     tmp = path + ".tmp"
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
 
+def _load_action():
+    try:
+        action = json.load(open(ACTION_STATE, encoding="utf-8")) if os.path.isfile(ACTION_STATE) else None
+        if action and float(action.get("expires_epoch", 0) or 0) < time.time():
+            _log("standalone action expired: " + action.get("id", "?"))
+            return None
+        return action
+    except Exception as exc:
+        _log("standalone action unreadable: " + str(exc))
+        return None
+
+
+def _contract_state():
+    """完整流程与独立任务共用契约器，但独立任务绝不创建主状态或启用源码 gate。"""
+    try:
+        if os.path.isfile(STATE):
+            return json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return {}
+    action = _load_action()
+    if not action:
+        return {}
+    return {
+        "current": "standalone_" + action.get("kind", ""),
+        "config": action.get("config", {}) or {},
+        "agent_tasks": action.get("agent_tasks", {}) or {},
+        "quality": action.get("quality", {}) or {},
+        "_standalone": True,
+        "_action_id": action.get("id", ""),
+    }
+
+
+def _evidence_data():
+    action = _load_action()
+    if action and not os.path.isfile(STATE):
+        return dict(action.get("evidence", {}) or {})
+    try:
+        return json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+    except Exception:
+        return {}
+
+
+def _save_evidence(data):
+    action = _load_action()
+    if action and not os.path.isfile(STATE):
+        action["evidence"] = data
+        _atomic_json(ACTION_STATE, action)
+    else:
+        _atomic_json(EVIDENCE_STATE, data)
+
+
 def _record_rejection(label, msg):
     """把真实拒签原因留给 done/doctor；Hook stderr 被宿主吞掉时也不能让主模型猜。"""
     try:
-        data = json.load(open(REJECTION_STATE, encoding="utf-8")) if os.path.exists(REJECTION_STATE) else {}
-        try:
-            st = json.load(open(STATE, encoding="utf-8"))
-        except Exception:
-            st = {}
+        action = _load_action() if not os.path.isfile(STATE) else None
+        data = dict(action.get("rejections", {}) or {}) if action else (
+            json.load(open(REJECTION_STATE, encoding="utf-8")) if os.path.exists(REJECTION_STATE) else {})
+        st = _contract_state()
         task = (st.get("agent_tasks", {}) or {}).get(label, {})
         data[label] = {
             "at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -585,7 +716,11 @@ def _record_rejection(label, msg):
             "task_sha256": task.get("sha256", ""),
             "reason": msg,
         }
-        _atomic_json(REJECTION_STATE, data)
+        if action:
+            action["rejections"] = data
+            _atomic_json(ACTION_STATE, action)
+        else:
+            _atomic_json(REJECTION_STATE, data)
         _log(label + " 拒签: " + msg)
     except Exception as e:
         _log("rejection EXC: " + str(e))
@@ -593,13 +728,21 @@ def _record_rejection(label, msg):
 
 def _clear_rejection(label):
     try:
-        if not os.path.exists(REJECTION_STATE):
-            return
-        data = json.load(open(REJECTION_STATE, encoding="utf-8"))
+        action = _load_action() if not os.path.isfile(STATE) else None
+        if action:
+            data = dict(action.get("rejections", {}) or {})
+        else:
+            if not os.path.exists(REJECTION_STATE):
+                return
+            data = json.load(open(REJECTION_STATE, encoding="utf-8"))
         if label in data or "SUBAGENT" in data:
             data.pop(label, None)
             data.pop("SUBAGENT", None)
-            _atomic_json(REJECTION_STATE, data)
+            if action:
+                action["rejections"] = data
+                _atomic_json(ACTION_STATE, action)
+            else:
+                _atomic_json(REJECTION_STATE, data)
     except Exception as e:
         _log("clear rejection EXC: " + str(e))
 
@@ -616,11 +759,8 @@ def _contract_bail(label, msg, soft):
 
 def _task_card_contract(kind, report, soft=False):
     """报告必须回传 harness 任务卡指纹；缺配置时不再允许子 agent 边猜边做。"""
-    try:
-        st = json.load(open(STATE, encoding="utf-8"))
-        task = (st.get("agent_tasks", {}) or {}).get(kind, {})
-    except Exception:
-        st, task = {}, {}
+    st = _contract_state()
+    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     if not task:
         _contract_bail(kind, "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。", soft)
     if task.get("step") != st.get("current"):
@@ -642,14 +782,14 @@ def _task_card_contract(kind, report, soft=False):
     base = _git_out(f"git merge-base {head} HEAD").strip()
     if base != head and head != _git_head():
         _contract_bail(kind, "任务卡基点已不在当前提交历史中(amend/rebase/切分支)，请重新生成任务卡。", soft)
+    if task.get("standalone") and _git_head() != head:
+        _contract_bail(kind, "独立任务禁止自动 commit，但当前 HEAD 已变化。"
+                       "保留代码后结束本任务并由用户自行决定是否提交。", soft)
     return task
 
 
 def _state_config():
-    try:
-        return (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {})
-    except Exception:
-        return {}
+    return (_contract_state().get("config", {}) or {})
 
 
 def _field(report, name):
@@ -661,6 +801,7 @@ _REPORT_FIELDS = (
     "TASK_CARD_SHA256", "GENERATOR_USED", "EXECUTED_UT", "EXECUTED_BUILD", "EXECUTED_COMMAND",
     "TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED", "AC_COVERAGE", "PENDING_QUESTIONS",
     "KNOWN_FAILURES", "SUSPECTED_BUGS", "FOUND", "FIXED", "REMAINING_COUNT",
+    "STAGE", "GAPS_FOUND", "MISSING_BRANCHES",
 )
 
 
@@ -716,10 +857,12 @@ def _record_codecheck_build_receipt(task, tool_calls):
         "head": _git_head(),
         "build": build_cfg,
     }
+    if task.get("standalone"):
+        rec["source_snapshot"] = _source_snapshot(task.get("head", ""))
     try:
-        data = json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+        data = _evidence_data()
         data["CODECHECK_BUILD"] = rec
-        _atomic_json(EVIDENCE_STATE, data)
+        _save_evidence(data)
         _log("CODECHECK 编译凭证: @%s" % (rec["head"][:9] or "no-git"))
     except Exception as e:
         _log("codecheck receipt EXC: " + str(e))
@@ -825,6 +968,8 @@ def _record_ut_receipts(task, report, tool_calls):
     records = {}
     common = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": task.get("step", ""),
               "task_sha256": task.get("sha256", ""), "head": _git_head()}
+    if task.get("standalone"):
+        common["source_snapshot"] = _source_snapshot(task.get("head", ""))
     if generator and not _call_failed(generator):
         records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
     if run and not _call_failed(run) and not _ut_execution_risk(report, run, cfg.get("UT运行命令", "")):
@@ -833,44 +978,39 @@ def _record_ut_receipts(task, report, tool_calls):
     if not records:
         return
     try:
-        data = json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+        data = _evidence_data()
         data.update(records)
-        _atomic_json(EVIDENCE_STATE, data)
+        _save_evidence(data)
         _log("UT 执行凭证: " + "/".join(sorted(records)) + " @" + common["head"][:9])
     except Exception as e:
         _log("ut receipt EXC: " + str(e))
 
 
 def _reusable_ut_receipt(key, task, expected=None):
-    try:
-        rec = json.load(open(EVIDENCE_STATE, encoding="utf-8")).get(key, {})
-    except Exception:
-        return None
+    rec = _evidence_data().get(key, {})
     if not rec or rec.get("step") != task.get("step") \
             or rec.get("task_sha256") != task.get("sha256") \
             or (expected is not None and not _same_config(rec.get("value", ""), expected)):
         return None
+    if task.get("standalone"):
+        return rec if rec.get("source_snapshot") == _source_snapshot(task.get("head", "")) else None
     changed, err = _source_changed_since_receipt(rec.get("head", ""), {})
     return rec if not err and not changed else None
 
 
 def _reusable_codecheck_build_receipt(task):
     """仅同任务卡、同步骤且源码未变化时复用；代码一变就必须重新编译。"""
-    try:
-        rec = json.load(open(EVIDENCE_STATE, encoding="utf-8")).get("CODECHECK_BUILD", {})
-    except Exception:
-        return None
+    rec = _evidence_data().get("CODECHECK_BUILD", {})
     if not rec or rec.get("step") != task.get("step") \
             or rec.get("task_sha256") != task.get("sha256") \
             or not _same_config(rec.get("build", ""), _state_config().get("编译方式", "")):
         return None
+    if task.get("standalone"):
+        return rec if rec.get("source_snapshot") == _source_snapshot(task.get("head", "")) else None
     head = rec.get("head", "")
     if not head:
         return None
-    try:
-        st = json.load(open(STATE, encoding="utf-8"))
-    except Exception:
-        return None
+    st = _contract_state()
     changed, err = _source_changed_since_receipt(head, st)
     return rec if not err and not changed else None
 
@@ -968,6 +1108,37 @@ def _changed_paths_since(head):
     return list(dict.fromkeys(x.replace("\\", "/") for x in paths))
 
 
+def _path_fingerprint(path):
+    h = hashlib.sha256()
+    p = os.path.abspath(path)
+    try:
+        if os.path.isfile(p):
+            h.update(b"file\0")
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+        elif os.path.isdir(p):
+            h.update(b"dir\0")
+            for name in sorted(os.listdir(p)):
+                fp = os.path.join(p, name)
+                stat = os.stat(fp)
+                h.update((name + "\0" + str(stat.st_size) + "\0" + str(stat.st_mtime_ns)).encode(
+                    "utf-8", errors="replace"))
+        else:
+            h.update(b"missing\0")
+    except OSError as exc:
+        h.update(("error:" + str(exc)).encode("utf-8", errors="replace"))
+    return h.hexdigest()
+
+
+def _source_snapshot(head):
+    return {
+        p: _path_fingerprint(p)
+        for p in _changed_paths_since(head)
+        if _SOURCE_PAT.search(p)
+    }
+
+
 _TEST_PAT = re.compile(r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/|(^|/)src/test/|(^|/)test_[^/]+\.py$|"
                        r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|py|go|rs|js|jsx|ts|tsx)$|"
                        r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$", re.I)
@@ -981,11 +1152,8 @@ def _test_like(path):
     if _TEST_PAT.search(path):
         return True
     pats = []
-    try:
-        v = (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {}).get("测试路径", [])
-        pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
-    except Exception:
-        pass
+    v = _state_config().get("测试路径", [])
+    pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
     try:
         v = json.load(open(".mae-flow-defaults.json", encoding="utf-8")).get("测试路径", [])
         pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
@@ -1002,6 +1170,10 @@ def _test_like(path):
 
 def _enforce_agent_scope(kind, task, bail):
     changed = [p for p in _changed_paths_since(task.get("head", "")) if _SOURCE_PAT.search(p)]
+    if task.get("standalone"):
+        initial = task.get("initial_source_fingerprints", {}) or {}
+        # 独立任务允许用户带着未提交代码开始；只审计任务启动后真正发生变化的路径。
+        changed = [p for p in changed if initial.get(p) != _path_fingerprint(p)]
     if kind == "COMPILE":
         bad = [p for p in changed if _test_like(p)]
         if bad:
@@ -1016,6 +1188,9 @@ def _enforce_agent_scope(kind, task, bail):
         if bad:
             bail("ut-generator-agent 修改了非测试源码: " + "、".join(bad[:5])
                  + "；源码缺陷必须先交用户裁决。")
+    elif kind == "GRILL":
+        if changed:
+            bail("grill-critic-agent 是只读审查角色，却修改了文件: " + "、".join(changed[:5]))
     return changed
 
 
@@ -1041,13 +1216,9 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         if not mm:
             bail(f"缺少机器对账字段 {k}: <数字>。")
         nums[k] = int(mm.group(1))
-    try:
-        st = json.load(open(STATE, encoding="utf-8"))
-        scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
-    except Exception:
-        st, scan = {}, {}
-    if st.get("current") in ("rf_codecheck", "tw_codecheck", "verify_codecheck") \
-            and scan.get("step") == st.get("current"):
+    st = _contract_state()
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    if scan.get("step") == st.get("current"):
         if nums["FOUND"] != scan.get("count"):
             bail(f"FOUND({nums['FOUND']})与 harness 首检({scan.get('count')})不一致。"
                  "禁止主会话先修后让 agent 补手续；回到首检状态并由 agent 处理原告警。")
@@ -1151,6 +1322,32 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
         nums[name] = value
     if nums["TESTS_FAILED"] != 0 or nums["TESTS_TOTAL"] != nums["TESTS_PASSED"]:
         bail("UT 数字对账不通过：PASS 必须 TESTS_FAILED=0 且 TOTAL=PASSED。")
+
+
+def _grill_contract(status, report, tool_calls=None, soft=False):
+    """Grill critic 只做遗漏审查；GAPS 是有效产出，不因发现问题被当成执行失败。"""
+    def bail(msg):
+        _contract_bail("GRILL", msg, soft)
+
+    task = _task_card_contract("GRILL", report, soft)
+    _enforce_agent_scope("GRILL", task, bail)
+    if status not in ("CLEAR", "GAPS", "FAIL"):
+        bail("未知结果状态 " + status + "；只能是 CLEAR/GAPS/FAIL。")
+    if status == "FAIL":
+        return
+    stage = _flex_field(report, "STAGE") or ""
+    if stage.lower() != str(task.get("stage", "")).lower():
+        bail("STAGE 与任务卡的质询检查阶段不一致。")
+    count = _number_field(report, "GAPS_FOUND")
+    if count is None:
+        bail("缺少 GAPS_FOUND: <数字>。")
+    if status == "CLEAR" and count != 0:
+        bail("标记 CLEAR 但 GAPS_FOUND 不是 0。")
+    if status == "GAPS" and count == 0:
+        bail("标记 GAPS 但 GAPS_FOUND=0。")
+    branches = _flex_field(report, "MISSING_BRANCHES")
+    if status == "GAPS" and (branches is None or _empty_section(branches)):
+        bail("发现遗漏时必须在 MISSING_BRANCHES 中列出可继续追问的决策分支。")
 
 
 def _git_out(cmd):
@@ -1307,7 +1504,16 @@ def main():
     try:
         d = read_input()
         _chdir_root(d)
-        if os.path.exists(EXIT_STATE):
+        action_active = bool(_load_action())
+        if action_active and ev == "pretooluse":
+            ev_action_pretooluse(d)
+        elif action_active and ev == "subagentstop":
+            ev_subagentstop(d)
+        elif action_active and ev in ("userprompt", "sessionstart"):
+            # 退出过完整流程后仍会保留 EXIT_STATE；独立任务是用户此刻的新意图，
+            # 状态注入必须优先于旧的“普通开发模式”提示，否则主 Agent 会丢失单项任务上下文。
+            ev_inject(d, session_start=(ev == "sessionstart"))
+        elif os.path.exists(EXIT_STATE):
             # 用户已明确退出：MAE-FLOW 完整让出控制权。不能只跳过源码 gate 而继续发令牌/注入步骤，
             # 否则会形成“表面直接开发，后台仍在推进旧流程”的半退出状态。
             if ev in ("userprompt", "sessionstart"):

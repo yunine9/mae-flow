@@ -30,6 +30,31 @@
      `init --ack "<用户本条原话>"`，否则不要 init；若用户要开另一张新单，建议另开 worktree，不覆盖退出现场；
      两者都没有 → **不要接管普通开发**；仅当用户明确要求 mae-flow 交付且已给出单号/需求时 `init`,
      否则照常执行用户的直接改码/补 UT 请求，不得为了使用插件而 init。
+   - **ut** — 只补并执行单元测试，**不 init 完整流程**。如果项目还有 `.mae-flow.json` 在途状态，
+     先说明不能叠加两套控制状态，让用户发送 `/mae-flow exit` 后重试；禁止自行退出。
+     从命令剩余文字提取目标文件/功能和验收说明；路径明确时用重复的 `--files` 传入，完整用户描述用
+     `--request` 原样传入。执行：
+     `mae-flow.py action start ut --request "<用户描述>" [--files "<路径>"]`
+     脚本会从项目预设或上次现场继承 UT 生成/运行/编译方式；缺项时只问缺失配置，不启动环境流程、不猜命令。
+     按输出的唯一话术启动 `ut-generator-agent`，不得添加自编参数。Agent 收尾后执行 `action finish`。
+     PASS 必须真实生成并运行测试；疑似源码缺陷先展示自查报告让用户裁决。独立模式默认不 commit、不 push。
+   - **codecheck** — 只做代码规范检查和安全修复，**不 init 完整流程**。在途完整流程的处理同 ut。
+     默认范围=当前工作区改动中的业务代码；用户点名文件时用 `--files`。执行：
+     `mae-flow.py action start codecheck --request "<用户描述>" [--files "<路径>"]`
+     只想看报告时增加 `--check-only`。修复模式缺编译方式时只问这一项。
+     脚本先真实 fullcheck：0 告警直接结束，不派 Agent；有告警才按输出任务卡启动
+     `codecheck-fix-agent`。Agent 收尾后执行 `action finish`。测试文件自动排除，剩余告警只报告，
+     禁止自动豁免；默认不 commit、不 push。
+   - **grill** — 只把需求问清楚并生成澄清结果，**不 init、不进入设计和编码**。在途完整流程的处理同 ut。
+     执行 `mae-flow.py action start grill --request "<用户原话>"`；已有文本材料用
+     `--source "<路径>"`。按输出路径完成八维备课和定向代码勘察，然后执行
+     `action critic --stage prep --document "<备课文件>"`，启动只读 `grill-critic-agent` 找第一轮遗漏。
+     此后主 Agent 一次只问一个问题，每个答案先检查模糊词、新名词、矛盾和衍生边界，再问下一题；
+     子 Agent 无权替用户回答。收敛后把澄清文档交
+     `action critic --stage final --document "<澄清文档>"` 再审一次，吸收或如实记录剩余风险，
+     最后 `action finish --report "<澄清文档>"`。默认不提交文档。
+   - **cancel / task cancel** — 仅取消当前独立 UT/CodeCheck/Grill 任务：
+     `mae-flow.py action cancel`。保留已经产生的代码和报告，不回滚，也不影响普通开发。
    - **setup** — 仅环境:执行 `mae-flow envcheck`;有 ❌ → 直接跑 python "<插件>/scripts/setup.py"
      (确定性安装器)→ ⚠人工项原样转用户、❌ 项才派 env-setup-agent 诊断(传日志路径与 scripts 目录),
      与 env_setup 步骤同一套三层分流;**不 init 流程**,修完汇报结果即结束。

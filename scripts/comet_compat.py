@@ -41,13 +41,19 @@ def ensure_direct_mode_compat(project_root="."):
             continue
         found.append(path)
         try:
-            text = open(path, encoding="utf-8", errors="replace").read()
+            text = open(path, encoding="utf-8", errors="strict").read()
             if BEGIN in text:
                 continue
             anchor = "set -euo pipefail\n"
-            if anchor not in text:
-                raise ValueError("未找到 set -euo pipefail，脚本结构不受支持")
-            updated = text.replace(anchor, anchor + "\n" + BLOCK, 1)
+            if anchor in text:
+                updated = text.replace(anchor, anchor + "\n" + BLOCK, 1)
+            elif text.startswith("#!"):
+                first, sep, rest = text.partition("\n")
+                updated = first + sep + BLOCK + rest
+            else:
+                # 兼容没有 shebang/set -e 的旧版项目 Hook。BLOCK 只做向上查标记并在命中时
+                # 提前返回，不改变后续脚本语义；比因结构差异拒绝退出更安全。
+                updated = BLOCK + text
             tmp = path + ".mae-flow.tmp"
             with open(tmp, "w", encoding="utf-8", newline="\n") as f:
                 f.write(updated)

@@ -5,6 +5,10 @@
 
 ## 阶段 0 — 开机金丝雀(约 15 分钟,全部通过才进阶段 1)
 
+- [ ] **0.0 未启用绝不接管（发布阻断项）**：任选一个从未执行 mae-flow init 的普通仓，让 AI Edit 一行源码、
+  执行 Bash、启动普通子 Agent，必须全部放行；日志应出现 `inactive: bypass`。仅安装插件就拦源码属于黑事件，
+  本项失败立即停止推广。再在该仓父目录临时放一份测试用 `.mae-flow.json`，子仓仍必须按自己的最近 `.git`
+  边界完整旁路，不能被父目录的旧流程误接管；测完删除测试状态。
 - [ ] **0.1 hook 存活**:启动会话发一条消息,开 `%TEMP%\mae-flow-hook.log`:
   - start/end 成对、耗时几十 ms 级 → 通过;
   - 文件不存在 → harness 不支持 exec form:把 hooks.json 五个 hook 的 `"command"+"args"` 改回
@@ -27,7 +31,8 @@
   观察调后 UT agent 实际用多少轮收尾(尸检/日志 query_depth),200 不够或严重富余都回报,下版校准。
 - [ ] **0.6 六事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,
   必须逐事件看"数据依赖行为"真实发生,日志干净不算数:
-  - **PreToolUse**:流程未初始化时让 AI"在 src/ 下随便加一行"→ 必须被拦并提示先走流程(拦了=tool_input 到手);
+  - **PreToolUse**:先在演练仓明确 init，再在禁止改源码的步骤让 AI"在 src/ 下随便加一行"→ 必须被拦；
+    另在未 init 普通仓重复一次必须放行，证明 gate 只接管已授权仓;
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
   - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
@@ -52,7 +57,9 @@
 - [ ] **1.2 env-setup 三产物**:statusline 自动接入;**权限基线合并**(settings 其他键无损,deny/allow 追加);
   `.comet/config.yaml` 两键齐。
 - [ ] **1.3 配置确认**:工号取"域\"后半段;需求文档三分支(给个 docx 试试"不可读格式"话术);
-  确认后把恒定项写 `.mae-flow-defaults.json` 提交。
+  口述一段中文需求后运行 messages → requirement-record，文件应为 UTF-8、正文 SHA 可复核；再造一个
+  UTF-16/GBK 文本走 `--source` 规范化。故意给坏文件执行 done，应拒绝且 `.mae-flow.json` 不留下半套配置；
+  连续两次错误 ack 应提示熔断而不是继续让用户复读。确认后把恒定项写 `.mae-flow-defaults.json` 提交。
 - [ ] **1.4 交付方式选择**:四选项是否以中文(标准交付/缺陷快修/小改快过/评审返工)展示,推荐+依据合理。
 - [ ] **1.5 全程观感**:done 报错可读性;gate 每次拦截记下来(误拦/漏拦分类);comet-build 四选项口径与公司标准一致。
 - [ ] **1.6 grill 工作表**(若走标准交付):缺章打回与「待填」残留拦截的报错观感。
@@ -91,10 +98,12 @@
   放行 CODECHECK Agent 令牌，现场仍有告警时仍必须被 `codecheck_clean` 拦住，证明没有把整步机器检查一起关掉。
 - [ ] **2.5 弱模型压测**:换最弱可用模型跑一单 小改快过,记录全部偏差(话术跑偏/跳步尝试/报错后的自愈质量)。
 - [ ] **2.6 会话卫生**:改插件后不重启会话的行为漂移确认一次(应复现,验证文档警告属实)。
-- [ ] **2.7 中途退出**:在 open/design 这类原本禁止改源码的步骤说“退出 mae-flow，保留代码，后面直接改”→
-  未确认前 Edit 仍应被拦；确认后状态栏显示“mae-flow 已退出│普通开发”，立即 Edit 一处源码和一处 UT 均应放行，
+- [ ] **2.7 中途退出**:在 open/design 这类原本禁止改源码的步骤直接发送 `/mae-flow exit` → 不得二次确认，
+  状态栏立即显示“mae-flow 已退出│普通开发”，Edit 一处源码和一处 UT 均应放行，
   `.mae-flow-work/exited/` 有完整现场，业务文件/提交没有被回滚。重启会话后仍保持普通开发；明确说“重新接回原流程”时
-  init 应恢复旧断点，若期间改过源码则回退质量链，旧 COMPILE/CODECHECK/UT 令牌不得复用。
+  init 应恢复旧断点，若期间改过源码则回退质量链，旧 COMPILE/CODECHECK/UT 令牌不得复用。再把状态 JSON 故意截断，
+  `/mae-flow exit` 仍应成功并保留坏文件；最后临时禁用 UserPromptSubmit Hook，在真实终端执行
+  `exit --interactive`，Agent 管道调用应拒绝、用户输入 EXIT 应成功。
 - [ ] **2.8 月光宝盒端到端**:分别从全新项目子目录、普通在途步骤、已退出的直接开发模式说
   “开启月光宝盒”——三种入口都应一次生效且不弹 AskUserQuestion。人为制造一条 CodeCheck/UT 环境失败，
   确认先真实尝试、再留痕继续，报告含现象/尝试/风险且没有假 PASS；push 成功后停在晨间检查、不自动定稿。

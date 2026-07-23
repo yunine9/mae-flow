@@ -17,7 +17,19 @@ except Exception:
 
 def main():
     try:
-        d = json.loads(sys.stdin.read() or "{}")
+        stream = getattr(sys.stdin, "buffer", sys.stdin)
+        raw = stream.read()
+        if isinstance(raw, bytes):
+            text = None
+            for enc in ("utf-8-sig", "gb18030"):
+                try:
+                    text = raw.decode(enc, errors="strict")
+                    break
+                except UnicodeDecodeError:
+                    pass
+            d = json.loads(text or "{}")
+        else:
+            d = json.loads(raw or "{}")
     except Exception:
         d = {}
     cwd = ((d.get("workspace") or {}).get("current_dir")) or d.get("cwd") or os.getcwd()

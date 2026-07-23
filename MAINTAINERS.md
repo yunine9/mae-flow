@@ -28,6 +28,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 6. **Windows-only**。命令用 `python` 不用 `python3`；子进程 `text=True` 必须显式 `encoding="utf-8"`（中文 Windows 默认 GBK）；路径匹配一律 `re.I`（NTFS 不分大小写）；跨盘符禁用 `relpath`；hook 经 Git Bash 执行。
 7. **用最弱的可用模型压测，用最强的模型生产**。强模型自觉守规则，会掩盖 harness 的洞；弱模型是 harness 的模糊测试器——每个洞都变成立刻可见可修的事故（2026-07-18 用 Haiku 一下午打出八类偏差，全部修复后才算"实战可信"）。改动 harness 后的回归验证同理：拿弱模型跑演习沙箱，别拿强模型的"一次通过"当证据。
 8. **硬禁令必须配裁决出口**。gate 与契约拦的是"未经用户裁决的动作"，不是场景本身——工程现实里被禁动作往往有正当场景（UT 揭出源码真缺陷、既有用例被规格演进淘汰、实现揭出设计/spec 有误、AskUserQuestion 客观不可用）。每条禁令都要回答"该场景的正规出口是什么"：unlock source（UT 缺陷修复）、SUSPECTED_BUGS 呈报（agent 自查后升级）、goto --ack 回流（设计/spec 修订）、accept-risk（宿主/收尾异常导致单个 Agent 令牌无法签发）。禁令没有出口，弱模型只剩"卡死"或"作弊绕过"两个选项，都是事故（ImpossibleBench 实证：给正规弃权通道，作弊率 54%→9%）。新加任何禁令前先写出口，出口必须带用户裁决与留痕。
+9. **安装不是授权，逃生不能复用故障链**。没有 `.mae-flow.json` 时所有工具 Hook 必须旁路；仅安装插件绝不能阻止普通改码。`/mae-flow exit` 由 UserPromptSubmit 用户事件直接签发短时凭据并原子退出，不再依赖 `.usermsg` ack；若整个 Hook 通道损坏，真实 TTY 的 `exit --interactive` 是独立最后出口。任何新增门禁都必须证明这两条出口仍可用。
 
 ### 思想图谱（三个开源思想源，各管一段、互不越界）
 
@@ -280,7 +281,9 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 ### 故障树
 
-- **模型说"流程未初始化"但明明有单** → `mae-flow doctor` 看第一行项目根对不对（父目录有杂散 `.mae-flow.json` 会劫持向上搜索）。
+- **模型说"流程未初始化"但明明有单** → `mae-flow doctor` 看第一行项目根对不对。项目根定位以最近的
+  `.git` / `openspec` 为边界，不会再被更高层目录的杂散 `.mae-flow.json` 劫持；状态应放在项目根，
+  不要靠扩大向上搜索范围兼容错误位置。
 - **gate 好像全失效了** → flow.json/状态文件 JSON 坏了会让 mae-flow 崩溃（exit 1 → fail-open）。手动跑 `python mae-flow.py gate edit src/x` 看 traceback。
 - **done 一直被拒但产物明明在** → 看报错里的 pattern 是否含未解析占位符（对应配置没 `--set`）；yaml_field 类型看 `.comet.yaml` 字段实际值。
 - **证据实测行为**：所有证据都可手动复现——直接跑报错消息里提示的那条命令。
@@ -295,14 +298,15 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 - **verify_ponytail 零证据**——跳过无人知；兜底：复杂度维度有 build 期 ponytail 常驻 + codecheck + comet review 三重冗余。
 - **codecheck REMAINING 的用户决策语义仍不可完全验真**——但 `approve-exemption` 已要求本步 ASKUSER 令牌、用户原话验真并写状态审批账；手写豁免文件不能放行。
-- **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——现在会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。宿主拿不到选项应答正文时，让用户再发一条普通消息即可恢复；不再静默降级成模型可自填。
+- **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。同一确认连续失败两次熔断，不再让用户机械复读；退出走独立 UserPrompt intent/TTY，不与 ack 共因失效。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 
 - **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
 - **ack 验真按步骤绑定**（done / goto / unlock / 豁免 / CodeCheck 人工恢复共用）：只接受当前步骤进入后捕获到的用户原话；令牌与用户消息都记录 step，不能跨关复用。若公司 harness 没回传 AskUserQuestion 的选项正文，要求用户用普通消息重复确认一次。这里选择“显式多确认一次”而不是 fail-open，因为这些命令会改变流程或放宽约束。
-- **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时走 `exit`：精确确认、现场快照、
-  项目标记和 Comet Hook 兼容四件事原子化完成，代码不回滚。禁止重新引入“手删状态文件”的假逃生口。
+- **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow exit`：
+  用户事件授权、现场快照、项目标记和 Comet Hook 兼容一次完成，代码不回滚；Hook 故障时使用真实 TTY
+  `exit --interactive`。禁止重新引入“手删状态文件”的假逃生口，也禁止让 exit 再依赖普通 ack。
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧 2.0.2 的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。

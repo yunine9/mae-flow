@@ -21,13 +21,15 @@
                                          用户确认后只放行当前步骤的单个 Agent 令牌
   mae-flow.py moonlight on|off|report|defer|repair|finalize
                                          无人值守开发、带遗留推送与晨间修复闭环
+  mae-flow.py messages                    查看当前步骤捕获的用户消息 ID/编码
+  mae-flow.py requirement-record ...      将用户原话/已有文本规范化为 UTF-8 需求入口
   mae-flow.py exit [--reason 文本] [--ack 用户原话]
                                          保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
 import argparse, glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
 
-from comet_compat import ensure_direct_mode_compat
+from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -47,6 +49,8 @@ STEPS_DIR = os.path.join(HERE, "..", "flow", "steps")
 STATE_PATH = ".mae-flow.json"   # 相对项目根;启动时 find_project_root() 自动 chdir,不赌调用方 cwd
 EXIT_PATH = ".mae-flow.json.exited"  # 复用既有 .mae-flow.json* ignore;存在时 Hook 不再接管普通开发
 MOONLIGHT_INTENT_PATH = STATE_PATH + ".moonlight-intent"
+EXIT_INTENT_PATH = STATE_PATH + ".exit-intent"
+FAILURE_PATH = STATE_PATH + ".failures"
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
@@ -94,20 +98,16 @@ SOURCE_FILENAMES = {
 
 def find_project_root(start=None):
     """从 start(默认 cwd)向上定位项目根,消除"模型 cd 进子目录后调用"的错位:
-    优先找已有 .mae-flow.json 或退出标记;没有(init 场景)则找 .git / openspec 标记;
-    都没有就留在原地。返回 (root, 是否已有状态文件)。"""
+    每层先找已有 .mae-flow.json 或退出标记，再判断 .git / openspec 项目边界；
+    不越过最近仓库去捡父目录的陈旧状态。都没有就留在原地。
+    返回 (root, 是否已有状态文件)。"""
     d = os.path.abspath(start or os.getcwd())
     probe = d
     while True:
         if os.path.exists(os.path.join(probe, STATE_PATH)) or os.path.exists(os.path.join(probe, EXIT_PATH)):
             return probe, os.path.exists(os.path.join(probe, STATE_PATH))
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
-    probe = d
-    while True:
-        if os.path.isdir(os.path.join(probe, ".git")) or os.path.isdir(os.path.join(probe, "openspec")):
+        # .git 在 worktree 中是文件而不是目录，必须使用 exists。
+        if os.path.exists(os.path.join(probe, ".git")) or os.path.isdir(os.path.join(probe, "openspec")):
             return probe, False
         parent = os.path.dirname(probe)
         if parent == probe:
@@ -256,6 +256,8 @@ def _allowed_set_keys(step):
 def _validate_config_value(key, value):
     if not value:
         return "配置值不能为空"
+    if "\x00" in value or "\ufffd" in value:
+        return "包含 NUL/Unicode 替换字符，疑似发生编码损坏"
     if key == "单号" and not re.fullmatch(r"(?:REQ|DTS)\w+", value):
         return "单号必须以 REQ 或 DTS 开头"
     if key in ("工号", "基线分支", "分支名") and re.search(r"[\\\s~^:?*\[\];&|`$<>()\"']", value):
@@ -263,6 +265,77 @@ def _validate_config_value(key, value):
     if key == "CHANGE_NAME" and not re.fullmatch(r"[A-Za-z0-9._-]+", value):
         return "change 名只允许字母、数字、点、下划线和短横线"
     return ""
+
+
+REQ_SHA_MARKER = "MAE-FLOW-USERMSG-SHA256:"
+_BINARY_PREFIXES = (b"%PDF-", b"PK\x03\x04", b"\x89PNG", b"\xff\xd8\xff", b"GIF8")
+
+
+def _text_corruption_reason(text):
+    """只拦高置信度损坏，不把普通中文内容误判成乱码。"""
+    if "\x00" in text:
+        return "包含 NUL 字符，疑似二进制或错误的 UTF-16 解码"
+    if "\ufffd" in text:
+        return "包含 Unicode 替换字符 �"
+    controls = sum(1 for ch in text if ord(ch) < 32 and ch not in "\r\n\t")
+    if controls:
+        return "包含不可见控制字符"
+    # UTF-8 被 GBK/Latin-1 错解后最常见的高信号组合；至少命中三次才拒绝，避免误伤正常用词。
+    mojibake = re.findall(r"(?:锟斤拷|ï¿½|Ã.|Â.|(?:銆|锛|鈥|涔|鐨|鏃|鎴|璇|鍙|缂))", text)
+    if len(mojibake) >= 3:
+        return "命中多处常见乱码片段(" + "、".join(mojibake[:5]) + ")"
+    return ""
+
+
+def _read_text_source(path, normalize=False):
+    """严格读取需求文本；normalize=True 时兼容常见 Windows 文本编码并返回编码名。"""
+    try:
+        raw = open(path, "rb").read()
+    except OSError as exc:
+        return "", "", "无法读取: %s" % exc
+    if not raw:
+        return "", "", "文件为空"
+    if raw.startswith(_BINARY_PREFIXES):
+        return "", "", "检测到 PDF/Office/图片等二进制格式，必须先提供文本版或粘贴关键内容"
+    candidates = [("utf-8-sig", "utf-8-sig")]
+    if normalize:
+        if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            candidates.append(("utf-16", "utf-16"))
+        candidates.append(("gb18030", "gb18030"))
+    errors = []
+    for label, enc in candidates:
+        try:
+            text = raw.decode(enc, errors="strict")
+        except (UnicodeDecodeError, LookupError) as exc:
+            errors.append("%s:%s" % (label, exc))
+            continue
+        bad = _text_corruption_reason(text)
+        if bad:
+            return "", label, bad
+        if not text.strip():
+            return "", label, "文件没有有效文本"
+        return text, label, ""
+    return "", "", ("不是可严格解码的 UTF-8 文本"
+                    + ("；可用 requirement-record --source 规范化 GBK/UTF-16 文本" if not normalize else "")
+                    + "（%s）" % " | ".join(errors[-2:]))
+
+
+def _validate_requirement_document(path):
+    """配置确认的需求入口必须是可复读的 UTF-8 文本；禁止 errors=replace 掩盖乱码。"""
+    text, enc, err = _read_text_source(path, normalize=False)
+    if err:
+        return False, err
+    marker = re.search(r"<!--\s*" + re.escape(REQ_SHA_MARKER) + r"\s*([0-9a-f]{64})\s*-->", text)
+    if marker:
+        body = text[marker.end():]
+        # 记录器固定在 marker 后写一个正文换行；校验只去掉这一层封装，不改用户原文内部空白。
+        body = body[1:] if body.startswith("\n") else body
+        if body.endswith("\n"):
+            body = body[:-1]
+        actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if actual != marker.group(1):
+            return False, "需求原文指纹不一致，文件写入后被改动或截断"
+    return True, enc
 
 
 def _configured_source_patterns(st):
@@ -995,7 +1068,7 @@ def ev_review_codecheck(spec, st):
 
 ENV_CACHE = os.path.join(os.path.expanduser("~"), ".mae-flow-env-ok")
 ENV_MARK = "mae-flow-env-ok-v1"              # 缓存有效标记:防裸 touch 伪造(空文件/外来内容一律无效)
-FAST_TYPES = ("path_any", "file_contains", "path_absent")   # 项目级快检查:不缓存,每次都跑
+FAST_TYPES = ("path_any", "file_contains", "path_absent")
 
 
 def run_env_checks(force_all=False):
@@ -1075,6 +1148,30 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
             "review_codecheck": ev_review_codecheck}
 
 
+def _ack_failure(st, reason="", success=False):
+    """记录确认通道连续失败；第二次起明确熔断，防弱模型无限重复提问。"""
+    sid = (st or {}).get("current", "")
+    key = "ack:" + sid
+    try:
+        data = json.load(open(FAILURE_PATH, encoding="utf-8")) if os.path.exists(FAILURE_PATH) else {}
+    except Exception:
+        data = {}
+    if success:
+        if key in data:
+            data.pop(key, None)
+            _write_json_atomic(FAILURE_PATH, data)
+        return 0
+    previous = data.get(key, {})
+    count = int(previous.get("count", 0)) + 1
+    data[key] = {
+        "count": count,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "reason": reason[:1000],
+    }
+    _write_json_atomic(FAILURE_PATH, data)
+    return count
+
+
 def _ack_verified(st, ack, exact=False):
     """ack 必须来自当前步骤之后的真实用户输入；旧步骤的“可以”不能循环使用。
 
@@ -1086,8 +1183,13 @@ def _ack_verified(st, ack, exact=False):
     except Exception:
         msgs = []
     if not msgs:
-        return False, ("harness 尚未记录到用户回复。请把待确认内容展示给用户，等用户回复后再继续；"
-                       "若 AskUserQuestion 的选项应答未被宿主回传，请让用户用普通消息再确认一次。")
+        why = ("harness 尚未记录到用户回复。先执行 doctor 检查 UserPromptSubmit 输入，"
+               "不要让用户反复说同一句确认。")
+        count = _ack_failure(st, why)
+        if count >= 2:
+            why += (" 同一确认通道已连续失败 %d 次，现已熔断：禁止继续循环。"
+                    "用户可直接发送 `/mae-flow exit`；Hook 也坏时在真实终端执行 exit --interactive。") % count
+        return False, why
 
     def nt(s):
         return re.sub(r"\s+", "", s or "")
@@ -1121,10 +1223,17 @@ def _ack_verified(st, ack, exact=False):
     actual = [v for m in current_msgs for v in candidates(m.get("text", ""))]
     matched = any((na == v if exact else na in v) for v in actual) if na else False
     if matched:
+        _ack_failure(st, success=True)
         return True, ""
-    return False, ("--ack 与当前步骤开始后的用户真实输入不匹配。"
-                   "ack 必须是用户回复/选项的**原文复制**(禁止转述、概括、代答);"
-                   "以前步骤说过的『可以』不能复用；先真实拿到本步输入,再以原文重试。")
+    why = ("--ack 与当前步骤开始后的用户真实输入不匹配。"
+           "ack 必须是用户回复/选项的原文复制；先执行 messages/doctor 核对捕获内容和编码，"
+           "不要再次向用户重复同一个问题。")
+    count = _ack_failure(st, why)
+    if count >= 2:
+        why += (" 同一确认通道已连续失败 %d 次，现已熔断：停止重试。"
+                "需要继续排查用 doctor；不想继续则发送 `/mae-flow exit`，"
+                "Hook 损坏时使用真实终端 exit --interactive。") % count
+    return False, why
 
 
 def check_evidence(step, st):
@@ -1401,7 +1510,7 @@ def print_current(flow, st):
 def _state_sidecars():
     return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg",
             STATE_PATH + ".agent-rejections", STATE_PATH + ".agent-evidence",
-            MOONLIGHT_INTENT_PATH, STATE_PATH + ".tmp"]
+            MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]
 
 
 def _unique_exit_dir(st):
@@ -1431,6 +1540,86 @@ def _write_json_atomic(path, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
+
+def _captured_user_messages(st):
+    try:
+        rows = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+    except Exception:
+        return []
+    sid = (st or {}).get("current", "")
+    entered = _step_entered_at(st or {})
+    return [m for m in rows
+            if m.get("at", "") >= entered and (not m.get("step") or m.get("step") == sid)]
+
+
+def cmd_messages(st):
+    """只展示短预览与稳定 ID，长中文正文不再经过 shell 参数往返。"""
+    rows = _captured_user_messages(st)
+    if not rows:
+        die("当前步骤没有捕获到用户消息。检查 UserPromptSubmit hook；"
+            "不要反复让用户确认，可直接使用 `/mae-flow exit` 退出。", 2)
+    print("[mae-flow] 当前步骤捕获到的用户消息（需求落盘请使用左侧 ID）:")
+    for m in rows:
+        text = re.sub(r"\s+", " ", m.get("text", "")).strip()
+        health = _text_corruption_reason(m.get("text", ""))
+        print("  %s  %s  %s%s" % (
+            m.get("id", "(旧记录无ID)"), m.get("at", "?"), text[:100],
+            ("  ❌疑似乱码:" + health) if health else ""))
+
+
+def cmd_requirement_record(st, args):
+    """从 Hook 捕获原文或已有文本文件生成统一 UTF-8 需求入口，并做写后回读校验。"""
+    if (st or {}).get("current") != "config_confirm":
+        die("requirement-record 只允许在配置确认阶段使用，避免后续偷偷更换需求依据。", 2)
+    ticket = (args.ticket or (st.get("config", {}) or {}).get("单号", "")).strip()
+    if not re.fullmatch(r"(?:REQ|DTS)\w+", ticket):
+        die("--ticket 必须是有效的 REQ/DTS 单号。", 2)
+    if bool(args.message_id) == bool(args.source):
+        die("必须且只能选择 --message-id <messages输出的ID> 或 --source <文本文件>。", 2)
+
+    source_desc = ""
+    if args.message_id:
+        rows = _captured_user_messages(st)
+        matches = [m for m in rows if m.get("id") == args.message_id]
+        if not matches:
+            die("当前步骤不存在消息 ID %s。先执行 messages 查看；"
+                "不要把中文原文复制进 shell 参数。" % args.message_id, 2)
+        text = matches[-1].get("text", "")
+        bad = _text_corruption_reason(text)
+        if bad:
+            die("捕获的用户原话疑似已经乱码：" + bad
+                + "。不要落盘；执行 doctor 检查 Hook 输入编码，或 `/mae-flow exit` 退出。", 2)
+        source_desc = "用户消息 " + args.message_id
+    else:
+        src = os.path.abspath(args.source)
+        text, enc, err = _read_text_source(src, normalize=True)
+        if err:
+            die("需求材料无法安全转成文本：" + err, 2)
+        source_desc = "%s（原编码 %s）" % (norm(src), enc)
+
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    path = os.path.join("docs", "req", "REQ-" + ticket + ".md")
+    if os.path.exists(path) and not args.replace:
+        die("目标已存在：%s。先查看内容；确认旧文件确实错误后加 --replace，禁止静默覆盖。" % path, 2)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    content = (
+        "# 用户提供的原始需求\n\n"
+        "来源：%s\n\n"
+        "<!-- %s %s -->\n"
+        "%s\n" % (source_desc, REQ_SHA_MARKER, digest, text)
+    )
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(content)
+    os.replace(tmp, path)
+    ok, why = _validate_requirement_document(path)
+    if not ok:
+        die("需求文件写后回读校验失败：" + why + "。文件保留供诊断，禁止进入下一阶段。", 2)
+    print("[mae-flow] 需求原文已确定性写入 UTF-8 并通过指纹回读：%s" % norm(path))
+    print("来源：%s" % source_desc)
+    print("正文 SHA256：%s" % digest)
+    print("请展示该文件全文让用户核对；确认后将「需求文档」配置为上述路径。")
 
 
 def _reopen_comet_archive(st):
@@ -1659,6 +1848,9 @@ def cmd_done(flow, st, args):
     if sid == "moonlight_review":
         die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
             "不能用 done 跳过报告闭环。", 2)
+    # 配置先在内存候选副本里完成全部校验；任何一步失败都不污染已确认状态。
+    # 旧实现遇到需求路径不存在会先 save_state，导致下一轮继续携带半套/乱码配置。
+    pending_config = dict(st.get("config", {}) or {})
     allowed_sets = _allowed_set_keys(step)
     for kv in args.set or []:
         if "=" not in kv:
@@ -1670,26 +1862,32 @@ def cmd_done(flow, st, args):
         bad = _validate_config_value(k, v)
         if bad:
             die(f"{k}「{v}」不合法:{bad}。", 2)
-        st["config"][k] = v
-    if st["config"].get("单号") and not st["config"].get("单号类型"):
-        st["config"]["单号类型"] = "feat" if st["config"]["单号"].startswith("REQ") else "fix"
+        pending_config[k] = v
+    if pending_config.get("单号") and not pending_config.get("单号类型"):
+        pending_config["单号类型"] = "feat" if pending_config["单号"].startswith("REQ") else "fix"
     # 需求文档:单号与需求完全解耦(单号只管 git 命名,需求只管做什么),内容对不对只有用户能判定,
     # 机器只拦"路径是假的"这一种硬错;"拿对文档"靠 config_confirm 的单独确认(展示摘录给用户核实)
     new_keys = [kv.split("=", 1)[0] for kv in (args.set or []) if "=" in kv]
-    doc = st["config"].get("需求文档", "")
+    doc = pending_config.get("需求文档", "")
     if "需求文档" in new_keys and not os.path.exists(doc):
-        save_state(st)
         die(f"需求文档「{doc}」不存在——路径必须真实可读。"
             "用户口述/粘贴的需求须先原文照录落盘(如 docs/req/REQ-<单号>.md)并经用户确认,再以该路径 --set。", 2)
+    if doc and ("需求文档" in new_keys or sid == "config_confirm"):
+        ok, why = _validate_requirement_document(doc)
+        if not ok:
+            die(f"需求文档「{doc}」未通过严格文本校验:{why}。"
+                "不要让用户重复说“我确认”，确认无法修复坏文件；"
+                "用户口述用 messages + requirement-record --message-id，"
+                "已有 GBK/UTF-16 文本用 requirement-record --source 规范化。", 2)
     if step.get("require_sets"):
-        missing = [k for k in step["require_sets"] if not st["config"].get(k)]
+        missing = [k for k in step["require_sets"] if not pending_config.get(k)]
         if missing:
             remedy = ("用 --set 补齐；月光模式禁止询问用户，只能从本轮需求原话、仓库预设、"
                       "当前分支和代码事实中保守取得，不能编造"
                       if _moonlight(st) else "用 --set 补齐;缺失项应询问用户")
             die("配置缺失,禁止推进: " + "、".join(missing) + "(" + remedy + ")", 2)
-        if "基线分支" in step["require_sets"] and not st["config"].get("分支名"):
-            st["config"]["分支名"] = "{基线分支}_{工号}_{单号}".format(**st["config"])
+        if "基线分支" in step["require_sets"] and not pending_config.get("分支名"):
+            pending_config["分支名"] = "{基线分支}_{工号}_{单号}".format(**pending_config)
     if step.get("user_ack") and not _moonlight(st) and not args.ack:
         die("本步需要用户确认:必须携带 --ack \"用户确认原话\"。没有拿到用户回复就调用 done = 违规。", 2)
     if step.get("user_ack") and not _moonlight(st) and args.ack:
@@ -1699,6 +1897,9 @@ def cmd_done(flow, st, args):
     if step.get("choice_key"):
         if args.choice not in step.get("choices", []):
             die(f"--choice 必须为: {'|'.join(step['choices'])}", 2)
+    # 到这里配置、文档、用户确认和 choice 已全部通过，才提交候选值。
+    st["config"] = pending_config
+    if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
     want = st.get("config", {}).get("分支名", "")
     if sid not in ("env_setup", "config_confirm", "workflow_select", "branch_create") and want:
@@ -1933,6 +2134,10 @@ WRITEISH = (r"(sed\s+-i|>>?\s*|\btee\s+|\bcp\s+|\bmv\s+|\bcopy\b|\bmove\b|\bdel\
 
 
 def cmd_gate(flow, st, args):
+    # 全局安装只是提供能力，不代表用户授权接管当前仓库。没有状态时必须 fail-open；
+    # 真正启用流程只认 init 创建的 .mae-flow.json。
+    if st is None:
+        sys.exit(0)
     sid = st["current"] if st else None
     step = flow["steps"].get(sid, {}) if st else {}
     # NTFS 不区分大小写:所有路径匹配一律 re.I
@@ -1940,20 +2145,22 @@ def cmd_gate(flow, st, args):
         p = norm(args.arg)
         if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
             die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
-        if re.search(r"\.mae-flow\.json(\.\w+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
+        if re.search(r"\.mae-flow\.json(?:\.[\w-]+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
                      r"|(^|/)\.mae-flow-work/moonlight-report\.md$", p, re.I):
             die("流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
                 "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
         if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I):
             die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
+        if sid == "config_confirm" and re.search(r"(^|/)docs/req/", p, re.I):
+            die("配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
+                "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
+                "已有文本用 requirement-record --source。", 2)
         plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
         if norm(os.path.abspath(args.arg)).lower().startswith(plugin_root + "/"):
             die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
         if re.search(flow["specs_truth"], p, re.I) and not step.get("allow_specs_write"):
             die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。", 2)
         if _is_source_path(p, st, flow):
-            if not st:
-                die("流程未初始化(无 .mae-flow.json)。禁止直接修改源码——请先按 skill 走 mae-flow init。", 2)
             if not step.get("allow_source_edit"):
                 die(f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。", 2)
             tp = _effective_test_patterns(st) if step.get("tests_only") else []
@@ -1976,7 +2183,7 @@ def cmd_gate(flow, st, args):
 
         # Edit/Write 之外，模型也可能用 python -c、node -e 等任意解释器直接碰状态文件。
         # 与其穷举所有写法，不如禁止 Bash 直接引用这些内部文件；读取统一走 status/current/doctor。
-        if hits_path(r"(^|/)(\.mae-flow\.json(?:\.\w+)?|\.mae-flow-history\.jsonl|\.mae-flow-need-reload"
+        if hits_path(r"(^|/)(\.mae-flow\.json(?:\.[\w-]+)*|\.mae-flow-history\.jsonl|\.mae-flow-need-reload"
                      r"|\.mae-flow-work/moonlight-report\.md)$"):
             die("流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash 直接访问；"
                 "查看请用 mae-flow status/current/doctor/moonlight report，修改只能走对应子命令。", 2)
@@ -1999,6 +2206,9 @@ def cmd_gate(flow, st, args):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
             die("hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——这是伪造 agent 收尾令牌的通道。", 2)
+        if re.search(r"mae-flow\.py[^;&|]*\bexit\b[^;&|]*--interactive\b", c, re.I):
+            die("exit --interactive 是 Hook/ack 全坏时给用户的真实终端逃生口，"
+                "Agent 的 Bash 禁止调用或代答；把完整命令展示给用户手动执行。", 2)
         if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
             die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
                 "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
@@ -2026,6 +2236,9 @@ def cmd_gate(flow, st, args):
             die("本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
                 "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。", 2)
         writeish = re.search(WRITEISH, c, re.I)
+        if sid == "config_confirm" and writeish and hits_path(r"(^|/)docs/req/"):
+            die("配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
+                "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。", 2)
         if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl|-need-reload)"
                                   r"|\.mae-flow-work/moonlight-report\.md"):
             die("流程状态/历史账本/待重启标记/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
@@ -2034,8 +2247,6 @@ def cmd_gate(flow, st, args):
             die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。", 2)
         source_toks = [t for t in toks if _is_source_path(t, st, flow)]
         if writeish and source_toks:
-            if not st:
-                die("流程未初始化(无 .mae-flow.json)。禁止经 Bash 写源码——请先按 skill 走 mae-flow init。", 2)
             if not step.get("allow_source_edit"):
                 die(f"当前步骤 {sid} 禁止经 Bash 写源码文件。", 2)
             tp = _effective_test_patterns(st) if step.get("tests_only") else []
@@ -2322,6 +2533,16 @@ def cmd_doctor(flow, st, args):
         print(f"{'⚠' if not cn else '❌'} change: " + (cn + " 的 .comet.yaml 不存在" if cn else "CHANGE_NAME 未设置(open 之前属正常)"))
     nac = _active_change_count()
     print(("✅" if nac <= 1 else "❌") + f" 活跃 change 数: {nac}" + ("(僵尸在场!comet 会抽错人,清理见下)" if nac > 1 else ""))
+    guards = [p for p in comet_guard_paths(os.getcwd()) if os.path.isfile(p)]
+    try:
+        compat = bool(guards) and all(
+            COMET_COMPAT_BEGIN in open(p, encoding="utf-8", errors="strict").read()
+            for p in guards)
+    except Exception:
+        compat = False
+    print(("✅" if compat else "⚠") + " 直接开发逃生兼容: "
+          + ("Comet Hook 已识别退出标记" if compat else
+             "未确认（不阻止当前流程；exit 会再次尽力修复，且永不因此拒绝退出）"))
     for _w in _sentinel_lines(sid, st):
         print("   " + _w)
     for kind, rec in sorted((st.get("risk_acceptances", {}) or {}).items()):
@@ -2359,12 +2580,30 @@ def cmd_doctor(flow, st, args):
           + (" | ".join(sp) if sp else "未配置（使用跨仓扩展名、构建文件和通用目录规则）"))
     # 观测项(公司机金丝雀关注):ack 验真存储 与 UTRUN 令牌——两者依赖 harness payload 字段
     try:
-        n = len(json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]"))
+        captured = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+        n = len(captured)
         print(f"✅ ack 验真存储: {n} 条用户输入" if n else
               "❌ ack 验真存储: 空(确认步骤会拒绝推进；请让用户发送一条普通消息后重试)")
+        if captured:
+            last = captured[-1]
+            health = _text_corruption_reason(last.get("text", ""))
+            print(("❌" if health else "✅") + " 最近用户输入: id=%s step=%s encoding=%s sha256=%s%s" % (
+                last.get("id", "旧记录无ID"), last.get("step", "?"),
+                last.get("input_encoding", "旧记录未知"),
+                (last.get("sha256", "") or "?")[:12],
+                (" 疑似乱码=" + health) if health else ""))
     except Exception:
         print("❌ ack 验真存储: 不存在(确认步骤会拒绝推进；检查 UserPromptSubmit hook，"
               "临时恢复方式是让用户发送普通确认消息后重试)")
+    try:
+        failures = json.load(open(FAILURE_PATH, encoding="utf-8")) if os.path.exists(FAILURE_PATH) else {}
+        rec = failures.get("ack:" + sid, {})
+        if rec:
+            print(("❌" if int(rec.get("count", 0)) >= 2 else "⚠")
+                  + " 当前确认通道连续失败: %s 次（%s）" % (
+                      rec.get("count", 0), rec.get("reason", "")[:160]))
+    except Exception:
+        pass
     try:
         tok = json.loads(open(STATE_PATH + ".tokens", encoding="utf-8").read()).get("UTRUN", "")
         uts = tok.get("at") if isinstance(tok, dict) else tok
@@ -3006,34 +3245,84 @@ def _print_exit_preview(flow, st):
 
 
 def cmd_exit(flow, st, args):
-    """保留现场并解除项目接管。高风险降级动作必须由本步之后的用户原话精确确认。"""
-    _print_exit_preview(flow, st)
-    if not args.ack:
-        print("\n请用户明确回复，例如：确认退出 mae-flow，保留当前代码并改为直接开发")
-        print("拿到回复后原文复制执行：")
-        print('python "%s" exit --reason "<退出原因>" --ack "<用户确认原话>"'
+    """保留现场并解除项目接管；确认链损坏时仍必须有独立出口。"""
+    ack = args.ack or ""
+    reason = args.reason or ""
+    auth = "ack"
+
+    intent_arg = getattr(args, "intent", None)
+    interactive = bool(getattr(args, "interactive", False))
+    # Hook 级退出受 12 秒看门狗约束，不能先跑可能很慢的 git status 预览；
+    # 用户已经通过本条明确命令授权，退出后完整现场仍会落盘。
+    if not intent_arg:
+        _print_exit_preview(flow, st)
+    if intent_arg:
+        try:
+            intent = json.load(open(EXIT_INTENT_PATH, encoding="utf-8"))
+        except Exception as exc:
+            die("退出事件凭据不可读或已消费：%s。不要循环重试；"
+                "用户可在真实终端执行 exit --interactive。" % exc, 2)
+        valid = (
+            intent.get("id") == intent_arg
+            and intent.get("step") == st.get("current")
+            and time.time() - float(intent.get("epoch", 0)) <= 30
+            and intent.get("sha256") == hashlib.sha256(
+                str(intent.get("text", "")).encode("utf-8")).hexdigest()
+        )
+        try:
+            os.remove(EXIT_INTENT_PATH)
+        except OSError:
+            pass
+        if not valid:
+            die("退出事件凭据已过期、步骤不符或内容损坏。重新发送 `/mae-flow exit`，"
+                "或在真实终端执行 exit --interactive；不要再次要求用户说“我确认”。", 2)
+        ack = str(intent.get("text", ""))
+        reason = reason or "用户通过明确退出指令切换为普通开发"
+        auth = "userprompt-hook"
+    elif interactive:
+        if not sys.stdin.isatty():
+            die("exit --interactive 只允许用户在真实交互终端执行，Agent/Bash 管道不能代答。"
+                "请把命令原样展示给用户手动运行。", 2)
+        print("\n这是紧急逃生通道。请输入大写 EXIT 确认保留现场并解除 mae-flow 门禁：",
+              end=" ", flush=True)
+        if input().strip() != "EXIT":
+            die("输入不匹配，未退出。", 2)
+        ack = "TTY:EXIT"
+        reason = reason or "用户通过真实终端紧急退出"
+        auth = "interactive-tty"
+    elif not ack:
+        print("\n直接发送 `/mae-flow exit` 即可退出，UserPromptSubmit Hook 会把该用户事件作为授权，"
+              "不再要求二次确认。")
+        print("若 Hook 已损坏，请用户在真实终端手动执行：")
+        print('python "%s" exit --interactive --reason "切换为普通开发"'
               % os.path.abspath(sys.argv[0]))
         return
-    if not args.reason:
-        die("exit 必须 --reason 记录为什么退出，不能只写‘用户要求’。", 2)
-    ok, why = _ack_verified(st, args.ack, exact=True)
-    if not ok:
-        die("exit 授权验真失败（退出会解除质量约束，因此要求整条原话精确匹配）:" + why, 2)
 
+    if auth == "ack":
+        if not reason:
+            die("exit 必须 --reason 记录为什么退出。也可让用户直接发送 `/mae-flow exit`。", 2)
+        ok, why = _ack_verified(st, ack, exact=True)
+        if not ok:
+            die("exit 对话授权验真失败:" + why
+                + "。不要让用户重复确认；请直接发送 `/mae-flow exit`，"
+                "或在真实终端执行 exit --interactive。", 2)
+
+    # 兼容补丁尽力完成，但绝不能反过来把逃生通道卡死。退出标记仍会原子落盘；
+    # 未发现 Comet Hook 通常表示它尚未初始化或没有项目级拦截。
     found, patched, errors = ensure_direct_mode_compat(os.getcwd())
-    if errors:
-        die("底层阶段门禁兼容更新失败，尚未退出：" + "；".join(errors), 2)
+    compat_warnings = list(errors)
     if _active_change_count() > 0 and not found:
-        die("检测到仍有在建规格，但没找到项目级 Comet Hook，无法保证退出后源码不再被拦。"
-            "请先执行 mae-flow setup 修复项目初始化，再重试 exit；本次尚未退出。", 2)
+        compat_warnings.append(
+            "存在在建规格但未发现项目级 Comet Hook；若其他插件仍拦截，请运行 setup 修复其直接模式兼容")
 
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     sid = st.get("current", "")
     st.pop("unlock", None)
     st.setdefault("history", []).append(
-        {"step": sid, "result": "exited", "note": args.reason, "at": now})
+        {"step": sid, "result": "exited", "note": reason, "at": now})
     save_state(st)
-    _append_history(st, outcome="用户主动退出")
+    if auth != "userprompt-hook":
+        _append_history(st, outcome="用户主动退出")
 
     snapshot = _unique_exit_dir(st)
     copied = _snapshot_state_files(snapshot)
@@ -3041,17 +3330,20 @@ def cmd_exit(flow, st, args):
         "version": 1,
         "status": "exited",
         "at": now,
-        "reason": args.reason,
-        "ack": args.ack,
+        "reason": reason,
+        "ack": ack,
+        "authorization": auth,
         "step": sid,
         "title": (flow.get("steps", {}).get(sid, {}) or {}).get("title", ""),
         "ticket": (st.get("config", {}) or {}).get("单号", ""),
         "workflow": (st.get("choices", {}) or {}).get("workflow", ""),
         "head": sh("git rev-parse --verify HEAD"),
         "branch": sh("git branch --show-current"),
-        "dirty_paths": _dirty_paths(),
+        "dirty_paths": ([] if auth == "userprompt-hook" else _dirty_paths()),
+        "dirty_paths_deferred": auth == "userprompt-hook",
         "snapshot": norm(snapshot),
         "comet_guard_paths": [norm(p) for p in found],
+        "compat_warnings": compat_warnings,
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
     _write_json_atomic(EXIT_PATH, record)
@@ -3067,6 +3359,8 @@ def cmd_exit(flow, st, args):
         print("已让项目阶段门禁识别直接开发模式：" + "、".join(norm(p) for p in patched))
     if cleanup_errors:
         print("⚠ 部分旧状态文件未清理，但退出标记已生效：" + "；".join(cleanup_errors), file=sys.stderr)
+    if compat_warnings:
+        print("⚠ 退出兼容提示：" + "；".join(compat_warnings), file=sys.stderr)
     print("现在可以直接让 AI 修改代码或补 UT。后续质量检查由用户自行决定。")
 
 
@@ -3082,6 +3376,69 @@ def print_direct_mode_status():
     print("只有用户明确要求重新接回原流程时才执行 init；init 会恢复原断点并重新取证。另一张新单请另开 worktree。")
 
 
+def cmd_exit_corrupt_state(args, state_error):
+    """状态 JSON 已坏时的独立逃生口；不能要求先修好状态才能退出。"""
+    intent_arg = getattr(args, "intent", None)
+    interactive = bool(getattr(args, "interactive", False))
+    ack, auth = "", ""
+    if intent_arg:
+        try:
+            intent = json.load(open(EXIT_INTENT_PATH, encoding="utf-8"))
+            valid = (
+                intent.get("id") == intent_arg
+                and intent.get("step") == "__corrupt_state__"
+                and time.time() - float(intent.get("epoch", 0)) <= 30
+                and intent.get("sha256") == hashlib.sha256(
+                    str(intent.get("text", "")).encode("utf-8")).hexdigest()
+            )
+        except Exception:
+            valid, intent = False, {}
+        try:
+            os.remove(EXIT_INTENT_PATH)
+        except OSError:
+            pass
+        if not valid:
+            die("流程状态已损坏，退出事件凭据也不可用。请在真实终端执行 exit --interactive。", 2)
+        ack, auth = str(intent.get("text", "")), "userprompt-hook-corrupt-state"
+    elif interactive:
+        if not sys.stdin.isatty():
+            die("状态已损坏；exit --interactive 只能由用户在真实终端执行。", 2)
+        print("[mae-flow] 状态 JSON 已损坏（%s）。输入大写 EXIT 保留坏文件并解除门禁：" % state_error,
+              end=" ", flush=True)
+        if input().strip() != "EXIT":
+            die("输入不匹配，未退出。", 2)
+        ack, auth = "TTY:EXIT", "interactive-tty-corrupt-state"
+    else:
+        die("流程状态已损坏，普通 ack 无法可靠验真。请重新发送 `/mae-flow exit`；"
+            "若 Hook 也异常，在真实终端执行 exit --interactive。原状态不会删除。", 2)
+
+    found, patched, errors = ensure_direct_mode_compat(os.getcwd())
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    snapshot = _unique_exit_dir({"config": {"单号": "corrupt-state"}})
+    copied = _snapshot_state_files(snapshot)
+    record = {
+        "version": 1, "status": "exited", "at": now,
+        "reason": getattr(args, "reason", None) or "流程状态损坏后紧急退出",
+        "ack": ack, "authorization": auth, "step": "__corrupt_state__",
+        "state_error": str(state_error), "head": sh("git rev-parse --verify HEAD"),
+        "branch": sh("git branch --show-current"), "snapshot": norm(snapshot),
+        "comet_guard_paths": [norm(p) for p in found], "compat_warnings": errors,
+    }
+    _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
+    _write_json_atomic(EXIT_PATH, record)
+    for src, _ in copied:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+    print("[mae-flow] 状态虽已损坏，但逃生成功；坏状态完整保存在 %s。现在按普通开发处理。"
+          % norm(snapshot))
+    if patched:
+        print("已同步放行项目阶段门禁：" + "、".join(norm(p) for p in patched))
+    if errors:
+        print("⚠ 兼容提示：" + "；".join(errors), file=sys.stderr)
+
+
 class MFParser(argparse.ArgumentParser):
     """参数错误即教学:argparse 默认英文 usage 弱模型读不懂会瞎试第二次。
     报错直接给中文速查 + 可复制的正确命令(错误即文档;子命令解析器自动继承本类)。"""
@@ -3094,7 +3451,8 @@ class MFParser(argparse.ArgumentParser):
               f"  python \"{me}\" done --ack \"用户原话\" [--choice 值] [--set 键=值]\n"
               f"  python \"{me}\" init\n"
               "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|agent-task|"
-              "accept-risk|moonlight|codecheck-scan|codecheck-record|approve-exemption|exit"
+              "accept-risk|moonlight|messages|requirement-record|codecheck-scan|"
+              "codecheck-record|approve-exemption|exit"
               "(用法见 current/exit 指令)。\n"
               "注意:子命令不带连字符(是 current 不是 --current);done 的 --set 可重复,值含空格要加引号。",
               file=sys.stderr)
@@ -3121,7 +3479,17 @@ def main():
         "on", "continue", "off", "report", "push-failed",
         "unlock-source", "defer", "blocked", "repair", "finalize"])
     ml.add_argument("--reason"); ml.add_argument("--ack")
-    x = sub.add_parser("exit"); x.add_argument("--reason"); x.add_argument("--ack")
+    x = sub.add_parser("exit")
+    x.add_argument("--reason"); x.add_argument("--ack")
+    x.add_argument("--intent", help=argparse.SUPPRESS)
+    x.add_argument("--interactive", action="store_true",
+                   help="Hook/ack 损坏时，由用户在真实终端输入 EXIT 的紧急出口")
+    sub.add_parser("messages")
+    rr = sub.add_parser("requirement-record")
+    rr.add_argument("--message-id")
+    rr.add_argument("--source")
+    rr.add_argument("--ticket")
+    rr.add_argument("--replace", action="store_true")
     rl = sub.add_parser("reloaded"); rl.add_argument("--ack")
     sub.add_parser("doctor")
     sub.add_parser("envcheck")
@@ -3152,7 +3520,14 @@ def main():
     global FLOW
     flow = load_flow()
     FLOW = flow
-    st = load_state()
+    try:
+        st = load_state()
+    except Exception as state_error:
+        if args.cmd == "exit":
+            return cmd_exit_corrupt_state(args, state_error)
+        die("流程状态文件损坏，不能安全判断当前步骤：%s。不要删除或手改状态；"
+            "用户可直接发送 `/mae-flow exit`，Hook 会保存坏文件并退出；"
+            "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
     if args.cmd == "envcheck":
         return cmd_envcheck(flow, args)
     if args.cmd == "template":
@@ -3174,6 +3549,10 @@ def main():
         die("流程未初始化,先执行 init。")
     if args.cmd == "exit":
         return cmd_exit(flow, st, args)
+    if args.cmd == "messages":
+        return cmd_messages(st)
+    if args.cmd == "requirement-record":
+        return cmd_requirement_record(st, args)
     if args.cmd == "moonlight":
         return cmd_moonlight(flow, st, args)
     if args.cmd == "current":

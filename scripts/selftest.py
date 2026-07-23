@@ -151,6 +151,67 @@ if flow:
     check("配置只能在声明步骤写入",
           mf._allowed_set_keys(steps["config_confirm"]) >= {"基线分支", "分支名", "编译方式"}
           and not mf._allowed_set_keys(steps["verify_codecheck"]))
+    good_req = "# 需求\n\n支持中文输入。\n"
+    with tempfile.TemporaryDirectory() as td:
+        good_path = os.path.join(td, "req.md")
+        bad_path = os.path.join(td, "bad.md")
+        open(good_path, "w", encoding="utf-8").write(good_req)
+        open(bad_path, "wb").write("我确认需求".encode("utf-16"))
+        check("需求文本严格校验可识别 UTF-8 与错误编码",
+              mf._validate_requirement_document(good_path)[0]
+              and not mf._validate_requirement_document(bad_path)[0])
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            config_state = {"current": "config_confirm", "config": {}, "choices": {},
+                            "history": [], "started": now}
+            mf.save_state(config_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "我确认以上配置", "step": "config_confirm", "at": now}],
+                          f, ensure_ascii=False)
+            failed = False
+            try:
+                mf.cmd_done(flow, config_state, types.SimpleNamespace(
+                    ack="我确认以上配置", choice=None,
+                    set=["工号=u1", "基线分支=main", "单号=REQ1", "单号类型=feat",
+                         "需求文档=" + bad_path, "编译方式=build-fix",
+                         "UT生成方式=AutoUT", "UT运行命令=mcde test --ut"]))
+            except SystemExit as exc:
+                failed = exc.code == 2
+            check("配置失败不会把半套或乱码值写入状态",
+                  failed and mf.load_state().get("config") == {})
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"id": "msg001", "text": "支持中文基站名称查询",
+                            "step": "config_confirm", "at": now}], f, ensure_ascii=False)
+            mf.cmd_requirement_record(config_state, types.SimpleNamespace(
+                ticket="REQ1", message_id="msg001", source=None, replace=False))
+            recorded = os.path.join("docs", "req", "REQ-REQ1.md")
+            check("需求原文由消息ID确定性写UTF-8并通过正文指纹",
+                  os.path.isfile(recorded)
+                  and mf._validate_requirement_document(recorded)[0]
+                  and "支持中文基站名称查询" in open(recorded, encoding="utf-8").read())
+            direct_req_edit_blocked = False
+            direct_req_shell_blocked = False
+            try:
+                mf.cmd_gate(flow, config_state, types.SimpleNamespace(
+                    what="edit", arg="docs/req/manual.md"))
+            except SystemExit as exc:
+                direct_req_edit_blocked = exc.code == 2
+            try:
+                mf.cmd_gate(flow, config_state, types.SimpleNamespace(
+                    what="bash", arg="echo 中文需求 > docs/req/manual.md"))
+            except SystemExit as exc:
+                direct_req_shell_blocked = exc.code == 2
+            check("配置阶段需求原文只能经确定性记录命令落盘",
+                  direct_req_edit_blocked and direct_req_shell_blocked)
+            mf._ack_verified(config_state, "错误确认")
+            _, second_why = mf._ack_verified(config_state, "错误确认")
+            check("同一确认通道连续失败两次会熔断并给独立退出路径",
+                  "熔断" in second_why and "/mae-flow exit" in second_why)
+        finally:
+            os.chdir(old_cwd)
     check("同名文件豁免键不会碰撞",
           mf._approval_key("R", "a/Foo.cpp") != mf._approval_key("R", "b/Foo.cpp"))
     check("豁免规则与文件必须在同一条记录",
@@ -179,6 +240,14 @@ if flow:
             mf.cmd_exit(flow, st, types.SimpleNamespace(ack="", reason=""))
             check("exit 只预览时不会解除门禁",
                   os.path.isfile(mf.STATE_PATH) and not os.path.exists(mf.EXIT_PATH))
+            agent_interactive_blocked = False
+            try:
+                mf.cmd_exit(flow, st, types.SimpleNamespace(
+                    ack="", reason="模拟 Agent 调用", intent=None, interactive=True))
+            except SystemExit as exc:
+                agent_interactive_blocked = exc.code == 2
+            check("TTY 紧急出口不能由非交互 Agent 进程代答",
+                  agent_interactive_blocked and os.path.isfile(mf.STATE_PATH))
             mf.cmd_exit(flow, st, types.SimpleNamespace(
                 ack="确认退出流程并保留代码", reason="改为直接开发"))
             rec = json.load(open(mf.EXIT_PATH, encoding="utf-8"))
@@ -810,6 +879,98 @@ check("子 Agent 令牌和用户确认均绑定当前步骤",
           os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read())
 check("dispatch 在直接模式完整停止旧流程接管",
       "direct mode: bypass" in dp and "不要运行 current/done" in dp)
+check("明确自然语言退出会触发、询问退出不会误触发",
+      dispatch._explicit_exit_prompt("不想用这个工作流了，后面直接让 AI 补 UT")
+      and not dispatch._explicit_exit_prompt("这个工作流能不能退出？"))
+
+# 插件全局安装不得接管未 init 的普通项目；Windows 控制台代码页也不得污染 Hook 的 UTF-8 JSON。
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run(["git", "init", "-q", td], check=True)
+    payload = json.dumps({
+        "cwd": td,
+        "tool_name": "Edit",
+        "tool_input": {"file_path": os.path.join(td, "src", "普通代码.cpp")},
+    }, ensure_ascii=False) + "\n"
+    inactive = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "pretooluse"],
+        cwd=td, input=payload, text=True, capture_output=True, timeout=10)
+    check("仅安装插件、未 init 时所有工具门禁完整旁路", inactive.returncode == 0)
+
+    state = {"current": "config_confirm", "config": {}, "choices": {},
+             "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+    with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+    user_payload = json.dumps({
+        "cwd": td, "prompt": "我确认中文需求：支持基站名称查询"
+    }, ensure_ascii=False) + "\n"
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "cp936"
+    captured = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+        cwd=td, input=user_payload.encode("utf-8"), capture_output=True, timeout=10, env=env)
+    messages = json.load(open(os.path.join(td, ".mae-flow.json.usermsg"), encoding="utf-8"))
+    check("Windows 非 UTF-8 控制台下 Hook 仍按原始 UTF-8 捕获中文",
+          captured.returncode == 0
+          and messages[-1]["text"] == "我确认中文需求：支持基站名称查询"
+          and messages[-1].get("input_encoding") == "utf-8-sig")
+
+with tempfile.TemporaryDirectory() as td:
+    # 父目录的旧状态不能越过最近 .git 边界接管一个独立子仓。
+    with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
+        json.dump({"current": "verify_ut", "config": {}, "choices": {},
+                   "history": [], "started": "2026-07-23 20:00:00"}, f)
+    nested = os.path.join(td, "independent-repo")
+    subprocess.run(["git", "init", "-q", nested], check=True)
+    child = os.path.join(nested, "src", "module")
+    os.makedirs(child)
+    root, has_state = mf.find_project_root(child)
+    payload = json.dumps({
+        "cwd": child,
+        "tool_name": "Edit",
+        "tool_input": {"file_path": os.path.join(child, "ordinary.cpp")},
+    }) + "\n"
+    isolated = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "pretooluse"],
+        cwd=child, input=payload, text=True, capture_output=True, timeout=10)
+    check("父目录陈旧状态不会越过独立仓边界误接管",
+          root == nested and not has_state and isolated.returncode == 0)
+
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run(["git", "init", "-q", td], check=True)
+    subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], cwd=td, check=True)
+    subprocess.run(["git", "config", "user.name", "MAE Flow Test"], cwd=td, check=True)
+    open(os.path.join(td, "biz.cpp"), "w", encoding="utf-8").write("int value = 1;\n")
+    subprocess.run(["git", "add", "biz.cpp"], cwd=td, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=td, check=True)
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
+        json.dump({"current": "env_setup", "config": {}, "choices": {},
+                   "history": [], "started": now}, f, ensure_ascii=False)
+    exit_payload = json.dumps({"cwd": td, "prompt": "/mae-flow exit"},
+                              ensure_ascii=False) + "\n"
+    exited = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+        cwd=td, input=exit_payload, text=True, capture_output=True, timeout=15)
+    exit_record = json.load(open(os.path.join(td, ".mae-flow.json.exited"), encoding="utf-8"))
+    check("明确 /mae-flow exit 由用户事件直接退出且不依赖 ack 账本",
+          exited.returncode == 0
+          and not os.path.exists(os.path.join(td, ".mae-flow.json"))
+          and exit_record.get("authorization") == "userprompt-hook")
+
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run(["git", "init", "-q", td], check=True)
+    open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8").write('{"current":')
+    exit_payload = json.dumps({"cwd": td, "prompt": "/mae-flow exit"},
+                              ensure_ascii=False) + "\n"
+    escaped = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+        cwd=td, input=exit_payload, text=True, capture_output=True, timeout=15)
+    corrupt_record = json.load(open(os.path.join(td, ".mae-flow.json.exited"), encoding="utf-8"))
+    saved_bad = os.path.join(td, corrupt_record["snapshot"], ".mae-flow.json")
+    check("状态 JSON 损坏时用户仍可一键逃生且坏现场被保留",
+          escaped.returncode == 0
+          and corrupt_record.get("authorization") == "userprompt-hook-corrupt-state"
+          and os.path.isfile(saved_bad))
 
 # 6.1 Comet 阶段门禁只增加一个幂等标记检查；从子目录调用也能找到项目根退出标记。
 with tempfile.TemporaryDirectory() as td:
@@ -849,6 +1010,8 @@ check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
       and 'expected_steps = {"COMPILE"' in mf_src)
 check("Bash 任意解释器不能直碰流程状态文件",
       "禁止经 Bash 直接访问" in mf_src and "mae-flow status/current/doctor" in mf_src)
+check("带短横线的一次性退出凭据也在状态黑名单内",
+      r"(?:\.[\w-]+)*" in mf_src and "EXIT_INTENT_PATH" in mf_src)
 check("STORY 不入库会在推送前检查提交树", "git ls-tree -r --name-only HEAD" in mf_src)
 check("STORY 不入库由 done 自动移入过程区",
       'if sid == "story"' in mf_src and 'os.path.join(".mae-flow-work", "story")' in mf_src)

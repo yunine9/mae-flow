@@ -17,7 +17,7 @@
   - 每次调用在 %TEMP%/mae-flow-hook.log 记 start/end 与耗时,
     只有 start 没有 end = 该次挂起被看门狗击杀,可据此定位。
 """
-import glob, hashlib, json, os, re, subprocess, sys, tempfile, threading, time
+import glob, hashlib, json, locale, os, re, subprocess, sys, tempfile, threading, time
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -30,6 +30,7 @@ MAEFLOW = os.path.join(HERE, "..", "scripts", "mae-flow.py")
 STATE = ".mae-flow.json"
 EXIT_STATE = ".mae-flow.json.exited"
 MOONLIGHT_INTENT = STATE + ".moonlight-intent"
+EXIT_INTENT = STATE + ".exit-intent"
 REJECTION_STATE = STATE + ".agent-rejections"
 EVIDENCE_STATE = STATE + ".agent-evidence"
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
@@ -37,6 +38,7 @@ WATCHDOG_SECS = 12
 STDIN_SECS = 3
 SUBPROC_SECS = 8
 _T0 = time.time()
+_INPUT_ENCODING = ""
 
 
 def _log(msg):
@@ -73,6 +75,36 @@ def maeflow(*args):
     return r.returncode
 
 
+def _decode_hook_json(raw):
+    """Hook 协议是 JSON 字节流，不能让 Windows 控制台代码页先替我们解码。
+
+    公司环境的 harness 正常发送 UTF-8；同时保留 GB18030/系统代码页兼容旧宿主。
+    每种编码都必须 strict 解码且成功解析 JSON，绝不用 errors=replace 把乱码写进确认账本。
+    """
+    global _INPUT_ENCODING
+    if isinstance(raw, str):
+        _INPUT_ENCODING = getattr(sys.stdin, "encoding", "") or "text"
+        return json.loads(raw or "{}")
+    encodings = ["utf-8-sig"]
+    preferred = locale.getpreferredencoding(False)
+    for enc in (preferred, "gb18030"):
+        if enc and enc.lower().replace("-", "") not in {
+                x.lower().replace("-", "") for x in encodings}:
+            encodings.append(enc)
+    last = None
+    for enc in encodings:
+        try:
+            text = raw.decode(enc, errors="strict")
+            value = json.loads(text or "{}")
+            _INPUT_ENCODING = enc
+            if enc != "utf-8-sig":
+                _log("stdin decoded with fallback encoding=" + enc)
+            return value
+        except (UnicodeDecodeError, LookupError, json.JSONDecodeError) as exc:
+            last = exc
+    raise ValueError("hook JSON 无法按 UTF-8/系统代码页解析: %s" % last)
+
+
 def read_input():
     """守护线程读 stdin。payload 惯例是单行 JSON,用 readline(见换行即返回)而非 read()(等 EOF):
     公司 harness 写完 payload 后关闭管道晚/不关,read() 等 EOF 会在 3s 兜底处误判超时、把已到的数据丢掉
@@ -82,19 +114,21 @@ def read_input():
 
     def _r():
         try:
-            buf = sys.stdin.readline()
+            stream = getattr(sys.stdin, "buffer", sys.stdin)
+            buf = stream.readline()
             try:
-                box["d"] = json.loads(buf or "{}")
+                box["d"] = _decode_hook_json(buf)
                 box["n"] = len(buf)
                 return
             except Exception:
                 pass
-            buf += sys.stdin.read()
-            box["d"] = json.loads(buf or "{}")
+            buf += stream.read()
+            box["d"] = _decode_hook_json(buf)
             box["n"] = len(buf)
-        except Exception:
+        except Exception as exc:
             box["d"] = {}
             box["n"] = -1
+            box["error"] = str(exc)
 
     th = threading.Thread(target=_r, daemon=True)
     th.start()
@@ -103,14 +137,15 @@ def read_input():
         _log("stdin read timeout(%ss) — 按空输入处理" % STDIN_SECS)
         return {}
     if not box["d"]:
-        _log("stdin empty/unparsed(n=%s) — 按空输入处理" % box.get("n"))
+        _log("stdin empty/unparsed(n=%s,error=%s) — 按空输入处理"
+             % (box.get("n"), box.get("error", "-")))
     return box["d"]
 
 
 def _chdir_root(d):
     """hook 进程的 cwd 是 codeagent 启动目录,未必是项目根。
-    以 hook JSON 的 cwd 为基准向上找 .mae-flow.json 或退出标记并 chdir;
-    init 之前再按 .git / openspec 定位，保证首次月光宝盒授权和随后创建的状态落在同一目录。"""
+    以 hook JSON 的 cwd 为基准向上定位；最近仓库边界会阻断更高层的陈旧状态，
+    避免一个父目录流程误接管从未启用 mae-flow 的独立子仓。"""
     base = d.get("cwd") or os.getcwd()
     probe = os.path.abspath(base)
     while True:
@@ -120,13 +155,7 @@ def _chdir_root(d):
                 _log("chdir 项目根: " + probe)
             os.chdir(probe)
             return
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
-    probe = os.path.abspath(base)
-    while True:
-        if (os.path.isdir(os.path.join(probe, ".git"))
+        if (os.path.exists(os.path.join(probe, ".git"))
                 or os.path.isdir(os.path.join(probe, "openspec"))):
             if probe != os.getcwd():
                 _log("chdir 项目根(init前): " + probe)
@@ -183,6 +212,15 @@ def ev_inject(d, session_start=False):
         prompt = d.get("prompt") or ""
         _capture_moonlight_intent(prompt)
         _capture_usermsg(prompt)
+        exit_intent = _capture_exit_intent(prompt)
+        if exit_intent:
+            rc = maeflow("exit", "--intent", exit_intent)
+            if rc == 0:
+                print("[mae-flow] 用户已明确退出，本条消息开始按普通开发请求处理；"
+                      "不要再运行 current/done。")
+                sys.exit(0)
+            print("[mae-flow] 自动退出未完成。不要重复要求用户确认；请执行 doctor 查看原因，"
+                  "用户始终可在真实终端运行 `mae-flow exit --interactive`。", file=sys.stderr)
     me = os.path.abspath(MAEFLOW)
     readme = os.path.abspath(os.path.join(HERE, "..", "README.md"))
     if os.path.exists(STATE):
@@ -405,13 +443,69 @@ def _capture_usermsg(text):
             step = json.load(open(STATE, encoding="utf-8")).get("current", "")
         except Exception:
             pass
-        msgs.append({"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": step, "text": text[:2000]})
+        captured = text[:2000]
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        msg_id = hashlib.sha256(
+            (stamp + "\0" + step + "\0" + captured).encode("utf-8")).hexdigest()[:12]
+        msgs.append({
+            "id": msg_id,
+            "at": stamp,
+            "step": step,
+            "text": captured,
+            "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
+            "input_encoding": _INPUT_ENCODING or "unknown",
+        })
         msgs = msgs[-10:]
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(json.dumps(msgs, ensure_ascii=False))
         os.replace(tmp, p)
     except Exception as e:
         _log("usermsg EXC: %s" % e)
+
+
+def _explicit_exit_prompt(text):
+    """只识别没有歧义的退出指令；询问“能不能退出”不应误触发。"""
+    value = re.sub(r"\s+", " ", (text or "").strip())
+    if re.search(r"^/mae-flow\s+(?:exit|direct)(?:\s|$)", value, re.I):
+        return True
+    lower = value.lower()
+    names_flow = "mae-flow" in lower or "mae flow" in lower or "这个工作流" in value
+    explicit_verb = bool(re.search(
+        r"(退出|停止使用|不想(?:再)?用|不用|关闭)\s*(?:mae[- ]?flow|这个工作流)", value, re.I))
+    direct_after = any(x in value for x in (
+        "直接开发", "直接改代码", "直接让", "直接写", "直接补", "补UT", "补 UT", "保留现场", "不走流程"))
+    question = any(x in value for x in ("能不能", "可以吗", "会怎样", "怎么退出", "如何退出", "？", "?"))
+    return names_flow and explicit_verb and direct_after and not question
+
+
+def _capture_exit_intent(text):
+    """用户事件本身签发一次性退出凭据，避免 exit 再依赖已经故障的 ack 账本。"""
+    try:
+        text = (text or "").strip()
+        if not text or not os.path.isfile(STATE) or not _explicit_exit_prompt(text):
+            return ""
+        try:
+            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+        except Exception:
+            step = "__corrupt_state__"
+        nonce = hashlib.sha256(
+            (str(time.time_ns()) + "\0" + step + "\0" + text).encode("utf-8")).hexdigest()[:24]
+        rec = {
+            "id": nonce,
+            "epoch": time.time(),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "step": step,
+            "text": text[:2000],
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+        tmp = EXIT_INTENT + ".tmp"
+        open(tmp, "w", encoding="utf-8").write(json.dumps(rec, ensure_ascii=False))
+        os.replace(tmp, EXIT_INTENT)
+        _log("captured explicit exit intent step=%s id=%s" % (step, nonce))
+        return nonce
+    except Exception as exc:
+        _log("exit intent EXC: %s" % exc)
+        return ""
 
 
 def _capture_moonlight_intent(text):
@@ -1222,6 +1316,14 @@ def main():
                 print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
                       "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
             _log("direct mode: bypass " + ev)
+            rc = 0
+        elif not os.path.exists(STATE) and ev in (
+                "pretooluse", "posttooluse", "subagentstop", "stop"):
+            # 安装插件不等于启用工作流。没有在途状态时，任何工具调用都必须完整旁路；
+            # 否则全局插件 Hook 会让从未使用 mae-flow 的普通项目也无法修改源码。
+            # SessionStart/UserPromptSubmit 仍保留轻量发现入口与显式月光宝盒意图捕获，
+            # init 成功创建 STATE 后，下一次工具调用才开始受门禁约束。
+            _log("inactive: bypass " + ev)
             rc = 0
         elif ev == "pretooluse":
             ev_pretooluse(d)

@@ -17,15 +17,19 @@
        build 只有实现 tasks 全部完成并提交后才能 defer；push 后停在晨间检查，不自动定稿规格；
      - 需求材料、权限或外部依赖客观缺失且无法自行补齐时，执行 current 给出的 `moonlight blocked`
        保存完整现场后结束；禁止反复重试或编造输入。主 Agent 在其他步骤提前结束会被 Stop Hook 打回。
-   - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。必须先运行 `mae-flow.py exit` 展示
-     当前步骤/分支/HEAD/未提交文件与退出影响，再取得用户明确确认；拿到后以用户原话执行
-     `mae-flow.py exit --reason "<具体原因>" --ack "<用户确认原话>"`。命令成功前禁止直接改代码，
-     成功后禁止继续 current/done。没有在途流程时只说明当前无需退出，不创建新流程。
+   - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。用户输入 `/mae-flow exit` 本身就是
+     明确授权，UserPromptSubmit Hook 会直接保存现场并退出，**禁止再追问一次确认**。若 Hook 已异常，
+     先且只重试一次
+     `mae-flow.py exit --reason "用户明确执行 /mae-flow exit" --ack "/mae-flow exit"`；
+     仍失败就将 `python "<插件>/scripts/mae-flow.py" exit --interactive --reason "切换为普通开发"`
+     原样交给用户在真实终端手动运行，禁止再次询问。Agent 不得用 Bash 管道代答。
+     成功后禁止继续 current/done。
+     没有在途流程时插件本来就完全旁路，只说明当前无需退出，不创建新流程。
    - **无参数** — 完整交付流程:项目根已有 .mae-flow.json → `python "<插件>/scripts/mae-flow.py" current` 续跑;
      有 `.mae-flow.json.exited` → 当前是普通开发模式，只有用户本条消息明确要求重新接回原流程时才执行
      `init --ack "<用户本条原话>"`，否则不要 init；若用户要开另一张新单，建议另开 worktree，不覆盖退出现场；
-     两者都没有 → 用户已给出单号/需求则 `init`,
-     否则先问用户要交付什么(单号+SE 文档),拿到再 init。
+     两者都没有 → **不要接管普通开发**；仅当用户明确要求 mae-flow 交付且已给出单号/需求时 `init`,
+     否则照常执行用户的直接改码/补 UT 请求，不得为了使用插件而 init。
    - **setup** — 仅环境:执行 `mae-flow envcheck`;有 ❌ → 直接跑 python "<插件>/scripts/setup.py"
      (确定性安装器)→ ⚠人工项原样转用户、❌ 项才派 env-setup-agent 诊断(传日志路径与 scripts 目录),
      与 env_setup 步骤同一套三层分流;**不 init 流程**,修完汇报结果即结束。

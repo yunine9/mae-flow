@@ -4,8 +4,8 @@
 需要 UT 时：
 1. 执行 `python "{MAEFLOW_PATH}" agent-task ut`；
 2. 把命令输出的**唯一一句启动话术原样**交给 ut-generator-agent，禁止自行拼任务；
-3. Agent 必须读取任务卡并按其中 `UT生成方式` 调用 AutoUT/java-autout/既有写法，按 `UT运行命令` 真实执行；编译问题只按任务卡的 `编译方式` 处理，三项均禁止猜；
-4. 只有 `UT_RESULT: PASS` 且报告中的 TASK_CARD_SHA256、GENERATOR_USED、EXECUTED_UT 与状态配置一致，done 才放行；NEEDS_INPUT/FAIL 不能当通过。
+3. Agent 必须读取任务卡并按其中 `UT生成方式` 调用 AutoUT/java-autout/既有写法，参考 `UT运行命令` 提示真实执行测试；该项写“随生成方式自带”时由 UT Skill 按项目决定实际命令。编译问题只按任务卡的 `编译方式` 处理；
+4. 只有 `UT_RESULT: PASS`、TASK_CARD_SHA256 和 GENERATOR_USED 合法，且 EXECUTED_UT 能对应到 transcript 中真实成功的测试调用，done 才放行；不再把实际命令与配置提示逐字比较。NEEDS_INPUT/FAIL 不能当通过。
 
 PENDING_QUESTIONS / SUSPECTED_BUGS 仍按主流程协议呈用户裁决；未经用户确认，UT agent 和主会话都不得修改被测源码。源码经 unlock 修复后执行 done，harness 会自动回流 rf_compile，强制重跑编译 → CodeCheck → UT；不接受仅重跑 UT 就推送。未经 unlock 却检测到被测源码变化会直接判越权。
 

@@ -1973,7 +1973,7 @@ def cmd_agent_task(flow, st, args):
                   "Harness首检告警(规则|文件): " + "、".join(r + "|" + f for r, f in scan.get("pairs", [])),
                   "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
     elif kind == "UT":
-        lines += ["职责:只对任务卡范围补/改测试；必须按 UT生成方式调用对应 Skill；必须真实执行 UT运行命令。",
+        lines += ["职责:只对任务卡范围补/改测试；必须按 UT生成方式调用对应 Skill；参考 UT运行命令提示真实执行测试。该项写随生成方式自带时，由 UT Skill 按项目决定实际命令，并在 EXECUTED_UT 如实报告。",
                   "评审返工不修改规格，测试依据使用上面列出的既有需求/规格。"]
     else:
         lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 build-fix Skill，禁止猜命令。"]

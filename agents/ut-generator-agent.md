@@ -121,7 +121,7 @@ UT_RESULT: FAIL
    `TESTS_TOTAL: <数字>`、`TESTS_PASSED: <数字>`、`TESTS_FAILED: <数字>`
 2. `TASK_CARD_SHA256: <任务卡中的64位指纹>`
 3. `GENERATOR_USED: <实际使用的UT生成方式/Skill名>`（必须与任务卡配置一致）
-4. `EXECUTED_UT: <实际执行的UT运行命令>`（必须与任务卡配置一致）
+4. `EXECUTED_UT: <实际执行的UT运行命令>`（必须来自本次真实工具调用；任务卡写“随生成方式自带”时由 UT Skill 按项目决定，不要求与该提示逐字一致）
 5. `AC_COVERAGE:` 验收标准覆盖对照表(每行 = delta spec 的一条 Scenario/EARS 条目 → 对应测试用例名;无对应者标"缺口"并说明)。
    **公司环境没有覆盖率工具,禁止报告任何覆盖率百分比——出现百分比即视为编造**
 6. `PENDING_QUESTIONS:` BLOCKED 方法的问题清单(方法名 | 疑问 | 已完成的查证 | 候选方案);没有则写 `PENDING_QUESTIONS: 无`

@@ -603,12 +603,56 @@ def _bash_segment(call, expected):
     return ""
 
 
+def _reported_bash_call(tool_calls, reported):
+    """按报告里的实际命令反查真实 Bash 调用，不与配置提示逐字绑定。"""
+    def n(s):
+        return re.sub(r"\s+", " ", (s or "")).strip().strip("`").lower()
+
+    want = n(reported)
+    if not want:
+        return None
+    exact = _bash_call(tool_calls, want)
+    if exact:
+        return exact
+    for x in reversed(tool_calls or []):
+        if str(x.get("name", "")).lower() != "bash":
+            continue
+        inp = x.get("input", {}) or {}
+        cmd = inp.get("command", "") if isinstance(inp, dict) else str(inp)
+        for seg in re.split(r"&&|\|\||[;\n]", n(cmd)):
+            seg = seg.strip()
+            if not seg or not want.startswith(seg):
+                continue
+            # 兼容“命令（补充说明）”，不接受任意自然语言包含一段命令。
+            tail = want[len(seg):].lstrip()
+            if not tail or tail[0] in "([（，,;；—":
+                return x
+    return None
+
+
+def _reported_bash_segment(call, reported):
+    """取报告所指向的真实命令段，供过滤、跳过风险检测使用。"""
+    def n(s):
+        return re.sub(r"\s+", " ", (s or "")).strip().strip("`")
+
+    want = n(reported).lower()
+    if not call or not want:
+        return ""
+    inp = call.get("input", {}) or {}
+    cmd = inp.get("command", "") if isinstance(inp, dict) else str(inp)
+    for seg in re.split(r"&&|\|\||[;\n]", n(cmd)):
+        clean = seg.strip()
+        low = clean.lower()
+        if low.startswith(want) or want.startswith(low):
+            return clean
+    return ""
+
+
 def _ut_execution_risk(report, run_call, expected):
     """PASS 不得靠临时禁用/过滤失败测试取得；配置本身带过滤时视为用户已明确授权。"""
     configured = re.sub(r"\s+", " ", expected or "").strip()
-    segment = _bash_segment(run_call, configured)
-    extra = segment[len(configured):].strip() if segment.lower().startswith(configured.lower()) else segment
     summary = _flex_field(report, "EXECUTED_UT") or ""
+    segment = _reported_bash_segment(run_call, summary)
     result = (run_call or {}).get("result", "") or ""
     risk_text = summary + "\n" + result
     # 常见测试框架会正常打印“0 skipped/0 disabled”，这是全绿统计，不得误伤。
@@ -620,7 +664,7 @@ def _ut_execution_risk(report, run_call, expected):
                        risk_text, flags=re.I)
     risk_text = re.sub(r"(?:跳过|禁用|排除)\s*[:：]?\s*0\s*(?:个|项|条|例)?", "", risk_text)
     text_risk = _UT_RISK_PAT.search(risk_text)
-    filter_risk = _UT_FILTER_PAT.search(extra) and not _UT_FILTER_PAT.search(configured)
+    filter_risk = _UT_FILTER_PAT.search(segment) and not _UT_FILTER_PAT.search(configured)
     if text_risk:
         return "测试报告或执行输出显示存在禁用、跳过或段错误；必须进入 KNOWN_FAILURES/SUSPECTED_BUGS 并用 NEEDS_INPUT，不能 PASS。"
     if filter_risk:
@@ -633,14 +677,16 @@ def _record_ut_receipts(task, report, tool_calls):
     cfg = _state_config()
     need = _required_skill(cfg.get("UT生成方式", ""))
     generator = _skill_call(tool_calls, need) if need else None
-    run = _bash_call(tool_calls, cfg.get("UT运行命令", ""))
+    executed = _flex_field(report, "EXECUTED_UT") or ""
+    run = _reported_bash_call(tool_calls, executed)
     records = {}
     common = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": task.get("step", ""),
               "task_sha256": task.get("sha256", ""), "head": _git_head()}
     if generator and not _call_failed(generator):
         records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
     if run and not _call_failed(run) and not _ut_execution_risk(report, run, cfg.get("UT运行命令", "")):
-        records["UT_RUN"] = dict(common, value=cfg.get("UT运行命令", ""))
+        actual = _reported_bash_segment(run, executed) or executed
+        records["UT_RUN"] = dict(common, value=actual)
     if not records:
         return
     try:
@@ -652,14 +698,14 @@ def _record_ut_receipts(task, report, tool_calls):
         _log("ut receipt EXC: " + str(e))
 
 
-def _reusable_ut_receipt(key, task, expected):
+def _reusable_ut_receipt(key, task, expected=None):
     try:
         rec = json.load(open(EVIDENCE_STATE, encoding="utf-8")).get(key, {})
     except Exception:
         return None
     if not rec or rec.get("step") != task.get("step") \
             or rec.get("task_sha256") != task.get("sha256") \
-            or not _same_config(rec.get("value", ""), expected):
+            or (expected is not None and not _same_config(rec.get("value", ""), expected)):
         return None
     changed, err = _source_changed_since_receipt(rec.get("head", ""), {})
     return rec if not err and not changed else None
@@ -928,18 +974,20 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     elif not _same_config(_flex_field(report, "GENERATOR_USED") or "", cfg.get("UT生成方式", "")):
         bail("GENERATOR_USED 与任务卡的 UT生成方式不一致。")
 
-    expected_ut = cfg.get("UT运行命令", "")
-    run = _bash_call(tool_calls, expected_ut)
-    risk = _ut_execution_risk(report, run, expected_ut)
+    configured_ut = cfg.get("UT运行命令", "")
+    executed_ut = _flex_field(report, "EXECUTED_UT") or ""
+    if not executed_ut:
+        bail("PASS 报告缺少 EXECUTED_UT: <实际执行的 UT 命令>。")
+    run = _reported_bash_call(tool_calls, executed_ut)
+    risk = _ut_execution_risk(report, run, configured_ut)
     if risk:
         bail(risk)
-    reused_run = _reusable_ut_receipt("UT_RUN", task, expected_ut) if soft and not run else None
+    reused_run = _reusable_ut_receipt("UT_RUN", task) if soft and not run else None
     if run and _call_failed(run):
         bail("UT运行命令的工具结果明确失败，不能报告 PASS。")
     if not run and not reused_run:
-        bail("transcript 中没有成功执行任务卡配置的 UT 命令，也没有同任务卡、同源码版本的可复用测试凭证。")
-    if run and not _same_config(_flex_field(report, "EXECUTED_UT") or "", expected_ut):
-        _log("UT EXECUTED_UT 摘要不准确,以 transcript 的真实 Bash 调用为准")
+        bail("EXECUTED_UT 未对应到 transcript 中真实执行成功的 Bash 命令，"
+             "也没有同任务卡、同源码版本的可复用测试凭证。")
 
     for name in ("PENDING_QUESTIONS", "KNOWN_FAILURES", "SUSPECTED_BUGS"):
         value = _flex_field(report, name)

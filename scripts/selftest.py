@@ -438,6 +438,32 @@ try:
         except SystemExit:
             ut_first_ok = False
         check("UT 真实 Skill/命令优先于摘要名称且兼容同行数字字段", ut_first_ok)
+
+        # “随 AutoUT 生成”是运行策略，不是要与真实命令逐字相同的字符串。
+        json.dump({"current": "rf_ut",
+                   "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "随AutoUT生成"},
+                   "agent_tasks": {"UT": ut_task}},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        dynamic_ut_ok = True
+        try:
+            dispatch._ut_contract("PASS", ut_report, ut_calls, soft=False)
+        except SystemExit:
+            dynamic_ut_ok = False
+        check("UT 动态运行策略不再与实际命令逐字比较", dynamic_ut_ok)
+
+        fake_run_calls = [ut_calls[0], dict(
+            ut_calls[1], input={"command": "echo tests are fine"}, result="77 passed")]
+        fake_run_blocked = False
+        try:
+            dispatch._ut_contract("PASS", ut_report, fake_run_calls, soft=False)
+        except SystemExit as exc:
+            fake_run_blocked = exc.code == 2
+        check("UT 报告命令必须对应 transcript 真实 Bash 调用", fake_run_blocked)
+
+        json.dump({"current": "rf_ut",
+                   "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "mcde test --ut"},
+                   "agent_tasks": {"UT": ut_task}},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
         ut_retry_ok = True
         try:
             dispatch._ut_contract("PASS", ut_report, [], soft=True)

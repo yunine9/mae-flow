@@ -308,6 +308,11 @@ if flow:
         # 脚本消费后再创建状态，保证“一句话开启”不是鸡生蛋。
         with tempfile.TemporaryDirectory() as td:
             subprocess.run(["git", "init", "-q", td], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], cwd=td, check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], cwd=td, check=True)
+            open(os.path.join(td, "biz.cpp"), "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], cwd=td, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=td, check=True)
             child = os.path.join(td, "service", "module")
             os.makedirs(child)
             payload = json.dumps({
@@ -324,7 +329,108 @@ if flow:
             fresh = mf.load_state()
             check("全新项目可从子目录一句话开启月光宝盒",
                   hook.returncode == 0 and intent_at_root and mf._moonlight(fresh)
-                  and not os.path.exists(mf.MOONLIGHT_INTENT_PATH))
+                  and not os.path.exists(mf.MOONLIGHT_INTENT_PATH)
+                  and "REQ" not in (fresh.get("moonlight") or {}).get("request", "")
+                  and "这个需求" in (fresh.get("moonlight") or {}).get("request", ""))
+
+            fresh["current"] = "config_confirm"
+            mf.save_state(fresh)
+            stop_payload = json.dumps({"cwd": td, "stop_hook_active": False}) + "\n"
+            stopped = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
+                cwd=td, input=stop_payload, text=True, capture_output=True, timeout=10)
+            recursive_stop = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
+                cwd=td, input=json.dumps({"cwd": td, "stop_hook_active": True}) + "\n",
+                text=True, capture_output=True, timeout=10)
+            check("月光宝盒非安全停点会由Stop Hook阻止主Agent提前结束",
+                  stopped.returncode == 2 and "禁止提前结束" in stopped.stderr
+                  and recursive_stop.returncode == 0)
+            mf.cmd_moonlight(flow, fresh, types.SimpleNamespace(
+                action="blocked", ack=None,
+                reason="缺少公司远端环境访问权限，已检查本地配置仍无法取得，夜间不能继续"))
+            blocked_state = mf.load_state()
+            allowed_stop = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
+                cwd=td, input=stop_payload, text=True, capture_output=True, timeout=10)
+            check("真实硬阻塞留痕后Stop Hook允许停止且晨间可原步骤恢复",
+                  allowed_stop.returncode == 0
+                  and bool((blocked_state.get("moonlight") or {}).get("hard_blocked")))
+            mf.cmd_moonlight(flow, blocked_state, types.SimpleNamespace(
+                action="repair", ack=None, reason=None))
+            check("硬阻塞修复轮保留原步骤继续",
+                  mf.load_state().get("current") == "config_confirm"
+                  and not (mf.load_state().get("moonlight") or {}).get("hard_blocked"))
+
+            build_state = mf.load_state()
+            build_state["current"] = "build"
+            build_state["config"].update({"单号": "REQMOONBUILD", "单号类型": "feat",
+                                           "CHANGE_NAME": "moon-build"})
+            build_state["choices"]["workflow"] = "full"
+            build_state.setdefault("step_heads", {})["build"] = mf.sh("git rev-parse --verify HEAD")
+            os.makedirs(os.path.join("openspec", "changes", "moon-build"))
+            tasks_path = os.path.join("openspec", "changes", "moon-build", "tasks.md")
+            open(tasks_path, "w", encoding="utf-8").write("- [ ] 实现功能\n")
+            mf.save_state(build_state)
+            premature_defer = False
+            try:
+                mf.cmd_moonlight(flow, build_state, types.SimpleNamespace(
+                    action="defer", ack=None,
+                    reason="编译暂时失败，已经检查日志但尚未完成全部实现任务"))
+            except SystemExit as exc:
+                premature_defer = exc.code == 2
+            check("build不能借尽力而为跳过未完成实现", premature_defer)
+
+            open(tasks_path, "w", encoding="utf-8").write("- [x] 实现功能\n")
+            open("biz.cpp", "a", encoding="utf-8").write("int done = 2;\n")
+            subprocess.run(["git", "add", "biz.cpp", tasks_path], check=True)
+            subprocess.run(["git", "commit", "-qm", "[REQMOONBUILD][feat]完成需求实现"], check=True)
+            mf.cmd_moonlight(flow, build_state, types.SimpleNamespace(
+                action="defer", ack=None,
+                reason="需求实现任务已全部完成并提交，仅剩公司编译环境不可用，已重试两次"))
+            check("build实现完成后可仅对编译遗留尽力放行",
+                  mf.load_state().get("current") == "verify_ponytail")
+            quality_state = mf.load_state()
+            quality_state["current"] = "rf_codecheck"
+            mf.save_state(quality_state)
+            wrong_blocked = False
+            try:
+                mf.cmd_moonlight(flow, quality_state, types.SimpleNamespace(
+                    action="blocked", ack=None,
+                    reason="规范检查失败但不想继续处理，尝试直接停止整个流程"))
+            except SystemExit as exc:
+                wrong_blocked = exc.code == 2
+            check("质量失败不能滥用硬阻塞出口而应走defer", wrong_blocked)
+
+            archive_now = time.strftime("%Y-%m-%d %H:%M:%S")
+            archive_state = {
+                "current": "archive",
+                "config": {"单号": "REQMOONARCH", "CHANGE_NAME": "moon-archive"},
+                "choices": {"workflow": "full"}, "history": [], "started": archive_now,
+            }
+            os.makedirs(os.path.join("openspec", "changes", "moon-archive"))
+            mf.save_state(archive_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "现在切换月光宝盒", "step": "archive", "at": archive_now}], f)
+            mf.cmd_moonlight(flow, archive_state, types.SimpleNamespace(
+                action="on", ack="月光宝盒", reason=None))
+            check("定稿尚未执行时中途切月光宝盒会先推送不自动定稿",
+                  mf.load_state().get("current") == "push")
+
+            partial_state = {
+                "current": "archive",
+                "config": {"单号": "REQMOONARCH2", "CHANGE_NAME": "missing-change"},
+                "choices": {"workflow": "full"}, "history": [], "started": archive_now,
+            }
+            mf.save_state(partial_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "月光宝盒继续", "step": "archive", "at": archive_now}], f)
+            mf.cmd_moonlight(flow, partial_state, types.SimpleNamespace(
+                action="on", ack="月光宝盒", reason=None))
+            partial = mf.load_state()
+            check("定稿可能已开始时不自动回滚或补做而是记录硬阻塞",
+                  partial.get("current") == "archive"
+                  and bool((partial.get("moonlight") or {}).get("hard_blocked")))
 
         # 已明确退出的项目也可切到月光宝盒；恢复旧断点但清空旧质量凭证。
         with tempfile.TemporaryDirectory() as td:
@@ -357,6 +463,7 @@ if flow:
             resumed = mf.load_state()
             check("普通开发模式可由用户明确切换到月光宝盒",
                   mf._moonlight(resumed) and resumed.get("current") == "rf_codecheck"
+                  and "切换月光宝盒继续做" in (resumed.get("moonlight") or {}).get("request", "")
                   and "agent_tasks" not in resumed and not os.path.exists(mf.EXIT_PATH))
 
         with tempfile.TemporaryDirectory() as td:
@@ -762,6 +869,9 @@ if hooks:
         for h in (hooks.get("hooks", {}).get("PreToolUse", []) or []))
     check("月光宝盒可在工具层禁止 AskUserQuestion",
           "AskUserQuestion" in pre and "月光宝盒处于无人值守模式" in dp)
+    stop_hooks = hooks.get("hooks", {}).get("Stop", []) or []
+    check("月光宝盒注册主Agent安全停点Stop Hook",
+          bool(stop_hooks) and "def ev_stop" in dp and "moonlight blocked" in dp)
 
 # 7. 关键文件
 for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md",

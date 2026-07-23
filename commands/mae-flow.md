@@ -14,7 +14,9 @@
      - 选择项按不扩大范围原则自动决定：明显评审意见选 review，明确缺陷选 hotfix，极小局部改动选 tweak，
        其余选 full；full 默认做需求质询，STORY 仅在用户明确要求或需求涉及测试协同时生成；
      - 质量步骤真实尝试后仍失败，使用 current 输出的 `moonlight defer` 留痕继续，最终必须尝试 push；
-       push 后停在晨间检查，不自动定稿规格。
+       build 只有实现 tasks 全部完成并提交后才能 defer；push 后停在晨间检查，不自动定稿规格；
+     - 需求材料、权限或外部依赖客观缺失且无法自行补齐时，执行 current 给出的 `moonlight blocked`
+       保存完整现场后结束；禁止反复重试或编造输入。主 Agent 在其他步骤提前结束会被 Stop Hook 打回。
    - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。必须先运行 `mae-flow.py exit` 展示
      当前步骤/分支/HEAD/未提交文件与退出影响，再取得用户明确确认；拿到后以用户原话执行
      `mae-flow.py exit --reason "<具体原因>" --ack "<用户确认原话>"`。命令成功前禁止直接改代码，

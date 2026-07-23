@@ -63,7 +63,7 @@ flow/flow.json              流程定义:步骤图、证据、权限、环境检
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
 scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
 scripts/comet_compat.py     让项目级阶段门禁识别 mae-flow 直接开发标记（setup/exit 幂等补齐）
-hooks/hooks.json            5 个 hook 注册(exec form + timeout 15s)
+hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
 agents/*.md                 5 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
 scripts/setup.py            环境安装器:确定性流水线(A 类装东西;幂等/dry-run/离线包;日志 %TEMP%/mae-flow-setup.log)
@@ -100,7 +100,10 @@ UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报
 AskUserQuestion；编译、CodeCheck、UT、环境和最终验证仍先执行，失败只能用 `moonlight defer` 记录真实问题，
 不能伪造通过。push 仍以本地 HEAD == 上游为硬证据，成功后停在 `moonlight_review`，规格定稿留给早晨。
 报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，若有环境遗留则
-先回 env_setup，结束后直接回质量链，不重跑需求和设计；`finalize` 才恢复普通归档流程。
+先回 env_setup，结束后直接回质量链，不重跑需求和设计；`finalize` 才恢复普通归档流程。Stop Hook 在安全
+停点前拒绝主 Agent 自行收工；真实硬阻塞须先执行 `moonlight blocked` 留痕，递归触发时 fail-open 防死循环。
+完整启动原话持久化进 moonlight 状态；build defer 还会先验证 tasks_checked 与 commit_tagged_after_entry，
+确保只放过编译遗留，不放过未完成实现。
 
 flow.json 步骤字段语义：
 
@@ -162,8 +165,9 @@ flow.json 步骤字段语义：
 
 ### 3.4 hooks（dispatch.py）
 
-5 个事件：SessionStart / UserPromptSubmit（状态注入 + 用户输入捕获进 ack 验真存储）、PreToolUse（gate）、
-PostToolUse（STORY/CHAIN/GRILL-PREP 模板校验 + ASKUSER/UTRUN 令牌 + AskUserQuestion 应答捕获）、SubagentStop（契约校验 + 令牌绑 HEAD）。
+6 个事件：SessionStart / UserPromptSubmit（状态注入 + 用户输入捕获进 ack 验真存储）、PreToolUse（gate）、
+PostToolUse（STORY/CHAIN/GRILL-PREP 模板校验 + ASKUSER/UTRUN 令牌 + AskUserQuestion 应答捕获）、
+SubagentStop（契约校验 + 令牌绑 HEAD）、Stop（月光宝盒安全停点约束）。
 
 **防卡死四件套**（历史上曾造成每条消息挂 10 分钟，动这里要极其小心）：
 - 看门狗 12s 强制 `os._exit(0)`

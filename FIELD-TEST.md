@@ -25,13 +25,15 @@
   「尸检线索」——把那份尸检发维护人,弱模型自行了断 vs maxTurns 硬切 vs API 中断,一看便知。
   **轮次预算校准**(2026-07-20 实锤:UT agent 25 轮烧完仍在读文件,已调 UT=200/compile=100/codecheck=100):
   观察调后 UT agent 实际用多少轮收尾(尸检/日志 query_depth),200 不够或严重富余都回报,下版校准。
-- [ ] **0.6 五事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,
+- [ ] **0.6 六事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,
   必须逐事件看"数据依赖行为"真实发生,日志干净不算数:
   - **PreToolUse**:流程未初始化时让 AI"在 src/ 下随便加一行"→ 必须被拦并提示先走流程(拦了=tool_input 到手);
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
   - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
   - **SubagentStop**:首单环境步派过 env-setup-agent 后,tokens 里出现 ENV 条目(=transcript 定位与契约校验活着);
+  - **Stop**:月光宝盒在非安全停点让主 Agent 结束回复，应被打回继续；执行 `moonlight blocked` 留痕后应允许停止，
+    日志出现 stop start/end。若宿主根本不触发 Stop，月光模式降级为 Skill 软约束，必须回报维护人；
   - **SessionStart**:重启会话,开场自动出现"存在进行中的交付流程"提示。
   加分项(最强确认,防线不但活着还咬人):在 story/定稿步故意不弹框直接让 AI done → 应被 ASKUSER 证据拒绝。
 

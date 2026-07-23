@@ -5,7 +5,7 @@
 用法(hooks.json 中,shell form——公司 codeagent 实测**不支持** exec form 的 args 数组:
 只执行 command 本体,payload 落进 python 的 stdin 被当脚本解析,JSON 的 false 炸 NameError,2026-07-20 实战):
   python "${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py" <事件>
-事件:pretooluse | userprompt | sessionstart | subagentstop | posttooluse
+事件:pretooluse | userprompt | sessionstart | subagentstop | posttooluse | stop
 (Windows 上 hook 经 Git Bash 执行,${VAR} 可展开;路径带引号防空格)
 输入:stdin 的 hook JSON。exit 2 = 拦截/打回(stderr 回传模型);其余一律 0(fail-open)。
 
@@ -1173,6 +1173,38 @@ def ev_posttooluse(d):
     sys.exit(0)
 
 
+def ev_stop(d):
+    """月光宝盒未到安全停点时，阻止主 Agent 提前结束。
+
+    Stop Hook 只补“主模型自行收工”这一处硬洞。真实硬阻塞必须先用 moonlight blocked 留痕；
+    push 失败则由 push-failed 留痕。stop_hook_active 时放行，避免宿主递归触发形成死循环。
+    """
+    try:
+        st = json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        sys.exit(0)
+    ml = st.get("moonlight") or {}
+    if not ml.get("enabled"):
+        sys.exit(0)
+    sid = st.get("current", "")
+    unresolved = [x for x in (ml.get("issues") or []) if not x.get("resolved_at")]
+    safe = (
+        sid in ("moonlight_review", "end")
+        or bool(ml.get("hard_blocked"))
+        or (sid == "push" and any(x.get("kind") == "push" for x in unresolved))
+    )
+    if safe:
+        sys.exit(0)
+    if d.get("stop_hook_active"):
+        _log("stop hook recursion guard: allow")
+        sys.exit(0)
+    print("[mae-flow] 月光宝盒仍在执行，当前步骤 %s，禁止提前结束回复或等待用户。"
+          "继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，"
+          "确实缺少需求/权限/外部条件而无法继续时用 moonlight blocked --reason 留痕后再停止。"
+          % (sid or "未知"), file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
     ev = sys.argv[1] if len(sys.argv) > 1 else ""
     _arm_watchdog()
@@ -1201,6 +1233,8 @@ def main():
             ev_subagentstop(d)
         elif ev == "posttooluse":
             ev_posttooluse(d)
+        elif ev == "stop":
+            ev_stop(d)
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 0
     except Exception as e:

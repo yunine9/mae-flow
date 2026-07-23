@@ -38,11 +38,15 @@ python "<插件目录>/scripts/mae-flow.py" moonlight on --ack "月光宝盒"
 若用户原文只有英文 `moonlight`，`--ack` 就原样传 `moonlight`。命令会在无状态时初始化、有在途状态时
 原地切换；之后仍按 current → 执行 → done 循环，但**禁止调用 AskUserQuestion，禁止结束回复等待用户**。
 原本的确认点由本次开启授权替代：根据需求、代码和仓库规则采用不扩大范围的保守结论，写进阶段产物。
+完整启动原话由状态机持久化，/clear 或重启后以 current 打印的「月光宝盒启动需求」恢复，不凭记忆重构需求。
 
 质量步骤必须先真实执行并尽力修复。确认继续尝试只会重复消耗时，按 current 给出的命令执行
 `moonlight defer --reason "<遗留+已尝试+风险>"`，把问题写入本地报告并继续；不能谎报 PASS/CLEAN/OK。
+build 只有 tasks 全部完成、实现已提交、仅剩编译问题时才允许 defer，不能拿“尽力而为”跳过需求实现。
 UT 自查后明确是源码缺陷时，先按 current 执行 `moonlight unlock-source --reason "<依据>"`，再修源码；
 done 会回流完整质量链。分支推送后停在 `moonlight_review`，不自动定稿规格。
+若需求材料、权限或外部依赖客观缺失，执行 current 给出的 `moonlight blocked --reason "<现场>"`；
+它会保存报告并允许 Stop Hook 放行，早晨用 `moonlight repair` 从原步骤继续。除此之外主 Agent 提前结束会被打回。
 
 月光宝盒的特殊入口：
 

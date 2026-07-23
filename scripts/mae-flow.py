@@ -163,6 +163,15 @@ def _moonlight_step_kind(sid):
     return MOONLIGHT_QUALITY_STEPS.get(sid, "")
 
 
+def _moonlight_can_block(sid):
+    """硬阻塞出口用于非质量工作；质量关有 defer，push 有 push-failed。build 例外：
+    它既是实现步骤，也可能遇到需求/依赖阻塞。"""
+    return sid == "build" or (
+        sid not in MOONLIGHT_QUALITY_STEPS
+        and sid not in ("push", "moonlight_review", "end")
+    )
+
+
 def _moonlight_issue_context(st):
     issues = _moonlight_unresolved(st)
     if not issues:
@@ -1281,6 +1290,11 @@ def print_current(flow, st):
         print("覆盖规则：下方普通步骤文字里的“询问用户 / AskUserQuestion / 等用户拍板”在本模式下一律不执行。"
               "分析和配置从用户原话、仓库预设、当前分支及代码事实中保守推断；"
               "质量裁决拿不准时不得替用户选择豁免，走本步的 moonlight defer。")
+        request = str(ml.get("request", "")).strip()
+        if request:
+            preview = request[:800] + ("…" if len(request) > 800 else "")
+            print("──── 月光宝盒启动需求（已持久化，断点恢复以此为准） ────")
+            print(preview)
         unresolved = _moonlight_unresolved(st)
         if unresolved:
             print("──── 当前遗留（修复轮必须优先处理） ────")
@@ -1347,6 +1361,11 @@ def print_current(flow, st):
         print(f"python \"{os.path.abspath(sys.argv[0])}\" moonlight push-failed "
               "--reason \"<错误原文和已尝试处理>\"")
         print("状态会停在 push，早晨修好远端问题后直接重新 push + done。")
+    if _moonlight(st) and _moonlight_can_block(sid):
+        print("若不是质量失败，而是需求材料、权限或外部依赖客观缺失，继续执行已无意义，执行：")
+        print(f"python \"{os.path.abspath(sys.argv[0])}\" moonlight blocked "
+              "--reason \"<缺失条件、已尝试确认、为什么无法继续>\"")
+        print("它会生成晨间报告并允许本轮正常停止，不会让 Stop Hook 无限打回。")
     if sid == "moonlight_review":
         return
     if step.get("require_sets"):
@@ -2405,11 +2424,17 @@ def _moonlight_report_text(flow, st):
         f"- 最近推送：{ml.get('pushed_at', '尚未完成')}",
         f"- 无人值守轮次：{ml.get('cycle', 1)}",
         "",
+        "## 启动需求原话",
+        "",
+        str(ml.get("request", "")).strip() or "旧状态未记录；以已确认需求文档和当前配置为准。",
+        "",
         "## 当前结论",
         "",
     ]
     if st.get("current") == "moonlight_review":
         lines.append("夜间执行已经走到推送，规格尚未自动归档。")
+    elif ml.get("hard_blocked"):
+        lines.append("夜间执行遇到无法自行补齐的硬阻塞，已如实停在当前步骤，尚未推送。")
     else:
         lines.append("仍在执行中或尚未成功推送；可执行 moonlight report 随时刷新本报告。")
     lines += ["", "## 尚未解决的问题", ""]
@@ -2424,6 +2449,8 @@ def _moonlight_report_text(flow, st):
             ]
             if x.get("rejection"):
                 lines.append(f"- Harness 诊断：{x['rejection']}")
+            if x.get("dirty_paths"):
+                lines.append("- 未提交现场：" + "、".join(x["dirty_paths"]))
             lines.append("")
     else:
         lines += ["无。", ""]
@@ -2495,12 +2522,12 @@ def _consume_preinit_moonlight_intent(ack):
     开启月光宝盒”，也不会把历史残留文件当成永久授权。
     """
     if not ack:
-        return False, "命令未携带 --ack"
+        return False, "命令未携带 --ack", ""
     try:
         rec = json.load(open(MOONLIGHT_INTENT_PATH, encoding="utf-8"))
     except Exception:
         return False, ("未捕获到本轮用户的月光宝盒授权。请让用户用普通消息明确说一次"
-                       "“开启月光宝盒”，再执行本命令。")
+                       "“开启月光宝盒”，再执行本命令。"), ""
     try:
         age = time.time() - float(rec.get("epoch", 0))
     except Exception:
@@ -2510,21 +2537,39 @@ def _consume_preinit_moonlight_intent(ack):
             os.remove(MOONLIGHT_INTENT_PATH)
         except OSError:
             pass
-        return False, "捕获到的月光宝盒授权已超过十分钟，请让用户重新明确授权。"
+        return False, "捕获到的月光宝盒授权已超过十分钟，请让用户重新明确授权。", ""
 
     def compact(value):
         return re.sub(r"\s+", "", value or "")
 
     text = rec.get("text", "")
     if not re.search(r"月光宝盒|moonlight", text, re.I):
-        return False, "捕获的用户原话没有明确提到月光宝盒。"
+        return False, "捕获的用户原话没有明确提到月光宝盒。", ""
     if compact(ack) not in compact(text):
-        return False, "--ack 不在本轮用户原话中，禁止由 Agent 自行补授权。"
+        return False, "--ack 不在本轮用户原话中，禁止由 Agent 自行补授权。", ""
     try:
         os.remove(MOONLIGHT_INTENT_PATH)
     except OSError:
         pass
-    return True, ""
+    return True, "", text
+
+
+def _moonlight_request_from_messages(st, ack):
+    """从当前步骤捕获的真实用户消息中取出完整启动原话，供断点恢复。"""
+    try:
+        msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+    except Exception:
+        msgs = []
+    needle = re.sub(r"\s+", "", ack or "")
+    entered = _step_entered_at(st)
+    sid = st.get("current", "")
+    for msg in reversed(msgs):
+        text = msg.get("text", "")
+        if (needle and needle in re.sub(r"\s+", "", text)
+                and msg.get("at", "") >= entered
+                and (not msg.get("step") or msg.get("step") == sid)):
+            return text
+    return ""
 
 
 def cmd_moonlight(flow, st, args):
@@ -2534,6 +2579,7 @@ def cmd_moonlight(flow, st, args):
             die("开启月光宝盒必须携带用户原话: --ack \"用户要求无人值守开发的原话\"。", 2)
         resumed_from_direct = False
         authorized_preinit = False
+        activation_request = ""
         if os.path.exists(EXIT_PATH):
             # 直接开发模式的用户消息保存在退出记录中。允许 shell 只传“月光宝盒/moonlight”
             # 这个短词，但恢复函数仍使用捕获到的完整原文验真。
@@ -2548,8 +2594,9 @@ def cmd_moonlight(flow, st, args):
                 full_ack = args.ack or ""
             st = _resume_direct_mode(full_ack)
             resumed_from_direct = True
+            activation_request = full_ack
         if st is None:
-            authorized_preinit, why = _consume_preinit_moonlight_intent(args.ack)
+            authorized_preinit, why, activation_request = _consume_preinit_moonlight_intent(args.ack)
             if not authorized_preinit:
                 die("月光宝盒授权验真失败:" + why, 2)
             st = _new_state()
@@ -2560,12 +2607,14 @@ def cmd_moonlight(flow, st, args):
             ok, why = _ack_verified(st, args.ack, exact=False)
             if not ok:
                 die("月光宝盒授权验真失败:" + why, 2)
+            activation_request = _moonlight_request_from_messages(st, args.ack)
         ml = _moonlight_data(st)
         if not ml.get("enabled"):
             ml.update({
                 "enabled": True,
                 "activated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "ack": args.ack,
+                "request": activation_request[:4000],
                 "cycle": max(1, int(ml.get("cycle", 0) or 0) + 1),
             })
             st.setdefault("history", []).append({
@@ -2579,6 +2628,36 @@ def cmd_moonlight(flow, st, args):
                 "at": time.strftime("%Y-%m-%d %H:%M:%S")})
             st["current"] = "push"
             st.setdefault("step_heads", {})["push"] = sh("git rev-parse --verify HEAD")
+        elif st.get("current") == "archive":
+            # archive 是不可逆动作。尚未开始时直接推送；若活跃 change 已消失，说明定稿工具
+            # 可能已执行到一半，不能为了夜间直行自动猜测、回滚或补做。
+            change_name = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
+            active_change = os.path.join("openspec", "changes", change_name) if change_name else ""
+            if active_change and os.path.isdir(active_change):
+                st.setdefault("history", []).append({
+                    "step": "archive", "result": "moonlight:archive-deferred",
+                    "note": "定稿尚未执行，夜间先推送",
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                st["current"] = "push"
+                st.setdefault("step_heads", {})["push"] = sh("git rev-parse --verify HEAD")
+            else:
+                now = time.strftime("%Y-%m-%d %H:%M:%S")
+                issues = ml.setdefault("issues", [])
+                issue = {
+                    "id": "ML-%03d" % (len(issues) + 1), "step": "archive",
+                    "kind": "blocker", "at": now,
+                    "head": sh("git rev-parse --verify HEAD"),
+                    "reason": "切换月光宝盒时规格定稿可能已经开始，活跃 change 已不存在或无法定位；"
+                              "不可自动回滚、补做或假定完成，需要早晨核对定稿现场。",
+                }
+                issues.append(issue)
+                ml["hard_blocked"] = {
+                    "at": now, "step": "archive", "head": issue["head"],
+                    "issue": issue["id"], "reason": issue["reason"],
+                }
+                st.setdefault("history", []).append({
+                    "step": "archive", "result": "moonlight:blocked",
+                    "note": issue["id"] + " " + issue["reason"], "at": now})
         save_state(st)
         _write_moonlight_report(flow, st)
         print("[mae-flow] 🌙 月光宝盒已开启。后续不再询问用户；质量问题尽力修复后可登记遗留继续，"
@@ -2606,6 +2685,41 @@ def cmd_moonlight(flow, st, args):
         return
     if not _moonlight(st):
         die("当前未开启月光宝盒。", 2)
+    if action == "blocked":
+        sid = st["current"]
+        if not _moonlight_can_block(sid):
+            kind = _moonlight_step_kind(sid)
+            remedy = ("moonlight defer" if kind else
+                      "moonlight push-failed" if sid == "push" else "当前已经处于安全停点")
+            die(f"当前步骤 {sid} 不能使用 blocked；请使用 {remedy}。", 2)
+        reason = (args.reason or "").strip()
+        if len(reason) < 12:
+            die("moonlight blocked 必须写清缺失条件、已经尝试的确认以及无法继续的原因。", 2)
+        ml = _moonlight_data(st)
+        issues = ml.setdefault("issues", [])
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        for old in _moonlight_unresolved(st):
+            if old.get("kind") == "blocker":
+                old["resolved_at"] = now
+                old["resolved_as"] = "superseded"
+        issue = {
+            "id": "ML-%03d" % (len(issues) + 1), "step": sid, "kind": "blocker",
+            "at": now, "head": sh("git rev-parse --verify HEAD"), "reason": reason,
+            "dirty_paths": _dirty_paths()[:100],
+        }
+        issues.append(issue)
+        ml["hard_blocked"] = {
+            "at": now, "step": sid, "head": issue["head"],
+            "issue": issue["id"], "reason": reason,
+        }
+        st.setdefault("history", []).append({
+            "step": sid, "result": "moonlight:blocked",
+            "note": issue["id"] + " " + reason, "at": now})
+        save_state(st)
+        _write_moonlight_report(flow, st)
+        print("[mae-flow] 月光宝盒已记录无法自动解决的硬阻塞并保存现场。"
+              "本轮允许正常停止；早晨执行 moonlight report 查看，条件补齐后执行 moonlight repair 继续当前步骤。")
+        return
     if action == "push-failed":
         if st.get("current") != "push":
             die("moonlight push-failed 只允许在 push 步骤使用。", 2)
@@ -2654,6 +2768,14 @@ def cmd_moonlight(flow, st, args):
         reason = (args.reason or "").strip()
         if len(reason) < 12:
             die("moonlight defer 的 --reason 必须写清遗留现象、已尝试处理和风险，不能只写“失败/继续”。", 2)
+        if sid == "build":
+            # build 同时承担需求实现与编译收尾。月光模式只能放过编译结果，不能把未实现完的
+            # tasks 一起跳过，否则“尽力而为”会退化成推送半成品。
+            for evaluator in (ev_tasks_checked, ev_commit_tagged_after_entry):
+                ok, why = evaluator({}, st)
+                if not ok:
+                    die("build 尚未达到“实现完成、仅编译遗留”的边界，不能 defer: " + why
+                        + "。继续完成实现；若需求/权限/外部依赖客观缺失，改用 moonlight blocked 留痕停止。", 2)
         dirty = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
         if dirty:
             die("带遗留推进前必须先提交当前有效源码/测试/构建改动，否则 push 会漏文件: "
@@ -2681,6 +2803,24 @@ def cmd_moonlight(flow, st, args):
         advance(flow, st, sid, flow["steps"][sid], "moonlight-deferred", issue_id)
         return
     if action == "repair":
+        ml = _moonlight_data(st)
+        if ml.get("hard_blocked"):
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            blocker = ml.pop("hard_blocked")
+            for issue in _moonlight_unresolved(st):
+                if issue.get("kind") == "blocker":
+                    issue["resolved_at"] = now
+                    issue["resolved_as"] = "morning-retry"
+            ml["cycle"] = int(ml.get("cycle", 1)) + 1
+            st.setdefault("history", []).append({
+                "step": st["current"], "result": "moonlight:repair-blocker",
+                "note": str(blocker.get("issue", "")), "at": now})
+            save_state(st)
+            _write_moonlight_report(flow, st)
+            print(f"[mae-flow] 已解除夜间硬阻塞标记，开始第 {ml['cycle']} 轮，"
+                  f"从原步骤 {st['current']} 继续；旧质量证据仍按代码版本校验。")
+            print_current(flow, st)
+            return
         if st.get("current") != "moonlight_review":
             die("只有夜间推送完成、停在 moonlight_review 后才能按报告开启修复轮。"
                 "当前仍在执行中，请先继续到 push。", 2)
@@ -2979,7 +3119,7 @@ def main():
     ml = sub.add_parser("moonlight")
     ml.add_argument("action", choices=[
         "on", "continue", "off", "report", "push-failed",
-        "unlock-source", "defer", "repair", "finalize"])
+        "unlock-source", "defer", "blocked", "repair", "finalize"])
     ml.add_argument("--reason"); ml.add_argument("--ack")
     x = sub.add_parser("exit"); x.add_argument("--reason"); x.add_argument("--ack")
     rl = sub.add_parser("reloaded"); rl.add_argument("--ack")

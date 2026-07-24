@@ -135,7 +135,7 @@ flow.json 步骤字段语义：
 | `next` | 字符串=直连；dict=按 `choice_key` 的选择分流 |
 | `next_by` | 按**历史**选择分流（如 branch_create 按之前 workflow_select 的选择） |
 | `choice_key` / `choices` | 本步需 `done --choice <值>`，存入 st.choices |
-| `user_ack` | 本步必须 `done --ack "用户原话"`，缺失拒绝（伪造 ack 只能靠铁律，工具验不了真） |
+| `user_ack` | 本步必须 `done --ack "用户原话"`；默认与当前步骤捕获到的普通消息或结构化选项精确匹配，局部短词、否定句和询问句均不算确认 |
 | `require_sets` | done 前必须 `--set` 齐的配置键；含"基线分支"时自动派生分支名 |
 | `evidence` | 证据数组，全部通过才推进（见 3.2） |
 | `allow_source_edit` / `allow_specs_write` | 本步的写权限，gate 据此拦截 |
@@ -248,7 +248,7 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 | 用户话术 | 上游/内部 |
 |---|---|
-| 标准交付 / 缺陷快修 / 小改快过 / 评审返工 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
+| 完整开发 / 已定位问题修复 / 局部修改 / 处理评审意见 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
 | 提案与规格、规格条目 | openspec proposal / delta spec |
 | 变更目录 | change（openspec/changes/<CHANGE_NAME>） |
 | 规格定稿 | archive / 归档 |
@@ -274,7 +274,17 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 - **加环境检查** → flow.json `env_checks` 加项；若 agent 能修，env-setup-agent.md 加对应 Step（必须幂等）。
 - **改 gate 规则** → mae-flow.py `cmd_gate`。记住 Edit/Bash 两路都要改，路径匹配带 `re.I`，改完必须跑冒烟用例（见第七节）。
 - **动 dispatch.py** → 任何新增 IO 都要问：会阻塞吗？超时了吗？失败会留日志吗？
-- **发版/打包前必跑 `python scripts/selftest.py`** → 语法/JSON/流程图/证据注册/占位符/agent 同步/关键文件 23 项自检，任何 ❌ 禁止发布。
+- **发版/打包前必跑 `python scripts/selftest.py`** → 语法/JSON/流程图/证据注册/占位符/agent 同步/关键文件自检，任何 ❌ 禁止发布。
+
+### 发版收口
+
+1. 更新根目录 `VERSION` 和 `CHANGELOG.md`，插件市场版本必须与 `VERSION` 一致；
+2. 固定 `env-profile.json` 中已经实测的公开依赖版本；公司内网包无法在外部复验时，记录公司机实测版本；
+3. 运行两套自动测试，再执行 `git archive HEAD` 解包并在干净目录重跑；
+4. 按 `FIELD-TEST.md` 阶段 0 在公司 Windows 实机做金丝雀；
+5. 创建并推送与 `VERSION` 一致的 `vX.Y.Z` tag。
+
+仓库中的分享 PPT 和图片不会进入 `git archive` 生成的插件源码包；`.gitattributes` 是发布包排除清单。
 
 ## 六、Windows 军规（违反任何一条都是真实故障，不是理论）
 

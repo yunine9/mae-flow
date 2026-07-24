@@ -2,6 +2,8 @@
 
 Mae-Flow 是一套给 CodeAgent 使用的代码交付流程。
 
+当前版本：`2.1.0`。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+
 你给出单号和需求，它会先把需求问清楚，再做设计、编码、编译、CodeCheck、单元测试和推送。中间需要你
 决定的地方会停下来问，不该由 AI 自己决定的事，它不能悄悄替你做。
 
@@ -309,6 +311,10 @@ python "<插件目录>/scripts/setup.py"
 ```
 
 完整日志在 `%TEMP%\mae-flow-setup.log`。
+
+脚本会逐项核对 npm、Git 和项目配置，不会因为“键存在”就把错误值当成正常。需要修改全局 npm/Git
+网络配置时，会先把原值保存到 `%TEMP%\mae-flow-setup-config-before-*.json` 并显示路径。OpenSpec 和
+Comet 使用本版实测过的固定版本；CodeCheck 来自公司内网仓库，实际安装版本会写入安装日志。
 
 有两类操作必须由人完成：
 

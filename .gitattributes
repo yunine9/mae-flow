@@ -1,0 +1,2 @@
+# Keep source releases small. Share assets remain available in the repository.
+docs/share/ export-ignore

@@ -20,8 +20,9 @@ done 报"**环境有变更待生效**"(有 .mae-flow-need-reload 标记:装了�
 3. **禁止你手工逐项安装**(拼 npm/plugin 命令绕过安装器=不可复现,下一台机器继续炸);
    **comet init 你和子 agent 都严禁执行**(gate 硬拦,管道喂输入等变体同禁——非交互跑会把
    全部 agent 平台初始化出来污染仓库),安装器会给三要素(目录/命令/平台)话术,原样转给用户。
-注意:检查项含「auto_transition 已关闭」——项目 .comet/config.yaml 必须含 auto_transition: false,
-  由 mae-flow 独占流程节奏(该文件缺失时安装器自动创建)。
+注意:检查项含「auto_transition 已关闭」和「review_mode=standard」——项目 `.comet/config.yaml`
+  必须分别为 `auto_transition: false`、`review_mode: standard`，已有错误值由安装器自动纠正。
+  安装器若修改全局 npm/Git 网络配置，会先在 `%TEMP%` 保存修改前备份并输出路径。
 新手引导(首次使用大概率发生,不是故障):
 - 首次全 ❌ 属正常,如实告知用户"首次初始化,自动安装约需几分钟";
 - 安装器/agent 报告"完成 .claude → .cac 迁移"→ 告知用户执行 **/reload-skills**(会话内命令,谁都无法代跑)或重启会话;

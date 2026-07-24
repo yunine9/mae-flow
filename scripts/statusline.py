@@ -9,6 +9,8 @@
 """
 import json, os, sys
 
+from mae_flow_core import RuntimeMode, find_project_root, resolve_runtime
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -35,35 +37,32 @@ def main():
     cwd = ((d.get("workspace") or {}).get("current_dir")) or d.get("cwd") or os.getcwd()
     base = os.path.basename(os.path.abspath(cwd)) or cwd
 
-    root, exited, probe = None, False, os.path.abspath(cwd)
-    while True:
-        if os.path.exists(os.path.join(probe, ".mae-flow.json.exited")):
-            root, exited = probe, True
-            break
-        if os.path.exists(os.path.join(probe, ".mae-flow.json")):
-            root = probe
-            break
-        parent = os.path.dirname(probe)
-        if parent == probe:
-            break
-        probe = parent
-
-    if not root:
+    root = find_project_root(cwd)
+    runtime = resolve_runtime(root)
+    if runtime.mode == RuntimeMode.INACTIVE:
         hint = " · mae-flow 空闲" if (os.path.isdir(os.path.join(cwd, "openspec"))
                                       or os.path.isdir(os.path.join(cwd, ".comet"))) else ""
         print(f"📁 {base}{hint}")
         return
-
-    if exited:
+    if runtime.mode == RuntimeMode.CORRUPT:
+        print(f"📁 {base} · mae-flow 状态异常(doctor 排障)")
+        return
+    if runtime.mode == RuntimeMode.DIRECT:
         print(f"📁 {base} · mae-flow 已退出 │ 普通开发")
         return
-
-    try:
-        st = json.load(open(os.path.join(root, ".mae-flow.json"), encoding="utf-8"))
-    except Exception:
-        print(f"📁 {base} · mae-flow 状态读取失败(doctor 排障)")
+    if runtime.mode == RuntimeMode.STANDALONE:
+        action = runtime.action or {}
+        label = {
+            "ut": "单独补 UT",
+            "codecheck": "单独做 CodeCheck",
+            "grill": "单独梳理需求",
+        }.get(action.get("kind"), "独立任务")
+        state = ("等待范围确认" if action.get("status") == "awaiting_scope_confirmation"
+                 else "执行中")
+        print(f"🧰 {label} │ {state} │ 普通开发不受限")
         return
 
+    st = runtime.flow or {}
     cfg = st.get("config", {})
     sid = st.get("current", "?")
     dan = cfg.get("单号", "未配置")

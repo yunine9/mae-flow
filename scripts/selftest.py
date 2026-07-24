@@ -184,6 +184,26 @@ if flow:
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{"text": "我确认以上配置", "step": "config_confirm", "at": now}],
                           f, ensure_ascii=False)
+            short_ack_ok, _ = mf._ack_verified(config_state, "确认")
+            check("主流程确认不接受用户原话中的局部短词", not short_ack_ok)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": json.dumps({"answer": "我确认以上配置"},
+                                               ensure_ascii=False),
+                            "step": "config_confirm", "at": now}],
+                          f, ensure_ascii=False)
+            structured_ack_ok, _ = mf._ack_verified(config_state, "我确认以上配置")
+            check("主流程确认兼容宿主结构化应答", structured_ack_ok)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": json.dumps({
+                    "options": ["我确认以上配置", "需要调整配置"],
+                    "answer": "需要调整配置",
+                }, ensure_ascii=False), "step": "config_confirm", "at": now}],
+                          f, ensure_ascii=False)
+            option_metadata_ok, _ = mf._ack_verified(config_state, "我确认以上配置")
+            check("结构化应答中的候选选项不能冒充用户确认", not option_metadata_ok)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "我确认以上配置", "step": "config_confirm", "at": now}],
+                          f, ensure_ascii=False)
             failed = False
             try:
                 mf.cmd_done(flow, config_state, types.SimpleNamespace(
@@ -225,6 +245,43 @@ if flow:
                   "熔断" in second_why and "/mae-flow exit" in second_why)
         finally:
             os.chdir(old_cwd)
+    setup_spec = importlib.util.spec_from_file_location(
+        "mae_flow_setup", os.path.join(ROOT, "scripts", "setup.py"))
+    setup_module = importlib.util.module_from_spec(setup_spec)
+    setup_spec.loader.exec_module(setup_module)
+    original_dry = setup_module.DRY
+    original_run = setup_module.subprocess.run
+    try:
+        setup_module.DRY = True
+        setup_module.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("dry-run 修改命令不应进入 subprocess"))
+        dry_rc, dry_out = setup_module.sh(
+            "npm config set registry https://example.invalid", mutate=True)
+        check("setup dry-run 不执行配置写入或安装命令",
+              dry_rc == 0 and dry_out == "")
+    finally:
+        setup_module.DRY = original_dry
+        setup_module.subprocess.run = original_run
+    with tempfile.TemporaryDirectory() as td:
+        config_path = os.path.join(td, "config.yaml")
+        open(config_path, "w", encoding="utf-8").write(
+            "auto_transition: true\nreview_mode: strict\nauto_transition: false\n")
+        auto_changed = setup_module.ensure_yaml_value(
+            config_path, "auto_transition", "false")
+        review_changed = setup_module.ensure_yaml_value(
+            config_path, "review_mode", "standard")
+        config_text = open(config_path, encoding="utf-8").read()
+        check("setup 会纠正错误 YAML 值并清理重复键",
+              auto_changed and review_changed
+              and config_text.count("auto_transition:") == 1
+              and "auto_transition: false" in config_text
+              and "review_mode: standard" in config_text)
+    profile = json.load(open(
+        os.path.join(ROOT, "skills", "mae-flow", "assets", "env-profile.json"),
+        encoding="utf-8"))
+    check("公开 npm 依赖固定为实测精确版本",
+          profile["npm_packages"]["openspec"].endswith("@1.6.0")
+          and profile["npm_packages"]["comet"].endswith("@0.3.9"))
     check("同名文件豁免键不会碰撞",
           mf._approval_key("R", "a/Foo.cpp") != mf._approval_key("R", "b/Foo.cpp"))
     check("豁免规则与文件必须在同一条记录",
@@ -276,6 +333,17 @@ if flow:
                   action.get("status") == "awaiting_scope_confirmation"
                   and action.get("files") == ["biz.cpp"]
                   and not action.get("agent_tasks"))
+            negative_scope_messages = (
+                "我还没确认以上范围",
+                "确认以上范围是什么意思？",
+                "请问是不是点“确认以上范围”就开始？",
+            )
+            check("独立任务范围确认不接受否定句和询问句",
+                  all(not mf._action_scope_ack_verified(
+                      {"scope_proposed_epoch": 1, "user_messages": [
+                          {"epoch": 2, "text": text}]},
+                      mf.ACTION_SCOPE_ACK)[0]
+                      for text in negative_scope_messages))
             forged_scope_ack_blocked = False
             try:
                 mf.cmd_action_confirm_scope(
@@ -865,7 +933,7 @@ if flow:
             mf.cmd_moonlight(flow, repairing, types.SimpleNamespace(
                 action="finalize", ack=None, reason=None))
             finalized = mf.load_state()
-            check("评审返工晨间修复完成后可直接结束",
+            check("评审意见处理晨间修复完成后可直接结束",
                   finalized.get("current") == "end" and not mf._moonlight(finalized))
 
             # full/tweak/hotfix 的夜间路径跳过不可逆归档，晨间 finalize 才恢复归档确认。
@@ -877,7 +945,7 @@ if flow:
             mf.save_state(full_state)
             mf.advance(flow, full_state, "verify_comet", flow["steps"]["verify_comet"], "done")
             skipped_archive = mf.load_state()
-            check("标准交付月光轮先跳过归档进入push",
+            check("完整开发月光轮先跳过归档进入push",
                   skipped_archive.get("current") == "push"
                   and any(h.get("result") == "moonlight:archive-deferred"
                           for h in skipped_archive.get("history", [])))
@@ -886,7 +954,7 @@ if flow:
             mf.cmd_moonlight(flow, full_morning, types.SimpleNamespace(
                 action="finalize", ack=None, reason=None))
             full_finalized = mf.load_state()
-            check("标准交付晨间finalize恢复普通规格定稿",
+            check("完整开发晨间finalize恢复普通规格定稿",
                   full_finalized.get("current") == "archive_confirm"
                   and not mf._moonlight(full_finalized))
     finally:
@@ -1399,8 +1467,17 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "skills/mae-flow/assets/settings-baseline.json",
           "skills/mae-flow/assets/env-profile.json", "scripts/setup.py", "scripts/comet_compat.py",
-          "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md", "MAINTAINERS.md"):
+          "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md",
+          "MAINTAINERS.md", "VERSION", "CHANGELOG.md", ".gitattributes"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))
+
+version = open(os.path.join(ROOT, "VERSION"), encoding="utf-8").read().strip()
+changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
+readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+check("VERSION、README 与 CHANGELOG 版本一致",
+      bool(re.fullmatch(r"\d+\.\d+\.\d+", version))
+      and ("## " + version) in changelog
+      and ("`" + version + "`") in readme)
 
 print(f"\n{'全部通过 ✅' if not fails else f'失败 {len(fails)} 项 ❌'}")
 sys.exit(1 if fails else 0)

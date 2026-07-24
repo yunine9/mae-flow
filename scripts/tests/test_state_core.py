@@ -174,6 +174,38 @@ class RuntimeAndStateTests(unittest.TestCase):
             self.assertIn("config_confirm", current.stdout)
             self.assertNotIn("普通开发模式", current.stdout)
 
+    def test_statusline_uses_repository_boundary_and_runtime_precedence(self):
+        with tempfile.TemporaryDirectory() as td:
+            parent = os.path.join(td, "parent")
+            child = os.path.join(parent, "child")
+            os.makedirs(os.path.join(parent, ".git"))
+            os.makedirs(os.path.join(child, ".git"))
+            atomic_write_json(
+                os.path.join(parent, ".mae-flow.json.exited"),
+                {"status": "exited"})
+            payload = json.dumps({"cwd": child}, ensure_ascii=False)
+            env = dict(os.environ)
+            env["PYTHONPATH"] = SCRIPTS + os.pathsep + env.get("PYTHONPATH", "")
+            env["PYTHONPYCACHEPREFIX"] = os.path.join(td, "pycache")
+            first = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS, "statusline.py")],
+                input=payload, text=True, capture_output=True, env=env, timeout=15)
+            self.assertNotIn("已退出", first.stdout)
+
+            save_versioned_json(
+                os.path.join(child, ".mae-flow.json"),
+                {"current": "env_setup", "config": {}, "choices": {},
+                 "history": [], "started": "2026-01-01 00:00:00"},
+                "flow", project_root=child)
+            atomic_write_json(
+                os.path.join(child, ".mae-flow.json.exited"),
+                {"status": "exited"})
+            second = subprocess.run(
+                [sys.executable, os.path.join(SCRIPTS, "statusline.py")],
+                input=payload, text=True, capture_output=True, env=env, timeout=15)
+            self.assertIn("环境就绪", second.stdout)
+            self.assertNotIn("已退出", second.stdout)
+
     def test_corrupt_exit_marker_has_deterministic_repair(self):
         with tempfile.TemporaryDirectory() as td:
             with open(

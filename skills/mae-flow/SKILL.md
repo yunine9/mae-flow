@@ -10,7 +10,8 @@ description: 基于 Comet（OpenSpec + Superpowers）的端到端需求交付工
 **用户话术纪律(用户界面层彻底封装)**:面向用户的一切展示与提问用公司语言,上游术语不进用户视野——
 comet/openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词不对用户说;统一说法:
 规格条目(=delta spec)、变更目录(=change)、规格定稿(=archive/归档)、方案讨论(=brainstorming)、
-代码精简(=ponytail review)、交付方式=标准交付(full)/缺陷快修(hotfix)/小改快过(tweak)/评审返工(review)。
+代码精简(=ponytail review)、开发方式=完整开发(full)/已定位问题修复(hotfix)/局部修改(tweak)/
+处理评审意见(review)。
 内部命令、--choice 代号、文件路径、报错原文照旧;doctor/排障输出保留原词(那是给维护人看的)。
 
 本流程**不由你解释和记忆**,由状态机工具驱动。你的职责只有一个循环:
@@ -52,7 +53,7 @@ done 会回流完整质量链。分支推送后停在 `moonlight_review`，不�
 
 - `moonlight report`：查看夜间结果和遗留；
 - `moonlight repair`：根据报告开启下一轮修复，重新跑编译、CodeCheck、UT、最终验证和推送；
-- `moonlight finalize`：早晨检查完成后恢复普通模式并进入规格定稿；评审返工直接结束；
+- `moonlight finalize`：早晨检查完成后恢复普通模式并进入规格定稿；评审意见处理直接结束；
 - `moonlight off`：保留断点，恢复普通交互模式。
 
 月光宝盒只允许“带着真实问题继续”，不允许自动豁免、删除/禁用测试、缩小测试范围、伪造执行证据、

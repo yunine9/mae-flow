@@ -395,7 +395,7 @@ def _ensure_review_base(st):
     history 时间反推，保证升级后不会把整个原需求 diff 当成本轮增量。
     """
     if not _is_review(st):
-        return "", "当前不是评审返工流程"
+        return "", "当前不是评审意见处理流程"
     old = st.get("review_base_head", "")
     if old and sh(f"git cat-file -t {old}") == "commit":
         return old, ""
@@ -1182,7 +1182,39 @@ def _ack_failure(st, reason="", success=False):
     return result[0]
 
 
-def _ack_verified(st, ack, exact=False):
+def _ack_candidates(text):
+    """Extract exact user answers without treating prompt/options metadata as consent."""
+    out = [text or ""]
+    try:
+        value = json.loads(text)
+        answer_keys = {
+            "answer", "answers", "response", "responses", "selected",
+            "selection", "selectedoption", "selectedoptions", "result",
+        }
+
+        def walk(v, trusted=False):
+            if isinstance(v, str) and trusted:
+                out.append(v)
+            elif isinstance(v, dict):
+                for key, item in v.items():
+                    normalized_key = re.sub(r"[^a-z]", "", str(key).lower())
+                    walk(item, trusted or normalized_key in answer_keys)
+            elif isinstance(v, list):
+                for item in v:
+                    walk(item, trusted)
+
+        if isinstance(value, str):
+            out.append(value)
+        elif isinstance(value, list):
+            walk(value, trusted=True)
+        else:
+            walk(value)
+    except Exception:
+        pass
+    return [re.sub(r"\s+", "", v) for v in out if re.sub(r"\s+", "", v)]
+
+
+def _ack_verified(st, ack, exact=True):
     """ack 必须来自当前步骤之后的真实用户输入；旧步骤的“可以”不能循环使用。
 
     如果宿主拿不到 AskUserQuestion 的应答正文，用户再发一条普通消息即可恢复；不允许静默降级为
@@ -1210,27 +1242,7 @@ def _ack_verified(st, ack, exact=False):
     current_msgs = [m for m in msgs
                     if m.get("at", "") >= entered and (not m.get("step") or m.get("step") == sid)]
 
-    def candidates(text):
-        """AskUserQuestion 在不同宿主里可能存成 JSON；精确确认应匹配其中一个真实字符串值。"""
-        out = [text or ""]
-        try:
-            value = json.loads(text)
-
-            def walk(v):
-                if isinstance(v, str):
-                    out.append(v)
-                elif isinstance(v, dict):
-                    for item in v.values():
-                        walk(item)
-                elif isinstance(v, list):
-                    for item in v:
-                        walk(item)
-            walk(value)
-        except Exception:
-            pass
-        return [nt(v) for v in out if nt(v)]
-
-    actual = [v for m in current_msgs for v in candidates(m.get("text", ""))]
+    actual = [v for m in current_msgs for v in _ack_candidates(m.get("text", ""))]
     matched = any((na == v if exact else na in v) for v in actual) if na else False
     if matched:
         _ack_failure(st, success=True)
@@ -1681,10 +1693,8 @@ def _action_scope_ack_verified(action, ack):
     for message in reversed(action.get("user_messages", []) or []):
         if float(message.get("epoch", 0) or 0) + 0.001 < proposed:
             continue
-        text = re.sub(r"\s+", "", str(message.get("text", "")))
-        if (ACTION_SCOPE_ACK in text
-                and "需要调整范围" not in text
-                and "不确认以上范围" not in text):
+        candidates = _ack_candidates(str(message.get("text", "")))
+        if re.sub(r"\s+", "", ACTION_SCOPE_ACK) in candidates:
             return True, ""
     return False, (
         "没有捕获到范围展示后的用户确认。请使用 AskUserQuestion 让用户选择「确认以上范围」；"
@@ -2269,7 +2279,7 @@ def advance(flow, st, sid, step, tag, note=""):
     if sid == "branch_create" and st.get("choices", {}).get("workflow") == "review":
         base = sh("git rev-parse --verify HEAD")
         if not base:
-            die("无法记录评审返工基点 HEAD,拒绝进入返工流程。", 2)
+            die("无法记录评审意见处理基点 HEAD,拒绝进入本轮修改。", 2)
         st["review_base_head"] = base
     # 兼容 2.0.2 已经停在旧 rf_verify 的在途单：按 history 自动恢复返工前 HEAD。
     if sid == "rf_verify" and st.get("choices", {}).get("workflow") == "review":
@@ -2819,7 +2829,7 @@ def cmd_agent_task(flow, st, args):
                   "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
     elif kind == "UT":
         lines += ["职责:只对任务卡范围补/改测试；必须按 UT生成方式调用对应 Skill；参考 UT运行命令提示真实执行测试。该项写随生成方式自带时，由 UT Skill 按项目决定实际命令，并在 EXECUTED_UT 如实报告。",
-                  "评审返工不修改规格，测试依据使用上面列出的既有需求/规格。"]
+                  "评审意见处理不修改规格，测试依据使用上面列出的既有需求/规格。"]
     else:
         lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 build-fix Skill，禁止猜命令。"]
     body = "\n".join(lines).rstrip() + "\n"
@@ -3584,7 +3594,7 @@ def cmd_moonlight(flow, st, args):
         save_state(st)
         _write_moonlight_report(flow, st)
         print("[mae-flow] 月光宝盒晨间检查已结束。"
-              + ("评审返工流程已完成。" if target == "end" else
+              + ("评审意见处理已完成。" if target == "end" else
                  "已恢复普通模式并进入规格定稿；定稿提交后还要再次 push。"))
         print_current(flow, st)
         return

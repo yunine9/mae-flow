@@ -58,7 +58,7 @@
       }
     },
     "rf_triage": {
-      "title": "评审返工 — 意见裁决",
+      "title": "处理评审意见 — 意见裁决",
       "user_ack": true,
       "evidence": [
         {
@@ -89,7 +89,7 @@
       "next": "rf_fix"
     },
     "rf_fix": {
-      "title": "评审返工 — 修复",
+      "title": "处理评审意见 — 修改代码",
       "allow_source_edit": true,
       "user_ack": true,
       "evidence": [
@@ -100,7 +100,7 @@
       "next": "rf_compile"
     },
     "rf_compile": {
-      "title": "评审返工 — 编译验证",
+      "title": "处理评审意见 — 编译验证",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -114,7 +114,7 @@
       "next": "rf_codecheck"
     },
     "rf_codecheck": {
-      "title": "评审返工 — 规范检查",
+      "title": "处理评审意见 — 规范检查",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -124,7 +124,7 @@
       "next": "rf_ut"
     },
     "rf_ut": {
-      "title": "评审返工 — 增量单元测试",
+      "title": "处理评审意见 — 增量单元测试",
       "allow_source_edit": true,
       "tests_only": true,
       "source_change_recheck": "rf_compile",
@@ -140,7 +140,7 @@
       "next": "push"
     },
     "rf_verify": {
-      "title": "评审返工 — 旧版验证迁移",
+      "title": "处理评审意见 — 旧版验证迁移",
       "next": "rf_compile"
     },
     "grill_ask": {
@@ -298,7 +298,7 @@
       "next": "build"
     },
     "hf_open": {
-      "title": "缺陷快修 — 轻量提案",
+      "title": "已定位问题修复 — 确认修改范围",
       "user_ack": true,
       "evidence": [
         {
@@ -314,7 +314,7 @@
       ]
     },
     "tw_open": {
-      "title": "小改快过 — 轻量提案",
+      "title": "局部修改 — 确认修改范围",
       "user_ack": true,
       "evidence": [
         {
@@ -330,7 +330,7 @@
       ]
     },
     "tw_change": {
-      "title": "小改快过 — 直接改动",
+      "title": "局部修改 — 修改代码",
       "allow_source_edit": true,
       "evidence": [
         {
@@ -571,10 +571,10 @@
       ]
     },
     {
-      "name": "Comet 项目已 init 且已迁移(.cac/skills 就位)",
+      "name": "Comet 项目已 init 且已迁移(.cac/skills/comet 就位)",
       "type": "path_any",
       "value": [
-        ".cac/skills"
+        ".cac/skills/comet"
       ]
     },
     {
@@ -589,6 +589,12 @@
       "type": "file_contains",
       "value": ".comet/config.yaml",
       "contains": "auto_transition: false"
+    },
+    {
+      "name": "review_mode 已设为 standard(.comet/config.yaml)",
+      "type": "file_contains",
+      "value": ".comet/config.yaml",
+      "contains": "review_mode: standard"
     },
     {
       "name": "Git Bash(comet 全部 .sh 脚本的运行依赖)",

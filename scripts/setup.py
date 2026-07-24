@@ -28,8 +28,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE_PATH = os.path.join(HERE, "..", "skills", "mae-flow", "assets", "env-profile.json")
 BASELINE_PATH = os.path.join(HERE, "..", "skills", "mae-flow", "assets", "settings-baseline.json")
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-setup.log")
+CONFIG_BACKUP = os.path.join(
+    tempfile.gettempdir(),
+    "mae-flow-setup-config-before-%s-%s.json" %
+    (time.strftime("%Y%m%d-%H%M%S"), os.getpid()))
 DRY = False
-RESULTS = []   # (状态, 步骤名, 详情) 状态: OK|FIXED|MANUAL|FAIL
+RESULTS = []   # (状态, 步骤名, 详情) 状态: OK|FIXED|PLAN|MANUAL|FAIL
+CONFIG_BEFORE = {}
 
 
 def log(msg):
@@ -42,9 +47,9 @@ def log(msg):
         pass
 
 
-def sh(cmd, timeout=300):
-    """执行并回收全部输出(日志留痕)。encoding 显式 utf-8:中文 Windows 军规。"""
-    if DRY:
+def sh(cmd, timeout=300, mutate=False):
+    """执行并回收全部输出；dry-run 仍做只读探测，只跳过明确标记的修改命令。"""
+    if DRY and mutate:
         log("  [dry-run] " + cmd)
         return 0, ""
     try:
@@ -64,8 +69,47 @@ def sh(cmd, timeout=300):
 
 def mark(status, name, detail=""):
     RESULTS.append((status, name, detail))
-    icon = {"OK": "✅", "FIXED": "✅(已配置)", "MANUAL": "⚠人工", "FAIL": "❌"}[status]
+    icon = {
+        "OK": "✅",
+        "FIXED": "✅(已配置)",
+        "PLAN": "📝(计划修改)",
+        "MANUAL": "⚠人工",
+        "FAIL": "❌",
+    }[status]
     log("%s %s%s" % (icon, name, ("" if not detail else " — " + detail.splitlines()[0][:120])))
+
+
+def remember_config(name, value):
+    """Persist pre-setup global config with owner-only permissions before mutation."""
+    if DRY or name in CONFIG_BEFORE:
+        return
+    CONFIG_BEFORE[name] = value
+    fd = os.open(CONFIG_BACKUP, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+        json.dump(CONFIG_BEFORE, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
+
+
+def ensure_cli_config(name, get_cmd, set_cmd, expected):
+    """Reconcile one npm/git config value instead of trusting one sentinel key."""
+    rc, out = sh(get_cmd, timeout=30)
+    current = out.strip() if rc == 0 else ""
+
+    def normalized(value):
+        return str(value).strip().rstrip("/").lower()
+
+    if normalized(current) == normalized(expected):
+        return False, ""
+    remember_config(name, current)
+    rc, out = sh(set_cmd, timeout=30, mutate=True)
+    if rc != 0:
+        return False, (out.strip().splitlines()[-1][:160] if out.strip() else "设置失败")
+    if not DRY:
+        verify_rc, verify_out = sh(get_cmd, timeout=30)
+        if verify_rc != 0 or normalized(verify_out) != normalized(expected):
+            return False, "设置命令返回成功，但复验值仍为 %s" % (
+                verify_out.strip() or "(空)")
+    return True, ""
 
 
 def need_reload(reason):
@@ -90,15 +134,16 @@ def npm_install(name, spec, offline_dir):
             mark("FAIL", name, "离线目录无 %s 的 .tgz 包: %s" % (name, offline_dir))
             return
         spec = '"%s"' % cand[0]
-    rc, out = sh("npm install -g %s" % spec, timeout=600)
+    rc, out = sh("npm install -g %s" % spec, timeout=600, mutate=True)
     if rc != 0:
-        sh("npm cache clean --force", timeout=120)
-        rc, out = sh("npm install -g %s" % spec, timeout=600)
+        sh("npm cache clean --force", timeout=120, mutate=True)
+        rc, out = sh("npm install -g %s" % spec, timeout=600, mutate=True)
     if rc != 0 and re.search(r"EPERM|EACCES", out) and os.environ.get("APPDATA"):
-        sh('npm config set prefix "%s"' % os.path.join(os.environ["APPDATA"], "npm"))
-        rc, out = sh("npm install -g %s" % spec, timeout=600)
+        sh('npm config set prefix "%s"' % os.path.join(os.environ["APPDATA"], "npm"),
+           mutate=True)
+        rc, out = sh("npm install -g %s" % spec, timeout=600, mutate=True)
     if rc == 0:
-        mark("FIXED", name)
+        mark("PLAN" if DRY else "FIXED", name)
     else:
         hint = "代理要求认证(407):需要提供代理凭据,交用户/诊断 agent" if "407" in out else \
                "网络/镜像不通?核对 env-profile.json 的 registry 与 proxy" if re.search(r"ETIMEDOUT|ENOTFOUND|ECONNREFUSED|network", out, re.I) else \
@@ -106,15 +151,28 @@ def npm_install(name, spec, offline_dir):
         mark("FAIL", name, hint + " | " + out.strip().splitlines()[-1][:160] if out.strip() else hint)
 
 
-def ensure_line_in_yaml(path, key, value):
-    """确保 yaml 有 key: value(缺则追加,不覆盖其他键)。"""
+def ensure_yaml_value(path, key, value):
+    """Ensure one top-level scalar has the requested value and remove duplicates."""
     txt = open(path, encoding="utf-8", errors="replace").read() if os.path.exists(path) else ""
-    if re.search(r"^\s*%s\s*:" % re.escape(key), txt, re.M):
+    newline = "\r\n" if "\r\n" in txt else "\n"
+    lines = txt.splitlines()
+    pattern = re.compile(r"^%s\s*:" % re.escape(key))
+    matches = [i for i, line in enumerate(lines) if pattern.match(line)]
+    wanted = "%s: %s" % (key, value)
+    if len(matches) == 1 and lines[matches[0]].strip() == wanted:
         return False
+    if matches:
+        first = matches[0]
+        lines[first] = wanted
+        lines = [line for i, line in enumerate(lines)
+                 if i == first or i not in set(matches[1:])]
+    else:
+        lines.append(wanted)
     if not DRY:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(("\n" if txt and not txt.endswith("\n") else "") + "%s: %s\n" % (key, value))
+        updated = newline.join(lines) + newline
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(updated)
     return True
 
 
@@ -148,7 +206,8 @@ def merge_settings(scripts_dir):
         tmp = p + ".tmp"
         json.dump(s, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         os.replace(tmp, p)
-    mark("FIXED" if changed else "OK", "settings(statusline+权限基线)", "重启会话生效" if changed else "")
+    mark(("PLAN" if DRY else "FIXED") if changed else "OK",
+         "settings(statusline+权限基线)", "重启会话生效" if changed else "")
 
 
 def main():
@@ -179,33 +238,56 @@ def main():
     if base_missing and not DRY:
         return finish()
 
-    # ---- npm / git 网络配置(幂等:已配对则不动) ----
-    rc, out = sh("npm config get registry", timeout=30)
-    if prof["npm_registry"].rstrip("/") in out:
-        mark("OK", "npm 镜像源")
-    else:
-        for c in ("npm config set registry " + prof["npm_registry"],
-                  "npm config set proxy " + prof["proxy"],
-                  "npm config set https-proxy " + prof["proxy"],
-                  "npm config set strict-ssl false"):
-            sh(c, timeout=30)
-        mark("FIXED", "npm 镜像源+代理")
-    rc, out = sh("git config --global http.proxy", timeout=20)
-    if out.strip():
-        mark("OK", "git 代理")
-    else:
-        for c in ("git config --global http.proxy " + prof["proxy"],
-                  "git config --global https.proxy " + prof["proxy"],
-                  "git config --global http.sslVerify false"):
-            sh(c, timeout=20)
-        mark("FIXED", "git 代理")
+    # ---- npm / git 网络配置(逐项收敛；修改前备份，不能只看 registry/http.proxy 一个哨兵) ----
+    npm_items = [
+        ("npm.registry", "npm config get registry",
+         "npm config set registry " + prof["npm_registry"], prof["npm_registry"]),
+        ("npm.proxy", "npm config get proxy",
+         "npm config set proxy " + prof["proxy"], prof["proxy"]),
+        ("npm.https-proxy", "npm config get https-proxy",
+         "npm config set https-proxy " + prof["proxy"], prof["proxy"]),
+        ("npm.strict-ssl", "npm config get strict-ssl",
+         "npm config set strict-ssl " + str(prof.get("npm_strict_ssl", False)).lower(),
+         str(prof.get("npm_strict_ssl", False)).lower()),
+    ]
+    git_items = [
+        ("git.http.proxy", "git config --global --get http.proxy",
+         "git config --global http.proxy " + prof["proxy"], prof["proxy"]),
+        ("git.https.proxy", "git config --global --get https.proxy",
+         "git config --global https.proxy " + prof["proxy"], prof["proxy"]),
+        ("git.http.sslVerify", "git config --global --get http.sslVerify",
+         "git config --global http.sslVerify "
+         + str(prof.get("git_ssl_verify", False)).lower(),
+         str(prof.get("git_ssl_verify", False)).lower()),
+    ]
+    for label, items in (("npm 镜像源+代理", npm_items), ("git 代理", git_items)):
+        changed, errors = False, []
+        for name, get_cmd, set_cmd, expected in items:
+            item_changed, err = ensure_cli_config(name, get_cmd, set_cmd, expected)
+            changed = changed or item_changed
+            if err:
+                errors.append(name + ":" + err)
+        detail = ("修改前配置备份: " + CONFIG_BACKUP) if changed and not DRY else ""
+        mark("FAIL" if errors else (("PLAN" if DRY else "FIXED") if changed else "OK"),
+             label, "；".join(errors) if errors else detail)
 
     # ---- scoped registries(私有 scope,如 @baize 的 codecheckcli 走 centralrepo,与主镜像不同) ----
     scoped = prof.get("npm_scoped_registries", {})
     if scoped:
+        scoped_changed, scoped_errors = False, []
         for scope, reg in scoped.items():
-            sh("npm config set %s:registry=%s" % (scope, reg), timeout=30)
-        mark("FIXED", "npm scoped registries", "、".join(scoped))
+            changed, err = ensure_cli_config(
+                "npm.%s:registry" % scope,
+                "npm config get %s:registry" % scope,
+                "npm config set %s:registry=%s" % (scope, reg),
+                reg)
+            scoped_changed = scoped_changed or changed
+            if err:
+                scoped_errors.append(scope + ":" + err)
+        mark("FAIL" if scoped_errors else (
+            ("PLAN" if DRY else "FIXED") if scoped_changed else "OK"),
+             "npm scoped registries",
+             "；".join(scoped_errors) if scoped_errors else "、".join(scoped))
 
     # ---- CLI 安装(幂等:有则跳过) ----
     # 已装判据:openspec/comet 用 --version 退出码;codecheck 别赌退出码(help/version 常非零退出),
@@ -219,6 +301,11 @@ def main():
             mark("OK", name)
         else:
             npm_install(key, prof["npm_packages"][key], offline)
+    if not DRY:
+        _, installed_versions = sh(
+            "npm list -g --depth=0 @fission-ai/openspec @rpamis/comet @baize/codecheckcli",
+            timeout=60)
+        log("已安装 npm 工具版本:\n" + (installed_versions.strip() or "(无法读取)"))
 
     # ---- codeagent 插件(幂等:装没装只认 plugin list 的复验结果) ----
     rc, listed = sh(prof["plugin_cli"] + " plugin list", timeout=60)
@@ -227,7 +314,10 @@ def main():
             mark("OK", "插件 " + pl["name"])
             continue
         for c in pl["cmds"]:
-            sh(c, timeout=600)   # 单条命令报错不当致命(marketplace 重复添加会报错),成败以复验为准
+            sh(c, timeout=600, mutate=True)  # 单条命令报错不当致命,成败以复验为准
+        if DRY:
+            mark("PLAN", "插件 " + pl["name"], "实际安装后需重启会话")
+            continue
         rc, listed2 = sh(prof["plugin_cli"] + " plugin list", timeout=60)
         if pl["name"].lower() in listed2.lower():
             mark("FIXED", "插件 " + pl["name"], "需重启会话生效")
@@ -239,7 +329,12 @@ def main():
 
     # ---- 项目级(仅在项目根执行时;顺序:先验 init,未初始化则全部跳过——没地基不装修) ----
     if os.path.isdir(".git"):
-        inited = os.path.isdir(os.path.join(".cac", "skills")) or os.path.isdir(os.path.join(".claude", "skills"))
+        comet_skills = [
+            os.path.join(base, "skills", "comet")
+            for base in (".cac", ".claude")
+        ]
+        inited = (any(os.path.isdir(path) for path in comet_skills)
+                  or any(os.path.isfile(path) for path in comet_guard_paths(os.getcwd())))
         if not inited:
             mark("MANUAL", "comet 项目初始化",
                  "交互式命令必须人工执行(自动化会初始化全部 agent 平台,已被禁止)。三要素:"
@@ -259,9 +354,12 @@ def main():
                 else:
                     mark("FIXED" if patched else "OK", "直接开发逃生通道",
                          "已让阶段门禁识别 mae-flow 退出标记" if patched else "")
-            ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "auto_transition", "false")
-            ch = ensure_line_in_yaml(os.path.join(".comet", "config.yaml"), "review_mode", "standard") or ch
-            mark("FIXED" if ch else "OK", ".comet/config.yaml(auto_transition+review_mode)")
+            ch = ensure_yaml_value(
+                os.path.join(".comet", "config.yaml"), "auto_transition", "false")
+            ch = ensure_yaml_value(
+                os.path.join(".comet", "config.yaml"), "review_mode", "standard") or ch
+            mark(("PLAN" if DRY else "FIXED") if ch else "OK",
+                 ".comet/config.yaml(auto_transition+review_mode)")
             if os.path.isdir(".claude") and not os.path.isdir(".cac"):
                 if not DRY:
                     os.rename(".claude", ".cac")
@@ -278,11 +376,13 @@ def main():
 
 
 def finish():
+    plans = [r for r in RESULTS if r[0] == "PLAN"]
     manual = [r for r in RESULTS if r[0] == "MANUAL"]
     fail = [r for r in RESULTS if r[0] == "FAIL"]
     log("──── 汇总 ────")
-    log("✅ %d 项就绪/已配置;⚠人工 %d 项;❌ %d 项。日志: %s" % (
-        len(RESULTS) - len(manual) - len(fail), len(manual), len(fail), LOG))
+    log("✅ %d 项就绪/已配置;📝计划修改 %d 项;⚠人工 %d 项;❌ %d 项。日志: %s" % (
+        len(RESULTS) - len(plans) - len(manual) - len(fail),
+        len(plans), len(manual), len(fail), LOG))
     if manual:
         log("⚠人工项(处理完重跑本脚本):")
         for _, n, d in manual:

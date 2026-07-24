@@ -2,14 +2,16 @@
   "说明": "公司环境常量(单一事实源:setup.py 与 env-setup-agent 都读这里;换代理/镜像/命令名只改本文件)",
   "npm_registry": "http://mirrors.tools.huawei.com/npm/",
   "proxy": "http://proxysg.huawei.com:8080",
+  "npm_strict_ssl": false,
+  "git_ssl_verify": false,
   "node_min": "20.19.0",
   "plugin_cli": "codeagent",
   "npm_scoped_registries": {
     "@baize": "https://cmc.centralrepo.rnd.huawei.com/artifactory/api/npm/product_npm/"
   },
   "npm_packages": {
-    "openspec": "@fission-ai/openspec@latest",
-    "comet": "@rpamis/comet@0.3.x",
+    "openspec": "@fission-ai/openspec@1.6.0",
+    "comet": "@rpamis/comet@0.3.9",
     "codecheck": "@baize/codecheckcli"
   },
   "plugins": [

@@ -23,7 +23,7 @@
                                          无人值守开发、带遗留推送与晨间修复闭环
   mae-flow.py messages                    查看当前步骤捕获的用户消息 ID/编码
   mae-flow.py requirement-record ...      将用户原话/已有文本规范化为 UTF-8 需求入口
-  mae-flow.py action start|status|critic|finish|cancel
+  mae-flow.py action start|confirm-scope|status|critic|finish|cancel
                                          独立运行 UT/CodeCheck/Grill，不启动完整流程
   mae-flow.py exit [--reason 文本] [--ack 用户原话]
                                          保留现场并退出流程,之后按普通开发处理
@@ -82,6 +82,7 @@ MOONLIGHT_INTENT_PATH = STATE_PATH + ".moonlight-intent"
 EXIT_INTENT_PATH = STATE_PATH + ".exit-intent"
 FAILURE_PATH = STATE_PATH + ".failures"
 ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
+ACTION_SCOPE_ACK = "确认以上范围"
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
@@ -1656,6 +1657,57 @@ def _action_files(raw, st=None):
     return out
 
 
+def _action_target_files(values, kind, config, flow):
+    """Turn explicit/inferred paths into the frozen scope shown to the user."""
+    source_files = [p for p in values if _is_source_path(p, {}, flow)]
+    if kind == "codecheck":
+        return [p for p in source_files
+                if not _is_test_file(p, {"config": config})]
+    if kind == "ut":
+        business = [p for p in source_files
+                    if not _is_test_file(p, {"config": config})]
+        if not business:
+            die("独立 UT 范围至少要包含一个被测业务文件；"
+                "空范围或只有测试文件不能启动。请先定位被测源码，再用 --files 明确传入。", 2)
+        return source_files
+    return values
+
+
+def _action_scope_ack_verified(action, ack):
+    """Scope approval must come from a user event after the proposal was saved."""
+    if re.sub(r"\s+", "", ack or "") != re.sub(r"\s+", "", ACTION_SCOPE_ACK):
+        return False, "确认命令必须原样使用用户选项「%s」" % ACTION_SCOPE_ACK
+    proposed = float(action.get("scope_proposed_epoch", 0) or 0)
+    for message in reversed(action.get("user_messages", []) or []):
+        if float(message.get("epoch", 0) or 0) + 0.001 < proposed:
+            continue
+        text = re.sub(r"\s+", "", str(message.get("text", "")))
+        if (ACTION_SCOPE_ACK in text
+                and "需要调整范围" not in text
+                and "不确认以上范围" not in text):
+            return True, ""
+    return False, (
+        "没有捕获到范围展示后的用户确认。请使用 AskUserQuestion 让用户选择「确认以上范围」；"
+        "工具应答未被宿主回传时，让用户再发送一条纯文本“确认以上范围”，不要由 Agent 代答。")
+
+
+def _print_action_scope(action, inferred):
+    print("[mae-flow] 独立 %s 待确认执行范围（尚未运行工具、尚未派子 Agent）：" %
+          action.get("kind", "").upper())
+    print("范围来源：" + ("当前工作区改动自动推导" if inferred else "用户点名/Agent 定位后传入"))
+    for index, path in enumerate(action.get("files", []), 1):
+        suffix = "（测试文件）" if _is_test_file(
+            path, {"config": action.get("config", {})}) else "（被测/业务文件）"
+        print("  %d. %s%s" % (index, path, suffix))
+    print("现在必须用 AskUserQuestion 让用户二选一：")
+    print("  - 确认以上范围")
+    print("  - 需要调整范围")
+    print("用户确认后执行：")
+    print('python "%s" action confirm-scope --ack "%s"' %
+          (os.path.abspath(__file__), ACTION_SCOPE_ACK))
+    print("若用户要求调整，执行 action cancel 后按新范围重新 action start；禁止自行扩大文件清单。")
+
+
 def _action_request(action, request="", source=""):
     work = _action_dir(action)
     os.makedirs(work, exist_ok=True)
@@ -1784,57 +1836,43 @@ def cmd_action_start(flow, st, args):
             "如果只想看报告，使用 --check-only。", 2)
     if kind == "grill" and not (args.request or args.source):
         die("独立质询必须提供 --request 用户需求原话或 --source 需求文本路径。", 2)
+    raw_files = _action_files(args.files)
+    inferred_scope = not bool(args.files)
+    if kind in ("ut", "codecheck"):
+        scoped_files = _action_target_files(raw_files, kind, config, flow)
+        if not scoped_files:
+            label = "CodeCheck" if kind == "codecheck" else "UT"
+            die("独立 %s 没有可执行的业务代码范围。请先定位文件，再用 --files 明确指定；"
+                "不会自动扩大到全仓。" % label, 2)
+    else:
+        scoped_files = raw_files
     _git_local_runtime_ignore()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     # 同一秒内取消后重开同类任务也必须使用全新目录，避免旧任务卡/报告混入新现场。
     nonce = hashlib.sha256(("%s:%s" % (time.time_ns(), os.getpid())).encode()).hexdigest()[:8]
     action_id = f"{stamp}-{nonce}-{kind}"
     action = {
-        "version": 1, "id": action_id, "kind": kind, "status": "active",
+        "version": 1, "id": action_id, "kind": kind,
+        "status": ("awaiting_scope_confirmation"
+                   if kind in ("ut", "codecheck") else "active"),
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "expires_epoch": time.time() + 24 * 3600,
         "work_dir": os.path.abspath(os.path.join(".mae-flow-work", "standalone", action_id)),
         "request": (args.request or "").strip(), "config": config,
+        "check_only": bool(args.check_only),
         "base_head": sh("git rev-parse --verify HEAD"),
         "commit_policy": "forbid", "tokens": {}, "rejections": {}, "quality": {},
     }
     action["sources"] = _action_request(action, args.request or "", args.source or "")
-    action["files"] = _action_files(args.files)
-    if kind == "codecheck":
-        files = [p for p in action["files"]
-                 if _is_source_path(p, {}, flow) and not _is_test_file(p, {"config": config})]
-        action["files"] = files
-        if not files:
-            _archive_action(action, "failed", "未找到需要检查的业务代码文件")
-            die("独立 CodeCheck 没有找到业务代码文件。请用 --files 明确指定；UT/测试文件不会参与检查。", 2)
-        result, err = _run_codecheck(files)
-        if err:
-            work = _archive_action(action, "failed", err)
-            die(err + "。原始诊断已保留在 " + norm(work), 2)
-        scan = {
-            "step": "standalone_codecheck", "head": action["base_head"],
-            "count": result["total"], "files": files, "pairs": result["pairs"],
-            "commands": result["commands"], "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        action["quality"]["codecheck_scan"] = scan
+    action["files"] = scoped_files
+    if kind in ("ut", "codecheck"):
+        action["scope_source"] = "dirty-worktree" if inferred_scope else "explicit"
+        action["scope_proposed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        action["scope_proposed_epoch"] = time.time()
         _save_action(action)
-        if result["total"] == 0 or args.check_only:
-            report = os.path.join(_action_dir(action), "codecheck-report.md")
-            with open(report, "w", encoding="utf-8") as f:
-                f.write("# 独立 CodeCheck 结果\n\n检查文件：%d\n\n告警：%d\n\n命令：\n%s\n"
-                        % (len(files), result["total"],
-                           "\n".join("- `" + x + "`" for x in result["commands"])))
-            outcome = "clean" if result["total"] == 0 else "check-only"
-            work = _archive_action(action, outcome, "机器首检完成")
-            print("[mae-flow] 独立 CodeCheck 已完成：%d 条告警。报告：%s"
-                  % (result["total"], norm(report)))
-            print("未启动完整流程，也没有修改或提交代码。")
-            return
-        print("[mae-flow] 首检发现 %d 条告警，开始专项修复。" % result["total"])
-        return _action_task_card(action, "codecheck")
+        _print_action_scope(action, inferred_scope)
+        return
     _save_action(action)
-    if kind == "ut":
-        return _action_task_card(action, "ut")
     work = _action_dir(action)
     prep = os.path.join(work, "grill-prep.md")
     clarification = os.path.join(work, "clarifications.md")
@@ -1846,6 +1884,55 @@ def cmd_action_start(flow, st, args):
           "答案增量写入：%s" % clarification)
     print("备课完成后执行 action critic --stage prep --document \"%s\" 做第一次对抗检查。"
           % prep)
+
+
+def cmd_action_confirm_scope(flow, args):
+    action = _load_action()
+    if not action or action.get("kind") not in ("ut", "codecheck"):
+        die("当前没有等待范围确认的独立 UT/CodeCheck 任务。", 2)
+    if action.get("status") != "awaiting_scope_confirmation":
+        die("当前独立任务已经确认过范围，不能重复确认或改写范围。", 2)
+    ok, why = _action_scope_ack_verified(action, args.ack)
+    if not ok:
+        die("独立任务范围确认验真失败：" + why, 2)
+    # 确认与执行可能跨会话；再次验证冻结路径仍存在且仍属于允许类型。
+    files = _action_files(action.get("files", []))
+    files = _action_target_files(
+        files, action["kind"], action.get("config", {}), flow)
+    if files != action.get("files", []):
+        die("确认后的文件范围与展示内容不一致，已拒绝执行；取消后重新发起。", 2)
+    action["status"] = "active"
+    action["scope_confirmed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    action["scope_confirmed_ack"] = args.ack
+    _save_action(action)
+    if action["kind"] == "codecheck":
+        result, err = _run_codecheck(files)
+        if err:
+            work = _archive_action(action, "failed", err)
+            die(err + "。原始诊断已保留在 " + norm(work), 2)
+        scan = {
+            "step": "standalone_codecheck", "head": action["base_head"],
+            "count": result["total"], "files": files, "pairs": result["pairs"],
+            "commands": result["commands"], "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        action["quality"]["codecheck_scan"] = scan
+        _save_action(action)
+        if result["total"] == 0 or action.get("check_only"):
+            report = os.path.join(_action_dir(action), "codecheck-report.md")
+            atomic_write_text(
+                report,
+                "# 独立 CodeCheck 结果\n\n检查文件：%d\n\n告警：%d\n\n命令：\n%s\n"
+                % (len(files), result["total"],
+                   "\n".join("- `" + x + "`" for x in result["commands"])))
+            outcome = "clean" if result["total"] == 0 else "check-only"
+            work = _archive_action(action, outcome, "机器首检完成")
+            print("[mae-flow] 独立 CodeCheck 已完成：%d 条告警。报告：%s"
+                  % (result["total"], norm(report)))
+            print("未启动完整流程，也没有修改或提交代码。")
+            return
+        print("[mae-flow] 首检发现 %d 条告警，开始专项修复。" % result["total"])
+        return _action_task_card(action, "codecheck")
+    return _action_task_card(action, "ut")
 
 
 def cmd_action_critic(args):
@@ -3904,6 +3991,8 @@ def main():
     if args.cmd == "action":
         if args.action == "start":
             return cmd_action_start(flow, st, args)
+        if args.action == "confirm-scope":
+            return cmd_action_confirm_scope(flow, args)
         if args.action == "status":
             return cmd_action_status()
         if args.action == "critic":

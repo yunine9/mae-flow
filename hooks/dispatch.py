@@ -269,6 +269,10 @@ def ev_inject(d, session_start=False):
             print("[mae-flow] 当前有独立 %s 任务 %s；它不启用完整流程，也不限制普通改码。"
                   "继续请执行 action status，完成后 action finish，随时可 action cancel。"
                   % (str(action.get("kind", "")).upper(), action.get("id", "?")))
+            if action.get("status") == "awaiting_scope_confirmation":
+                print("[mae-flow] 当前任务尚未执行，正在等待用户确认已展示的文件范围。"
+                      "用户选择「确认以上范围」后执行 action confirm-scope "
+                      "--ack \"确认以上范围\"；用户要求调整则 action cancel 后按新范围重开。")
         elif session_start and (os.path.isdir("openspec") or os.path.isdir(".comet")):
             # 交付项目 + 无在途单:给新用户一行发现入口(仅会话启动时,不打扰后续消息)
             print(f"[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说「交付 <单号> + SE 文档」"
@@ -514,20 +518,26 @@ def _text_of(v):
 
 def _capture_usermsg(text):
     """harness 捕获的用户真实输入(UserPromptSubmit 的 prompt / AskUserQuestion 的应答),
-    供 done --ack 三级验真。仅在有在途流程时记录(不污染未用 mae-flow 的仓库);
-    保留最近 10 条、单条截断 2000 字;写失败留日志不阻塞。
-    存储文件在 gate 黑名单前缀内(.mae-flow.json.usermsg),模型不可改写。"""
+    供完整流程 ack 与独立任务范围确认验真。没有流程/独立任务时不落盘；
+    保留最近 10 条、单条截断 2000 字，写失败留日志不阻塞。"""
     try:
         text = (text or "").strip()
-        if not text or not os.path.exists(STATE):
+        if not text:
             return
-        p = STATE + ".usermsg"
         step = ""
-        try:
-            raw, err = safe_read_json(STATE)
-            step = normalize_document(raw, "flow").get("current", "") if not err and raw else ""
-        except Exception:
-            pass
+        action = None
+        if os.path.exists(STATE):
+            try:
+                raw, err = safe_read_json(STATE)
+                step = normalize_document(
+                    raw, "flow").get("current", "") if not err and raw else ""
+            except Exception:
+                pass
+        else:
+            action = _load_action()
+            if not action:
+                return
+            step = "standalone_" + action.get("kind", "")
         captured = text[:2000]
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         msg_id = hashlib.sha256(
@@ -535,6 +545,7 @@ def _capture_usermsg(text):
         row = {
             "id": msg_id,
             "at": stamp,
+            "epoch": time.time(),
             "step": step,
             "text": captured,
             "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
@@ -547,7 +558,16 @@ def _capture_usermsg(text):
             msgs.append(row)
             return msgs[-10:]
 
-        update_json(p, append_message, default=[], recover_corrupt=True)
+        if action:
+            def append_action(current):
+                current["user_messages"] = append_message(
+                    current.get("user_messages", []))
+                return current
+            update_versioned_json(ACTION_STATE, "action", append_action)
+        else:
+            update_json(
+                STATE + ".usermsg", append_message, default=[],
+                recover_corrupt=True)
     except Exception as e:
         _log("usermsg EXC: %s" % e)
 

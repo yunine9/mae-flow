@@ -30,8 +30,11 @@
   **轮次预算校准**(2026-07-20 实锤:UT agent 25 轮烧完仍在读文件,已调 UT=200/compile=100/codecheck=100):
   观察调后 UT agent 实际用多少轮收尾(尸检/日志 query_depth),200 不够或严重富余都回报,下版校准。
 - [ ] **0.8 三个独立入口**：在未 init 的普通仓分别试 `/mae-flow ut`、`/mae-flow codecheck`、
-  `/mae-flow grill`。均不得出现 `.mae-flow.json`；UT 必须真实运行且不自动 commit，CodeCheck 0 告警不得派
-  修复 Agent，Grill 完成 prep/final 两次 critic 后只留下澄清文档。任务进行中另让 AI 修改普通源码必须放行；
+  `/mae-flow grill`。均不得出现 `.mae-flow.json`；UT/CodeCheck 启动后必须先展示实际文件清单并等待二次
+  确认，确认前不能运行工具或派 Agent；空范围、UT 只有测试文件、CodeCheck 只有测试文件都必须拒绝。
+  用户选“需要调整范围”后应取消重开，不能由 Agent 原地扩张。确认后 UT 必须真实运行且不自动 commit，
+  CodeCheck 0 告警不得派修复 Agent，Grill 完成 prep/final 两次 critic 后只留下澄清文档。
+  任务进行中另让 AI 修改普通源码必须放行；
   `/mae-flow cancel` 后任务卡和报告保留、控制指针消失。再在有完整流程的仓调用任一入口，应提示先由用户
   `/mae-flow exit`，不得自行退出或叠加状态。
 - [ ] **0.6 六事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,

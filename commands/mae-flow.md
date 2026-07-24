@@ -32,17 +32,24 @@
      否则照常执行用户的直接改码/补 UT 请求，不得为了使用插件而 init。
    - **ut** — 只补并执行单元测试，**不 init 完整流程**。如果项目还有 `.mae-flow.json` 在途状态，
      先说明不能叠加两套控制状态，让用户发送 `/mae-flow exit` 后重试；禁止自行退出。
-     从命令剩余文字提取目标文件/功能和验收说明；路径明确时用重复的 `--files` 传入，完整用户描述用
+     从命令剩余文字提取目标文件/功能和验收说明；若用户只说了功能，先定向查找并定位至少一个被测
+     业务文件。用重复的 `--files` 明确传入业务文件（可同时带相关测试文件），完整用户描述用
      `--request` 原样传入。执行：
-     `mae-flow.py action start ut --request "<用户描述>" [--files "<路径>"]`
+     `mae-flow.py action start ut --request "<用户描述>" --files "<被测业务文件>"`
      脚本会从项目预设或上次现场继承 UT 生成/运行/编译方式；缺项时只问缺失配置，不启动环境流程、不猜命令。
-     按输出的唯一话术启动 `ut-generator-agent`，不得添加自编参数。Agent 收尾后执行 `action finish`。
+     `start` 只会冻结并展示文件清单，不会立即派 Agent。必须用 AskUserQuestion 让用户选择
+     「确认以上范围 / 需要调整范围」；确认后执行
+     `mae-flow.py action confirm-scope --ack "确认以上范围"`，调整则 `action cancel` 后按新清单重开。
+     只有确认成功后，才按输出的唯一话术启动 `ut-generator-agent`，不得添加自编参数。
+     Agent 收尾后执行 `action finish`。
      PASS 必须真实生成并运行测试；疑似源码缺陷先展示自查报告让用户裁决。独立模式默认不 commit、不 push。
    - **codecheck** — 只做代码规范检查和安全修复，**不 init 完整流程**。在途完整流程的处理同 ut。
      默认范围=当前工作区改动中的业务代码；用户点名文件时用 `--files`。执行：
      `mae-flow.py action start codecheck --request "<用户描述>" [--files "<路径>"]`
      只想看报告时增加 `--check-only`。修复模式缺编译方式时只问这一项。
-     脚本先真实 fullcheck：0 告警直接结束，不派 Agent；有告警才按输出任务卡启动
+     `start` 同样只展示过滤后的业务文件清单，用户二次确认后执行
+     `action confirm-scope --ack "确认以上范围"`；确认前禁止扫描，调整时取消后按新范围重开。
+     确认后脚本才真实 fullcheck：0 告警直接结束，不派 Agent；有告警才按输出任务卡启动
      `codecheck-fix-agent`。Agent 收尾后执行 `action finish`。测试文件自动排除，剩余告警只报告，
      禁止自动豁免；默认不 commit、不 push。
    - **grill** — 只把需求问清楚并生成澄清结果，**不 init、不进入设计和编码**。在途完整流程的处理同 ut。

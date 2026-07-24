@@ -85,6 +85,8 @@ def parse_args(argv=None):
     action_start.add_argument("--generator")
     action_start.add_argument("--ut-command")
     action_start.add_argument("--check-only", action="store_true")
+    confirm_scope = actions.add_parser("confirm-scope")
+    confirm_scope.add_argument("--ack", required=True)
     actions.add_parser("status")
     critic = actions.add_parser("critic")
     critic.add_argument("--stage", choices=["prep", "final"], required=True)

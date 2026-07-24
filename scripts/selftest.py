@@ -242,17 +242,62 @@ if flow:
             open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
             subprocess.run(["git", "add", "biz.cpp"], check=True)
             subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
-            open("biz.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
             base_head = mf.sh("git rev-parse HEAD")
-
             common = dict(source=None, build="build-fix skill", check_only=False)
+
+            empty_scope_blocked = False
+            try:
+                mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                    kind="ut", request="补充单元测试", files=[],
+                    generator="AutoUT", ut_command="mcde test --ut", **common))
+            except SystemExit as exc:
+                empty_scope_blocked = exc.code == 2
+            os.makedirs("tests", exist_ok=True)
+            open("tests/BizTest.cpp", "w", encoding="utf-8").write("int test_only = 1;\n")
+            test_only_blocked = False
+            try:
+                mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                    kind="ut", request="补充单元测试", files=["tests/BizTest.cpp"],
+                    generator="AutoUT", ut_command="mcde test --ut", **common))
+            except SystemExit as exc:
+                test_only_blocked = exc.code == 2
+            os.remove("tests/BizTest.cpp")
+            os.rmdir("tests")
+            check("独立 UT 拒绝空范围和纯测试文件范围",
+                  empty_scope_blocked and test_only_blocked
+                  and not os.path.exists(mf.ACTION_PATH))
+
+            open("biz.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
             mf.cmd_action_start(flow, None, types.SimpleNamespace(
                 kind="ut", request="为 biz.cpp 当前改动补充边界测试", files=["biz.cpp"],
                 generator="AutoUT", ut_command="mcde test --ut", **common))
             action = mf._load_action()
+            check("独立 UT 启动后只冻结并展示范围，不提前派 Agent",
+                  action.get("status") == "awaiting_scope_confirmation"
+                  and action.get("files") == ["biz.cpp"]
+                  and not action.get("agent_tasks"))
+            forged_scope_ack_blocked = False
+            try:
+                mf.cmd_action_confirm_scope(
+                    flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
+            except SystemExit as exc:
+                forged_scope_ack_blocked = exc.code == 2
+            check("独立任务范围确认不能由 Agent 只带命令参数伪造",
+                  forged_scope_ack_blocked)
+            scope_prompt = json.dumps(
+                {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                ensure_ascii=False) + "\n"
+            captured = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+                cwd=td, input=scope_prompt, text=True, capture_output=True, timeout=10)
+            mf.cmd_action_confirm_scope(
+                flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
+            action = mf._load_action()
             ut_task = action.get("agent_tasks", {}).get("UT", {})
-            check("独立 UT 为未提交代码生成任务卡但不启用主流程",
-                  action.get("kind") == "ut" and ut_task.get("standalone")
+            check("用户二次确认后独立 UT 才生成任务卡",
+                  captured.returncode == 0 and action.get("kind") == "ut"
+                  and action.get("scope_confirmed_ack") == mf.ACTION_SCOPE_ACK
+                  and ut_task.get("standalone")
                   and os.path.isfile(ut_task.get("path", ""))
                   and not os.path.exists(mf.STATE_PATH)
                   and mf.sh("git rev-parse HEAD") == base_head)
@@ -265,17 +310,47 @@ if flow:
                   and ".mae-flow-work" not in mf.sh("git status --short")
                   and not os.path.exists(".gitignore"))
 
+            os.makedirs("tests", exist_ok=True)
+            open("tests/CodeCheckTest.cpp", "w", encoding="utf-8").write(
+                "int codecheck_test_only = 1;\n")
+            codecheck_test_only_blocked = False
+            try:
+                mf.cmd_action_start(flow, None, types.SimpleNamespace(
+                    kind="codecheck", request="只传测试文件", files=["tests/CodeCheckTest.cpp"],
+                    generator=None, ut_command=None, **common))
+            except SystemExit as exc:
+                codecheck_test_only_blocked = exc.code == 2
+            os.remove("tests/CodeCheckTest.cpp")
+            os.rmdir("tests")
+            check("独立 CodeCheck 排除测试文件且不会把空结果扩大到全仓",
+                  codecheck_test_only_blocked and not os.path.exists(mf.ACTION_PATH))
+
             old_run = mf._run_codecheck
             try:
+                calls = []
                 mf._run_codecheck = lambda files: (
+                    calls.append(list(files)) or
                     {"total": 0, "pairs": [], "commands": ["codecheck fullcheck -f " + ",".join(files)]}, "")
                 mf.cmd_action_start(flow, None, types.SimpleNamespace(
                     kind="codecheck", request="检查当前业务改动", files=["biz.cpp"],
                     generator=None, ut_command=None, **common))
+                pending_codecheck = mf._load_action()
+                check("独立 CodeCheck 范围确认前不运行扫描",
+                      pending_codecheck.get("status") == "awaiting_scope_confirmation"
+                      and not calls)
+                scope_prompt = json.dumps(
+                    {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                    ensure_ascii=False) + "\n"
+                captured_cc = subprocess.run(
+                    [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+                    cwd=td, input=scope_prompt, text=True, capture_output=True, timeout=10)
+                mf.cmd_action_confirm_scope(
+                    flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
             finally:
                 mf._run_codecheck = old_run
-            check("独立 CodeCheck 机器首检为零时不派 Agent",
-                  not os.path.exists(mf.ACTION_PATH)
+            check("独立 CodeCheck 经用户确认后首检为零不派 Agent",
+                  captured_cc.returncode == 0 and calls == [["biz.cpp"]]
+                  and not os.path.exists(mf.ACTION_PATH)
                   and not os.path.exists(mf.STATE_PATH)
                   and mf.sh("git rev-parse HEAD") == base_head)
 
@@ -337,7 +412,25 @@ if flow:
                             if cli_sources and os.path.isfile(cli_sources[0]) else "")
             check("独立任务真实 CLI 在 Windows 中文编码下保持需求原文",
                   cli.returncode == 0 and cli_request in request_text
+                  and cli_action.get("status") == "awaiting_scope_confirmation"
                   and not os.path.exists(mf.STATE_PATH), cli.stdout)
+            cli_prompt = json.dumps(
+                {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                ensure_ascii=False) + "\n"
+            cli_capture = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
+                cwd=td, input=cli_prompt, text=True, capture_output=True, timeout=10)
+            cli_confirm = subprocess.run([
+                sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+                "action", "confirm-scope", "--ack", mf.ACTION_SCOPE_ACK,
+            ], env=cli_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                encoding="cp936", errors="replace")
+            cli_confirmed_action = mf._load_action()
+            check("独立任务真实 CLI 可在 Windows 中文环境完成范围确认",
+                  cli_capture.returncode == 0 and cli_confirm.returncode == 0
+                  and cli_confirmed_action.get("status") == "active"
+                  and cli_confirmed_action.get("agent_tasks", {}).get("UT"),
+                  cli_confirm.stdout)
             cancel = subprocess.run([
                 sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
                 "action", "cancel",

@@ -32,7 +32,9 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 10. **单项能力不是缩水版完整流程**。UT、CodeCheck、Grill 使用 `.mae-flow-work/standalone-action.json`
     轻量控制层，不创建 `.mae-flow.json`，也不启用阶段源码门禁。三类任务共享任务卡、指纹、契约和报告机制；
     只有匹配当前任务卡的 SubagentStop 会被校验，普通 Edit/Bash/子 Agent 继续放行。独立任务默认不 commit，
-    24 小时失效，取消只移除控制指针并保留现场。禁止为增加第四个单项能力复制一套新状态机。
+    24 小时失效，取消只移除控制指针并保留现场。UT/CodeCheck 必须先冻结并展示范围，再用提案之后捕获的
+    用户事件确认；确认前不得执行工具或生成任务卡。UT 至少包含一个被测业务文件，CodeCheck 排除测试文件。
+    用户调整范围一律取消重开，禁止原地静默扩张。禁止为增加第四个单项能力复制一套新状态机。
 11. **运行模式只能有一个裁决源**。CLI 和 Hook 一律调用 `mae_flow_core.resolve_runtime()`，禁止再用
     `exists(.mae-flow.json)` / `exists(standalone-action.json)` 各自排列优先级。完整流程、独立任务、退出标记
     意外共存时，完整流程具有唯一控制权；冲突只告警，不得因此放开源码门禁。所有 JSON 状态写入必须经

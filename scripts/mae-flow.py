@@ -4073,7 +4073,7 @@ def cmd_codecheck_scan(flow, st, args):
         "stock_excluded": stock}
     if stock:
         print("[mae-flow] 范围过滤:另有 %d 条告警在变更文件内但不属于本次修改"
-              "(存量债,不计入本单;线上若按全文件口径拦截,由存量治理单另行处理)。"
+              "(存量债,不计入本单;线上流水线同为增量口径不拦存量,确需治理另立单)。"
               % stock)
     elif stock is None and result["total"]:
         print("[mae-flow] ⚠ 本轮告警明细缺行号,无法区分存量与本单修改,"

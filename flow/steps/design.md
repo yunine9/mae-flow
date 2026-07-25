@@ -15,7 +15,7 @@ done 硬校验占位已消失,方案节是入库档案里设计的唯一落点,�
 设计文档确认后执行(两条,顺序固定)：
 
 1. `python "{MAEFLOW_PATH}" spec set design_doc ".mae-flow-work/design-{单号}.md"`（登记时会校验文件真实存在）
-2. `python "{MAEFLOW_PATH}" spec phase build`（阶段 open→build；不可跳跃、不可回退）
+2. `python "{MAEFLOW_PATH}" spec phase build`（阶段 design→build；open 步收尾已推进到 design；不可跳跃、不可回退）
 
 
 **收尾自查**:done 前 `spec show` 确认 phase=build 且 design_doc 已登记（done 的证据就查这两项加占位消除）。

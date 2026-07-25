@@ -1260,6 +1260,106 @@ class V5LayoutTests(unittest.TestCase):
             instructions(self.root, "nope", "guide")
         self.assertIn("change", str(ctx.exception))
 
+    # ---- 审计补测:域名占位、布局门、必须节、坏编码、混用清单、零任务 ----
+
+    def test_v5_domain_placeholder_rejected(self):
+        seed_project(self.root)
+        write(self.root, "openspec/changes/ph/change.md",
+              "# 为什么\n\nWhy.\n\n# 规格条目：{域名}\n\n%s\n"
+              "# 实现清单\n\n- [ ] 1. x\n" % ADDED_OK)
+        ok, messages = validate(self.root, "ph")
+        self.assertFalse(ok)
+        self.assertTrue(any("占位符" in m for m in messages), messages)
+
+    def test_instructions_layout_gate_both_directions(self):
+        seed_project(self.root)
+        new_change(self.root, "vee", tier="full")
+        # v5 单取旧制品 → 拒并引导 change
+        for legacy_artifact in ("proposal", "design", "tasks", "specs"):
+            with self.assertRaises(SpecEngineError) as ctx:
+                instructions(self.root, legacy_artifact, "vee")
+            self.assertIn("spec instructions change", str(ctx.exception))
+        # legacy 在途单取 change → 拒并引导旧制品
+        seed_change(self.root, "leg", {"dom": ADDED_OK})
+        with self.assertRaises(SpecEngineError) as ctx:
+            instructions(self.root, "change", "leg")
+        self.assertIn("旧布局在途单", str(ctx.exception))
+        # tier=None 列全三档(无流程状态时的缺省视图)
+        text = instructions(self.root, "change", "vee", tier=None)
+        for tier_word in ("full（完整开发）", "hotfix（已定位修复）",
+                          "tweak（局部修改）"):
+            self.assertIn(tier_word, text)
+
+    def test_check_required_sections_per_tier(self):
+        seed_project(self.root)
+        # 只有 为什么+实现清单:hotfix/tweak 合规,full 缺 规格条目+方案
+        seed_v5_change(self.root, "lite")
+        self.assertEqual([], specengine.check_required_sections(
+            self.root, "lite", "hotfix"))
+        self.assertEqual([], specengine.check_required_sections(
+            self.root, "lite", "tweak"))
+        missing = specengine.check_required_sections(self.root, "lite", "full")
+        self.assertEqual(2, len(missing), missing)
+        self.assertTrue(any("规格条目" in m for m in missing))
+        self.assertIn("方案", missing)
+        # 四节齐全:full 合规;legacy 布局与未知档位不查
+        seed_v5_change(self.root, "fullc", domains={"dom": ADDED_OK},
+                       design="Plan.")
+        self.assertEqual([], specengine.check_required_sections(
+            self.root, "fullc", "full"))
+        seed_change(self.root, "leg", {"dom": ADDED_OK})
+        self.assertEqual([], specengine.check_required_sections(
+            self.root, "leg", "full"))
+        self.assertEqual([], specengine.check_required_sections(
+            self.root, "lite", "review"))
+
+    def test_legacy_bad_encoding_is_readable_everywhere(self):
+        """审计实锤:legacy delta/主 spec 坏编码曾裸 UnicodeDecodeError 穿透
+        has_delta/validate/archive。统一收口后必须是带 UTF-8 指引的引擎错误。"""
+        seed_project(self.root)
+        seed_change(self.root, "enc", {"dom": ADDED_OK},
+                    tasks="- [x] 1. done\n")
+        bad = os.path.join(self.root, "openspec", "changes", "enc",
+                           "specs", "dom", "spec.md")
+        with open(bad, "wb") as stream:
+            stream.write("## ADDED Requirements 坏编码".encode("gbk") + b"\xff\n")
+        for api in (lambda: has_delta(self.root, "enc"),
+                    lambda: validate(self.root, "enc"),
+                    lambda: archive(self.root, "enc", date="2026-01-02")):
+            with self.assertRaises(SpecEngineError) as ctx:
+                api()
+            self.assertIn("UTF-8", str(ctx.exception))
+        # v5 单合并进坏编码主 spec 同样优雅报错且不动现场
+        write(self.root, "openspec/changes/enc/specs/dom/spec.md", ADDED_OK)
+        os.makedirs(os.path.join(self.root, "openspec", "specs", "dom"),
+                    exist_ok=True)
+        with open(os.path.join(self.root, "openspec", "specs", "dom",
+                               "spec.md"), "wb") as stream:
+            stream.write("# dom Specification 坏".encode("gbk") + b"\xfe\n")
+        with self.assertRaises(SpecEngineError) as ctx:
+            archive(self.root, "enc", date="2026-01-02")
+        self.assertIn("UTF-8", str(ctx.exception))
+        self.assertTrue(os.path.isdir(os.path.join(
+            self.root, "openspec", "changes", "enc")))
+
+    def test_tasks_source_rejects_mixed_layout(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "mixed")
+        write(self.root, "openspec/changes/mixed/tasks.md", "- [ ] 1. old\n")
+        with self.assertRaises(SpecEngineError) as ctx:
+            tasks_source(self.root, "mixed")
+        self.assertIn("布局混用", str(ctx.exception))
+
+    def test_v5_empty_task_list_semantics(self):
+        """实现清单节存在但零任务:与 legacy 空 tasks.md 同语义(0/0=全勾),
+        固化该边界防止未来无意改动。"""
+        seed_project(self.root)
+        seed_v5_change(self.root, "zero", tasks="(本单无需实现任务)")
+        label, text = tasks_source(self.root, "zero")
+        self.assertIsNotNone(text)
+        self.assertEqual({"total": 0, "completed": 0},
+                         status(self.root, "zero")["tasks"])
+
     # ---- 围栏内一级头不是小节边界 ----
 
     def test_code_fence_h1_is_not_section_boundary(self):

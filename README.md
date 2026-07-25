@@ -304,10 +304,11 @@ AI 会先查代码和规格，再逐条给出结论：需要修、可以有依�
 想排除机器上旧版 OpenSpec、Comet 和其他插件的影响，可以按
 [Mae-Flow 干净环境验证](CLEAN-ROOM-TEST.md) 卸载外部组件后做一次最小实跑。
 
-Mae-Flow 真正依赖的宿主基础环境只有 Python 3.8+、Git、Node.js 和 Windows 下随 Git for Windows
-提供的 Git Bash。`mae-flow envcheck` 会实际执行版本命令，并显示四者的版本和真实路径；首次开启完整流程时
-也会复用同一套检查。缺少依赖会在创建流程状态前明确报错，因此不会激活 Hook 把普通开发锁住。Git worktree
-的 `.git` 文件形式也支持。
+Mae-Flow 真正依赖的宿主基础环境只有 Python 3.8+、Git 和 Windows 下随 Git for Windows 提供的
+Git Bash（v4 起规格引擎纯 Python 内化，Node.js 降为可选件，仅开发期差分对拍用，缺失不影响交付）。
+`mae-flow envcheck` 会实际执行版本命令，并显示各项的版本和真实路径；首次开启完整流程时也会复用同一套
+检查。缺少必需依赖会在创建流程状态前明确报错，因此不会激活 Hook 把普通开发锁住。Git worktree 的
+`.git` 文件形式也支持。
 
 项目编译工具、测试框架和访问依赖仓库的权限仍由具体项目提供。这些不是 Mae-Flow 重复安装的东西：即使不用
 AI，开发者本来也需要它们；它们会在真正编译和测试时按项目已确认的配置验证，不会重新引入耗时的 setup。

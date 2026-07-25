@@ -57,19 +57,20 @@
 
 - [ ] **1.1 安装即用（发布阻断项）**:
   - 新建一个带空格和中文路径的 Git 仓，只安装插件，不运行任何 setup/reload/init；普通 Edit/Bash 必须放行；
-  - 执行 `mae-flow envcheck`，Python/Git/Node.js/Git Bash 显示真实版本与路径，
-    OpenSpec/Comet/各阶段内嵌规则全部为 ✅，CodeCheck 缺失不能把插件判失败；
-  - 执行 `mae-flow init`，应自动创建 `openspec/config.yaml` 和 `.comet/config.yaml` 后直接进入配置确认，
+  - 执行 `mae-flow envcheck`，Python/Git/Git Bash 显示真实版本与路径（必需项），Node.js 在可选项
+    （缺失不判失败——v4 起规格引擎纯 Python 内化），「内置规格引擎」与各阶段内嵌规则全部为 ✅，
+    CodeCheck 缺失不能把插件判失败；
+  - 执行 `mae-flow init`，应自动创建 `openspec/config.yaml`（v4 后不再有 `.comet/` 目录）后直接进入配置确认，
     项目中不得出现 `.cac/.claude/.cursor/.windsurf` 等平台目录；
-  - 删除流程状态后连续两次执行 `capability prepare`，两次都成功且第二次不新增杂项；把
-    `.comet/config.yaml` 改成 `auto_transition: true`、`review_mode: strict` 后再 prepare，应纠正为
-    `false/standard`；
-  - 用 Git worktree 再执行一次 `mae-flow init`，`.git` 为文件也必须正常识别；临时让 Node 或 Git Bash
-    不可见时，初始化应在创建 `.mae-flow.json` 前失败并列出缺失依赖，普通开发仍不受 Hook 影响；
+  - 删除流程状态后连续两次执行 `capability prepare`，两次都成功且第二次不新增杂项、不产生
+    `openspec/config.yaml` 以外的配置文件；
+  - 用 Git worktree 再执行一次 `mae-flow init`，`.git` 为文件也必须正常识别；临时让 Git Bash
+    不可见时，初始化应在创建 `.mae-flow.json` 前失败并列出缺失依赖（Node 不可见不得失败），
+    普通开发仍不受 Hook 影响；
   - 让 AI 尝试全局 `comet init`，必须被拦并明确说明“内嵌运行时无需手动初始化”，不能再给用户迁移或
     reload 指令。
 - [ ] **1.2 固定源码与 CodeCheck 首用**:
-  - `capability status` 显示 OpenSpec 1.6.0、Comet 0.3.9 和所有能力包；机器全局安装不同版本不得影响结果；
+  - `capability status` 显示内置规格引擎与所有能力包为 ✅（v4 后无 OpenSpec/Comet 版本行）；机器全局安装任何版本的 openspec/comet 不得影响结果；
   - 从 open 到 archive 跑一条最小变更，创建/设计交接/状态推进/规格合并/目录移动各只执行一次，
     不能出现重复 Created 或“第一次已移动、第二次找不到目录”；
   - 已安装 CodeCheck 时应找到真实 `codecheck.cmd`，即使 `fullcheck --help` 退出码为 1 也判可用；

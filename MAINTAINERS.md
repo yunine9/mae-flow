@@ -119,7 +119,8 @@ skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 require_sets 步骤的 `current` 会展示预填块；它只是候选值，配置阶段统一放进完整确认单一次确认，
 不再逐项要求用户签字。
 **过程区 `.mae-flow-work/`**（gitignored，2026-07-21 治"MR 里 md 泛滥"+STORY 误提交实战）：过程性产物的家——
-grill-prep 工作表、survey 代码勘察笔记、不入库 STORY——物理上不可能被卷进提交。
+grill-prep 工作表、survey 代码勘察笔记、不入库 STORY，v5 起再加 superpowers 设计文档
+（design-{单号}.md）与实现计划（plan-{单号}.md）——物理上不可能被卷进提交。
 **提交白名单**（交付物才 commit）：openspec 全套、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
 REVIEW（返工台账）、delivery-notes（团队沉淀）、STORY（仅用户选入库时）。
 git add 一律精确路径，gate 硬拦 `-A/--all/.`（宽 add 是 STORY 误提交的凶手）。
@@ -170,7 +171,7 @@ flow.json 步骤字段语义：
 | `tasks_checked` | 本 change 的实现清单无未勾选项（v5 = change.md 的「# 实现清单」节；旧布局在途单 = tasks.md，来源由引擎 `tasks_source` 统一裁决） |
 | `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
-| `yaml_field` | 读本 change `.comet.yaml` 字段：`equals` 精确匹配或非空即过（**首选**——comet-guard 机器写入，不可伪造） |
+| `spec_field` | 读 `.mae-flow.json` spec 段字段（v3 起阶段/产物指针的单一真相源）：`equals` 精确匹配或非空即过；指针字段登记时校验文件真实存在 + 现场复核（`yaml_field` 保留为在途兼容别名，指向同一实现） |
 | `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送） |
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
@@ -226,8 +227,9 @@ CodeCheck 的现场扫描、clean_paths、提交、分支和归档等证据继�
 
 ### 3.5 内嵌运行时与 CodeCheck
 
-`init` 在创建 `.mae-flow.json` **之前**调用 `prepare_project()`：校验内嵌 OpenSpec 版本，使用
-`--tools none` 创建 `openspec/config.yaml`，并确定性写入 `.comet/config.yaml`。失败时没有流程状态，
+`init` 在创建 `.mae-flow.json` **之前**调用 `prepare_project()`：校验 Git 项目根与宿主必需项
+（Python/Git/Git Bash——v4 起 Node 可选），用内置规格引擎 `ensure_config` 创建
+`openspec/config.yaml`（v4 后不再调 Node CLI、不再写 `.comet/config.yaml`）。失败时没有流程状态，
 所有 Hook 仍处于 inactive 旁路，绝不能出现“初始化失败但普通开发也被锁住”。
 
 `runtime/vendor/manifest.json` 是开源组件版本真相源；`runtime/THIRD_PARTY_NOTICES.md` 和每个组件的
@@ -251,17 +253,20 @@ CodeCheck 时执行一次公司 npm 安装，registry 用命令行一次性参�
 maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0.7 持续校准）。
 新增 agent 时：契约文件放 agents/，且必须把 agent 名加进 dispatch.py `ev_subagentstop` 的识别正则和标记正则，否则契约校验不生效。
 
-## 四、与 comet 的集成合同（破坏任何一条都会出鬼故事）
+## 四、comet 思想源合同（v3 后 comet 不再是运行组件，方法约定内化到这些落点）
 
-| 约定 | 原因 | 落点 |
+v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability comet-build-defaults`
+全部不复存在；下表是仍然生效的**方法级**约定与它们的现行落点（破坏任何一条仍会出鬼故事）：
+
+| 约定 | 原因 | 现行落点 |
 |---|---|---|
-| `.comet/config.yaml` 含 `auto_transition: false` | mae-flow 独占节奏，禁止 comet 自动衔接阶段 | `prepare_project()` 创建/纠正 |
-| `review_mode: standard`（full/hotfix；tweak 上游硬编码 off，有意接受——tw 链另有 compile/CodeCheck/UT 兜底 + tw_verify 装载 verify 包做正确性核对） | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | `prepare_project()` + build.md |
-| isolation=branch、tdd=direct+direct_override、executing-plans | 不让 Agent 记五个字段；完整流程离开 build 前必须已写状态 | `capability comet-build-defaults` |
+| mae-flow 独占节奏，阶段不自动衔接 | 每次推进都要有证据 | `spec phase` 逐级推进 + done 证据链 |
+| review_mode=standard（full/hotfix；tweak 有意 off——tw 链另有 compile/CodeCheck/UT 兜底 + tw_verify 装载 verify 包做正确性核对） | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | build.md + verify_comet.md 装载的内嵌方法原文 |
+| isolation=branch、tdd=direct+direct_override、executing-plans | 不让 Agent 记五个字段 | build.md 的固定选择声明 |
 | comet verify 的分支处理选"保持分支" | 推送归 push 步，MR 人工建 | verify_comet.md |
-| 依赖 `.comet.yaml` 的 `design_doc`/`verify_result` 字段 | yaml_field 证据的数据源 | flow.json |
-| comet 锁 **0.3.9** | 字段名/guard 行为按固定源码编写，不读取全局版本 | `runtime/vendor/manifest.json` |
-| OpenSpec 锁 **1.6.0** | schema/CLI/归档语义固定，避免机器差异 | 内嵌 ESM + schema/templates |
+| 阶段/`design_doc`/`verify_result` 的数据源 | spec_field 证据可信 | `.mae-flow.json` spec 段（`mae-flow spec` 机器写入） |
+| comet 方法文本锁 **0.3.9** | 内嵌方法原文按固定源码选段，不读取全局版本 | `runtime/vendor/manifest.json` + `CAPABILITY_PACKS` |
+| OpenSpec 锁 **1.6.0** | schema/templates/归档语义固定（引擎按其源码逐条移植并差分对拍） | vendored schema/templates + `specengine.py` |
 | 不创建 `.cac/.claude`、不 reload | 安装插件就应可用，不污染项目或个人目录 | `prepare_project()` 回归测试 |
 | tweak 也走归档 | 防僵尸活跃 change 干扰 comet 阶段检测 | flow.json + archive.md |
 | verify 链固定顺序 Ponytail→CodeCheck→UT→Comet | 删→改→测→验：重构定稿后 UT 才覆盖得上最终形态 | flow.json + 各 verify step md |
@@ -288,7 +293,7 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 3. **会话卫生**：一单一会话为佳；改插件/agent/settings 后必须重启会话（定义在会话启动时缓存）；长会话行为漂移时 /clear（状态在磁盘，进度不丢）。重上下文步骤（build、verify 链入口）的 `current` 会主动提示 /clear 时机（`clear_hint` 标记）；重步骤 md 内置「中断恢复先读什么」清单（`current` 每次打印，恢复质量不赌模型自觉）；build 的批次 commit 后是安全 /clear 点，批次结论/调试根因假设要求写进实现清单备注行（中间推理不留在会话里）。
 4. **仓库预设**：`.mae-flow-defaults.json` 提交进仓（编译方式/UT生成方式/UT运行命令等恒定项），config_confirm 时 `current` 自动展示预填，新人第二单起免逐项来回；基线分支与需求文档不预设免问。另支持**机器直读键**「测试路径」（正则数组，gate 直接消费，启用 verify_ut 的测试路径收紧）——预填展示类键与机器直读键的区别要在改代码时留意。
 
-**阶段互锁哨兵（2026-07-21，治"comet 与 mae-flow 双状态机冲突像随机 bug"）**：mae-flow 主导、每步核对 comet 跟队。`current`/`doctor` 内置「步骤↔comet phase 合法区间」映射（`COMET_PHASE_EXPECT`），phase 掉队（多为闪退打断 guard --apply）或活跃 change >1（僵尸）时**强预警不硬拒**（硬闸在转换点的 phase 证据/glob_absent 上，哨兵只做诊断避免制造新死锁）。三个真因固化：①僵尸放大器（comet 多活跃按字典序抽一个管全场，`_active_change_count` 检测）②双状态机无互锁（design/build 收尾自查 phase 已推进）③Bash/Write 不对称（comet hook 只拦 Write，SKILL 铁律"被 GUARD 拦禁止换工具硬绕，先 doctor"，change 目录内写用 git mv）。
+**阶段互锁哨兵（2026-07-21 立，v3 引擎内化后大部分退役）**：当年治"comet 与 mae-flow 双状态机冲突像随机 bug"的 `COMET_PHASE_EXPECT` 步骤↔phase 对账已随第二状态机一起摘除（单一真相源后无账可对）。存活至今的部分：①活跃 change >1 的僵尸诊断（`_active_change_count`，doctor 强预警不硬拒——多单并存会干扰在建区判定）②"被 GUARD 拦禁止换工具硬绕，先 doctor"的 SKILL 铁律 ③change 目录内移动用 git mv。历史机制细节看 git 历史，不要按本段旧文恢复已删代码。
 
 **升级内嵌组件 checklist**：更新 `runtime/vendor/manifest.json` 与许可证 → 重新生成 OpenSpec 单入口 bundle →
 核对 Comet state/guard 字段和事件 → 核对 `CAPABILITY_PACKS` 选中的上游标题仍存在 → 跑 capability 生命周期、

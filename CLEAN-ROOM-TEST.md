@@ -49,20 +49,21 @@ Get-Content "$env:TEMP\mae-flow-hook.log" -Tail 50
 
 预期：
 
-- Python、Git、Node.js、Git Bash 均为 ✅，并显示实际版本和绝对路径；
-- OpenSpec、Comet 和全部阶段能力均为 ✅；
-- OpenSpec 版本为 `1.6.0`；
+- Python、Git、Git Bash 均为 ✅（必需项），并显示实际版本和绝对路径；Node.js 在可选项，
+  缺失不判失败（v4 起规格引擎纯 Python 内化，Node 仅开发期差分对拍用）；
+- 「内置规格引擎」和全部阶段能力均为 ✅（无 OpenSpec/Comet 版本行）；
 - 路径位于当前 Mae-Flow 插件缓存目录的 `runtime\vendor\`；
 - comet、openspec、superpowers、ponytail 四个 SHA-256 全部通过；
 - 不要求 setup、reload 或 `comet init`。
 
-临时移除任一基础命令的 PATH 后再尝试初始化，应在 `.mae-flow.json` 创建前明确报出缺失项；恢复环境后可以
-直接重试，普通 Edit/Bash 在此期间仍应放行。
+临时移除任一**必需**基础命令（Python/Git/Git Bash）的 PATH 后再尝试初始化，应在 `.mae-flow.json`
+创建前明确报出缺失项（移除 Node 不得失败）；恢复环境后可以直接重试，普通 Edit/Bash 在此期间仍应放行。
 
 ## 4. 做一次最小实跑
 
 在临时 Git 仓库中发送一句小需求并启动 `/mae-flow`。初始化后应直接进入配置确认，只生成
-`openspec/config.yaml`、`.comet/config.yaml` 和 Mae-Flow 状态，不得创建 `.cac/.claude/.cursor/.windsurf`。
+`openspec/config.yaml` 和 Mae-Flow 状态（v4 后不再有 `.comet/` 目录），不得创建
+`.cac/.claude/.cursor/.windsurf`。
 
 再分别试一次：
 

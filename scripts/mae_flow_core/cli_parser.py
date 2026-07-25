@@ -69,7 +69,8 @@ def parse_args(argv=None):
     spec_new.add_argument("value", nargs="?", help="变更目录英文短名")
     spec_instr = spec_actions.add_parser("instructions")
     spec_instr.add_argument(
-        "value", help="proposal | specs | design | tasks")
+        "value", help="change(v5 四合一,新单唯一入口) | "
+                      "proposal | specs | design | tasks(旧布局在途单)")
     spec_actions.add_parser("validate")
     spec_actions.add_parser("archive")
     spec_set = spec_actions.add_parser("set")

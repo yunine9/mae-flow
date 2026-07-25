@@ -271,12 +271,10 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertIn("<spec_format>", instructions)   # 规格条目格式合同
             self.assertIn("# 规格条目：<域名>", instructions)
             self.assertIn("change.md", instructions)
-            # 旧四制品指令保留(在途旧布局单还要用)
-            legacy_instructions = self._spec_ok(
-                root, "instructions", "proposal", env=env).stdout
-            self.assertIn('<artifact id="proposal" change="%s"' % CHANGE,
-                          legacy_instructions)
-            self.assertIn("<template>", legacy_instructions)
+            # 布局门:v5 单上取旧制品被拒并引导 change(引擎不亲口指示制造
+            # 它自己随后会拒绝的布局混用现场)
+            self._spec_rejected(root, "instructions", "proposal", env=env,
+                                needle="spec instructions change")
             self._spec_rejected(root, "instructions", "不存在的制品", env=env)
 
             # --- 阶段机:不可跳跃、不可回退(archived 不可直达在 archive 阶段验证) ---

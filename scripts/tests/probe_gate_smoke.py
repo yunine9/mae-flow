@@ -120,15 +120,21 @@ def main():
     check("spec_validate: 默认不拦（待设计", ok, why)
     ok, why = mf.ev_spec_validate({"placeholders": ["（待填", "（待设计"]}, st())
     check("spec_validate: design 步配置拦（待设计", not ok and "待设计" in why, why)
+    # allow_empty 是 hotfix/tweak 档的配置,必须节检查按真实档位走
+    def st_hotfix(cn="probe-x"):
+        return {"config": {"CHANGE_NAME": cn}, "choices": {"workflow": "hotfix"}}
     write(root, "openspec/changes/probe-x/change.md",
           "# 为什么\n\nx\n\n# 实现清单\n\n- [x] 1. x\n")
+    ok, why = mf.ev_spec_validate({"allow_empty": True}, st_hotfix())
+    check("spec_validate: allow_empty 无 delta 过(hotfix 档)", ok, why)
+    # 必须节接线:full 档缺规格条目/方案节被拒(V5_TIER_REQUIRED 不再是死常量)
     ok, why = mf.ev_spec_validate({"allow_empty": True}, st())
-    check("spec_validate: allow_empty 无 delta 过", ok, why)
+    check("spec_validate: full 档缺必须节拒", not ok and "必须小节" in why, why)
     write(root, "openspec/changes/probe-x/change.md",
           "# 为什么\n\nx\n\n# 规格条目：dom\n\n## ADDED Requirements\n\n"
           "### Requirement: Bad\nNo keyword here.\n\n#### Scenario: s\n- x\n\n"
           "# 实现清单\n\n- [x] 1. x\n")
-    ok, why = mf.ev_spec_validate({"allow_empty": True}, st())
+    ok, why = mf.ev_spec_validate({"allow_empty": True}, st_hotfix())
     check("spec_validate: allow_empty 有非法 delta 仍拒", not ok, why)
     write(root, "openspec/changes/probe-x/tasks.md", "- [ ] 1. old\n")
     write(root, "openspec/changes/probe-x/change.md", GOOD_DOC)

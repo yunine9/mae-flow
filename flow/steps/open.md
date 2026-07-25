@@ -42,8 +42,9 @@ clarifications 里已是 EARS 的答案直接沿用)——UT 阶段将按这些�
 `accept-risk askuser`;该兜底只替代交互令牌,②③类的规格修订、提交和其他证据仍必须完成。
 确认后先执行：
 
+`python "{MAEFLOW_PATH}" spec phase design`
 
-确认状态已进入 design，再 git add openspec/(clarifications 尚在 docs/ 未随迁的,精确补 git add docs/clarifications-{单号}.md;
+确认状态已进入 design(spec show 应显示 phase=design)，再 git add openspec/(clarifications 尚在 docs/ 未随迁的,精确补 git add docs/clarifications-{单号}.md;
 **禁止 git add docs/ 或 -A**)&& git commit -m "[单号][类型]提案与规格",
 再 done --set CHANGE_NAME=<变更目录名>(done 硬校验 change.md 存在、规格结构校验通过且阶段已登记)。
 需求缺口已经在本步骤逐项让用户裁决，产物齐全后无需再索要一次“确认本阶段完成”。

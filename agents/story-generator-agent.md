@@ -43,7 +43,7 @@ PENDING_CONFIRM——**禁止写死结论,禁止书写"(已确认)"**(那是主�
 1. SPEC 文档 → 先找 `openspec/changes/{CHANGE_NAME}/change.md`(v5:规格在「# 规格条目：<域>」节),
    没有再在 `openspec/specs/` 或 `openspec/changes/` 下查找旧布局 spec.md;补生成模式优先查找归档目录
    (Glob `openspec/changes/archive/*{CHANGE_NAME}*` 或 `openspec/archive/*{CHANGE_NAME}*`——归档目录名可能带日期前缀,v5 档案里只有 change.md)
-2. 设计文档 → `docs/` 下查找
+2. 设计文档 → v5 单先看 change.md 的「# 方案」节(设计结论),完整版在 `.mae-flow-work/design-{单号}.md`(过程件,本机存在时可读);旧布局在途单在变更目录 design.md 或 `docs/` 下查找
 3. 已有代码 → 主 agent 指定路径或从 git log 提取变更文件
 4. 单号 → 主 agent 提供
 5. STORY 模板 → **首选主 agent 传入的绝对路径**(标准途径,主 agent 用 mae-flow template 获取;hook 校验以该模板为准)。

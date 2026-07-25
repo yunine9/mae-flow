@@ -137,6 +137,19 @@ def _read_text(path):
         return stream.read()
 
 
+def _read_text_utf8(path):
+    """读 UTF-8 文本；编码坏时抛带指引的引擎错误。
+
+    审计实锤：裸 UnicodeDecodeError 会以 traceback 穿透 validate/archive/
+    has_delta 直到 CLI（违背"流畅易用不卡死"）。OSError 原样抛出，由调用方
+    按各自语义处理（缺失容忍/报错）。"""
+    try:
+        return _read_text(path)
+    except UnicodeDecodeError as exc:
+        raise SpecEngineError(
+            "%s 读取失败（文件须为 UTF-8 编码）：%s" % (_posix(path), exc))
+
+
 def _utc_today():
     """CLI 的日期一律取 ``new Date().toISOString()`` 前段，即 UTC 日期。"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -1161,7 +1174,7 @@ def _iter_delta_validation_sources(change_dir):
     specs_dir = os.path.join(change_dir, "specs")
     for spec_file in _find_delta_spec_files(specs_dir):
         try:
-            content = _read_text(spec_file)
+            content = _read_text_utf8(spec_file)
         except OSError:
             continue
         yield _rel_under(spec_file, specs_dir), content
@@ -1403,6 +1416,27 @@ def has_delta(root, change):
     return _has_delta_specs(change_dir)
 
 
+def check_required_sections(root, change, tier):
+    """v5 分档必须节的机器校验：返回缺失小节名列表（合规为空列表）。
+
+    审计实锤：V5_TIER_REQUIRED 声明后一直无人消费，"full=四节"的分档合同
+    在机器侧未接线——整节删除可静默过全部门禁。本函数由 ev_spec_validate
+    在 done 时调用；legacy 布局或未知档位不查（返回空）。规格条目按
+    "至少一个 # 规格条目：<域> 节"判定。"""
+    change_dir = _require_change_dir(root, change)
+    if tier not in V5_TIER_REQUIRED or _change_layout(change_dir) != "v5":
+        return []
+    doc = _read_change_doc(change_dir)
+    missing = []
+    for section in V5_TIER_REQUIRED[tier]:
+        if section == V5_SECTION_SPEC:
+            if not doc["domains"]:
+                missing.append("%s：<域名>" % V5_SECTION_SPEC)
+        elif section not in doc["sections"]:
+            missing.append(section)
+    return missing
+
+
 def tasks_source(root, change):
     """实现清单的内容源：返回 ``(标签, 文本或 None)``。
 
@@ -1412,13 +1446,15 @@ def tasks_source(root, change):
     计数正则留在各自调用方。"""
     _validate_change_name(change)
     change_dir = _change_dir(root, change)
+    # 混用（change.md 与 tasks.md 并存）时"清单从哪来"没有可信答案，
+    # 与 has_delta 同一判据拒绝——静默偏向任何一边都可能读错进度。
+    _require_layout_pure(change_dir)
     if _change_layout(change_dir) == "v5":
         label = ("openspec/changes/%s/change.md 的 \"# %s\" 节"
                  % (change, V5_SECTION_TASKS))
-        try:
-            doc = _read_change_doc(change_dir)
-        except SpecEngineError:
-            return label, None
+        # 坏编码传播为带 UTF-8 指引的引擎错误——吞成 None 会被调用方当
+        # "实现清单缺失"报出，引导补节而不是修编码（审计实锤的错误指引）。
+        doc = _read_change_doc(change_dir)
         return label, doc["sections"].get(V5_SECTION_TASKS)
     label = "openspec/changes/%s/tasks.md" % change
     try:
@@ -1713,10 +1749,23 @@ def instructions(root, artifact, change, tier=None):
     change_dir = _require_change_dir(root, change)
     schema_name = _resolve_schema_name(root, change_dir, strict=True)
     schema = _load_schema(schema_name)
+    # 布局门（审计实锤）：指令是"教模型写什么"的入口，发错布局的指令等于
+    # 引擎亲口指示制造它自己随后会拒绝的混用现场。
     if artifact == "change":
+        if _change_layout(change_dir) != "v5" and _legacy_markers(change_dir):
+            raise SpecEngineError(
+                "change '%s' 是旧布局在途单（存在 %s）；继续按旧四件套补齐走完，"
+                "不要新建 change.md（用 spec instructions "
+                "proposal|specs|design|tasks 取旧制品指令）"
+                % (change, "、".join(_legacy_markers(change_dir))))
         return _render_change_instructions(
             change, change_dir, schema_name, schema, tier,
             _read_project_config(root))
+    if _change_layout(change_dir) == "v5":
+        raise SpecEngineError(
+            "change '%s' 是 v5 四合一布局（change.md），不再使用旧制品 '%s'；"
+            "执行 spec instructions change 取四合一结构与规格条目格式合同"
+            % (change, artifact))
     valid_ids = [item["id"] for item in schema["artifacts"]]
     selected = None
     for item in schema["artifacts"]:
@@ -2092,12 +2141,11 @@ def _build_updated_spec(source_content, target_content, spec_name, change_name):
 
 def _has_delta_specs(change_dir):
     """镜像 archive 的 hasDeltaSpecs 探测：一层 specs/<域>/spec.md，区分大小写。
-    v5 布局改看 change.md 的规格条目节（同一条 _HAS_DELTA_RE 探测正则）。"""
+    v5 布局改看 change.md 的规格条目节（同一条 _HAS_DELTA_RE 探测正则）。
+    坏编码统一传播为带 UTF-8 指引的引擎错误（吞成 False 会让"有规格但读不了"
+    伪装成"无规格轻量单"，规格被静默丢弃）。"""
     if _change_layout(change_dir) == "v5":
-        try:
-            doc = _read_change_doc(change_dir)
-        except SpecEngineError:
-            return False
+        doc = _read_change_doc(change_dir)
         return any(_HAS_DELTA_RE.search(item["body"]) for item in doc["domains"])
     specs_dir = os.path.join(change_dir, "specs")
     try:
@@ -2109,7 +2157,7 @@ def _has_delta_specs(change_dir):
         if not os.path.isdir(os.path.join(specs_dir, entry)):
             continue
         try:
-            content = _read_text(candidate)
+            content = _read_text_utf8(candidate)
         except OSError:
             continue
         if _HAS_DELTA_RE.search(content):
@@ -2154,7 +2202,7 @@ def _find_spec_updates(change_dir, main_specs_dir):
         target = os.path.join(main_specs_dir, entry, "spec.md")
         updates.append({
             "domain": entry,
-            "content": _read_text(source),
+            "content": _read_text_utf8(source),
             "target": target,
             "exists": os.path.isfile(target),
         })
@@ -2200,7 +2248,7 @@ def _sweep_main_specs_for_leak(root):
         if not os.path.isfile(spec_file):
             continue
         try:
-            content = _read_text(spec_file)
+            content = _read_text_utf8(spec_file)
         except OSError:
             continue
         if _LEAK_RE.search(_norm_newlines(content)):
@@ -2245,7 +2293,8 @@ def archive(root, change, date=None):
     totals = {"added": 0, "modified": 0, "removed": 0, "renamed": 0}
     for update in _find_spec_updates(change_dir, main_specs):
         source_content = update["content"]
-        target_content = _read_text(update["target"]) if update["exists"] else None
+        target_content = (_read_text_utf8(update["target"])
+                          if update["exists"] else None)
         rebuilt, counts, merge_warnings = _build_updated_spec(
             source_content, target_content, update["domain"], change)
         warnings.extend(merge_warnings)

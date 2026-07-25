@@ -1,5 +1,53 @@
 # 更新记录
 
+## 2026-07-26：v5 完备性审计——六维 12-agent 对抗验证,31 项实锤清零
+
+对 v5+dogfood 全部改动面做六维审计(旧引用残留/引擎双布局/dogfood 三修边界/
+证据链正反路径/文档一致性/测试缺口),每维 findings 经独立对抗验证(实跑复现才
+判真),31 项确认、2 项驳回,全部修复:
+
+### 高危功能修复
+
+- **full 单 phase 链断裂**(v3 删 comet-guard 时丢链,两批重写都没发现):open.md
+  「确认后先执行:」后补回 `spec phase design`,design.md 括注改正为 design→build
+  ——此前每张 full 单走到 design 步必撞跳跃墙;
+- **v5 任务卡缺规格依据**:`_requirement_sources` 只按旧布局 glob specs/,v5 单的
+  COMPILE/CODECHECK/UT 任务卡永远看不到规格条目——补 change.md 双布局六路 glob;
+- **doctor 误报每张新单**:change 健康行仍查 v3 已废的 .comet.yaml(phase 也从它
+  读)——改为按布局探测产物 + 从 .mae-flow.json spec 段读 phase;
+- **legacy 坏编码裸崩五处**:delta spec/主 spec 非 UTF-8 时 has_delta/validate/
+  archive 裸 UnicodeDecodeError 穿透到 CLI traceback——新增 _read_text_utf8 统一
+  收口(dogfood 单只修了 tasks.md 一处,同类成片残留);tasks_source v5 分支原先把
+  坏编码吞成"源缺失"引导补节而非修编码,改为传播带 UTF-8 指引的引擎错误。
+
+### 机制缺口接线
+
+- **V5_TIER_REQUIRED 死常量接线**:新增 check_required_sections,ev_spec_validate
+  按 workflow 档位查必须节——此前"full=四节"合同零机器校验,整节删除可静默过全部
+  门禁(占位检查随节头一起消失);
+- **instructions 布局门**:v5 单取旧制品拒并引导 change,legacy 在途单取 change 拒
+  并引导旧四件套——此前引擎会亲口指示制造它自己随后拒绝的布局混用;
+- **phase 跳跃命令链两修**:止步 verify(原链会引导 `spec phase archive` 绕过
+  verify-pass 三重校验并推进死胡同)+ 用脚本真实绝对路径(原字面量 mae-flow.py
+  照抄必失败);并新增 phase archive 直推拒(与 archived 同理,只能由 verify-pass
+  产生);
+- tasks_source 混用拒(与 has_delta 同判据;原静默偏向 change.md 无视 tasks.md)。
+
+### 文档过时清零(v3/v4 换轨欠账)
+
+FIELD-TEST 1.1/1.2(.comet/config.yaml、版本号检查项按 v4 现实重写)、
+CLEAN-ROOM §3/§4(Node 改可选、初始化产物清单)、README 宿主依赖段(Node 降级)、
+MAINTAINERS 四处(spec_field 转正、prepare_project 三点、comet 集成合同表改
+"思想源合同"现行落点、阶段互锁哨兵段改存活现状)、story agent 设计文档兜底改
+双布局、cli help 补 change 制品、MAINTAINERS 过程区住户清单补 design/plan。
+
+### 测试补齐
+
+specengine 60→66(域名占位拒、布局门双向、必须节三档、legacy 坏编码全 API 优雅、
+混用清单拒、零任务语义固化);探针① 24→25(必须节证据路径)、探针② 22→26(跳跃
+命令链绝对路径断言、archived 链止步 verify、new 异名警告不覆盖、phase archive
+直推拒);capabilities 布局门断言换轨。全套回归+selftest 全绿。
+
 ## 2026-07-26：v5 首单 dogfood——真实 hotfix 走全链 + 三处流畅性实锤修复
 
 拿真实小缺陷(legacy tasks.md 坏编码穿透,DTS2026072501)在本仓走完 v5 hotfix 全链:

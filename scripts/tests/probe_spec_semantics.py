@@ -176,9 +176,39 @@ def main():
               and "布局混用" in (r.stdout + r.stderr))
         r = spec(root, "init")
         r = spec(root, "phase", "verify")
-        check("阶段跳跃拒", r.returncode != 0 and "跳跃" in (r.stdout + r.stderr))
+        err = r.stdout + r.stderr
+        check("阶段跳跃拒", r.returncode != 0 and "跳跃" in err)
+        # 审计补测:报错命令链用脚本真实绝对路径(字面量 mae-flow.py 照抄必失败)
+        check("跳跃报错命令链含脚本绝对路径",
+              'spec phase design' in err and MAE.replace("\\", "/") in err, err[-300:])
+        r = spec(root, "phase", "archived")
+        err = r.stdout + r.stderr
+        check("跳到 archived 的命令链止步 verify(不引导绕过 verify-pass)",
+              r.returncode != 0 and "spec phase verify" in err
+              and "phase archive" not in err.replace("phase archived", ""), err[-300:])
         r = spec(root, "set", "verify_result", "pass")
         check("verify_result 直写拒", r.returncode != 0)
+        # spec new 异值警告:已登记 CHANGE_NAME 与新目录不一致时警告不覆盖
+        r = spec(root, "new", "probe-другой" if False else "probe-second")
+        state = json.load(open(os.path.join(root, ".mae-flow.json"),
+                               encoding="utf-8"))
+        check("new 异名单警告且不覆盖已登记 CHANGE_NAME",
+              "不一致" in (r.stderr or "")
+              and state["config"]["CHANGE_NAME"] == "probe-full",
+              (r.stderr or "") + str(state["config"]))
+
+        # phase archive 直推拒(绕过 verify-pass 的通道关闭)
+        root = make_repo(base, "pa 仓", "full", current="verify_comet")
+        spec(root, "new", "probe-full")
+        write(root, "openspec/changes/probe-full/change.md",
+              "# 为什么\n\nx\n\n# 规格条目：dom\n\n" + DELTA
+              + "\n# 方案\n\ny\n\n# 实现清单\n\n- [x] 1. x\n")
+        spec(root, "init")
+        for p in ("design", "build", "verify"):
+            spec(root, "phase", p)
+        r = spec(root, "phase", "archive")
+        check("phase archive 直推拒(只能由 verify-pass 产生)",
+              r.returncode != 0 and "verify-pass" in (r.stdout + r.stderr))
 
     print("\n探针②通过 %d 项, 失败 %d 项" % (PASS, len(FAIL)))
     if FAIL:

@@ -613,11 +613,19 @@ def ev_spec_validate(spec, st):
             if hit:
                 return False, ("change.md 残留「%s…」骨架占位;"
                                "把占位替换成实际内容后重试" % "、".join(hit))
+        # v5 分档必须节接线(审计实锤:V5_TIER_REQUIRED 曾是零消费死常量,
+        # "full=四节"合同在机器侧未接线,整节删除可静默过全部门禁)。
+        workflow = (st.get("choices", {}) or {}).get("workflow", "")
+        missing = specengine.check_required_sections(os.getcwd(), cn, workflow)
+        if missing:
+            return False, ("change.md 缺少 %s 档必须小节: %s;分档合同见 "
+                           "spec instructions change"
+                           % (workflow, "、".join(missing)))
     except specengine.SpecEngineError as exc:
         return False, "规格校验无法执行: " + str(exc)
     except Exception as exc:
-        return False, ("规格校验异常(%s: %s);检查 change.md 编码为 UTF-8、"
-                       "内容为文本后重试" % (type(exc).__name__, exc))
+        return False, ("规格校验异常(%s: %s);按报错修复对应文件(编码须 UTF-8)"
+                       "后重试" % (type(exc).__name__, exc))
     return True, ""
 
 
@@ -3408,12 +3416,23 @@ def cmd_spec(flow, st, args):
         if order.index(target) - order.index(cur) > 1:
             # dogfood 实测:hotfix/tweak 单不经 design/build 步骤,阶段停在 open,
             # verify 步一条 phase verify 会撞这堵墙——报错必须给出路(核心原则)。
+            # 审计实锤两修:①链止步 verify(archive/archived 由 verify-pass/
+            # spec archive 产生,列进链会引导绕过三重校验并推进死胡同);
+            # ②命令用本脚本真实路径(字面量 mae-flow.py 相对路径照抄必失败)。
+            script = norm(os.path.abspath(sys.argv[0]))
+            stop = min(order.index(target), order.index("verify"))
             chain = " && ".join(
-                'python mae-flow.py spec phase %s' % p
-                for p in order[order.index(cur) + 1:order.index(target) + 1])
+                'python "%s" spec phase %s' % (script, p)
+                for p in order[order.index(cur) + 1:stop + 1])
+            tail = ("(verify 之后由 spec verify-pass 与 spec archive 推进,"
+                    "不可用 phase 直达)" if order.index(target) > order.index("verify")
+                    else "")
             die("阶段不能跳跃(%s → %s):中间阶段的产物与证据会被绕过。"
                 "轻量单(hotfix/tweak)不经 design/build 步骤但阶段仍需逐级推进,"
-                "依序执行:%s" % (cur, target, chain), 2)
+                "依序执行:%s%s" % (cur, target, chain, tail), 2)
+        if target == "archive":
+            die("archive 阶段由 spec verify-pass 在三重校验(阶段在 verify+报告"
+                "存在+清单全勾)通过后写入,不接受直接推进(直推会绕过验证)。", 2)
         if target == "archived":
             die("archived 由 spec archive 动作在真实完成定稿后写入,不接受直接推进。", 2)
         data["phase"] = target
@@ -3738,8 +3757,14 @@ def _requirement_sources(st):
         out.append(os.path.abspath(doc))
     cn = st.get("config", {}).get("CHANGE_NAME", "")
     if cn:
-        pats = [f"openspec/changes/{cn}/specs/*/spec.md",
+        # 双布局:v5 的规格在 change.md 规格条目节,legacy 在 specs/<域>/spec.md;
+        # 归档后两者都随目录进 archive。审计实锤:漏掉 change.md 时,v5 单的
+        # COMPILE/CODECHECK/UT 任务卡「需求/规格依据」永远缺规格。
+        pats = [f"openspec/changes/{cn}/change.md",
+                f"openspec/changes/{cn}/specs/*/spec.md",
+                f"openspec/changes/archive/*{cn}*/change.md",
                 f"openspec/changes/archive/*{cn}*/specs/*/spec.md",
+                f"openspec/archive/*{cn}*/change.md",
                 f"openspec/archive/*{cn}*/specs/*/spec.md"]
         for p in pats:
             out.extend(os.path.abspath(x) for x in globmod.glob(p))
@@ -4002,12 +4027,23 @@ def cmd_doctor(flow, st, args):
     want = st["config"].get("分支名", "(未设置)")
     print(("✅" if cur == want else "❌") + f" 分支: 当前 {cur or '未知'} / 约定 {want}")
     cn = st["config"].get("CHANGE_NAME", "")
-    yml = f"openspec/changes/{cn}/.comet.yaml" if cn else ""
-    if yml and os.path.exists(yml):
-        ph = re.search(r"phase:\s*(\S+)", open(yml, encoding="utf-8").read())
-        print(f"✅ change: {cn},phase={ph.group(1) if ph else '?'}")
+    # v3 后阶段真相源在 .mae-flow.json 的 spec 段;产物按布局探测
+    # (v5=change.md,legacy=.openspec.yaml/四件套)。审计实锤:旧实现查
+    # .comet.yaml,对 v3 之后的每张健康单都误报 ❌。
+    if cn:
+        cdir = f"openspec/changes/{cn}"
+        ph = str(_spec_data(st).get("phase", "") or "?")
+        if os.path.isfile(cdir + "/change.md"):
+            print(f"✅ change: {cn}(v5 四合一),phase={ph}")
+        elif os.path.isdir(cdir):
+            print(f"✅ change: {cn}(旧布局在途),phase={ph}")
+        elif ph == "archived" or globmod.glob(
+                f"openspec/changes/archive/*{cn}*"):
+            print(f"✅ change: {cn} 已归档,phase={ph}")
+        else:
+            print(f"❌ change: {cn} 目录不存在且未见归档(phase={ph})")
     else:
-        print(f"{'⚠' if not cn else '❌'} change: " + (cn + " 的 .comet.yaml 不存在" if cn else "CHANGE_NAME 未设置(open 之前属正常)"))
+        print("⚠ change: CHANGE_NAME 未设置(open 之前属正常)")
     nac = _active_change_count()
     print(("✅" if nac <= 1 else "❌") + f" 活跃 change 数: {nac}" + ("(僵尸在场!comet 会抽错人,清理见下)" if nac > 1 else ""))
     guards = [p for p in comet_guard_paths(os.getcwd()) if os.path.isfile(p)]

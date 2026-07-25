@@ -1,5 +1,29 @@
 # 更新记录
 
+## 2026-07-26：v5 首单 dogfood——真实 hotfix 走全链 + 三处流畅性实锤修复
+
+拿真实小缺陷(legacy tasks.md 坏编码穿透,DTS2026072501)在本仓走完 v5 hotfix 全链:
+spec new(hotfix 骨架)→ change.md(为什么+规格条目 evidence 域+实现清单)→ validate
+→ init → 修码+UT+单号 commit → phase 链 → verify-pass → archive。验证实锤:档案里
+只有一个 change.md;evidence 域真相源由归档自动新建合并;规格条目两条 EARS Scenario
+与新增测试逐条对照。
+
+dogfood 抓到并当场修复三处(核心原则:流畅易用,报错即出路):
+
+- **spec new 自动登记 CHANGE_NAME**(为空才写,done --set 幂等仍是权威;提示走
+  stderr——stdout 是 JSON 契约面,探针会拦混写):此前 init 要 CHANGE_NAME、
+  记录动作 done --set 又排在 init 之后,真实链路要撞两次墙才绕通;
+- **phase 跳跃报错给依序命令链**:hotfix/tweak 单不经 design/build 步骤、阶段停在
+  open,verify 步一条 `spec phase verify` 必撞"不能跳跃"墙且原文案无出路;
+- **verify_comet/tw_verify 步骤指令补轻量单的逐级推进命令**(tw_verify 原文"从
+  build 推进"对 tweak 单从来就不成立,v3 引入的文档断裂),顺带清掉 tw_verify
+  残留的 proposal/tasks 旧话术。
+
+本单交付:specengine legacy 分支坏编码收口(tasks_source 报带 UTF-8 指引的引擎错、
+_count_tasks 保持 CLI 同款宽容)+ 回归用例。specengine 60、探针 24+22、selftest
+全绿。已知手感遗留(未修,待实际痛再动):无 harness 环境 config_confirm 的确认账
+无法建立(设计如此,公司环境不存在);新建域真相源 Purpose 为 TBD 需归档后人工补。
+
 ## 2026-07-25：v5 单据轻量化——四合一 change.md，每单入库 7-9 件 → 1 件
 
 目标:完整开发单入库 7-9 个文件(proposal/design/tasks/delta spec/.openspec.yaml/

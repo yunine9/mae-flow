@@ -559,6 +559,20 @@ class EngineBasicsTests(unittest.TestCase):
         with self.assertRaises(SpecEngineError):
             new_change(self.root, "first-change")
 
+    def test_legacy_tasks_bad_encoding_readable_and_tolerant(self):
+        """legacy tasks.md 坏编码:引擎报带 UTF-8 指引的错误(不裸 traceback),
+        计数展示路径保持 CLI 同款宽容——与 v5 change.md 的收口对称。"""
+        seed_project(self.root)
+        seed_change(self.root, "enc", {"dom": ADDED_OK})
+        path = os.path.join(self.root, "openspec", "changes", "enc", "tasks.md")
+        with open(path, "wb") as stream:
+            stream.write("- [ ] 1. 任务".encode("gbk") + b"\xff\n")
+        with self.assertRaises(SpecEngineError) as ctx:
+            tasks_source(self.root, "enc")
+        self.assertIn("UTF-8", str(ctx.exception))
+        self.assertEqual({"total": 0, "completed": 0},
+                         status(self.root, "enc")["tasks"])
+
     def test_new_change_keeps_existing_full_config(self):
         ensure_config(self.root)
         full = read_text(self.root, "openspec/config.yaml")

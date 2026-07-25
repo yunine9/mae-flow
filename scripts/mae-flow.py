@@ -3306,6 +3306,21 @@ def cmd_spec(flow, st, args):
             info = specengine.new_change(os.getcwd(), name, tier=tier)
         except specengine.SpecEngineError as exc:
             die("创建变更目录失败: " + str(exc), 2)
+        # dogfood 实测:spec init 要求 CHANGE_NAME 已记录,而记录动作(done --set)
+        # 排在 init 之后,真实链路要撞两次墙才绕通。new 是真实动作、目录名就是
+        # 事实,创建成功即顺手登记(为空才写;done --set 同值幂等,权威不变)。
+        if not cn:
+            st["config"]["CHANGE_NAME"] = name
+            st.setdefault("history", []).append(
+                {"step": st["current"], "result": "spec:new", "note": name,
+                 "at": now})
+            save_state(st)
+            # stdout 是 spec new 的 JSON 契约面,提示一律走 stderr
+            print("[mae-flow] CHANGE_NAME=%s 已随创建自动登记(done 无需重复 --set)。"
+                  % name, file=sys.stderr)
+        elif cn != name:
+            print("[mae-flow] ⚠ 已登记 CHANGE_NAME=%s 与新目录 %s 不一致;"
+                  "一仓一单,请确认没有开重复单。" % (cn, name), file=sys.stderr)
         print(json.dumps(info, ensure_ascii=False, indent=2))
         return
     if action == "instructions":
@@ -3391,7 +3406,14 @@ def cmd_spec(flow, st, args):
             die("阶段不能回退(%s → %s)。需要回流请走 goto --force --ack 由用户裁决。"
                 % (cur, target), 2)
         if order.index(target) - order.index(cur) > 1:
-            die("阶段不能跳跃(%s → %s):中间阶段的产物与证据会被绕过。" % (cur, target), 2)
+            # dogfood 实测:hotfix/tweak 单不经 design/build 步骤,阶段停在 open,
+            # verify 步一条 phase verify 会撞这堵墙——报错必须给出路(核心原则)。
+            chain = " && ".join(
+                'python mae-flow.py spec phase %s' % p
+                for p in order[order.index(cur) + 1:order.index(target) + 1])
+            die("阶段不能跳跃(%s → %s):中间阶段的产物与证据会被绕过。"
+                "轻量单(hotfix/tweak)不经 design/build 步骤但阶段仍需逐级推进,"
+                "依序执行:%s" % (cur, target, chain), 2)
         if target == "archived":
             die("archived 由 spec archive 动作在真实完成定稿后写入,不接受直接推进。", 2)
         data["phase"] = target

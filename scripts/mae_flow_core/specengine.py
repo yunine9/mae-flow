@@ -1425,6 +1425,11 @@ def tasks_source(root, change):
         return label, _read_text(os.path.join(change_dir, "tasks.md"))
     except OSError:
         return label, None
+    except UnicodeDecodeError as exc:
+        # 与 v5 的 _read_change_doc 对称:坏编码是"读取失败要修",不是"源缺失",
+        # 收口为带指引的引擎错误,证据层转拒+可重试,不裸 traceback。
+        raise SpecEngineError(
+            "tasks.md 读取失败（文件须为 UTF-8 编码）：%s" % exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1595,7 +1600,8 @@ def _count_tasks(change_dir):
         return _count_task_lines(doc["sections"].get(V5_SECTION_TASKS, ""))
     try:
         content = _read_text(os.path.join(change_dir, "tasks.md"))
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # 展示/归档计数路径保持 CLI 同款宽容(getTaskProgress 的 try/catch 静默)。
         return {"total": 0, "completed": 0}
     return _count_task_lines(content)
 

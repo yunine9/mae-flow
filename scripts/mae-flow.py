@@ -948,6 +948,69 @@ def _biz_changed_files(st):
     return files, ""
 
 
+# 覆盖口径(用户拍板):CodeCheck/UT 针对本次修改的函数,不背整个文件的存量债。
+# "函数"用变更行±SLACK 窗口近似——函数级规则(超长/圈复杂度)的告警常报在
+# 签名行,窗口外扩把"改动所在函数"的这类告警兜进来;纯存量行的告警滤除。
+CODECHECK_LINE_SLACK = 3
+
+
+def _changed_lines(st, files):
+    """本单每文件的变更行集合(+侧,git diff -U0 解析)——范围过滤的唯一数据源。
+    返回 ({norm(file): set(行号)}, err)。"""
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    result = {}
+    for f in files:
+        out = sh(f'git -c core.quotepath=false diff -U0 {diff} -- "{f}"')
+        lines = set()
+        for m in re.finditer(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", out, re.M):
+            start = int(m.group(1))
+            n = int(m.group(2) if m.group(2) is not None else "1")
+            lines.update(range(start, start + max(n, 1)))
+        result[norm(f)] = lines
+    return result, ""
+
+
+def _scope_filter_codecheck(result, st, files):
+    """把告警过滤到本次修改范围(变更行±SLACK)。
+
+    返回 (filtered_result, excluded_stock_or_None)。None = 无法过滤——
+    告警明细缺行号(纯计数输出/JSON 无行号)或明细与总数对不上时保守全算,
+    宁可多报也不静默漏掉真告警;scan 会如实标注无法区分存量。"""
+    pairs = result.get("pairs") or []
+    if not pairs or result.get("total") != len(pairs) \
+            or any(p[2] is None for p in pairs):
+        return result, None
+    changed, err = _changed_lines(st, files)
+    if err or changed is None:
+        return result, None
+    norm_files = {norm(f): f for f in files}
+    kept, excluded = [], 0
+    for rule, wfile, line in pairs:
+        window = changed.get(norm(wfile))
+        if window is None:
+            # 报告里的路径没还原成清单文件(多义 basename 等):保守保留
+            kept.append((rule, wfile, line))
+            continue
+        if any(abs(line - c) <= CODECHECK_LINE_SLACK for c in window):
+            kept.append((rule, wfile, line))
+        else:
+            excluded += 1
+    return {"total": len(kept), "pairs": kept,
+            "commands": result.get("commands", [])}, excluded
+
+
+def _render_warning_pairs(pairs):
+    """任务卡里的告警清单渲染:规则|文件[|行号](旧状态里的二元组也兼容)。"""
+    out = []
+    for p in pairs:
+        rule, file_name = p[0], p[1]
+        line = p[2] if len(p) > 2 else None
+        out.append("|".join([rule, file_name] + ([str(line)] if line is not None else [])))
+    return "、".join(out)
+
+
 def _batches(files, maxlen=6000):
     """按命令行长度分批；同名文件拆开，保证报告只给 basename 时仍能还原完整路径。"""
     out, cur, ln, names = [], [], 0, set()
@@ -1054,11 +1117,18 @@ def _run_codecheck(files):
         total += count
         fs = re.findall(r"- \*\*文件\*\*: `([^`]+)`", rtxt)
         rs = re.findall(r"- \*\*规则\*\*: (\S+)", rtxt)
-        raw_pairs = json_pairs or list(zip(rs, fs))
-        for rule, file_name in raw_pairs:
+        lns = re.findall(r"- \*\*(?:行号|位置|行)\*\*:\s*`?(\d+)", rtxt)
+        if json_pairs:
+            raw_pairs = json_pairs
+        elif lns and len(lns) == len(rs) == len(fs):
+            raw_pairs = [(r, f, int(ln)) for (r, f), ln in zip(zip(rs, fs), lns)]
+        else:
+            raw_pairs = [(r, f, None) for r, f in zip(rs, fs)]
+        for rule, file_name, line in raw_pairs:
             matches = [x for x in batch if norm(x).lower() == norm(file_name).lower()
                        or os.path.basename(x).lower() == os.path.basename(file_name).lower()]
-            pairs.append((rule, matches[0] if len(matches) == 1 else norm(file_name)))
+            pairs.append((rule, matches[0] if len(matches) == 1 else norm(file_name),
+                          line))
     return {"total": total, "pairs": pairs, "commands": commands}, ""
 
 
@@ -1098,7 +1168,19 @@ def _parse_codecheck_json(path):
             rule = low.get("rule") or low.get("rulename") or low.get("ruleid")
             file_name = low.get("file") or low.get("filepath") or low.get("path")
             if uid and rule and file_name:
-                rows.append((str(uid), str(rule).split()[0], norm(str(file_name))))
+                # 行号:覆盖口径过滤(本次修改的函数)的依据;键名按已见格式宽兜底,
+                # 取不到记 None(过滤层对 None 保守保留)。
+                line = None
+                for lk in ("line", "lineno", "linenumber", "startline",
+                           "beginline", "linenum"):
+                    try:
+                        if low.get(lk) is not None:
+                            line = int(low[lk])
+                            break
+                    except (TypeError, ValueError):
+                        continue
+                rows.append((str(uid), str(rule).split()[0],
+                             norm(str(file_name)), line))
             for x in v.values():
                 walk(x)
         elif isinstance(v, list):
@@ -1107,8 +1189,8 @@ def _parse_codecheck_json(path):
 
     walk(data)
     uniq = {}
-    for uid, rule, file_name in rows:
-        uniq[uid] = (rule, file_name)
+    for uid, rule, file_name, line in rows:
+        uniq[uid] = (rule, file_name, line)
     if uniq:
         return len(uniq), list(uniq.values())
     # 某些版本只有明确总数，没有逐条对象；只接受语义清楚的数字字段。
@@ -1177,6 +1259,8 @@ def ev_codecheck_clean(spec, st):
             return True, ""
         return False, err + ("；若你已人工看过诊断文件并确认告警数，可使用 current 中给出的 "
                              "codecheck-record 恢复命令，记录会绑定当前 HEAD 和文件清单，代码一变即失效")
+    # 与 codecheck-scan 同源同口径:复核也只数本次修改范围内的告警
+    result, _stock = _scope_filter_codecheck(result, st, files)
     total, pairs = result["total"], result["pairs"]
     if total == 0:
         return True, ""
@@ -1186,14 +1270,14 @@ def ev_codecheck_clean(spec, st):
                        "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),把「规则ID + 文件 + 用户原话」"
                        f"逐行写入 {ex} 并 commit 后重试——口头豁免无效")
     extxt = open(ex, encoding="utf-8", errors="replace").read()
-    bad = [f"{r}({f})" for r, f in pairs if not _exemption_text_has_pair(extxt, r, f)]
+    bad = [f"{r}({f})" for r, f, _ln in pairs if not _exemption_text_has_pair(extxt, r, f)]
     if len(pairs) < total and bad == []:
         bad = [f"(另有 {total - len(pairs)} 条未解析出明细,无法核对豁免)"]
     if bad:
         return False, (f"实测遗留 {total} 条告警,以下未被豁免清单覆盖: " + "、".join(bad[:5])
                        + ("…" if len(bad) > 5 else "") + f"。修掉或补齐 {ex}(须用户裁决原话)后重试")
     approved = _approved_exemptions(st)
-    unauthorized = [f"{r}({f})" for r, f in pairs
+    unauthorized = [f"{r}({f})" for r, f, _ln in pairs
                     if _approval_key(r, f) not in approved and not _was_exempt_before_review(st, ex, r, f)]
     if unauthorized:
         return False, ("豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: " + "、".join(unauthorized[:5])
@@ -2109,7 +2193,7 @@ def _action_task_card(action, kind, stage=""):
             f"Harness首检告警数: {scan.get('count', '未执行')}",
             "Harness首检文件: " + "、".join(scan.get("files", [])),
             "Harness首检告警(规则|文件): "
-            + "、".join(r + "|" + f for r, f in scan.get("pairs", [])),
+            + _render_warning_pairs(scan.get("pairs", [])),
             "职责:仅处理首检范围内业务代码告警；修复后按配置编译并重新 fullcheck；禁止自动豁免。",
         ]
     elif label == "UT":
@@ -3897,10 +3981,35 @@ def cmd_agent_task(flow, st, args):
     if kind == "CODECHECK":
         lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
                   "Harness首检文件: " + "、".join(scan.get("files", [])),
-                  "Harness首检告警(规则|文件): " + "、".join(r + "|" + f for r, f in scan.get("pairs", [])),
+                  "Harness首检告警(规则|文件): " + _render_warning_pairs(scan.get("pairs", [])),
                   "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
     elif kind == "UT":
-        lines += ["职责:只对任务卡范围补/改测试；必须调用任务卡指定的 Mae-Flow 自带"
+        # 覆盖口径(用户拍板):测试对象=本次修改的函数,不为文件中未修改的
+        # 存量函数补测——范围蔓延等于每单背整个文件的测试债。
+        biz_files, _scope_err = _biz_changed_files(st)
+        changed_map, _cl_err = (_changed_lines(st, biz_files)
+                                if biz_files else ({}, ""))
+        if changed_map:
+            spans = []
+            for f in biz_files:
+                nums = sorted(changed_map.get(norm(f), set()))
+                if not nums:
+                    continue
+                ranges, start, prev = [], nums[0], nums[0]
+                for n in nums[1:]:
+                    if n > prev + 1:
+                        ranges.append((start, prev))
+                        start = n
+                    prev = n
+                ranges.append((start, prev))
+                spans.append(f + ": " + ",".join(
+                    ("%d" % a) if a == b else ("%d-%d" % (a, b))
+                    for a, b in ranges))
+            if spans:
+                lines.append("本次修改行范围(测试对象所在处): " + "; ".join(spans))
+        lines += ["职责:只对任务卡范围补/改测试；**测试对象=本次修改的函数/行为"
+                  "(上面行范围所在函数)+规格条目 EARS 条目,禁止为文件中未修改的"
+                  "存量函数补测**；必须调用任务卡指定的 Mae-Flow 自带"
                   " AutoUT/java-autout Skill（或明确配置的既有写法），并真实执行测试。"
                   "写“随生成方式自带”时由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。",
                   "评审意见处理不修改规格，测试依据使用上面列出的既有需求/规格。"]
@@ -3953,10 +4062,22 @@ def cmd_codecheck_scan(flow, st, args):
         if _moonlight(st):
             die(err + "；月光宝盒请按提示执行 moonlight defer 留痕继续。", 2)
         die(err + "；" + _risk_option("CODECHECK_TOOL"), 2)
+    # 覆盖口径:只算本次修改范围内的告警,文件里的存量告警不背(用户拍板)
+    stock = None
+    if files:
+        result, stock = _scope_filter_codecheck(result, st, files)
     st.setdefault("quality", {})["codecheck_scan"] = {
         "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
-        "files": files, "pairs": result["pairs"], "commands": result["commands"]}
+        "files": files, "pairs": result["pairs"], "commands": result["commands"],
+        "stock_excluded": stock}
+    if stock:
+        print("[mae-flow] 范围过滤:另有 %d 条告警在变更文件内但不属于本次修改"
+              "(存量债,不计入本单;线上若按全文件口径拦截,由存量治理单另行处理)。"
+              % stock)
+    elif stock is None and result["total"]:
+        print("[mae-flow] ⚠ 本轮告警明细缺行号,无法区分存量与本单修改,"
+              "已保守全算。", file=sys.stderr)
     # 每次重扫都是新一轮；旧 Agent 令牌不能替新告警背书。
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)

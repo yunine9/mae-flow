@@ -3,7 +3,9 @@
 第 0 步执行 `python "{MAEFLOW_PATH}" codecheck-scan`，由 harness 统一计算文件并运行检查：
 - 算「变更业务代码文件清单」:git diff --name-only 基线...HEAD 过滤代码文件、排除测试文件;
   **清单为空(本单没改业务代码)→ 无需检查,直接 done**;
-- harness 在项目根执行 `codecheck fullcheck -f <清单>`(禁 increcheck)。
+- harness 在项目根执行 `codecheck fullcheck -f <清单>`(禁 increcheck),随后**按覆盖口径过滤**:
+  只计本次修改范围(变更行±3,近似"改动所在函数")内的告警——**文件里的存量告警不是本单的债**,
+  scan 会报"另有 N 条存量告警未计入"供知情,存量治理另立单;告警明细缺行号时保守全算并明示;
   **可用性只认这一条命令能不能跑**——裸 `codecheck`、`codecheck --help` 之类报"不可用"一律不算数,
   别据此判定"codecheck 坏了"更别派 agent 去"修复 codecheck"(它是修代码规范的,不修工具);
   真的 `codecheck fullcheck` 本身跑不起来(报错/命令不存在)→ 这是环境问题,停下报告用户,不是派 agent。

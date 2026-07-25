@@ -200,6 +200,50 @@ def main():
                  "openspec/changes/probe-x/tasks.md"]}, st())
     check("glob_absent: 移走后过", ok, why)
 
+    # ---------- 3. 覆盖口径:CodeCheck 告警按本次修改行±3 过滤 ----------
+    root = os.path.join(base, "scope")
+    os.makedirs(root)
+    subprocess.run(["git", "init", "-q", "-b", "main", root],
+                   check=True, capture_output=True)
+    gitc = ["git", "-c", "user.email=probe@test", "-c", "user.name=probe", "-C", root]
+    src = os.path.join(root, "src")
+    os.makedirs(src)
+    with open(os.path.join(src, "a.c"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("".join("line %d\n" % i for i in range(1, 21)))
+    subprocess.run(gitc + ["add", "-A"], check=True, capture_output=True)
+    subprocess.run(gitc + ["commit", "-q", "-m", "base"], check=True,
+                   capture_output=True)
+    subprocess.run(gitc + ["checkout", "-q", "-b", "work"], check=True,
+                   capture_output=True)
+    content = ["line %d\n" % i for i in range(1, 21)]
+    content[9] = "changed 10\n"
+    content[10] = "changed 11\n"
+    with open(os.path.join(src, "a.c"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("".join(content))
+    subprocess.run(gitc + ["commit", "-aqm", "change"], check=True,
+                   capture_output=True)
+    os.chdir(root)
+    st_scope = {"config": {"基线分支": "main", "CHANGE_NAME": "x"},
+                "choices": {"workflow": "hotfix"}}
+    changed, err = mf._changed_lines(st_scope, ["src/a.c"])
+    check("范围口径: _changed_lines 解析变更行",
+          not err and changed.get("src/a.c") == {10, 11}, str((changed, err)))
+    result = {"total": 3, "pairs": [
+        ("RuleA", "src/a.c", 11),    # 变更行内 → 保留
+        ("RuleB", "src/a.c", 13),    # 窗口内(11+3) → 保留(近似"改动所在函数")
+        ("RuleC", "src/a.c", 1),     # 存量行 → 滤除
+    ], "commands": []}
+    filtered, stock = mf._scope_filter_codecheck(result, st_scope, ["src/a.c"])
+    check("范围口径: 本次修改±3 内保留、存量滤除",
+          filtered["total"] == 2 and stock == 1
+          and all(r != "RuleC" for r, _f, _l in filtered["pairs"]),
+          str((filtered, stock)))
+    nodetail = {"total": 2, "pairs": [("R", "src/a.c", None),
+                                      ("R2", "src/a.c", 5)], "commands": []}
+    filtered, stock = mf._scope_filter_codecheck(nodetail, st_scope, ["src/a.c"])
+    check("范围口径: 明细缺行号保守全算(不静默漏报)",
+          filtered["total"] == 2 and stock is None, str((filtered, stock)))
+
     os.chdir(os.path.expanduser("~"))
     base_ctx.cleanup()
     print("\n探针①通过 %d 项, 失败 %d 项" % (PASS, len(FAIL)))

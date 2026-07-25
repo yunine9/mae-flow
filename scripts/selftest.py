@@ -175,7 +175,9 @@ if flow:
             stdout=sample, stderr="", returncode=1)
         result, err = mf._run_codecheck(["src/Foo.cpp"])
         check("CodeCheck 成功不依赖退出码 0",
-              not err and result["total"] == 1 and result["pairs"] == [("R.ONE", "src/Foo.cpp")])
+              not err and result["total"] == 1
+              # 覆盖口径改造后告警带行号槽位;此样例明细无行号 → None(保守全算)
+              and result["pairs"] == [("R.ONE", "src/Foo.cpp", None)])
     finally:
         mf.subprocess.run, mf.ensure_codecheck = real_run, real_ensure
     win_argv, win_shell, _ = mf._codecheck_launch(

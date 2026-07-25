@@ -49,11 +49,15 @@ Get-Content "$env:TEMP\mae-flow-hook.log" -Tail 50
 
 预期：
 
+- Python、Git、Node.js、Git Bash 均为 ✅，并显示实际版本和绝对路径；
 - OpenSpec、Comet 和全部阶段能力均为 ✅；
 - OpenSpec 版本为 `1.6.0`；
 - 路径位于 `mae-flow\2.2.0\runtime\vendor\`；
 - comet、openspec、superpowers、ponytail 四个 SHA-256 全部通过；
 - 不要求 setup、reload 或 `comet init`。
+
+临时移除任一基础命令的 PATH 后再尝试初始化，应在 `.mae-flow.json` 创建前明确报出缺失项；恢复环境后可以
+直接重试，普通 Edit/Bash 在此期间仍应放行。
 
 ## 4. 做一次最小实跑
 

@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -352,6 +353,46 @@ def _run_host_cli(command, timeout=120, windows=None):
     return subprocess.run(command, **kwargs)
 
 
+def _python():
+    executable = os.path.abspath(sys.executable or "")
+    if not executable or not os.path.isfile(executable):
+        raise CapabilityError(
+            "找不到当前 Python 解释器。请从能够正常运行 Python 3 的终端启动 CodeAgent。")
+    if sys.version_info < (3, 8):
+        raise CapabilityError(
+            "Python 版本过低（当前 %s）；Mae-Flow 至少需要 Python 3.8。"
+            % ".".join(str(item) for item in sys.version_info[:3]))
+    return executable
+
+
+def _git(windows=None):
+    git = shutil.which("git") or shutil.which("git.exe")
+    if git:
+        return git
+    use_windows = os.name == "nt" if windows is None else bool(windows)
+    if use_windows:
+        candidates = []
+        for variable in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+            value = os.environ.get(variable, "")
+            if not value:
+                continue
+            if variable == "LOCALAPPDATA":
+                candidates.extend((
+                    os.path.join(value, "Programs", "Git", "cmd", "git.exe"),
+                    os.path.join(value, "Programs", "Git", "bin", "git.exe"),
+                ))
+            else:
+                candidates.extend((
+                    os.path.join(value, "Git", "cmd", "git.exe"),
+                    os.path.join(value, "Git", "bin", "git.exe"),
+                ))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+    raise CapabilityError(
+        "找不到 Git。Windows 请安装 Git for Windows，并确认 `git --version` 可执行。")
+
+
 def _node(windows=None):
     node = shutil.which("node") or shutil.which("node.exe")
     if node:
@@ -389,14 +430,16 @@ def _bash(windows=None):
     use_windows = os.name == "nt" if windows is None else bool(windows)
     if use_windows:
         candidates = []
-        git = shutil.which("git") or shutil.which("git.exe")
-        if git:
+        try:
+            git = _git(windows=True)
             git_dir = os.path.dirname(os.path.abspath(git))
             candidates.extend((
                 os.path.normpath(os.path.join(git_dir, "..", "bin", "bash.exe")),
                 os.path.normpath(os.path.join(
                     git_dir, "..", "usr", "bin", "bash.exe")),
             ))
+        except CapabilityError:
+            pass
         for variable in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
             value = os.environ.get(variable, "")
             if not value:
@@ -410,6 +453,65 @@ def _bash(windows=None):
                 return candidate
     raise CapabilityError(
         "找不到 Git Bash。项目开发需要 Git，Windows 请确认 Git for Windows 的 bash.exe 在 PATH。")
+
+
+def _version_detail(executable, arguments):
+    result = _run([executable, *arguments], timeout=30)
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    first_line = output.splitlines()[0].strip() if output else "未返回版本信息"
+    if result.returncode != 0:
+        raise CapabilityError(
+            "%s %s 执行失败（退出码 %s）: %s" % (
+                executable, " ".join(arguments), result.returncode,
+                first_line))
+    return "%s — %s" % (first_line, os.path.abspath(executable))
+
+
+def _host_runtime_checks():
+    """Probe the small host runtime Mae-Flow actually depends on."""
+    checks = []
+
+    def probe(key, name, resolver, arguments=None, detail=None):
+        try:
+            executable = resolver()
+            rendered = detail(executable) if detail else _version_detail(
+                executable, arguments or [])
+            checks.append({
+                "key": key,
+                "name": name,
+                "ok": True,
+                "detail": rendered,
+                "path": executable,
+            })
+        except CapabilityError as exc:
+            checks.append({
+                "key": key,
+                "name": name,
+                "ok": False,
+                "detail": str(exc),
+                "path": "",
+            })
+
+    probe(
+        "python", "Python", _python,
+        detail=lambda executable: "Python %s — %s" % (
+            ".".join(str(item) for item in sys.version_info[:3]),
+            executable))
+    probe("git", "Git", _git, ["--version"])
+    probe("node", "Node.js", _node, ["--version"])
+    probe("bash", "Git Bash", _bash, ["--version"])
+    return checks
+
+
+def _require_host_runtime():
+    checks = _host_runtime_checks()
+    failed = [item for item in checks if not item["ok"]]
+    if failed:
+        raise CapabilityError(
+            "基础依赖不可用: " + "；".join(
+                "%s: %s" % (item["name"], item["detail"])
+                for item in failed))
+    return {item["key"]: item for item in checks}
 
 
 def run_openspec(arguments, cwd=None, timeout=120):
@@ -505,8 +607,25 @@ def prepare_project(project_root):
     so Hooks remain in their normal fail-open inactive mode.
     """
     root = os.path.abspath(project_root)
-    if not os.path.isdir(os.path.join(root, ".git")):
+    runtime = _require_host_runtime()
+    if not os.path.isdir(root):
+        raise CapabilityError("项目目录不存在: " + root)
+    if not os.path.exists(os.path.join(root, ".git")):
         raise CapabilityError("当前目录不是 Git 项目根（缺少 .git）: " + root)
+    git_root = _run(
+        [runtime["git"]["path"], "-C", root, "rev-parse", "--show-toplevel"],
+        timeout=30)
+    discovered_root = (git_root.stdout or "").strip().splitlines()
+    if git_root.returncode != 0 or not discovered_root:
+        raise CapabilityError(
+            "Git 仓库检查失败: "
+            + ((git_root.stdout or "") + (git_root.stderr or "")).strip()[-600:])
+    actual_root = os.path.abspath(discovered_root[-1])
+    if os.path.normcase(os.path.realpath(actual_root)) != os.path.normcase(
+            os.path.realpath(root)):
+        raise CapabilityError(
+            "请在 Git 项目根目录启动 Mae-Flow。当前目录: %s；项目根: %s"
+            % (root, actual_root))
 
     version = run_openspec(["--version"], cwd=root, timeout=30)
     if version.returncode != 0 or "1.6.0" not in (version.stdout + version.stderr):
@@ -534,6 +653,10 @@ def prepare_project(project_root):
         "openspec": "1.6.0",
         "comet": "0.3.9-embedded",
         "project": root,
+        "python": runtime["python"]["detail"],
+        "git": runtime["git"]["detail"],
+        "node": runtime["node"]["detail"],
+        "bash": runtime["bash"]["detail"],
         "created_project_skills": False,
     }
 
@@ -671,6 +794,11 @@ def diagnostics(project_root=None, include_codecheck=False):
     def add(name, ok, detail):
         checks.append({"name": name, "ok": bool(ok), "detail": str(detail)})
 
+    for runtime_check in _host_runtime_checks():
+        add(
+            runtime_check["name"],
+            runtime_check["ok"],
+            runtime_check["detail"])
     add("内嵌 OpenSpec", os.path.isfile(OPENSPEC_ENTRY), OPENSPEC_ENTRY)
     add("内嵌 Comet 脚本", os.path.isfile(
         os.path.join(COMET_SCRIPT_ROOT, "comet-state.sh")), COMET_SCRIPT_ROOT)
@@ -686,10 +814,6 @@ def diagnostics(project_root=None, include_codecheck=False):
             (result.stdout + result.stderr).strip())
     except CapabilityError as exc:
         add("OpenSpec 可执行", False, exc)
-    try:
-        add("Git Bash", bool(_bash()), _bash())
-    except CapabilityError as exc:
-        add("Git Bash", False, exc)
     if include_codecheck:
         codecheck = ensure_codecheck(install=False)
         add("CodeCheck", codecheck["available"], codecheck["detail"])

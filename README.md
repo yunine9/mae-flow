@@ -298,8 +298,13 @@ AI 会先查代码和规格，再逐条给出结论：需要修、可以有依�
 想排除机器上旧版 OpenSpec、Comet 和其他插件的影响，可以按
 [Mae-Flow 干净环境验证](CLEAN-ROOM-TEST.md) 卸载外部组件后做一次最小实跑。
 
-项目本身仍要具备正常开发所需的基础条件，例如 Git、项目编译工具、测试框架和访问依赖仓库的权限。这些不是
-Mae-Flow 重复安装的东西：即使不用 AI，开发者本来也需要它们。
+Mae-Flow 真正依赖的宿主基础环境只有 Python 3.8+、Git、Node.js 和 Windows 下随 Git for Windows
+提供的 Git Bash。`mae-flow envcheck` 会实际执行版本命令，并显示四者的版本和真实路径；首次开启完整流程时
+也会复用同一套检查。缺少依赖会在创建流程状态前明确报错，因此不会激活 Hook 把普通开发锁住。Git worktree
+的 `.git` 文件形式也支持。
+
+项目编译工具、测试框架和访问依赖仓库的权限仍由具体项目提供。这些不是 Mae-Flow 重复安装的东西：即使不用
+AI，开发者本来也需要它们；它们会在真正编译和测试时按项目已确认的配置验证，不会重新引入耗时的 setup。
 
 CodeCheck 是唯一例外。它来自公司内网 npm 仓库，第一次真正执行规范检查时，Mae-Flow 会先查找
 `codecheck`/`codecheck.cmd`；找不到才尝试一次：
@@ -311,7 +316,8 @@ npm install -g @baize/codecheckcli --registry=https://cmc.centralrepo.rnd.huawei
 这条命令只给本次安装指定仓库，不会永久修改 npm 配置。安装失败会保存诊断，不会反复安装、误派修复 Agent
 或把流程锁死：普通模式由用户选择重试或承担“本次未做 CodeCheck”的风险继续；月光宝盒会记录到晨间报告。
 
-需要检查插件自身是否完整时，可以让 AI 执行 `mae-flow envcheck`。它只做内嵌运行时自检，不安装项目环境。
+需要检查插件自身是否完整时，可以让 AI 执行 `mae-flow envcheck`。它会检查上述四个基础运行时和插件内嵌
+能力，但不安装项目编译环境。CodeCheck 缺失会提示，但不会把插件判为不可用。
 
 团队可以把稳定的项目配置写进 `.mae-flow-defaults.json` 并提交：
 

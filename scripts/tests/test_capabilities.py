@@ -5,6 +5,7 @@
 import glob
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -75,9 +76,15 @@ class EmbeddedCapabilityTests(unittest.TestCase):
 
     def test_prepare_and_full_embedded_lifecycle_in_unicode_path(self):
         with tempfile.TemporaryDirectory(prefix="mae flow 中文 ") as root:
-            os.makedirs(os.path.join(root, ".git"))
+            subprocess.run(
+                ["git", "init", "-q", root],
+                check=True, capture_output=True, text=True)
             prepared = prepare_project(root)
             self.assertEqual("1.6.0", prepared["openspec"])
+            self.assertIn("Python ", prepared["python"])
+            self.assertIn("git version", prepared["git"].lower())
+            self.assertIn("node", prepared)
+            self.assertIn("bash", prepared)
             self.assertFalse(prepared["created_project_skills"])
             self.assertFalse(os.path.exists(os.path.join(root, ".cac")))
             self.assertFalse(os.path.exists(os.path.join(root, ".claude")))
@@ -189,6 +196,55 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(
                 root, "openspec", "specs", "runtime", "spec.md")))
 
+    def test_host_runtime_diagnostics_show_versions_and_paths(self):
+        checks = {
+            item["name"]: item
+            for item in capabilities.diagnostics(ROOT)
+        }
+        for name in ("Python", "Git", "Node.js", "Git Bash"):
+            with self.subTest(runtime=name):
+                self.assertIn(name, checks)
+                self.assertTrue(checks[name]["ok"], checks[name])
+                self.assertIn(" — ", checks[name]["detail"])
+
+    def test_prepare_accepts_git_worktree_dot_git_file(self):
+        with tempfile.TemporaryDirectory(prefix="mae worktree ") as base:
+            repository = os.path.join(base, "main")
+            worktree = os.path.join(base, "分支 worktree")
+            subprocess.run(
+                ["git", "init", "-q", repository],
+                check=True, capture_output=True, text=True)
+            write(os.path.join(repository, "README.md"), "runtime test\n")
+            subprocess.run(
+                ["git", "-C", repository, "add", "README.md"],
+                check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-C", repository, "-c", "user.name=Mae Flow",
+                 "-c", "user.email=mae-flow@example.invalid",
+                 "commit", "-q", "-m", "init"],
+                check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-C", repository, "worktree", "add", "-q",
+                 "-b", "runtime-test", worktree],
+                check=True, capture_output=True, text=True)
+            self.assertTrue(os.path.isfile(os.path.join(worktree, ".git")))
+            prepared = prepare_project(worktree)
+            self.assertEqual(os.path.abspath(worktree), prepared["project"])
+
+    def test_missing_host_dependency_fails_before_project_files_are_written(self):
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(
+                ["git", "init", "-q", root],
+                check=True, capture_output=True, text=True)
+            with mock.patch.object(
+                    capabilities, "_git",
+                    side_effect=capabilities.CapabilityError("找不到 Git")):
+                with self.assertRaisesRegex(
+                        capabilities.CapabilityError, "基础依赖不可用.*Git"):
+                    prepare_project(root)
+            self.assertFalse(os.path.exists(os.path.join(root, "openspec")))
+            self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
+
     def test_codecheck_install_is_one_shot_and_does_not_mutate_npm_config(self):
         with tempfile.TemporaryDirectory() as root:
             state_path = os.path.join(root, "capabilities.json")
@@ -258,9 +314,12 @@ class EmbeddedCapabilityTests(unittest.TestCase):
         }
         expected_bash = os.path.join(
             env["ProgramFiles"], "Git", "bin", "bash.exe")
+        expected_git = os.path.join(
+            env["ProgramFiles"], "Git", "cmd", "git.exe")
         expected_node = os.path.join(env["NVM_SYMLINK"], "node.exe")
         existing = {
             os.path.normpath(expected_bash),
+            os.path.normpath(expected_git),
             os.path.normpath(expected_node),
         }
         with mock.patch.object(
@@ -275,6 +334,9 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertEqual(
                 os.path.normpath(expected_node),
                 os.path.normpath(capabilities._node(windows=True)))
+            self.assertEqual(
+                os.path.normpath(expected_git),
+                os.path.normpath(capabilities._git(windows=True)))
 
 
 if __name__ == "__main__":

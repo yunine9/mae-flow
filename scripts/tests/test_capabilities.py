@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Regression tests for Mae-Flow's self-contained capability runtime."""
+"""Regression tests for Mae-Flow's self-contained capability runtime.
+
+换轨说明(为什么这些断言和旧版长得不一样):
+
+- v3 摘掉了第二状态机:交付阶段与产物指针从外部 `.comet.yaml` 收归
+  `.mae-flow.json` 的 `spec` 段,`mae-flow spec <init|new|instructions|validate|
+  set|phase|verify-pass|archive>` 取代了 comet-state/guard/handoff/archive;
+- v4 摘掉了 Node:规格引擎换成纯 Python 的 `mae_flow_core.specengine`,
+  Node 从"宿主必需"降级为"开发期对拍可选件",`prepare_project` 不再调外部 CLI、
+  不再写 `.comet/config.yaml`。
+
+所以原来"用 run_openspec/run_comet 驱动外部引擎跑一遍生命周期"的用例换轨成
+"用内置引擎 + spec 子命令驱动真实 CLI 跑一遍生命周期":关键覆盖(中文与空格路径下
+完整生命周期真实跑通)一条不少,并且补上了旧版结构上做不到的断言 ——
+阶段不可跳跃/回退/直达 archived、产物指针登记时必须真实存在、
+`verify_result` 不可直写(旧 comet 时代 `state set verify_result pass` 的伪造通道)。
+"""
 
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,18 +32,40 @@ from unittest import mock
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ROOT = os.path.abspath(os.path.join(SCRIPTS, ".."))
+MAE_FLOW = os.path.join(SCRIPTS, "mae-flow.py")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core import (  # noqa: E402
     CAPABILITY_PACKS,
-    configure_comet_build,
     prepare_project,
     render_pack,
-    run_comet,
-    run_openspec,
 )
 from mae_flow_core import capabilities  # noqa: E402
+
+
+# 宿主必需项:v4 起 Node 已不在其中(见 _optional_runtime_checks)。
+REQUIRED_RUNTIMES = ("Python", "Git", "Git Bash")
+# v4 删除的诊断项。任何一项复活都意味着外部引擎/Node 重新变成宿主前置,
+# 属于架构回退,必须让测试红。
+RETIRED_DIAGNOSTIC_ITEMS = (
+    "内嵌 OpenSpec", "内嵌 Comet 脚本", "OpenSpec 可执行", "Node.js")
+# prepare_project 的返回契约(v4):不再有 openspec/comet/node 三个键。
+PREPARED_KEYS = {
+    "spec_engine", "project", "python", "git", "bash",
+    "created_project_skills",
+}
+RETIRED_PREPARED_KEYS = ("openspec", "comet", "node")
+
+CHANGE = "embedded-smoke"
+DELTA_SPEC = (
+    "# Runtime Specification\n\n"
+    "## ADDED Requirements\n\n"
+    "### Requirement: Embedded runtime\n"
+    "The system SHALL execute the bundled runtime.\n\n"
+    "#### Scenario: Runtime starts\n"
+    "- **WHEN** a project starts Mae-Flow\n"
+    "- **THEN** the embedded runtime is available\n")
 
 
 def write(path, text):
@@ -35,7 +74,74 @@ def write(path, text):
         stream.write(text)
 
 
+def read_json(path):
+    with open(path, encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+def which_in(name, path):
+    return shutil.which(name, path=path) or shutil.which(name + ".exe", path=path)
+
+
 class EmbeddedCapabilityTests(unittest.TestCase):
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+    def _spec(self, root, *arguments, **kwargs):
+        """真实跑一条 `mae-flow spec ...`(子进程,含 argparse 与状态存储全链路)。"""
+        env = kwargs.pop("env", None)
+        self.assertFalse(kwargs, "未知参数: %s" % sorted(kwargs))
+        return subprocess.run(
+            [sys.executable, MAE_FLOW, "spec", *arguments],
+            cwd=root, text=True, capture_output=True, timeout=180, env=env)
+
+    def _spec_ok(self, root, *arguments, **kwargs):
+        result = self._spec(root, *arguments, **kwargs)
+        self.assertEqual(
+            0, result.returncode,
+            "spec %s 应成功: %s" % (
+                " ".join(arguments), (result.stdout or "") + (result.stderr or "")))
+        return result
+
+    def _spec_rejected(self, root, *arguments, **kwargs):
+        needle = kwargs.pop("needle", "")
+        result = self._spec(root, *arguments, **kwargs)
+        self.assertEqual(
+            2, result.returncode,
+            "spec %s 应被拒绝: %s" % (
+                " ".join(arguments), (result.stdout or "") + (result.stderr or "")))
+        if needle:
+            self.assertIn(
+                needle, (result.stderr or "") + (result.stdout or ""))
+        return result
+
+    @staticmethod
+    def _spec_state(root):
+        return read_json(os.path.join(root, ".mae-flow.json")).get("spec", {})
+
+    @staticmethod
+    def _env_without_node():
+        """PATH 里保证没有 node、但仍留着 git 的一份环境;做不到就返回 None。
+
+        v4 承诺"整条规格生命周期不需要 Node"。子进程看不见父进程的 mock,
+        只能靠 PATH 隔离来在 CLI 层真实证明这一点。"""
+        separator = os.pathsep
+        entries = [
+            item for item in os.environ.get("PATH", "").split(separator) if item]
+        path = separator.join(
+            item for item in entries if not which_in("node", item))
+        if which_in("node", path) or not which_in("git", path):
+            return None
+        env = os.environ.copy()
+        env["PATH"] = path
+        # Windows 下 _node() 还会读这几个环境变量兜底,隔离必须一并清掉。
+        for variable in ("CODEAGENT_NODE_PATH", "NODE_EXE", "NVM_SYMLINK"):
+            env.pop(variable, None)
+        return env
+
+    # ------------------------------------------------------------------
+    # 能力包与内嵌资源
+    # ------------------------------------------------------------------
     def test_all_phase_packs_are_pinned_and_host_safe(self):
         expected = {
             "open", "hotfix-open", "tweak-open", "design", "build",
@@ -74,139 +180,303 @@ class EmbeddedCapabilityTests(unittest.TestCase):
         self.assertEqual(4, len(integrity))
         self.assertTrue(all(item["ok"] for item in integrity), integrity)
 
-    def test_prepare_and_full_embedded_lifecycle_in_unicode_path(self):
-        with tempfile.TemporaryDirectory(prefix="mae flow 中文 ") as root:
+    # ------------------------------------------------------------------
+    # 生命周期:内置引擎 + spec 子命令,中文与空格路径
+    # ------------------------------------------------------------------
+    def test_full_spec_lifecycle_in_unicode_path(self):
+        """中文+空格路径下,用内置引擎跑完 open→design→build→verify→archive。
+
+        换轨:旧版这里跑的是 run_openspec/run_comet(外部 Node + bash 状态机),
+        阶段真相源是 `.comet.yaml`;v3/v4 之后阶段与产物指针都在 `.mae-flow.json`
+        的 spec 段,引擎是纯 Python。断言强度不降反升 —— 每个"不许"都真跑一遍。
+
+        旧版对 configure_comet_build 六项构建约定(isolation/build_mode/
+        subagent_dispatch/tdd_mode/direct_override/review_mode)的对账断言随
+        `.comet.yaml` 一起消失:那六个字段是第二状态机的私有配置,v3 之后不存在
+        对应概念。等价强度的替代是下面的阶段机与 verify-pass 三条硬校验 ——
+        它们守的是同一件事:机器结论只能由真实动作产生,不能被直写伪造。"""
+        with tempfile.TemporaryDirectory(prefix="mae flow 中文 ") as base:
+            root = os.path.join(base, "仓库 根 目录")
+            os.makedirs(root)
             subprocess.run(
                 ["git", "init", "-q", root],
                 check=True, capture_output=True, text=True)
             prepared = prepare_project(root)
-            self.assertEqual("1.6.0", prepared["openspec"])
-            self.assertIn("Python ", prepared["python"])
-            self.assertIn("git version", prepared["git"].lower())
-            self.assertIn("node", prepared)
-            self.assertIn("bash", prepared)
-            self.assertFalse(prepared["created_project_skills"])
-            self.assertFalse(os.path.exists(os.path.join(root, ".cac")))
-            self.assertFalse(os.path.exists(os.path.join(root, ".claude")))
-            with open(
-                    os.path.join(root, ".comet", "config.yaml"),
-                    encoding="utf-8") as stream:
-                config = stream.read()
-            self.assertIn("auto_transition: false", config)
-            self.assertIn("review_mode: standard", config)
+            self.assertEqual("builtin", prepared["spec_engine"])
+            # 子进程用不到 node 才算真的"去 Node";隔离不成立时退回继承环境,
+            # 精确的 node 缺失守护在 test_prepare_and_diagnostics_survive... 里。
+            env = self._env_without_node()
+            write(os.path.join(root, ".mae-flow.json"), json.dumps({
+                "current": "design",
+                "config": {"CHANGE_NAME": CHANGE, "单号": "REQ中文 1"},
+                "choices": {"workflow": "full"},
+                "history": [],
+                "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, ensure_ascii=False))
+            change = os.path.join(root, "openspec", "changes", CHANGE)
 
-            created = run_openspec(
-                ["new", "change", "embedded-smoke"], cwd=root)
-            self.assertEqual(0, created.returncode, created.stderr)
+            # --- 变更目录由内置引擎创建,重复创建被拒 ---
+            created = self._spec_ok(root, "new", CHANGE, env=env)
             self.assertEqual(
-                1, created.stdout.count("Created change 'embedded-smoke'"))
+                "spec-driven", json.loads(created.stdout)["schema"])
+            self.assertTrue(os.path.isfile(
+                os.path.join(change, ".openspec.yaml")))
+            self._spec_rejected(root, "new", CHANGE, env=env, needle="已存在")
 
-            change = os.path.join(
-                root, "openspec", "changes", "embedded-smoke")
-            write(
-                os.path.join(change, "proposal.md"),
-                "# Proposal\n\n## Why\n\nRuntime smoke.\n\n"
-                "## What Changes\n\nUse bundled runtime.\n")
-            write(
-                os.path.join(change, "design.md"),
-                "# Design\n\nUse the pinned embedded runtime.\n")
-            write(
-                os.path.join(change, "tasks.md"),
-                "# Tasks\n\n- [x] 1. Embedded runtime works\n")
-            write(
-                os.path.join(change, "specs", "runtime", "spec.md"),
-                "# Runtime Specification\n\n"
-                "## ADDED Requirements\n\n"
-                "### Requirement: Embedded runtime\n"
-                "The system SHALL execute the bundled runtime.\n\n"
-                "#### Scenario: Runtime starts\n"
-                "- **WHEN** a project starts Mae-Flow\n"
-                "- **THEN** the embedded runtime is available\n")
+            # --- 登记初始化:阶段真相源落在 .mae-flow.json ---
+            self._spec_ok(root, "init", env=env)
+            self.assertEqual("open", self._spec_state(root)["phase"])
+            self.assertEqual(CHANGE, self._spec_state(root)["change"])
+            # 定稿只能在定稿阶段(取代 comet archive 的阶段前置校验)
+            self._spec_rejected(root, "archive", env=env, needle="定稿只能在")
 
-            result = run_comet(
-                "state", ["init", "embedded-smoke", "full"], cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
-            result = run_comet(
-                "guard", ["embedded-smoke", "open", "--apply"], cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
-            result = run_comet(
-                "handoff", ["embedded-smoke", "design", "--write"], cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
+            # --- 产物格式指令来自 vendored schema,而不是外部 CLI ---
+            instructions = self._spec_ok(
+                root, "instructions", "proposal", env=env).stdout
+            self.assertIn('<artifact id="proposal" change="%s"' % CHANGE,
+                          instructions)
+            self.assertIn("<template>", instructions)
+            self.assertIn("proposal.md", instructions)
+            self._spec_rejected(root, "instructions", "不存在的制品", env=env)
 
-            design_doc = os.path.join(
-                root, "docs", "superpowers", "specs", "embedded-design.md")
-            write(
-                design_doc,
-                "---\n"
-                "comet_change: embedded-smoke\n"
-                "role: technical-design\n"
-                "canonical_spec: openspec\n"
-                "---\n"
-                "# Embedded Design\n")
-            result = run_comet(
-                "state",
-                ["set", "embedded-smoke", "design_doc",
-                 "docs/superpowers/specs/embedded-design.md"],
-                cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
-            result = run_comet(
-                "guard", ["embedded-smoke", "design", "--apply"], cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
+            # --- 阶段机:不可跳跃、不可回退(archived 不可直达在 archive 阶段验证) ---
+            self._spec_rejected(root, "phase", "verify", env=env, needle="跳跃")
+            self._spec_rejected(root, "phase", "archived", env=env, needle="跳跃")
+            self._spec_ok(root, "phase", "design", env=env)
+            self.assertEqual("design", self._spec_state(root)["phase"])
+            self._spec_rejected(root, "phase", "open", env=env, needle="回退")
 
-            applied = configure_comet_build("embedded-smoke", cwd=root)
-            self.assertEqual(6, len(applied))
-            result = run_comet(
-                "state",
-                ["transition", "embedded-smoke", "build-complete"],
-                cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
-
-            report = os.path.join(
-                root, "docs", "superpowers", "reports",
-                "embedded-verify.md")
-            write(report, "# Verification\n\nAll checks passed.\n")
-            for field, value in (
-                    ("verification_report",
-                     "docs/superpowers/reports/embedded-verify.md"),
-                    ("branch_status", "handled")):
-                result = run_comet(
-                    "state", ["set", "embedded-smoke", field, value],
-                    cwd=root)
-                self.assertEqual(0, result.returncode, result.stderr)
-            result = run_comet(
-                "state", ["transition", "embedded-smoke", "verify-pass"],
-                cwd=root)
-            self.assertEqual(0, result.returncode, result.stderr)
-
-            archived = run_comet(
-                "archive", ["embedded-smoke"], cwd=root, timeout=180)
+            # --- 指针登记:文件必须真实存在;非指针字段不许直写 ---
+            self._spec_rejected(
+                root, "set", "design_doc", "docs/不存在的设计.md",
+                env=env, needle="不存在")
+            self.assertNotIn("design_doc", self._spec_state(root))
+            self._spec_rejected(
+                root, "set", "verify_result", "pass", env=env,
+                needle="只能登记这些产物指针")
+            self.assertNotIn("verify_result", self._spec_state(root))
+            write(os.path.join(root, "docs", "设计 doc.md"),
+                  "# Embedded Design\n\n内置引擎驱动。\n")
+            self._spec_ok(root, "set", "design_doc", "docs/设计 doc.md", env=env)
             self.assertEqual(
-                0, archived.returncode,
-                (archived.stdout or "") + (archived.stderr or ""))
+                "docs/设计 doc.md", self._spec_state(root)["design_doc"])
+
+            # --- 规格结构校验真的会拦(内置引擎,无 Node) ---
+            write(os.path.join(change, "proposal.md"),
+                  "# Proposal\n\n## Why\n\nRuntime smoke.\n\n"
+                  "## What Changes\n\nUse the builtin spec engine.\n")
+            write(os.path.join(change, "design.md"),
+                  "# Design\n\nUse the pinned builtin engine.\n")
+            write(os.path.join(change, "tasks.md"),
+                  "# Tasks\n\n- [ ] 1. Builtin engine works\n")
+            broken = DELTA_SPEC.replace(
+                "The system SHALL execute the bundled runtime.",
+                "The system executes the bundled runtime.")
+            write(os.path.join(change, "specs", "runtime", "spec.md"), broken)
+            self._spec_rejected(root, "validate", env=env, needle="未通过")
+            write(os.path.join(change, "specs", "runtime", "spec.md"), DELTA_SPEC)
+            self._spec_ok(root, "validate", env=env)
+
+            # --- 推进到验证阶段 ---
+            self._spec_ok(root, "phase", "build", env=env)
+            self._spec_ok(root, "phase", "verify", env=env)
+
+            # --- verify-pass 三条硬校验:阶段、报告存在、任务全勾 ---
+            self._spec_rejected(root, "verify-pass", env=env, needle="验证报告")
+            write(os.path.join(root, "docs", "验证 report.md"),
+                  "# Verification\n\nAll checks passed.\n")
+            self._spec_ok(
+                root, "set", "verification_report", "docs/验证 report.md",
+                env=env)
+            self._spec_rejected(root, "verify-pass", env=env, needle="未完成")
+            write(os.path.join(change, "tasks.md"),
+                  "# Tasks\n\n- [x] 1. Builtin engine works\n")
+            self._spec_ok(root, "verify-pass", env=env)
+            data = self._spec_state(root)
+            self.assertEqual("pass", data["verify_result"])
+            self.assertEqual("handled", data["branch_status"])
+            self.assertEqual("archive", data["phase"])
+            # archived 只能由真实定稿产生,不接受直接推进(此时它是合法的 +1 步,
+            # 所以拦它的是专门的守卫而不是跳跃检查)
+            self._spec_rejected(root, "phase", "archived", env=env,
+                                needle="不接受直接推进")
+            self.assertEqual("archive", self._spec_state(root)["phase"])
+
+            # --- 定稿:delta 合并进真相源 + 目录移动(不是复制) ---
+            archived = self._spec_ok(root, "archive", env=env)
+            self.assertIn("openspec/specs/runtime/spec.md", archived.stdout)
+            self.assertEqual("archived", self._spec_state(root)["phase"])
             self.assertFalse(os.path.exists(change))
             archived_dirs = glob.glob(os.path.join(
-                root, "openspec", "changes", "archive",
-                "*-embedded-smoke"))
+                root, "openspec", "changes", "archive", "*-" + CHANGE))
             self.assertEqual(1, len(archived_dirs))
-            with open(
-                    os.path.join(archived_dirs[0], ".comet.yaml"),
-                    encoding="utf-8") as stream:
-                archived_state = stream.read()
-            self.assertIn("archived: true", archived_state)
-            self.assertTrue(os.path.isfile(os.path.join(
-                root, "openspec", "specs", "runtime", "spec.md")))
+            self.assertEqual(
+                os.path.basename(archived_dirs[0]),
+                self._spec_state(root)["archived_to"])
+            for name in ("proposal.md", "tasks.md"):
+                self.assertTrue(os.path.isfile(
+                    os.path.join(archived_dirs[0], name)), name)
+            main_spec = os.path.join(
+                root, "openspec", "specs", "runtime", "spec.md")
+            self.assertTrue(os.path.isfile(main_spec))
+            with open(main_spec, encoding="utf-8") as stream:
+                merged = stream.read()
+            self.assertIn("### Requirement: Embedded runtime", merged)
+            # delta 分节字样不得泄漏进真相源
+            self.assertNotIn("## ADDED Requirements", merged)
+            # 重复定稿被拒(阶段已 archived)
+            self._spec_rejected(root, "archive", env=env, needle="定稿只能在")
 
+            # --- 第二状态机确实不存在了(旧版在这里读 .comet.yaml 的 archived: true;
+            #     等价强度的替代断言 = 阶段落在 .mae-flow.json 且全仓无 comet 状态文件) ---
+            comet_leftovers = []
+            for dirpath, dirnames, filenames in os.walk(root):
+                if ".git" in dirnames:
+                    dirnames.remove(".git")
+                comet_leftovers.extend(
+                    os.path.join(dirpath, name) for name in
+                    list(filenames) + list(dirnames)
+                    if name in (".comet.yaml", ".comet"))
+            self.assertEqual([], comet_leftovers)
+
+    # ------------------------------------------------------------------
+    # prepare_project 契约
+    # ------------------------------------------------------------------
+    def test_prepare_project_contract_and_untouched_project(self):
+        with tempfile.TemporaryDirectory(prefix="mae flow 中文 ") as base:
+            root = os.path.join(base, "准备 项目")
+            os.makedirs(root)
+            subprocess.run(
+                ["git", "init", "-q", root],
+                check=True, capture_output=True, text=True)
+            prepared = prepare_project(root)
+            self.assertEqual(PREPARED_KEYS, set(prepared))
+            for retired in RETIRED_PREPARED_KEYS:
+                self.assertNotIn(retired, prepared)
+            self.assertEqual("builtin", prepared["spec_engine"])
+            self.assertEqual(os.path.abspath(root), prepared["project"])
+            self.assertIn("Python ", prepared["python"])
+            self.assertIn("git version", prepared["git"].lower())
+            self.assertIn(" — ", prepared["bash"])
+            self.assertFalse(prepared["created_project_skills"])
+
+            config = os.path.join(root, "openspec", "config.yaml")
+            self.assertTrue(os.path.isfile(config))
+            with open(config, encoding="utf-8") as stream:
+                config_text = stream.read()
+            self.assertIn("schema: spec-driven", config_text)
+            self.assertTrue(os.path.isdir(
+                os.path.join(root, "openspec", "specs")))
+            self.assertTrue(os.path.isdir(
+                os.path.join(root, "openspec", "changes", "archive")))
+            # v4:交付阶段收归 .mae-flow.json,comet 的项目级配置不再产生
+            self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
+            self.assertFalse(os.path.exists(
+                os.path.join(root, ".comet", "config.yaml")))
+            self.assertFalse(os.path.exists(os.path.join(root, ".cac")))
+            self.assertFalse(os.path.exists(os.path.join(root, ".claude")))
+            # prepare 早于流程激活:状态文件必须还不存在(Hook 保持 fail-open)
+            self.assertFalse(os.path.exists(
+                os.path.join(root, ".mae-flow.json")))
+
+            # 幂等:重跑不动已有配置
+            write(config, config_text + "\n# 用户注释保持不变\n")
+            again = prepare_project(root)
+            self.assertEqual(PREPARED_KEYS, set(again))
+            with open(config, encoding="utf-8") as stream:
+                self.assertIn("# 用户注释保持不变", stream.read())
+
+    def test_prepare_and_diagnostics_survive_missing_node(self):
+        """v4 的核心承诺:宿主没有 Node 也能准备项目、诊断也不报红。
+
+        用 PATH 级隔离模拟 node 缺失(比直接 mock `_node` 更接近生产:
+        任何"换个地方找 node"的隐式回退都会被这条测试抓到)。"""
+        real_which = capabilities.shutil.which
+
+        def which_without_node(name, *args, **kwargs):
+            if os.path.basename(str(name)).lower() in ("node", "node.exe"):
+                return None
+            return real_which(name, *args, **kwargs)
+
+        windows_hints = {
+            key: "" for key in
+            ("CODEAGENT_NODE_PATH", "NODE_EXE", "NVM_SYMLINK")}
+        with tempfile.TemporaryDirectory(prefix="mae flow 无 node ") as root:
+            subprocess.run(
+                ["git", "init", "-q", root],
+                check=True, capture_output=True, text=True)
+            with mock.patch.object(
+                    capabilities.shutil, "which",
+                    side_effect=which_without_node), \
+                    mock.patch.dict(capabilities.os.environ, windows_hints):
+                # 隔离本身有效(否则下面的断言会因为仍能找到 node 而变成空跑)
+                with self.assertRaises(capabilities.CapabilityError):
+                    capabilities._node()
+                required = capabilities._host_runtime_checks()
+                optional = capabilities._optional_runtime_checks()
+                prepared = prepare_project(root)
+                checks = capabilities.diagnostics(ROOT)
+
+            self.assertEqual({"python", "git", "bash"},
+                             {item["key"] for item in required})
+            self.assertTrue(all(item["ok"] for item in required), required)
+            self.assertEqual(["node"], [item["key"] for item in optional])
+            self.assertTrue(optional[0]["ok"], optional)
+            self.assertIn("未安装", optional[0]["detail"])
+            self.assertEqual(PREPARED_KEYS, set(prepared))
+            self.assertEqual("builtin", prepared["spec_engine"])
+            self.assertTrue(os.path.isfile(
+                os.path.join(root, "openspec", "config.yaml")))
+            self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
+            self.assertEqual(
+                [], [item for item in checks if not item["ok"]],
+                "Node 缺失不得让任何诊断项变红")
+            self.assertTrue(any(
+                item["name"] == "内置规格引擎" and item["ok"] for item in checks))
+
+    # ------------------------------------------------------------------
+    # 诊断契约
+    # ------------------------------------------------------------------
     def test_host_runtime_diagnostics_show_versions_and_paths(self):
-        checks = {
-            item["name"]: item
-            for item in capabilities.diagnostics(ROOT)
-        }
-        for name in ("Python", "Git", "Node.js", "Git Bash"):
+        checks = capabilities.diagnostics(ROOT)
+        by_name = {item["name"]: item for item in checks}
+        for name in REQUIRED_RUNTIMES:
             with self.subTest(runtime=name):
-                self.assertIn(name, checks)
-                self.assertTrue(checks[name]["ok"], checks[name])
-                self.assertIn(" — ", checks[name]["detail"])
+                self.assertIn(name, by_name)
+                self.assertTrue(by_name[name]["ok"], by_name[name])
+                self.assertIn(" — ", by_name[name]["detail"])
+        # 必需项就是这三条:Node 不在其中(v4 去 Node 的核心契约)
+        self.assertEqual(
+            set(REQUIRED_RUNTIMES),
+            {item["name"] for item in capabilities._host_runtime_checks()})
 
+        # Node 只作为可选参考件出现:在场则报版本,缺失也 ok(生产上允许没有)
+        node_items = [item for item in checks
+                      if item["name"].startswith("Node.js")]
+        self.assertEqual(1, len(node_items), node_items)
+        self.assertIn("可选", node_items[0]["name"])
+        self.assertTrue(node_items[0]["ok"], node_items[0])
+
+        # 内置规格引擎必须被真实加载过一次
+        self.assertIn("内置规格引擎", by_name)
+        self.assertTrue(by_name["内置规格引擎"]["ok"], by_name["内置规格引擎"])
+
+        # 防回退:这些项属于外部引擎时代,复活即架构回退
+        for retired in RETIRED_DIAGNOSTIC_ITEMS:
+            self.assertNotIn(retired, by_name)
+
+        # 内嵌规则包与 vendored 目录完整性仍逐项体检
+        self.assertEqual(
+            {"内嵌规则 " + pack for pack in CAPABILITY_PACKS},
+            {item["name"] for item in checks
+             if item["name"].startswith("内嵌规则 ")})
+        self.assertEqual(
+            [], [item for item in checks if not item["ok"]],
+            "健康宿主上 capability status 必须全绿")
+
+    # ------------------------------------------------------------------
+    # 宿主适配(与 v3/v4 无关,保持原样)
+    # ------------------------------------------------------------------
     def test_windows_plugin_path_is_literal_in_embedded_commands(self):
         windows_script = (
             r"C:\Users\l00899311\.cac\plugins\cache\aimarket"
@@ -262,6 +532,8 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                     prepare_project(root)
             self.assertFalse(os.path.exists(os.path.join(root, "openspec")))
             self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
+            self.assertFalse(os.path.exists(
+                os.path.join(root, ".mae-flow.json")))
 
     def test_codecheck_install_is_one_shot_and_does_not_mutate_npm_config(self):
         with tempfile.TemporaryDirectory() as root:

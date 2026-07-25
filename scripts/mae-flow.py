@@ -53,7 +53,6 @@ from mae_flow_core import (
     save_versioned_json,
     update_json,
     capability_diagnostics,
-    configure_comet_build,
     ensure_codecheck,
     prepare_project,
     render_pack,
@@ -548,28 +547,28 @@ def ev_tasks_checked(spec, st):
     return (n == 0, "" if n == 0 else f"tasks.md 还有 {n} 个未勾选任务")
 
 
-def ev_yaml(spec, st):
-    """读本 change 的 .comet.yaml 字段作证据(comet-guard 机器写入,比文件存在性可信)。
+def ev_spec_field(spec, st):
+    """读本单交付登记字段作证据(由 `mae-flow spec` 子命令机器写入,并现场复核指针有效性)。
+
+    v3 取代 yaml_field:数据源从 comet 的 .comet.yaml 换成 .mae-flow.json 的 spec 段——
+    同一把锁、同一份 gate 保护,且登记时就校验过文件真实存在(比读外部 YAML 更可信)。
     spec: {"field": 名, "equals": 期望值} 或 {"field": 名}(非空即过)。"""
-    cn = st["config"].get("CHANGE_NAME", "")
-    if not cn:
-        return False, "CHANGE_NAME 未设置,无法读取 .comet.yaml"
-    path = f"openspec/changes/{cn}/.comet.yaml"
-    if not os.path.exists(path):
-        return False, "未找到 " + path
-    txt = open(path, encoding="utf-8", errors="replace").read()
-    m = re.search(r"^\s*" + re.escape(spec["field"]) + r":\s*(.*?)\s*$", txt, re.M)
-    val = (m.group(1).strip().strip("'\"") if m else "")
-    # 兼容 "value" 作 "equals" 的别名:曾有 flow.json 写成 value 被静默忽略,
-    # 使"验证必须为 pass"退化成"非空即过"(pending/fail 都能过)。
+    field = spec["field"]
+    data = _spec_data(st)
+    val = str(data.get(field, "") or "")
     expected = spec.get("equals", spec.get("value"))
     if expected is not None:
         if val == expected:
             return True, ""
-        return False, (f".comet.yaml 的 {spec['field']}={val or '(空)'},需要 {expected}"
-                       "——先完成本步的 comet 阶段并通过 comet-guard --apply,谎报无效")
+        return False, (f"交付登记 {field}={val or '(空)'},需要 {expected}"
+                       "——按本步指引完成动作后用 mae-flow spec 登记,谎报无效")
     if val in ("", "null", "~"):
-        return False, f".comet.yaml 的 {spec['field']} 为空——本步的 comet 产物尚未生成/登记"
+        return False, (f"交付登记 {field} 为空——本步产物尚未登记;"
+                       f"完成后执行 mae-flow spec set {field} \"<路径>\"")
+    # 指针类字段现场复核:登记后文件被删/改名不能继续算证据
+    if field in SPEC_REGISTER_FIELDS and not os.path.isfile(val):
+        return False, (f"交付登记 {field} 指向 {val},但该文件现在不存在(被删或改名);"
+                       "重新生成产物并重新登记")
     return True, ""
 
 
@@ -1184,7 +1183,8 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
-            "yaml_field": ev_yaml, "pushed": ev_pushed, "agent_ran": ev_agent_ran,
+            "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
+            "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
             "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
             "review_agent_or_no_code": ev_review_agent_or_no_code,
@@ -1551,70 +1551,44 @@ def perms_line(step):
 
 # mae-flow 步骤 ↔ comet phase 合法区间(阶段互锁哨兵;未列出的步骤不检查)
 # 依据 comet 0.3 语义:comet-design 收尾自带 guard design --apply → build;build 收尾 apply → verify
-COMET_PHASE_EXPECT = {
-    "story_ask": ("build",), "story": ("build",),
-    "build": ("build", "verify"),
-    "verify_ponytail": ("verify",), "verify_post_ponytail_compile": ("verify",),
-    "verify_recompile": ("verify",), "verify_codecheck": ("verify",),
-    "verify_ut": ("verify",), "verify_comet": ("verify", "archive"),
-    "archive_confirm": ("verify", "archive"), "archive": ("verify", "archive"),
-    "design": ("open", "design", "build"),
-    # tweak/hotfix 线补齐哨兵覆盖(此前全裸:guard --apply 中断后整条 tw 链无预警,
-    # 直到 tw_verify 的 transition 硬报错)。哨兵只警不拒,区间宁宽勿漏。
-    "hf_open": ("open", "build"),
-    "tw_open": ("open", "build"),
-    "tw_change": ("build",), "tw_compile": ("build",),
-    "tw_codecheck": ("build",), "tw_ut": ("build",),
-    "tw_verify": ("build", "verify", "archive"),
-}
+SPEC_REGISTER_FIELDS = ("design_doc", "plan", "verification_report")
+SPEC_PHASES = ("open", "design", "build", "verify", "archive", "archived")
 
 
-def _comet_phase(st):
-    """读当前 change 的 comet phase(显式用 CHANGE_NAME,绝不学 comet 的字典序抽奖)。"""
-    cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
-    if not cn:
-        return ""
-    p = f"openspec/changes/{cn}/.comet.yaml"
-    if not os.path.exists(p):
-        return ""
-    m = re.search(r"^phase:\s*(\S+)", open(p, encoding="utf-8", errors="replace").read(), re.M)
-    return m.group(1) if m else ""
+def _spec_data(st):
+    """本单的交付登记(阶段与产物指针)。
+
+    v3:阶段状态收归 .mae-flow.json 单一裁决源——此前它活在 comet 的 .comet.yaml 里,
+    形成第二状态机:phase 掉队、僵尸 change、Bash 直写伪造、CRLF 双脑分裂全部源于此。
+    现在与流程状态同文件、同一把锁、同一份 gate 保护,不需要哨兵对账。"""
+    return st.setdefault("spec", {})
+
+
+def _spec_phase(st):
+    return str(_spec_data(st).get("phase", "") or "")
 
 
 def _active_change_count():
-    """在建区活跃 change 计数(镜像 comet 的判定:排除 archive/ 子目录与 archived: true)。>1 = 僵尸在场。"""
+    """在建区活跃 change 计数(排除 archive/ 与已归档)。>1 = 有历史残留未归档。"""
     n = 0
     try:
-        for d in os.listdir("openspec/changes"):
+        for d in os.listdir(os.path.join("openspec", "changes")):
             full = os.path.join("openspec", "changes", d)
-            if not os.path.isdir(full) or d == "archive":
-                continue
-            y = os.path.join(full, ".comet.yaml")
-            if not os.path.exists(y):
-                continue
-            if re.search(r"^archived:\s*true", open(y, encoding="utf-8", errors="replace").read(), re.M):
-                continue
-            n += 1
+            if os.path.isdir(full) and d != "archive":
+                n += 1
     except OSError:
         pass
     return n
 
 
 def _sentinel_lines(sid, st):
-    """阶段互锁哨兵:把'谜之写入拦截'变'开局就有诊断'。只警告不硬拒(硬闸在转换点的 phase 证据上)。"""
+    """在建区残留诊断。阶段错位这一整类随 v3 消失(阶段与流程同源,不可能不一致)。"""
     out = []
-    ph = _comet_phase(st)
-    exp = COMET_PHASE_EXPECT.get(sid)
-    if exp and ph and ph not in exp:
-        out.append(f"⚠ 阶段错位:comet phase={ph},本步期望 {'/'.join(exp)}。多为上一步的 comet-guard --apply"
-                   " 未完成(闪退/中断)——按该阶段收尾指引补跑 guard --apply 再继续;"
-                   "被 COMET PHASE GUARD 拦到写入时禁止换工具硬绕,先 doctor。")
     n = _active_change_count()
     if n > 1:
-        out.append(f"⚠ 僵尸告警:openspec/changes/ 下有 {n} 个活跃 change(应只有当前单一个)。"
-                   "comet 会按字典序抽一个管全场,极易造成谜之写入拦截。处理:当前单为 "
-                   f"{(st.get('config', {}) or {}).get('CHANGE_NAME', '?')},其余为历史残留——"
-                   "做完没归档的补归档,废弃的经用户确认移除。")
+        out.append(f"⚠ 在建区有 {n} 个 change 目录(应只有当前单一个)。当前单为 "
+                   f"{(st.get('config', {}) or {}).get('CHANGE_NAME', '?')},其余是历史残留——"
+                   "做完没定稿的补定稿,废弃的经用户确认移除,以免规格产物混淆。")
     return out
 
 
@@ -2418,33 +2392,20 @@ def cmd_requirement_record(st, args):
     print("请展示该文件全文让用户核对；确认后将「需求文档」配置为上述路径。")
 
 
-def _reopen_comet_archive(st):
-    cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
-    if not cn:
-        return False, "缺 CHANGE_NAME"
-    # 第一路走内嵌运行时:插件承诺不创建 .cac/.claude,纯内嵌项目上只找旧目录
-    # 这个恢复分支必死。旧版项目残留脚本仅作兜底。
-    why = ""
-    try:
-        result = run_comet("state", ["transition", cn, "archive-reopen"], cwd=os.getcwd())
-        if result.returncode == 0:
-            return True, ""
-        why = ((result.stdout or "") + (result.stderr or "")).strip()[-1000:]
-    except Exception as exc:
-        why = str(exc)
-    scripts = [os.path.join(base, "skills", "comet", "scripts", "comet-state.sh")
-               for base in (".cac", ".claude")]
-    script = next((p for p in scripts if os.path.isfile(p)), "")
-    if not script:
-        return False, why or "内嵌 comet-state 执行失败,且未发现旧版项目脚本"
-    try:
-        result = subprocess.run(["bash", script, "transition", cn, "archive-reopen"],
-                                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                timeout=30)
-    except Exception as exc:
-        return False, (why + "; 旧版脚本兜底也失败: " + str(exc)).strip("; ")
-    if result.returncode != 0:
-        return False, ((result.stdout or "") + (result.stderr or "")).strip()[-1000:]
+def _reopen_spec_archive(st):
+    """把交付阶段从 archive 退回 verify(源码在退出期间变过,验证结论必须重做)。
+
+    v3:阶段是自家状态里的一个字段,回退就是改它 + 作废验证结论——不再需要调外部
+    引擎的 archive-reopen 转换(那条链在纯内嵌项目上曾必死:只找 .cac/.claude 旧脚本)。"""
+    data = _spec_data(st)
+    if data.get("phase") != "archive":
+        return True, ""
+    data["phase"] = "verify"
+    data.pop("verify_result", None)
+    data.pop("verified_at", None)
+    st.setdefault("history", []).append(
+        {"step": st.get("current", ""), "result": "spec:archive-reopen",
+         "note": "退出期间源码变化,验证结论作废", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     return True, ""
 
 
@@ -2491,10 +2452,10 @@ def _resume_direct_mode(ack=""):
         elif old_step in ("verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
                           "verify_codecheck", "verify_ut", "verify_comet", "archive_confirm",
                           "archive", "push", "end"):
-            if _comet_phase(st) == "archive":
-                ok, why = _reopen_comet_archive(st)
+            if _spec_phase(st) == "archive":
+                ok, why = _reopen_spec_archive(st)
                 if not ok:
-                    die("源码已变化且底层处于定稿阶段，但正规回退失败；尚未重新启用：" + why, 2)
+                    die("源码已变化且交付处于定稿阶段，但正规回退失败；尚未重新启用：" + why, 2)
             target = "verify_recompile"
 
     for path in _state_sidecars():
@@ -2593,15 +2554,6 @@ def cmd_capability(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if not result["available"]:
             sys.exit(2)
-        return
-    if action == "comet-build-defaults":
-        try:
-            applied = configure_comet_build(args.change, cwd=os.getcwd())
-        except CapabilityError as exc:
-            die("内嵌能力执行失败: " + str(exc), 2)
-        print(json.dumps(
-            {"change": args.change, "applied": applied},
-            ensure_ascii=False, indent=2))
         return
     try:
         if action == "openspec":
@@ -3266,6 +3218,159 @@ def _gate_die(st, sid, rule, subject, msg):
     die(msg, 2)
 
 
+def cmd_spec(flow, st, args):
+    """交付登记与阶段推进(v3 取代 comet-state)。
+
+    设计要点(比被取代者更硬):
+    - 指针字段登记时**现场校验文件真实存在**,写不进不存在的路径;
+    - `verify_result` 不可直写——它只能由 verify-pass 转换产生,而转换要求验证报告
+      已登记且真实存在。这封掉了 comet 时代 `set verify_result pass` 的伪造通道;
+    - 阶段推进只接受合法序,乱跳报错;所有动作写 history 留痕。"""
+    if st is None:
+        die("流程未初始化;先执行 init。", 2)
+    action = args.spec_action
+    data = _spec_data(st)
+    cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    from mae_flow_core import specengine
+
+    if action == "show":
+        out = {"change": cn, **data}
+        if cn:
+            try:
+                out["artifacts"] = specengine.status(os.getcwd(), cn)
+            except Exception as exc:
+                out["artifacts_error"] = str(exc)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return
+    if action == "new":
+        name = (args.value or cn or "").strip()
+        if not name:
+            die("需要变更目录名:spec new <英文短名>。", 2)
+        try:
+            specengine.ensure_config(os.getcwd())
+            info = specengine.new_change(os.getcwd(), name)
+        except specengine.SpecEngineError as exc:
+            die("创建变更目录失败: " + str(exc), 2)
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return
+    if action == "instructions":
+        artifact = args.value or ""
+        if not cn:
+            die("先记录 CHANGE_NAME(done --set CHANGE_NAME=<英文短名>)。", 2)
+        try:
+            print(specengine.instructions(os.getcwd(), artifact, cn), end="")
+        except specengine.SpecEngineError as exc:
+            die("获取产物格式指令失败: " + str(exc), 2)
+        return
+    if action == "validate":
+        if not cn:
+            die("先记录 CHANGE_NAME。", 2)
+        try:
+            ok, messages = specengine.validate(os.getcwd(), cn)
+        except specengine.SpecEngineError as exc:
+            die("规格校验无法执行: " + str(exc), 2)
+        for line in messages:
+            print(line)
+        if not ok:
+            die("规格结构校验未通过:按上面的错误逐条修正后重跑(当步修比定稿时爆便宜得多)。", 2)
+        print("[mae-flow] 规格结构校验通过。")
+        return
+    if action == "archive":
+        if not cn:
+            die("先记录 CHANGE_NAME。", 2)
+        if _spec_phase(st) != "archive":
+            die("规格定稿只能在定稿阶段执行(当前阶段 %s):先完成验证并通过 spec verify-pass。"
+                % (_spec_phase(st) or "未初始化"), 2)
+        try:
+            info = specengine.archive(os.getcwd(), cn)
+        except specengine.SpecEngineError as exc:
+            die("规格定稿失败(现场保持原样,可修正后直接重跑): " + str(exc), 2)
+        data["phase"] = "archived"
+        data["archived_to"] = info.get("archive_name", "")
+        data["archived_at"] = now
+        st.setdefault("history", []).append(
+            {"step": st["current"], "result": "spec:archived",
+             "note": info.get("archive_name", ""), "at": now})
+        save_state(st)
+        for warn in info.get("warnings", []) or []:
+            print("⚠ " + str(warn), file=sys.stderr)
+        print("[mae-flow] 规格已定稿:合并进真相源 %s;变更目录已移动到 %s。"
+              % ("、".join(info.get("merged", [])) or "(无规格变更)",
+                 info.get("archive_name", "")))
+        print("统计: " + json.dumps(info.get("totals", {}), ensure_ascii=False))
+        return
+    if action == "init":
+        if not cn:
+            die("先用 done --set CHANGE_NAME=<英文短名> 记录变更目录名。", 2)
+        data.update({"change": cn, "phase": "open", "workflow":
+                     (st.get("choices", {}) or {}).get("workflow", ""),
+                     "initialized_at": now})
+        st.setdefault("history", []).append(
+            {"step": st["current"], "result": "spec:init", "note": cn, "at": now})
+        save_state(st)
+        print("[mae-flow] 交付登记已初始化:change=%s phase=open" % cn)
+        return
+    if action == "set":
+        field, value = args.field, (args.value or "").strip()
+        if field not in SPEC_REGISTER_FIELDS:
+            die("只能登记这些产物指针: %s。阶段与验证结论由 phase/verify-pass 转换产生,"
+                "不接受直写(直写等于伪造机器结论)。" % "、".join(SPEC_REGISTER_FIELDS), 2)
+        if not value:
+            die("登记值不能为空。", 2)
+        if not os.path.isfile(value):
+            die("登记失败:%s 不存在。先真实产出该文件再登记(登记不是承诺,是事实)。" % value, 2)
+        data[field] = norm(value)
+        st.setdefault("history", []).append(
+            {"step": st["current"], "result": "spec:set:" + field, "note": value, "at": now})
+        save_state(st)
+        print("[mae-flow] 已登记 %s = %s" % (field, norm(value)))
+        return
+    if action == "phase":
+        target = args.value or ""
+        if target not in SPEC_PHASES:
+            die("阶段只能是: %s" % "、".join(SPEC_PHASES), 2)
+        cur = _spec_phase(st) or "open"
+        order = list(SPEC_PHASES)
+        if order.index(target) < order.index(cur):
+            die("阶段不能回退(%s → %s)。需要回流请走 goto --force --ack 由用户裁决。"
+                % (cur, target), 2)
+        if order.index(target) - order.index(cur) > 1:
+            die("阶段不能跳跃(%s → %s):中间阶段的产物与证据会被绕过。" % (cur, target), 2)
+        if target == "archived":
+            die("archived 由 spec archive 动作在真实完成定稿后写入,不接受直接推进。", 2)
+        data["phase"] = target
+        st.setdefault("history", []).append(
+            {"step": st["current"], "result": "spec:phase:" + target, "at": now})
+        save_state(st)
+        print("[mae-flow] 交付阶段:%s → %s" % (cur, target))
+        return
+    if action == "verify-pass":
+        cur = _spec_phase(st)
+        if cur != "verify":
+            die("verify-pass 只能在验证阶段执行(当前阶段 %s):没进入验证就宣布验证通过"
+                "等于跳过实现与检查。先按步骤指引把阶段推进到 verify。" % (cur or "未初始化"), 2)
+        report = str(data.get("verification_report", "") or "")
+        if not report or not os.path.isfile(report):
+            die("verify-pass 要求先登记真实存在的验证报告:"
+                "mae-flow spec set verification_report \"<路径>\"。"
+                "验证结论不能凭口头产生。", 2)
+        ok, why = ev_tasks_checked({}, st)
+        if not ok:
+            die("verify-pass 前实现清单仍有未完成项:" + why, 2)
+        data["verify_result"] = "pass"
+        data["branch_status"] = "handled"
+        data["verified_at"] = now
+        data["phase"] = "archive"
+        st.setdefault("history", []).append(
+            {"step": st["current"], "result": "spec:verify-pass", "note": report, "at": now})
+        save_state(st)
+        print("[mae-flow] 规格符合性已通过:verify_result=pass,阶段 verify → archive。")
+        return
+    die("未知的 spec 动作: " + str(action), 2)
+
+
 def cmd_allow(flow, st, args):
     """break-glass:为一次被误拦的动作签发单次放行令(用户裁决,强验真)。"""
     if st is None:
@@ -3490,14 +3595,9 @@ def cmd_gate(flow, st, args):
                             for t in toks):
             die("comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护(黑名单#4),"
                 "直写等同伪造阶段/验证证据。", 2)
-        m_set = re.search(r"comet-state\b[^;|&]*?\bset\b\s+\S+\s+(\S+)", c, re.I)
-        if m_set and m_set.group(1).lower() in ("verify_result", "phase", "archived", "verified_at"):
-            die("禁止用 comet-state set 直写 %s:该字段只能由 transition(带前置校验)产生,"
-                "直写绕过全部退出条件检查等同伪造证据。verification_report/branch_status "
-                "等登记类字段不受限。" % m_set.group(1), 2)
         if re.search(r"COMET_FORCE_PHASE", c, re.I):
-            die("COMET_FORCE_PHASE 是维护者修复逃生口,Agent 禁止使用:它绕过阶段前置校验直写 phase。"
-                "阶段异常先执行 mae-flow doctor 按哨兵指引处理。", 2)
+            die("COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
+                "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。", 2)
         if re.search(r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*\.(sh|mjs|js)\b"
                      r"|runtime/bin/openspec\b", c, re.I):
             die("禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec 路由等环境,"
@@ -4954,6 +5054,8 @@ def main():
         return cmd_accept_risk(flow, st, args)
     if args.cmd == "allow":
         return cmd_allow(flow, st, args)
+    if args.cmd == "spec":
+        return cmd_spec(flow, st, args)
     if args.cmd == "done":
         return cmd_done(flow, st, args)
     if args.cmd == "skip":

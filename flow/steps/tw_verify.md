@@ -1,6 +1,6 @@
-先把底层状态从 build 推进到 verify：
+先把交付阶段从 build 推进到 verify：
 
-`python "{MAEFLOW_PATH}" capability comet-state -- transition "{CHANGE_NAME}" build-complete`
+`python "{MAEFLOW_PATH}" spec phase verify`
 
 然后按下方内嵌方法做一次与“小改”相称的最终核对，不扩大成全仓走读：
 
@@ -10,13 +10,12 @@
 4. 登记并完成状态：
 
 ```text
-python "{MAEFLOW_PATH}" capability comet-state -- set "{CHANGE_NAME}" verification_report ".mae-flow-work/verification-{CHANGE_NAME}.md"
-python "{MAEFLOW_PATH}" capability comet-state -- set "{CHANGE_NAME}" branch_status handled
-python "{MAEFLOW_PATH}" capability comet-state -- transition "{CHANGE_NAME}" verify-pass
+python "{MAEFLOW_PATH}" spec set verification_report ".mae-flow-work/verification-{CHANGE_NAME}.md"
+python "{MAEFLOW_PATH}" spec verify-pass
 ```
 
 发现实现问题时不要在这里偷改：回到 `tw_change` 修复，之后重新走编译、CodeCheck、UT 和本检查。
-`verify_result: pass` 写入后再 done。
+verify-pass 会硬校验阶段、报告文件与实现清单，三者齐备才写入 `verify_result: pass`；写入后再 done。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:verify}}

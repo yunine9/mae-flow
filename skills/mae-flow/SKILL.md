@@ -8,7 +8,7 @@ description: 由状态机和工具门禁驱动的端到端需求交付工作流�
 
 **全程使用简体中文与用户交流**(代码、命令、报错原文除外),无论用户消息是什么语言或只是一个命令。
 **用户话术纪律(用户界面层彻底封装)**:面向用户的一切展示与提问用公司语言,上游术语不进用户视野——
-comet/openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词不对用户说;统一说法:
+openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词不对用户说;统一说法:
 规格条目(=delta spec)、变更目录(=change)、规格定稿(=archive/归档)、方案讨论(=brainstorming)、
 代码精简(=ponytail review)、开发方式=完整开发(full)/已定位问题修复(hotfix)/局部修改(tweak)/
 处理评审意见(review)。
@@ -128,8 +128,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
    必须先把具体风险展示给用户并让用户二选一（重试 / 承担风险继续），只有用户明确选后者才能按提示执行
    `accept-risk`。它不等于 skip/goto，只替代当前步骤这一个令牌，其他机器证据照常检查。
 4. 意图不明的输入(单个词、无单号无文档):先问用户想做什么,不要 init。
-5. 中断恢复:直接 `current` 即回到断点;涉及 comet 阶段内部的细粒度恢复,可加用
-   `comet-state check <CHANGE_NAME> <阶段> --recover` 拿结构化恢复上下文;
+5. 中断恢复:直接 `current` 即回到断点;需要看交付阶段与已登记产物用 `spec show`;
    确需人工修复用 `goto <step> --force` 并告知用户。
    **Agent 令牌兜底通道**:AskUserQuestion 或专项 Agent 客观异常、继续重跑代价过高时，不再用 goto 跳整步；
    把报错中的具体风险展示给用户，取得**纯文本或结构化选项的明确确认**后，执行报错给出的
@@ -140,9 +139,9 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
 第一次失败先看真实拒签原因：如果已有可复用执行凭证，只做便宜的报告重答；否则把“重跑预计耗时”和
 “不重跑的具体风险”一起交给用户选择。用户选重试才重启 agent；选承担风险则走 `accept-risk`，
 禁止主 agent 因为自己嫌慢替用户做决定，也禁止无限自动重启。
-被 **COMET PHASE GUARD** 拦到写入(报错框含 phase/change)→ **禁止换工具硬绕**(Write 被拦就改 bash 是最坏反应,
-造成"时灵时不灵"的假象):先执行 mae-flow doctor 看 comet phase 与活跃 change 数,按哨兵指引处理——
-phase 掉队则补跑对应 guard --apply;活跃 change >1 则清僵尸;确需写 change 目录内文件用 git mv 而非 Write。
+被 gate 拦到写入时 **禁止换工具硬绕**(Write 被拦就改 bash 是最坏反应,造成"时灵时不灵"的假象):
+先执行 mae-flow doctor 看当前步骤权限与在建区状态;拦截连续出现三次会在报错里给出用户放行令
+(`allow <编号> --ack`)与整步跳过通道,按提示把风险交用户裁决,不要自己找绕路。
 打回消息附「尸检线索」时,**必须把线索原样转告新实例**——死因是某工具持续报错的,提醒新实例按契约
 "带着情报死"条款直接 FAIL/BLOCKED 上报,别让它把同一堵墙再撞一遍。
 重启计数的范围 = **本次进入该步骤内的连续失败**:步骤经 goto/回退重新进入后计数归零;

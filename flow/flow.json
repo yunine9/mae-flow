@@ -32,10 +32,18 @@
         "review"
       ],
       "choice_answers": {
-        "full": ["完整开发"],
-        "hotfix": ["已定位问题修复"],
-        "tweak": ["局部修改"],
-        "review": ["处理评审意见"]
+        "full": [
+          "完整开发"
+        ],
+        "hotfix": [
+          "已定位问题修复"
+        ],
+        "tweak": [
+          "局部修改"
+        ],
+        "review": [
+          "处理评审意见"
+        ]
       },
       "next": "branch_create"
     },
@@ -147,8 +155,14 @@
         "no"
       ],
       "choice_answers": {
-        "yes": ["做需求质询", "做质询"],
-        "no": ["跳过需求质询", "跳过"]
+        "yes": [
+          "做需求质询",
+          "做质询"
+        ],
+        "no": [
+          "跳过需求质询",
+          "跳过"
+        ]
       },
       "next": {
         "yes": "grill",
@@ -208,12 +222,6 @@
           ]
         },
         {
-          "type": "glob",
-          "any": [
-            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
-          ]
-        },
-        {
           "type": "clean_paths",
           "paths": [
             "openspec/changes/{CHANGE_NAME}"
@@ -222,6 +230,10 @@
         {
           "type": "agent_ran",
           "agent": "ASKUSER"
+        },
+        {
+          "type": "spec_field",
+          "field": "phase"
         }
       ],
       "next": "design",
@@ -233,8 +245,13 @@
       "title": "方案设计",
       "evidence": [
         {
-          "type": "yaml_field",
+          "type": "spec_field",
           "field": "design_doc"
+        },
+        {
+          "type": "spec_field",
+          "field": "phase",
+          "equals": "build"
         },
         {
           "type": "clean_paths",
@@ -255,8 +272,12 @@
         "no"
       ],
       "choice_answers": {
-        "yes": ["生成 STORY"],
-        "no": ["不生成 STORY"]
+        "yes": [
+          "生成 STORY"
+        ],
+        "no": [
+          "不生成 STORY"
+        ]
       },
       "next": {
         "yes": "story",
@@ -302,13 +323,13 @@
     "hf_open": {
       "title": "已定位问题修复 — 确认修改范围",
       "user_ack": true,
-      "confirmation_answers": ["确认范围并继续"],
+      "confirmation_answers": [
+        "确认范围并继续"
+      ],
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
-          ]
+          "type": "spec_field",
+          "field": "phase"
         }
       ],
       "next": "build",
@@ -319,13 +340,13 @@
     "tw_open": {
       "title": "局部修改 — 确认修改范围",
       "user_ack": true,
-      "confirmation_answers": ["确认范围并继续"],
+      "confirmation_answers": [
+        "确认范围并继续"
+      ],
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
-          ]
+          "type": "spec_field",
+          "field": "phase"
         }
       ],
       "next": "tw_change",
@@ -387,7 +408,7 @@
       "title": "小改 — 对照需求检查",
       "evidence": [
         {
-          "type": "yaml_field",
+          "type": "spec_field",
           "field": "verify_result",
           "equals": "pass"
         }
@@ -480,7 +501,7 @@
       "title": "验证 4/4 — 规格符合性",
       "evidence": [
         {
-          "type": "yaml_field",
+          "type": "spec_field",
           "field": "verify_result",
           "equals": "pass"
         }
@@ -490,7 +511,9 @@
     "archive_confirm": {
       "title": "规格定稿确认(不可逆)",
       "user_ack": true,
-      "confirmation_answers": ["确认定稿"],
+      "confirmation_answers": [
+        "确认定稿"
+      ],
       "evidence": [
         {
           "type": "agent_ran",
@@ -506,16 +529,21 @@
         {
           "type": "glob",
           "any": [
-            "openspec/archive/*{CHANGE_NAME}*",
             "openspec/changes/archive/*{CHANGE_NAME}*"
           ]
         },
         {
           "type": "glob_absent",
           "any": [
-            "openspec/changes/{CHANGE_NAME}/.comet.yaml"
+            "openspec/changes/{CHANGE_NAME}/proposal.md",
+            "openspec/changes/{CHANGE_NAME}/tasks.md"
           ],
-          "note": "归档是移动不是复制:原 change 目录必须已从 openspec/changes/ 消失。仍在=复制式假归档(会变僵尸干扰后续 comet 检测),用 git mv 把目录移进 archive/ 而非 cp"
+          "note": "定稿是移动不是复制:原变更目录必须已从 openspec/changes/ 消失。仍在=复制式假定稿(会干扰后续在建区判定),用 spec archive 完成移动"
+        },
+        {
+          "type": "spec_field",
+          "field": "phase",
+          "equals": "archived"
         },
         {
           "type": "clean_paths",

@@ -20,7 +20,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" current\n'
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
-            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|template|"
+            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "codecheck-scan|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
@@ -61,6 +61,23 @@ def parse_args(argv=None):
         "agent", help="当前步骤报错中显示的 Agent 名称，如 compile/codecheck/ut")
     risk.add_argument("--reason", required=True)
     risk.add_argument("--ack", required=True)
+    spec = sub.add_parser("spec")
+    spec_actions = spec.add_subparsers(dest="spec_action", required=True)
+    spec_actions.add_parser("init")
+    spec_actions.add_parser("show")
+    spec_new = spec_actions.add_parser("new")
+    spec_new.add_argument("value", nargs="?", help="变更目录英文短名")
+    spec_instr = spec_actions.add_parser("instructions")
+    spec_instr.add_argument(
+        "value", help="proposal | specs | design | tasks")
+    spec_actions.add_parser("validate")
+    spec_actions.add_parser("archive")
+    spec_set = spec_actions.add_parser("set")
+    spec_set.add_argument("field", help="design_doc | plan | verification_report")
+    spec_set.add_argument("value", help="产物真实路径（登记时校验存在）")
+    spec_phase = spec_actions.add_parser("phase")
+    spec_phase.add_argument("value", help="open|design|build|verify|archive")
+    spec_actions.add_parser("verify-pass")
     allow = sub.add_parser("allow")
     allow.add_argument(
         "block_id", help="gate 三振升级报错中给出的拦截编号(不要自行构造)")
@@ -130,8 +147,6 @@ def parse_args(argv=None):
             "comet-archive", "comet-validate"):
         cap_comet = capabilities.add_parser(action)
         cap_comet.add_argument("arguments", nargs=argparse.REMAINDER)
-    cap_build_defaults = capabilities.add_parser("comet-build-defaults")
-    cap_build_defaults.add_argument("change")
     cap_codecheck = capabilities.add_parser("codecheck")
     cap_codecheck.add_argument(
         "--install", action="store_true",

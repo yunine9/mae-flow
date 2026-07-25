@@ -1,9 +1,8 @@
 按下方内嵌规则生成轻量提案。确认英文短名后执行
-`python "{MAEFLOW_PATH}" capability openspec -- new change "<英文短名>"`，只生成动机、范围、简短实现说明和
+`python "{MAEFLOW_PATH}" spec new "<英文短名>"`，只生成动机、范围、简短实现说明和
 不超过 3 个任务；随后执行：
 
-1. `python "{MAEFLOW_PATH}" capability comet-state -- init "<英文短名>" tweak`
-2. `python "{MAEFLOW_PATH}" capability comet-guard -- "<英文短名>" open --apply`
+1. `python "{MAEFLOW_PATH}" spec init`
 
 展示改动范围，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮；
 用户点选确认后 done --set CHANGE_NAME=<change目录名>，不再要求输入确认句。

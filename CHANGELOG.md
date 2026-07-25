@@ -1,5 +1,60 @@
 # 更新记录
 
+## 2026-07-25：v3+v4 引擎内化——单一状态机、零 Node 依赖
+
+目标:阶段状态只有一个裁决源;宿主前置从四件套(Python/Git/Node/Git Bash)减为三件
+(Node 降级为可选,仅开发期对拍用)。方法论文本继续以固定源码随包提供,一字未改。
+
+### v3 去 comet:第二状态机摘除
+
+- 交付阶段、验证结论、产物指针从外部 `.comet.yaml` 收归 `.mae-flow.json` 的 `spec` 段:
+  同一把锁、同一份 gate 保护、同一套 revision/CAS。因此彻底消失的整类问题:phase 掉队、
+  僵尸 change 抽奖、`.comet.yaml` 的 Bash/Edit 不对称伪造面、CRLF 双脑分裂、
+  `COMET_FORCE_PHASE` 逃生口、阶段互锁哨兵(它存在的唯一目的就是对账两个状态机);
+- 新增 `mae-flow spec <init|show|new|instructions|validate|set|phase|verify-pass|archive>`,
+  三条硬点比被取代者更严:指针字段**登记时校验文件真实存在**;阶段不可跳跃/回退/直达
+  archived;`verify_result` **不可直写**,只能由 verify-pass 在「阶段已在 verify + 报告
+  文件存在 + 实现清单全勾」三重校验后产生——旧 `comet-state set verify_result pass`
+  一条命令伪造验证的通道关闭;
+- 证据 `yaml_field` → `spec_field`(旧名保留为别名,在途单兼容),并新增指针**现场复核**
+  (登记后文件被删/改名即失效);design/archive 步补 phase 硬闸(comet 时代根本没有);
+- 退出后接回流程的定稿回退不再依赖外部引擎(旧实现只找 `.cac/.claude` 旧脚本,
+  纯内嵌项目上必死),改为改自家阶段字段并作废验证结论;
+- 20 处步骤指令的 `capability comet-*` 全部改写为 `spec ...`;SKILL.md comet 话术清零。
+
+### v4 去 Node:规格引擎纯 Python 内化
+
+- 新增 `scripts/mae_flow_core/specengine.py`(1861 行):建配置/建变更目录/发格式指令/
+  结构校验/定稿合并/状态查询六项全部内化。实现方式是**直读内嵌 bundle 未混淆的
+  esbuild 源码逐条移植**(关键处注释标注上游函数名),schema、模板、指令正文实时读
+  vendored 数据文件,零硬编码;
+- `scripts/tests/test_specengine.py`:46 项测试,含 **13 个与内嵌 CLI 的差分对拍**——
+  ADDED/MODIFIED/REMOVED/RENAMED、多域、单文件多 requirement、中文 SHALL 混写、
+  三种非法格式、全链路,要求 `openspec/` 目录树逐字节一致 + validate/archive 判决一致;
+- **顺带修上游 CLI 一个真 bug**:CLI 先写真相源后查归档冲突,同日同名二次归档会把 delta
+  二次并进主 spec 才报错,留下脏真相源+未移走的变更目录(已实测复现)。引擎把冲突检查
+  (含主 specs 残留检查)提前到任何写盘之前,移动失败回滚已写文件——"归档半成功不可
+  重入"这个老痛点从根上消除;
+- `prepare_project` 改用引擎创建规格配置,不再调 Node CLI、不再写 `.comet/config.yaml`;
+  `_host_runtime_checks` 必需项只剩 Python/Git/Git Bash,Node 移入可选检查(缺失也 ok);
+  诊断新增「内置规格引擎」项;open/hf_open/tw_open 三步的 `capability openspec` 全部
+  改为 `spec new|instructions|validate`——**Node 彻底离开运行路径**;
+- 清理随之失效的死代码:`configure_comet_build`、`_ensure_yaml_scalar`、
+  `capability comet-build-defaults`(留着等于留一条会重新写出 `.comet/config.yaml` 的双源)。
+
+### 测试体系换轨(不弱化断言)
+
+- `test_capabilities.py` 9→11 项:诊断契约按新必需/可选项断言并加四条防回退(Node 不得
+  回到必需、`内置规格引擎` 不得消失、`OpenSpec 可执行`/`内嵌 Comet 脚本` 不得复活);
+  生命周期用例改走 `spec` 子命令端到端,保留中文+空格路径覆盖,并**在 PATH 剥掉 node
+  的子进程里跑**——v4 承诺有测试守护;新增 prepare_project 契约与「无 Node 仍成功」用例;
+- `selftest.py` 新增四条防回退:步骤与流程图不得再出现 `capability comet-`、证据全部
+  spec_field、**AST 级**检查流程代码不再直接驱动外部引擎(子串匹配会误报文档字符串)、
+  透传调用面不得扩张;并把规格引擎测试纳入自检清单。
+
+回归:state_core 7 项、specengine 46 项、capabilities 11 项、selftest 211 项、
+gate 冒烟 92 项、spec 语义探针 17 项,全绿。
+
 ## 2026-07-25：流程魔改——轻量化与质量的平衡批次
 
 准则:轻量化只删"重复劳动"(同一决定问两遍/同一 agent 白跑),不删决策点与证据;

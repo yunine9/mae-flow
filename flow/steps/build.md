@@ -2,11 +2,9 @@
 代码事实先查 .mae-flow-work/survey-{单号}.md(勘察笔记),只做增量探索,禁止全量重读代码。
 **中断/上下文重置(/clear)后恢复,先按序重读再动手**:①superpowers 计划文档 ②tasks.md(勾选与备注=进度真相)
 ③design.md 与 delta spec ④git log {基线分支}..HEAD 与最近 diff。禁止只凭本条指令闷头续写。
-先执行 `python "{MAEFLOW_PATH}" capability comet-state -- check "{CHANGE_NAME}" build`。
 随后执行
-`python "{MAEFLOW_PATH}" capability comet-build-defaults "{CHANGE_NAME}"`。
 这条确定性命令一次写入 branch、executing-plans、direct、standard 等公司固定选择，
-禁止由 Agent 自己记五六个字段，也不要手写 `.comet.yaml`。
+禁止由 Agent 自己记五六个字段，也不要手工编辑流程状态文件。
 按下方内嵌的实现计划与连续执行规则生成计划并实施，不调用外部 Skill。
 计划由主会话**亲自**按内嵌 writing-plans 方法生成——禁止把"制定计划"派给子代理:子代理上下文里
 没有本页能力包文本,产出会丢失 bite-sized/No Placeholders 纪律(下方原文如出现"派发计划子代理"
@@ -16,7 +14,7 @@
 - 隔离方式=branch(分支已在 branch_create 建好,直接沿用,不新建、不用 worktree);
 - 执行方式=executing-plans(如用户明确要求 subagent-driven,派发契约中必须注明 commit 格式为 [单号][类型]描述,否则子 agent 的提交会被拦截);
 - tdd_mode=direct 且 direct_override=true(公司用 AutoUT 在 verify 阶段事后补测,不走 TDD);
-- review_mode=standard(comet 审查查的是**正确性/漏洞/边界**,与 CodeCheck 的规范、Ponytail 的复杂度
+- 正确性审查(查**正确性/漏洞/边界**,与 CodeCheck 的规范、Ponytail 的复杂度
   维度不同、互不替代,这一维只有它管;高风险变更经用户同意可升 thorough)。
 开工自查(计划评审通过后、写第一行码前,自己过一遍不问用户):tasks.md 逐项能指到 design/delta spec 的出处吗?
 三者有矛盾或遗漏 → 走上面的回流通道,**不带病开工**——现在对齐五分钟,verify 阶段返工半天。
@@ -28,7 +26,7 @@ executing-plans 的**批次检查点不等用户**:每批完成展示简报后�
 让 /clear 后(或换会话)的你只靠磁盘就能无损接续。
 superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_override 授权,UT 由 verify 阶段 AutoUT 统一补,继续执行。
 按计划迭代,每完成一个任务:实现 → delta spec 同步检查(有偏差立即修) → 勾选 tasks.md →
-git commit -m "[单号][类型]描述"(拒绝 comet 建议的 fix:/tweak:/设计意图式 message;
+git commit -m "[单号][类型]描述"(拒绝方法原文建议的 fix:/tweak:/设计意图式 message;
 **先 commit 后编译**是定死的顺序:任务代码可以带着编译错误入库,compile-agent 的修复另行 commit)。
 **积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 先执行
 `python "{MAEFLOW_PATH}" agent-task compile --scope "<本批模块/任务>"`，把输出的唯一启动话术原样交给 compile-agent**
@@ -54,18 +52,17 @@ mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(
 两条边界:**YAGNI 不得砍 delta spec 要求的行为**(spec 是合同,只作用于怎么写,不作用于写什么);
 **禁用 ultra 档**(ultra 会质疑需求本身——那是 grill 阶段的事,不是写码时的事)。
 约束:小步提交禁积攒;只改本 change 相关代码;仅改 changes/ 下 delta spec,真相源只读;
-未提交改动按 comet 的 dirty-worktree 协议归因,来源不明禁止覆盖/回滚;
-comet 提示工作流升级条件(hotfix→full)时,停手展示原因,等用户确认后 goto design --force。
+未提交改动必须先归因(本单产出/用户原有/来源不明),来源不明禁止覆盖或回滚;
+发现需要升级工作流(hotfix→full,如实现揭出跨模块设计变更)时,停手展示原因,等用户确认后 goto design --force。
 实现中发现**设计或 delta spec 本身有误**(实现揭出的矛盾/遗漏/做不到)——这是实现阶段的正常发现,不是事故:
 停手,呈报用户(问题+影响+建议修法),经确认后 goto design(设计误)或 goto open(spec 误)--ack "用户原话"
 回流修订,修订后顺流回来;**禁止不吭声地偏离设计"先做出来再说"**——偏离没有记录,评审和 verify 都会被骗过。
 计划生成后执行：
-`python "{MAEFLOW_PATH}" capability comet-state -- set "{CHANGE_NAME}" plan "<计划文档路径>"`
+`python "{MAEFLOW_PATH}" spec set plan "<计划文档路径>"`
 
 全部完成、任务全勾选且最后一轮 compile-agent 已 OK 后执行
-`python "{MAEFLOW_PATH}" capability comet-state -- transition "{CHANGE_NAME}" build-complete`。
 Mae-Flow 已经用任务清单、提交和编译令牌校验过本阶段，不再让底层 guard 重跑一遍长编译。
-确认 `.comet.yaml phase` 已为 `verify`，展示任务状态与产物摘要后直接 done。
+展示任务状态与产物摘要后直接 done(阶段推进由 verify 链的第一步负责,本步不改阶段)。
 状态机会自动校验 tasks 全勾选、最新 commit 带单号和编译令牌，不再让用户为“代码已经写完”签字。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────

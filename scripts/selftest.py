@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
-agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import contextlib, importlib.util, io, json, os, re, subprocess, sys, tempfile, time, types
+agent 契约与 dispatch 识别名同步、v3/v4 换轨防回退(comet 子命令与外部 Node
+规格引擎不得复活)、关键文件存在。任何 ❌ 退出码 1。"""
+import ast, contextlib, glob, importlib.util, io, json, os, re, subprocess, sys, tempfile, time, types
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,8 +27,10 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/state_store.py",
           "scripts/mae_flow_core/standalone.py",
           "scripts/mae_flow_core/moonlight.py",
+          "scripts/mae_flow_core/specengine.py",
           "scripts/tests/test_state_core.py",
-          "scripts/tests/test_capabilities.py"):
+          "scripts/tests/test_capabilities.py",
+          "scripts/tests/test_specengine.py"):
     try:
         path = os.path.join(ROOT, f)
         with open(path, encoding="utf-8") as stream:
@@ -48,6 +51,13 @@ capability_tests = subprocess.run(
     text=True, capture_output=True, timeout=240)
 check("内嵌能力完整生命周期回归", capability_tests.returncode == 0,
       (capability_tests.stdout + capability_tests.stderr)[-5000:])
+# v4:规格引擎换成纯 Python，它的单元测试 + 与内嵌 CLI 的差分对拍必须同样点名跑。
+specengine_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_specengine.py")],
+    text=True, capture_output=True, timeout=300)
+check("内置规格引擎回归与差分对拍", specengine_tests.returncode == 0,
+      (specengine_tests.stdout + specengine_tests.stderr)[-5000:])
 
 # 2. JSON
 flow = hooks = None
@@ -410,15 +420,21 @@ if flow:
             os.chdir(old_cwd)
     # Plugin-owned runtime is prepared in-process: no project Skill directory,
     # global npm mutation, setup script or reload marker.
+    # v4 换轨：规格目录由内置纯 Python 引擎创建（不再自检外部 openspec 版本号），
+    # 交付阶段收归 .mae-flow.json，因此 .comet/config.yaml 从"必须存在"变成"必须不存在"。
     with tempfile.TemporaryDirectory() as td:
         subprocess.run(["git", "init", "-q", td], check=True)
         prepared = mf.prepare_project(td)
-        check("安装后项目能力可直接准备且不生成 .cac/.claude",
-              prepared.get("openspec") == "1.6.0"
+        check("安装后项目能力可直接准备且不生成 .cac/.claude/.comet",
+              prepared.get("spec_engine") == "builtin"
+              and set(prepared) == {"spec_engine", "project", "python", "git",
+                                    "bash", "created_project_skills"}
               and os.path.isfile(os.path.join(td, "openspec", "config.yaml"))
-              and os.path.isfile(os.path.join(td, ".comet", "config.yaml"))
+              and os.path.isdir(os.path.join(td, "openspec", "changes", "archive"))
+              and not os.path.exists(os.path.join(td, ".comet"))
               and not os.path.exists(os.path.join(td, ".cac"))
-              and not os.path.exists(os.path.join(td, ".claude")))
+              and not os.path.exists(os.path.join(td, ".claude")),
+              "prepared=%s" % sorted(prepared))
         old_cwd = os.getcwd()
         try:
             os.chdir(td)
@@ -1630,6 +1646,73 @@ check("STORY 不入库会在推送前检查提交树", "git ls-tree -r --name-on
 check("STORY 不入库由 done 自动移入过程区",
       'if sid == "story"' in mf_src and 'os.path.join(".mae-flow-work", "story")' in mf_src)
 
+# 6.45 v3/v4 换轨防回退：第二状态机(comet)与外部 Node 规格引擎不得从任何缝隙复活。
+# v3 把阶段与产物指针收归 .mae-flow.json 的 spec 段(证据类型 spec_field)，
+# v4 把规格引擎换成纯 Python specengine。这两条检查守的就是"不许悄悄退回去"。
+flow_src = open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8").read()
+comet_command_hits = ["flow/flow.json"] if "capability comet-" in flow_src else []
+for step_doc in sorted(glob.glob(os.path.join(ROOT, "flow", "steps", "*.md"))):
+    with open(step_doc, encoding="utf-8") as stream:
+        if "capability comet-" in stream.read():
+            comet_command_hits.append(
+                os.path.relpath(step_doc, ROOT).replace(os.sep, "/"))
+check("流程图与步骤指令不再调用 comet 子命令", not comet_command_hits,
+      str(comet_command_hits))
+check("流程证据全部换轨到 spec_field(不留 yaml_field 兼容别名)",
+      "yaml_field" not in flow_src)
+
+# run_openspec/run_comet/configure_comet_build 的允许调用面：
+#   - scripts/mae_flow_core/capabilities.py：外部引擎适配层本身(定义与内部转调)
+#   - scripts/mae-flow.py 的 cmd_capability：`capability ...` 透传逃生口
+# 其余任何位置出现即"流程又开始直接驱动外部引擎"，属于回退。
+# 用 AST 找真实调用点：子串匹配会被注释、文档字符串里的字面量误报。
+ENGINE_CALL_NAMES = {"run_openspec", "run_comet", "configure_comet_build"}
+
+
+def _engine_call_sites(path):
+    with open(path, encoding="utf-8") as stream:
+        tree = ast.parse(stream.read(), filename=path)
+    hits = []
+
+    def called_name(node):
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
+        return ""
+
+    def walk(node, enclosing):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, child.name)
+                continue
+            if isinstance(child, ast.Call) and called_name(child) in ENGINE_CALL_NAMES:
+                hits.append("%s(%s)" % (child.lineno, enclosing or "<module>"))
+            walk(child, enclosing)
+
+    walk(tree, "")
+    return hits
+
+
+engine_hits = {}
+for source in sorted(glob.glob(
+        os.path.join(ROOT, "scripts", "**", "*.py"), recursive=True)):
+    rel = os.path.relpath(source, ROOT).replace(os.sep, "/")
+    if rel in ("scripts/selftest.py", "scripts/mae_flow_core/capabilities.py"):
+        continue                      # 本文件是检查逻辑自身；capabilities 是适配层
+    found = _engine_call_sites(source)
+    if found:
+        engine_hits[rel] = found
+flow_engine_calls = [
+    "%s:%s" % (rel, hit)
+    for rel, found in sorted(engine_hits.items()) for hit in found
+    if not (rel == "scripts/mae-flow.py" and hit.endswith("(cmd_capability)"))]
+check("流程代码不再直接驱动外部规格引擎(OpenSpec/Comet)",
+      not flow_engine_calls, str(flow_engine_calls))
+check("外部引擎透传只保留在 capability 子命令里且不再扩张",
+      len(engine_hits.get("scripts/mae-flow.py", [])) <= 3,
+      str(engine_hits.get("scripts/mae-flow.py", [])))
+
 # 6.5 模板与 dispatch 章节校验同步(posttooluse 路由里必须引用同名模板)
 for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):
     check(f"dispatch 模板校验引用 {tpl}", tpl in dp)
@@ -1656,7 +1739,9 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "scripts/comet_compat.py", "scripts/mae_flow_core/capabilities.py",
+          "scripts/mae_flow_core/specengine.py",
           "scripts/tests/test_capabilities.py",
+          "scripts/tests/test_specengine.py",
           "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
           "runtime/vendor/ponytail/LICENSE",

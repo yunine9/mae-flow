@@ -5,4 +5,4 @@ UT 经用户裁决后修改了被测源码，harness 已自动把流程送回质
 3. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 按报告处理后重启新实例；
 4. done 后继续 Ponytail → CodeCheck → UT，确保源码修复没有绕过任何下游质量门。
 
-这是回流专用编译节点，不重新执行 comet-build，不重做已经完成的实现计划。
+这是回流专用编译节点，不重做已经完成的实现计划。

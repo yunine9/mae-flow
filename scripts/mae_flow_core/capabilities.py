@@ -518,8 +518,31 @@ def _host_runtime_checks():
             ".".join(str(item) for item in sys.version_info[:3]),
             executable))
     probe("git", "Git", _git, ["--version"])
-    probe("node", "Node.js", _node, ["--version"])
     probe("bash", "Git Bash", _bash, ["--version"])
+    return checks
+
+
+def _optional_runtime_checks():
+    """参考件:缺失不影响任何流程能力。
+
+    v4 起规格引擎是纯 Python,Node 只在需要与上游 CLI 做差分核对时才用到
+    (开发期工具),不再是宿主前置——这是"零依赖"目标的最后一块。"""
+    checks = []
+    try:
+        node = _node()
+        result = _run([node, "--version"], timeout=20)
+        detail = (result.stdout or result.stderr or "").strip().splitlines()
+        checks.append({
+            "key": "node", "name": "Node.js（可选，仅开发期对拍用）",
+            "ok": True, "path": node,
+            "detail": ((detail[0] if detail else "") + " — " + node).strip(" —"),
+        })
+    except CapabilityError as exc:
+        checks.append({
+            "key": "node", "name": "Node.js（可选，仅开发期对拍用）",
+            "ok": True, "path": "",
+            "detail": "未安装（不影响流程：规格引擎为纯 Python）— " + str(exc)[:120],
+        })
     return checks
 
 
@@ -576,52 +599,6 @@ def run_comet(script_name, arguments, cwd=None, timeout=180):
                 cwd=cwd, timeout=timeout, env=env)
 
 
-def configure_comet_build(change_name, cwd=None):
-    """Write Mae-Flow's fixed full-workflow build choices deterministically."""
-    decisions = (
-        ("isolation", "branch"),
-        ("build_mode", "executing-plans"),
-        ("subagent_dispatch", "null"),
-        ("tdd_mode", "direct"),
-        ("direct_override", "true"),
-        ("review_mode", "standard"),
-    )
-    applied = []
-    for field, value in decisions:
-        result = run_comet(
-            "state", ["set", change_name, field, value], cwd=cwd, timeout=60)
-        if result.returncode:
-            detail = ((result.stdout or "") + (result.stderr or "")).strip()
-            raise CapabilityError(
-                "写入构建约定失败(%s=%s): %s" % (
-                    field, value, detail[-1000:]))
-        applied.append({"field": field, "value": value})
-    return applied
-
-
-def _ensure_yaml_scalar(path, key, value):
-    if os.path.isfile(path):
-        with open(path, encoding="utf-8", errors="replace") as stream:
-            text = stream.read()
-    else:
-        text = ""
-    newline = "\r\n" if "\r\n" in text else "\n"
-    lines = text.splitlines()
-    pattern = re.compile(r"^%s\s*:" % re.escape(key))
-    positions = [i for i, line in enumerate(lines) if pattern.match(line)]
-    wanted = "%s: %s" % (key, value)
-    if positions:
-        first = positions[0]
-        lines[first] = wanted
-        duplicates = set(positions[1:])
-        lines = [line for i, line in enumerate(lines) if i not in duplicates]
-    else:
-        lines.append(wanted)
-    updated = newline.join(lines).rstrip() + newline
-    if updated != text:
-        atomic_write_text(path, updated)
-
-
 def prepare_project(project_root):
     """Prepare deterministic project metadata before flow state is activated.
 
@@ -650,35 +627,22 @@ def prepare_project(project_root):
             "请在 Git 项目根目录启动 Mae-Flow。当前目录: %s；项目根: %s"
             % (root, actual_root))
 
-    version = run_openspec(["--version"], cwd=root, timeout=30)
-    if version.returncode != 0 or "1.6.0" not in (version.stdout + version.stderr):
-        raise CapabilityError(
-            "插件内嵌 OpenSpec 自检失败: "
-            + (version.stdout + version.stderr).strip()[-600:])
-
+    # v4:规格目录由内置引擎创建,不再调 Node CLI——Node 从此不是宿主前置。
+    from . import specengine
     config = os.path.join(root, "openspec", "config.yaml")
     if not os.path.isfile(config):
-        result = run_openspec(
-            ["init", root, "--tools", "none", "--profile", "core"],
-            cwd=root, timeout=90)
-        if result.returncode != 0 or not os.path.isfile(config):
-            raise CapabilityError(
-                "无法创建项目规格目录: "
-                + (result.stdout + result.stderr).strip()[-1200:])
-
-    comet_config = os.path.join(root, ".comet", "config.yaml")
-    os.makedirs(os.path.dirname(comet_config), exist_ok=True)
-    _ensure_yaml_scalar(comet_config, "auto_transition", "false")
-    _ensure_yaml_scalar(comet_config, "review_mode", "standard")
-    _ensure_yaml_scalar(comet_config, "context_compression", "off")
+        try:
+            specengine.ensure_config(root)
+        except specengine.SpecEngineError as exc:
+            raise CapabilityError("无法创建项目规格目录: " + str(exc))
+        if not os.path.isfile(config):
+            raise CapabilityError("规格配置创建后仍不存在: " + config)
 
     return {
-        "openspec": "1.6.0",
-        "comet": "0.3.9-embedded",
+        "spec_engine": "builtin",
         "project": root,
         "python": runtime["python"]["detail"],
         "git": runtime["git"]["detail"],
-        "node": runtime["node"]["detail"],
         "bash": runtime["bash"]["detail"],
         "created_project_skills": False,
     }
@@ -817,26 +781,25 @@ def diagnostics(project_root=None, include_codecheck=False):
     def add(name, ok, detail):
         checks.append({"name": name, "ok": bool(ok), "detail": str(detail)})
 
-    for runtime_check in _host_runtime_checks():
+    for runtime_check in _host_runtime_checks() + _optional_runtime_checks():
         add(
             runtime_check["name"],
             runtime_check["ok"],
             runtime_check["detail"])
-    add("内嵌 OpenSpec", os.path.isfile(OPENSPEC_ENTRY), OPENSPEC_ENTRY)
-    add("内嵌 Comet 脚本", os.path.isfile(
-        os.path.join(COMET_SCRIPT_ROOT, "comet-state.sh")), COMET_SCRIPT_ROOT)
+    from . import specengine
+    try:
+        # 真实加载 schema:模板/规则数据缺失或损坏必须在这里就暴露
+        schema = specengine._load_schema("spec-driven")
+        add("内置规格引擎", bool(schema),
+            "纯 Python（无需 Node）— schema spec-driven 已加载")
+    except Exception as exc:
+        add("内置规格引擎", False, exc)
     for pack in sorted(CAPABILITY_PACKS):
         try:
             render_pack(pack)
             add("内嵌规则 " + pack, True, "已加载")
         except CapabilityError as exc:
             add("内嵌规则 " + pack, False, exc)
-    try:
-        result = run_openspec(["--version"], cwd=project_root, timeout=30)
-        add("OpenSpec 可执行", result.returncode == 0 and "1.6.0" in result.stdout,
-            (result.stdout + result.stderr).strip())
-    except CapabilityError as exc:
-        add("OpenSpec 可执行", False, exc)
     if include_codecheck:
         codecheck = ensure_codecheck(install=False)
         add("CodeCheck", codecheck["available"], codecheck["detail"])

@@ -16,7 +16,6 @@ from .runtime import (
 from .capabilities import (
     CAPABILITY_PACKS,
     CapabilityError,
-    configure_comet_build,
     diagnostics as capability_diagnostics,
     ensure_codecheck,
     prepare_project,
@@ -60,7 +59,6 @@ __all__ = [
     "RuntimeSnapshot",
     "CAPABILITY_PACKS",
     "CapabilityError",
-    "configure_comet_build",
     "capability_diagnostics",
     "ensure_codecheck",
     "prepare_project",

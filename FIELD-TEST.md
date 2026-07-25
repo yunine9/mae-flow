@@ -1,4 +1,4 @@
-# 公司 Windows 实机测试清单(2026-07-20)
+# 公司 Windows 实机测试清单(2026-07-25)
 
 目的:插件从"macOS 沙箱实证"到"实战可信"的最后一公里。按序执行,每项记录 现象/日志/结论;
 发现问题记三元组:现象 + hook 日志片段 + 所在步骤。**验收线:整单 gate 误拦次数应为个位数。**
@@ -11,7 +11,7 @@
   边界完整旁路，不能被父目录的旧流程误接管；测完删除测试状态。
 - [ ] **0.1 hook 存活**:启动会话发一条消息,开 `%TEMP%\mae-flow-hook.log`:
   - start/end 成对、耗时几十 ms 级 → 通过;
-  - 文件不存在 → harness 不支持 exec form:把 hooks.json 五个 hook 的 `"command"+"args"` 改回
+  - 文件不存在 → harness 不支持 exec form:把 hooks.json 六个 hook 的 `"command"+"args"` 改回
     shell form(`python "${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py" <事件>`),重启会话再测;
   - 有 start 无 end / WATCHDOG 行 → 有挂起,收集日志全文发维护人,暂停实测。
 - [ ] **0.2 PostToolUse-Bash 延迟**:让 AI 连跑几条 Bash 命令,看日志里 posttooluse 的耗时与频度
@@ -46,7 +46,8 @@
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
   - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
-  - **SubagentStop**:首单环境步派过 env-setup-agent 后,tokens 里出现 ENV 条目(=transcript 定位与契约校验活着);
+  - **SubagentStop**:派一次 compile-agent 或 ut-generator-agent 后,tokens 里出现对应 COMPILE/UT 条目，
+    且任务卡指纹与真实 Skill/Bash 调用能被识别(=transcript 定位与契约校验活着);
   - **Stop**:月光宝盒在非安全停点让主 Agent 结束回复，应被打回继续；执行 `moonlight blocked` 留痕后应允许停止，
     日志出现 stop start/end。若宿主根本不触发 Stop，月光模式降级为 Skill 软约束，必须回报维护人；
   - **SessionStart**:重启会话,开场自动出现"存在进行中的交付流程"提示。
@@ -54,20 +55,23 @@
 
 ## 阶段 1 — 首单实跑校准(半天,选一个小需求,建议 局部修改/已定位问题修复)
 
-- [ ] **1.1 环境初始化链(新三层:安装器→诊断 agent→人工三要素)**:
-  - 首选路径:终端直接跑 `python "<插件>/scripts/setup.py"`(会话外也行),看逐步 ✅/⚠/❌ 与汇总;
-    幂等验证:连跑两遍,第二遍应全 ✅ 秒过;
-  - **profile 校准**:安装失败先核对 `assets/env-profile.json` 的镜像/代理/插件命令与公司实际是否一致——
-    对不上改这一个文件,不改代码;
-  - **错误值收敛**:先把 `.comet/config.yaml` 改成 `auto_transition: true`、`review_mode: strict`，
-    重跑 setup 后必须自动纠正；修改全局 npm/Git 配置时，输出应给出 `%TEMP%` 下的修改前备份路径;
-  - ⚠人工项话术:comet init 三要素(目录/命令/平台)是否复制即用;处理完重跑安装器能续上;
-  - ❌ 项:AI 派 env-setup-agent 诊断(它应重跑 setup.py 验证,而不是自己拼命令装);
-  - **gate 验证**:让 AI 试跑 `comet init` 应被硬拦(实战修复:自动化执行会初始化全部平台);
-  - 此前误自动化留下的多平台目录(.cursor/.windsurf 等):人工删除;
-  - 老链路项照旧:.claude→.cac 迁移、/reload-skills 提示、新装插件重启提示、statusline+权限基线合并无损。
-- [ ] **1.2 env-setup 三产物**:statusline 自动接入;**权限基线合并**(settings 其他键无损,deny/allow 追加);
-  `.comet/config.yaml` 两键齐。
+- [ ] **1.1 安装即用（发布阻断项）**:
+  - 新建一个带空格和中文路径的 Git 仓，只安装插件，不运行任何 setup/reload/init；普通 Edit/Bash 必须放行；
+  - 执行 `mae-flow envcheck`，OpenSpec/Comet/各阶段内嵌规则全部为 ✅，CodeCheck 缺失不能把插件判失败；
+  - 执行 `mae-flow init`，应自动创建 `openspec/config.yaml` 和 `.comet/config.yaml` 后直接进入配置确认，
+    项目中不得出现 `.cac/.claude/.cursor/.windsurf` 等平台目录；
+  - 删除流程状态后连续两次执行 `capability prepare`，两次都成功且第二次不新增杂项；把
+    `.comet/config.yaml` 改成 `auto_transition: true`、`review_mode: strict` 后再 prepare，应纠正为
+    `false/standard`；
+  - 让 AI 尝试全局 `comet init`，必须被拦并明确说明“内嵌运行时无需手动初始化”，不能再给用户迁移或
+    reload 指令。
+- [ ] **1.2 固定源码与 CodeCheck 首用**:
+  - `capability status` 显示 OpenSpec 1.6.0、Comet 0.3.9 和所有能力包；机器全局安装不同版本不得影响结果；
+  - 从 open 到 archive 跑一条最小变更，创建/设计交接/状态推进/规格合并/目录移动各只执行一次，
+    不能出现重复 Created 或“第一次已移动、第二次找不到目录”；
+  - 已安装 CodeCheck 时应找到真实 `codecheck.cmd`，即使 `fullcheck --help` 退出码为 1 也判可用；
+  - 未安装场景只在第一次真正检查时尽力安装，命令带一次性 `--registry`，npm 全局配置前后不变；
+    安装失败时不得循环安装或锁死流程，普通模式能提示风险出口，月光模式能写晨间报告。
 - [ ] **1.3 配置确认**:工号取"域\"后半段;需求文档三分支(给个 docx 试试"不可读格式"话术);
   口述一段中文需求后运行 messages → requirement-record，文件应为 UTF-8、正文 SHA 可复核；再造一个
   UTF-16/GBK 文本走 `--source` 规范化。故意给坏文件执行 done，应拒绝且 `.mae-flow.json` 不留下半套配置；

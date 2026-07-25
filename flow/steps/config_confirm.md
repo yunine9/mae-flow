@@ -30,18 +30,16 @@
   done 时状态机硬校验:需求文档必须真实存在、可严格按 UTF-8 读取、无高置信乱码；由
   requirement-record 生成的文件还会核对正文 SHA-256。配置和确认全部通过后才一次性保存，
   失败不会留下半套配置。乱码不是用户确认问题，禁止反复让用户说“我确认”
-- 编译方式(build-fix skill | mvn compile -q | 其他)——按仓库构建体系推断候选,用户拍板;
-  **必须落到一个后面调得起来的具体方式**:是命令就记命令原文;是 skill(如 build-fix)要确认它已安装/加载
-  (调不起来的 skill 会导致 build 阶段无法编译)。按语言推断候选:C++/CMake/mcde 仓 → 推荐 build-fix(skill);
+- 编译方式(Mae-Flow 自带 build-fix skill | mvn compile -q | 其他)——按仓库构建体系推断候选,
+  用户拍板；C++/CMake/mcde 仓推荐 build-fix，Java/Maven 仓推荐明确的 mvn 命令。
+  build-fix 随 Mae-Flow 插件提供，不单独安装、不做项目目录迁移、不要求 reload；
   Java/Maven 仓 → mvn 命令;其他 → 用户给命令。拿不准就和用户确认一条能跑通的编译命令兜底。
   **该配置是全流程唯一编译路由**:compile-agent、codecheck/UT agent 的编译验证全按它执行,
   任何 agent 现场另猜编译命令都是违规;
-  **确认后同步给 comet**:检查仓库根 comet.yaml,缺 build_command/verify_command 则写入
-  (值=确认的编译方式与 UT 运行命令;若编译方式是 skill 而非命令,写等价命令行或与用户商定),
-  保证 comet-guard 的 build/verify 校验与本流程用同一套命令,不各验各的
-- UT生成方式:自动推断+确认(C++/mcde→AutoUT;Java/Maven→java-autout;其他→参考仓内写法)
-- UT运行命令提示(随生成方式自带 | mvn test | 其他)。这是给 UT Skill 的运行提示，不是字符串门禁；
-  最终以 transcript 中真实执行成功的测试命令为证据，不要求动态生成的命令与提示逐字一致
+- UT生成方式:自动推断+确认(C++/mcde→插件自带 AutoUT skill;Java/Maven→插件自带
+  java-autout skill;其他→参考仓内写法)。这些能力随 Mae-Flow 安装，不再单独安装或 reload
+- UT运行命令提示(随生成方式确定 | mvn test | 其他)。这是运行入口提示，不是逐字字符串门禁；
+  最终以真实执行结果为准
 仓库预设:current 输出若附带「仓库预设(.mae-flow-defaults.json)」块(团队提交进仓的恒定项,
 如编译方式/UT生成方式/UT运行命令),以其值为预填直接进入确认展示,不再重新推断;
 用户点头后照常逐项 --set。**基线分支与需求文档不因预设免问,仍必须单独确认**。

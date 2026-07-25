@@ -37,7 +37,8 @@ COMPILE_RESULT: FAIL
 
 - 单号和单号类型(feat/fix)
 - **编译方式**(config_confirm 确认的配置原文)——这是唯一路由,**禁止自行另猜编译命令**:
-  - 配置为 `build-fix`(skill)→ 用 **Skill 工具**调用 build-fix skill,全程遵守其内部纪律(模块定位/白名单修法);
+  - 配置为 `build-fix` → 用 **Skill 工具**调用 Mae-Flow 插件自带的 build-fix skill，
+    全程遵守其内部纪律(模块定位/白名单修法)；
   - 配置为命令(如 `mvn compile -q`)→ 执行该命令
 - 本批改动说明(哪些任务/模块,可选)
 - harness 任务卡路径与 `TASK_CARD_SHA256`

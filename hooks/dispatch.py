@@ -234,13 +234,9 @@ def ev_action_pretooluse(d):
 
 def ev_inject(d, session_start=False):
     if session_start:
-        # 重启会话 = skill 已重新加载:清"待重启"标记(迁移后真空期的唯一合法出口)
-        try:
-            if os.path.exists(".mae-flow-need-reload"):
-                os.remove(".mae-flow-need-reload")
-                _log("cleared need-reload(会话重启,skill 已加载)")
-        except Exception as e:
-            _log("clear need-reload EXC: %s" % e)
+        # Plugin-owned capabilities are available with the installed plugin;
+        # no project marker or reload handshake is required.
+        pass
     else:
         # 用户消息原文进 ack 验真存储。payload 无 prompt 字段时确认步骤会明确拒绝并要求用户
         # 再发一条普通消息，不再降级成模型自行填写 ack。
@@ -431,7 +427,7 @@ def ev_subagentstop(d):
                 r"\b" + re.escape(standalone_expected) + r"_RESULT:", head):
             _log("standalone action ignores unrelated subagent without expected contract")
             sys.exit(0)
-    if not re.search(r"_RESULT:|env-setup-agent|ut-generator-agent|codecheck-fix-agent|"
+    if not re.search(r"_RESULT:|ut-generator-agent|codecheck-fix-agent|"
                      r"story-generator-agent|compile-agent|grill-critic-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
@@ -869,10 +865,31 @@ def _required_skill(config_value):
     return ""
 
 
+def _embedded_build_command(build_cfg):
+    return "mcde build -i" if "build-fix" in (build_cfg or "").lower() else ""
+
+
+def _build_call(tool_calls, build_cfg):
+    """Find the real compilation call selected by the confirmed build route."""
+    need = _required_skill(build_cfg)
+    if need:
+        return _skill_call(tool_calls, need)
+    embedded = _embedded_build_command(build_cfg)
+    return _bash_call(tool_calls, embedded or build_cfg)
+
+
+def _build_summary_matches(summary, build_cfg):
+    if _same_config(summary, build_cfg):
+        return True
+    embedded = _embedded_build_command(build_cfg)
+    return bool(embedded and (
+        "build-fix" in (summary or "").lower()
+        or _same_config(summary, embedded)))
+
+
 def _codecheck_build_call(tool_calls, build_cfg):
     """返回当前 transcript 中与配置一致且未明确失败的编译调用。"""
-    need = _required_skill(build_cfg)
-    call = _skill_call(tool_calls, need) if need else _bash_call(tool_calls, build_cfg)
+    call = _build_call(tool_calls, build_cfg)
     return call if call and not _call_failed(call) else None
 
 
@@ -1267,7 +1284,7 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         reused = _reusable_codecheck_build_receipt(task) if soft and not current_call else None
         if current_call:
             # 工具调用是事实，字段只是摘要；不因摘要写成“无需”等小格式问题重跑长编译。
-            if not _same_config(build, build_cfg):
+            if not _build_summary_matches(build, build_cfg):
                 _log("CODECHECK EXECUTED_BUILD 摘要不准确,以 transcript 的真实编译调用为准")
         elif reused:
             _log("CODECHECK 重答复用编译凭证 @" + reused.get("head", "")[:9])
@@ -1280,7 +1297,7 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
                 bail(f"编译配置要求 {need} Skill，但本轮 transcript 中没有成功调用，"
                      "也没有同任务卡、同源码版本的可复用编译凭证。")
             else:
-                call = _bash_call(tool_calls, build_cfg)
+                call = _build_call(tool_calls, build_cfg)
                 if call and _call_failed(call):
                     bail("配置的编译命令明确失败，不能把本轮修复计为已编译。")
                 bail("本轮 transcript 中没有成功执行配置的编译命令，"
@@ -1312,7 +1329,9 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
             bail(f"{need} Skill 的工具结果明确失败，不能报告 PASS。")
         if not call and not reused:
             bail(f"UT 配置要求 {need} Skill，但 transcript 中没有成功调用，"
-                 "也没有同任务卡、同源码版本的可复用生成凭证；不能用手写测试冒充 Skill 产出。")
+                 "也没有同任务卡、同源码版本的可复用生成凭证。"
+                 "若宿主确实未暴露子会话工具调用，主会话应展示风险并使用 accept-risk，"
+                 "不要重启长任务形成循环。")
         label = _flex_field(report, "GENERATOR_USED") or ""
         if call and not _same_config(label, cfg.get("UT生成方式", "")):
             _log("UT GENERATOR_USED 摘要不准确,以 transcript 的真实 Skill 调用为准")
@@ -1420,7 +1439,7 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
     if not re.search(r"EXECUTED_BUILD", report):
         bail("必须包含 EXECUTED_BUILD(实际执行的编译方式与输出摘录)。")
     build_cfg = _state_config().get("编译方式", "")
-    if not _same_config(_field(report, "EXECUTED_BUILD"), build_cfg):
+    if not _build_summary_matches(_field(report, "EXECUTED_BUILD"), build_cfg):
         bail("EXECUTED_BUILD 与配置确认的编译方式不一致,禁止自行猜测或替换编译命令。")
     need = _required_skill(build_cfg)
     if need:
@@ -1430,7 +1449,8 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
         if _call_failed(call):
             bail(f"{need} Skill 的工具结果明确失败，不能报告编译成功。")
     else:
-        _require_bash_success(tool_calls, build_cfg, bail, "编译")
+        expected = _embedded_build_command(build_cfg) or build_cfg
+        _require_bash_success(tool_calls, expected, bail, "编译")
     m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
     if not m:
         bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")

@@ -108,6 +108,25 @@ def parse_args(argv=None):
         "--repair-state", action="store_true",
         help="仅修复损坏的辅助状态；绝不覆盖完整流程断点")
     sub.add_parser("envcheck")
+    capability = sub.add_parser("capability")
+    capabilities = capability.add_subparsers(
+        dest="capability_action", required=True)
+    cap_status = capabilities.add_parser("status")
+    cap_status.add_argument("--codecheck", action="store_true")
+    capabilities.add_parser("prepare")
+    cap_openspec = capabilities.add_parser("openspec")
+    cap_openspec.add_argument("arguments", nargs=argparse.REMAINDER)
+    for action in (
+            "comet-state", "comet-guard", "comet-handoff",
+            "comet-archive", "comet-validate"):
+        cap_comet = capabilities.add_parser(action)
+        cap_comet.add_argument("arguments", nargs=argparse.REMAINDER)
+    cap_build_defaults = capabilities.add_parser("comet-build-defaults")
+    cap_build_defaults.add_argument("change")
+    cap_codecheck = capabilities.add_parser("codecheck")
+    cap_codecheck.add_argument(
+        "--install", action="store_true",
+        help="缺失时从公司内网仓库尽力安装")
     report = sub.add_parser("report")
     report.add_argument("--all", action="store_true")
     template = sub.add_parser("template")

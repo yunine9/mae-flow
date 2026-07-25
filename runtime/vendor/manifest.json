@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "generated_at": "2026-07-25",
+  "components": {
+    "comet": {
+      "version": "0.3.9",
+      "source": "npm:@rpamis/comet@0.3.9",
+      "mode": "official Chinese skills and deterministic shell scripts",
+      "sha256": "5f58c98dac12f4ac16a53bbdb7f8c22b066ce14eba421d6170050f0400ad8e9c"
+    },
+    "openspec": {
+      "version": "1.6.0",
+      "source": "npm:@fission-ai/openspec@1.6.0",
+      "mode": "single-entry esbuild bundled CLI, official schema and generated workflow skills",
+      "sha256": "35ae60d06a203d8416cdfc15e2cbf986cdce44c7cff5f6d48a2af378d6ef8c5f"
+    },
+    "superpowers": {
+      "commit": "3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9",
+      "source": "https://github.com/obra/superpowers",
+      "mode": "complete upstream skills directory",
+      "sha256": "6b7d4beb56a237c42f0b48a4eeb2fbb27bc0f2f51a9113fa0beb67d6630b1be8"
+    },
+    "ponytail": {
+      "commit": "16f29800fd2681bdf24f3eb4ccffe38be3baec6b",
+      "source": "https://github.com/DietrichGebert/ponytail",
+      "mode": "complete upstream skills directory",
+      "sha256": "f7be89723fe90f0e0d3ffaff5ed01fe8f07a6d3e85543d875f5537395fbc1164"
+    }
+  }
+}

@@ -43,7 +43,7 @@ UT_RESULT: FAIL
 - 单号和单号类型(feat/fix)
 - 基线分支(用于 `git diff --name-only {基线分支}...HEAD` 获取变更文件)
 - delta spec 路径(UT 场景设计的依据)
-- **UT 生成方式**(AutoUT skill / 参考仓内已有 UT 写法 / 其他)
+- **UT 生成方式**(Mae-Flow 插件自带 AutoUT/java-autout Skill / 参考仓内已有 UT 写法 / 其他)
 - **UT 运行命令**
 - **编译方式**(UT 引入编译问题时按此修复)
 - harness 任务卡路径与 `TASK_CARD_SHA256`
@@ -71,13 +71,14 @@ UT_RESULT: FAIL
 3. 根据配置的 UT 生成方式执行:
 
    **如果配置为 AutoUT skill(C++ 项目):**
-   - 调用 AutoUT skill 生成 UT
+   - 调用 Mae-Flow 插件自带的 AutoUT skill 生成 UT
    - AutoUT 内部会处理 C++ 测试框架的适配
 
    **如果配置为 java-autout skill(Java 项目):**
-   - 调用 java-autout skill,严格遵循它的五阶段流程(准备 → 代码分析 → mock 策略 → 增量生成 → 编译验证 → 质量检查)和全部规范(禁用断言、参数匹配规则、@PrepareForTest 完整性、增量小批生成等)
-   - **AskUserQuestion 适配(重要)**:java-autout 规范中所有要求"询问用户"的时机(mock 置信度不足、同模块无参考 UT、mock 编译失败回退 Phase 2 等),在本子 agent 环境中你**无法提问**。此时改为:将该方法标记为 BLOCKED,把问题(方法名、疑问内容、已完成的查证、候选方案)记入 `PENDING_QUESTIONS`,跳过该方法继续处理其余方法。**禁止**因无法提问而违反 java-autout 的禁止项(简化 mock 绕过、跳过复杂方法、反复试错修 mock 编译)——攒问题返回就是正确的求助方式,java-autout"求助是正确产出"的哲学在这里同样成立
-   - java-autout 的方法清单契约("每个方法必须有最终状态")继续生效,BLOCKED 是合法的最终状态之一
+   - 调用 Mae-Flow 插件自带的 java-autout skill，严格遵循它的五阶段流程和全部规范
+   - 子 agent 无法直接询问用户时，把低置信 mock、无参考 UT、编译回退等问题标成 BLOCKED，
+     连同查证和候选方案写入 `PENDING_QUESTIONS`，继续其余方法
+   - 方法清单契约继续生效，每个方法必须有最终状态，BLOCKED 是合法状态之一
 
    **如果配置为"参考仓内已有 UT 写法":**
    - 扫描 `src/test/` 目录,识别既有 UT 的编写风格(测试框架、断言方式、Mock 用法、命名规范、目录结构)
@@ -91,7 +92,8 @@ UT_RESULT: FAIL
    - 异常场景:SPEC 中约束的错误处理逻辑
 5. 按配置的 UT 运行命令运行全量 UT。禁止临时追加 filter/exclude/disable 参数，禁止屏蔽失败用例后报告 PASS；
    如果配置命令本身包含过滤范围，则按任务卡原样执行（视为用户已确认的范围）
-6. UT 引入编译问题则按**配置的编译方式**修复(配置是 build-fix skill → 用 Skill 工具调;是命令 → 执行该命令;
+6. UT 引入编译问题则按**配置的编译方式**修复(配置是 build-fix → 用 Skill 工具调用插件自带能力；
+   是命令 → 执行该命令；
    长编译后台执行+**长间隔轮询**(单次调用内 sleep 后看日志);**禁止自行另猜编译命令**),修完重新跑 UT
 7. **修复循环上限 5 轮,每轮必须先归因再动手**(systematic-debugging 纪律):读全失败输出、
    定位根因、写明本轮的根因假设,同一假设不重复试——盲试"改一下再跑"不算一轮,是浪费轮次。

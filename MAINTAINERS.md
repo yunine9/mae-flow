@@ -10,13 +10,14 @@
 
 ```
 mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物证据 + 越界拦截
-  └ comet          —— 管"工程方法":open/design/build/verify/archive 五阶段编排
-      ├ openspec   —— 管 WHAT:提案、delta spec、真相源、归档
-      └ superpowers—— 管 HOW:brainstorming、写计划、执行计划、收尾
-公司质量 agent(env-setup/ut-generator/codecheck-fix/story-generator/compile)—— 管"质量动作"
+  ├ 内嵌 Comet 0.3.9     —— 阶段方法 + 确定性状态/守卫/归档脚本
+  ├ 内嵌 OpenSpec 1.6.0  —— 提案、delta spec、真相源、归档
+  ├ 内嵌 Superpowers     —— brainstorming、写计划、执行计划、验证
+  └ 内嵌 Ponytail        —— 写码精简与最终复杂度审查
+公司质量 agent(ut-generator/codecheck-fix/story-generator/compile)—— 管"质量动作"
 ```
 
-职责分层的一句话版本：**状态机管路径、证据管推进、hook 管越界、comet 管方法、子 agent 管质量**。
+职责分层的一句话版本：**状态机管路径、证据管推进、hook 管越界、固定源码包管方法、子 agent 管质量**。
 
 ### 设计原则（改任何代码前先读）
 
@@ -39,15 +40,22 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
     `exists(.mae-flow.json)` / `exists(standalone-action.json)` 各自排列优先级。完整流程、独立任务、退出标记
     意外共存时，完整流程具有唯一控制权；冲突只告警，不得因此放开源码门禁。所有 JSON 状态写入必须经
     `StateStore` 的项目锁、schema 迁移和 revision/CAS；禁止恢复固定 `.tmp` 或手写 read-modify-write。
+12. **插件安装即能力可用，项目初始化不是用户流程**。OpenSpec、Comet、Superpowers、Ponytail 的固定源码和
+    可执行运行时全部位于 `runtime/vendor/`，步骤指令由 `render_pack()` 在运行时从固定上游原文选段并做宿主
+    适配；不得复制到用户目录、不得依赖全局同名 Skill、不得要求 reload。build-fix、AutoUT、java-autout 是
+    内网插件自身随包发布的真实 Skill，仍必须通过 Skill 工具调用。CodeCheck 是唯一允许首次使用时尽力安装的
+    公司 CLI；失败可诊断并走风险出口，不能把整个插件判为不可用。
 
-### 思想图谱（三个开源思想源，各管一段、互不越界）
+### 能力图谱（固定源码直接运行，各管一段、互不越界）
 
 | 思想源 | 在流程中的位置 | 融入方式与红线 |
 |---|---|---|
 | **grill-me**（mattpocock/skills 的 grilling） | grill 步（open 之前） | 五铁律原文级还原（追问至共识/决策树逐支/每题带推荐/一次一题/事实自查决策问人），工程化增强：8 维备课（模板化工作表 grill-prep，hook 校验章节 + done 拦「待填」残留）、题目四要素、阻塞性排序、收敛条件。**高度红线：只问需求层（WHAT），技术分歧记入「留给设计阶段」清单，禁止下钻** |
-| **superpowers**（brainstorming/writing-plans/executing-plans 等） | 经 comet 编排进 design/build | brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；build 四项工作方式固化标准答案；批次检查点不等用户；TDD 说教用标准回应化解；编译/测试失败按 systematic-debugging 纪律"先归因再动手"（build 主会话 + UT agent 修复循环，skill 缺失时按内联纪律执行）；评审返工轮次（review workflow）按 receiving-code-review 纪律：先查证再裁决、反驳要依据、禁"您说得对"式照单全收 |
+| **Comet 0.3.9** | open/design/build/verify/archive 全链 | 官方中文 Skill 的阶段规则按标题从固定源码直接编入对应步骤；官方 state/guard/handoff/archive 脚本直接执行。入口、外部 Skill 查找和自动跳阶段由适配器移除，节奏只归 Mae-Flow |
+| **OpenSpec 1.6.0** | 提案、规格、验证、归档 | 官方 CLI 打成自包含 ESM，schema、模板、官方 Skill 同包；所有命令通过 `capability openspec`，禁止调用机器全局版本 |
+| **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT AC_COVERAGE | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
-| **ponytail** | build 全程 + verify 4.1 | 双用：build 写码时 full 档常驻预防（the ladder，源头压缩整条 verify 链的量）+ verify 对 diff 做 review 治疗。**两条红线：YAGNI 不得砍 delta spec 要求的行为（spec 是合同，YAGNI 只管怎么写不管写什么）；禁 ultra 档（质疑需求是 grill 的地盘）** |
+| **Ponytail** | build 全程 + verify 4.1 | 固定 commit 的官方 Skill 原文双用：build 写码时 full 档常驻预防（the ladder）+ verify 对 diff 做 review。**两条红线：YAGNI 不得砍 delta spec 要求的行为；禁 ultra 档** |
 | **compound-engineering**（EveryInc） | end 沉淀 → build/verify 装载 | 每单教训经用户逐条确认后沉淀进 docs/delivery-notes.md，下单 build/codecheck/UT 开工前装载。**红线：只沉淀仓库事实（构建陷阱/告警高发点/mock 策略），禁流程规则——防与插件双源打架；上限 30 条，超限删最旧** |
 
 ### 质量五维（一维一主，verify 顺序即理由：删 → 改 → 测 → 验）
@@ -74,15 +82,15 @@ flow/flow.json              流程定义:步骤图、证据、权限、环境检
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
 scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
 scripts/mae_flow_core/      CLI/Hook 共用内核：运行模式裁决、带锁状态存储、独立任务生命周期、月光策略
-scripts/comet_compat.py     让项目级阶段门禁识别 mae-flow 直接开发标记（setup/exit 幂等补齐）
+scripts/mae_flow_core/capabilities.py  固定能力包加载、内嵌 CLI/脚本路由、CodeCheck 首用安装
+runtime/vendor/             固定版本的 Comet/OpenSpec/Superpowers/Ponytail 源码与许可证
+runtime/bin/openspec        Comet 归档脚本调用内嵌 OpenSpec 的稳定入口
+scripts/comet_compat.py     只兼容旧项目残留的 Comet Hook；新项目不会创建项目级 Hook
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
-agents/*.md                 5 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
-scripts/setup.py            环境安装器:确定性流水线(A 类装东西;幂等/dry-run/离线包;日志 %TEMP%/mae-flow-setup.log)
-skills/mae-flow/assets/env-profile.json  公司环境常量单一事实源(镜像/代理/包名/插件命令;换环境只改它)
-commands/mae-flow.md       /mae-flow 命令的三个模式(完整/setup/story)
-skills/mae-flow/assets/     模板与基线:STORY / CHAIN / GRILL-PREP / REVIEW 四份模板(hook 章节校验以此为准,
-                            全插件唯一)+ settings-baseline.json 权限基线(env-setup 合并进项目 settings)
+agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
+commands/mae-flow.md        /mae-flow 的完整流程、独立任务、月光宝盒与诊断入口
+skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 ```
 
 ## 三、核心机制
@@ -120,10 +128,10 @@ UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报
 **月光宝盒**是普通状态机上的显式运行策略，不是另一套流程。UserPromptSubmit 在新项目尚无状态文件时，
 把十分钟内的明确授权写入一次性 `.mae-flow.json.moonlight-intent`；脚本验真并消费后才建状态，解决首次
 启动的先后顺序问题。在途流程原地切换，已退出流程先恢复现场并清空旧质量证据。运行中 PreToolUse 硬拦
-AskUserQuestion；编译、CodeCheck、UT、环境和最终验证仍先执行，失败只能用 `moonlight defer` 记录真实问题，
+AskUserQuestion；编译、CodeCheck、UT 和最终验证仍先执行，失败只能用 `moonlight defer` 记录真实问题，
 不能伪造通过。push 仍以本地 HEAD == 上游为硬证据，成功后停在 `moonlight_review`，规格定稿留给早晨。
-报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，若有环境遗留则
-先回 env_setup，结束后直接回质量链，不重跑需求和设计；`finalize` 才恢复普通归档流程。Stop Hook 在安全
+报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，旧报告里的
+环境类遗留映射到该工作流的编译入口，不重跑需求和设计；`finalize` 才恢复普通归档流程。Stop Hook 在安全
 停点前拒绝主 Agent 自行收工；真实硬阻塞须先执行 `moonlight blocked` 留痕，递归触发时 fail-open 防死循环。
 完整启动原话持久化进 moonlight 状态；build defer 还会先验证 tasks_checked 与 commit_tagged_after_entry，
 确保只放过编译遗留，不放过未完成实现。
@@ -179,7 +187,7 @@ flow.json 步骤字段语义：
 - 源码判定统一走 `_is_source_path`：常见源码扩展名和构建入口文件在任何目录都算源码，再叠加 `source_patterns` 通用目录与 defaults/config「源码路径」私有正则；Edit/Bash gate、令牌新鲜度、UT 回流共用这一口径。Bash 路按 **token** 判断，禁止退回整串 regex。
 - git 约定：分支名（checkout -b/-B、switch -c/-C、branch -m）、commit 格式（含不带引号的 -m）、force push（含 +refspec）、`git worktree add`（与状态机不兼容）
 - `.env` 类密钥文件禁写；危险命令 denylist（管道执行远程脚本、`git clean -x`、对 `/`~`*`.`盘根 的递归删除——普通目录的 rm -r 不拦）。注：PreToolUse 硬拦在权限跳过模式下依然生效（hook 跑在 shell 里，提示词注入绕不过）
-- `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）；拦截消息给"目录/命令/平台"三要素话术交用户手动。教训：agent 的"想尽办法装成功"哲学会压过"无法自动化"的措辞——这类禁令必须放硬层
+- 全局 `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）。现在无需用户手动初始化，`prepare_project()` 只以 `--tools none` 创建规格配置；拦截消息直接指向内嵌能力，不再给人工安装话术。
 - `git add -A / --all / .` 全禁（宽提交会把无关文件与不入库产物卷进交付分支——STORY 误提交实战；提交必须精确到文件/明确产物目录）
 - verify_ut/rf_ut 的测试路径收紧（`tests_only`）：仓库配置优先，缺失时放弃旧的 fail-open，改用内置保守测试路径规则；Edit/Bash 双路都拦非测试源码。**这不是死禁**——非标准目录补 `.mae-flow-defaults.json`，真源码缺陷走 unlock 裁决通道。
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步骤，历史留痕 `unlock:source`。done 检测到被测源码变化后不消费旧 UT 证据，而是自动回流完整质量链：review 回 rf_compile；主流程进入 verify_recompile，再走 Ponytail/CodeCheck/UT，不重做实现计划。无 unlock 却改了被测源码则判越权，不允许通过补验证洗白。
@@ -207,16 +215,24 @@ filter/exclude/disable，或输出出现非零 disabled/skipped、segfault 时�
 所有 `agent_ran` 门禁都有统一人工出口 `accept-risk`，但它刻意不是“跳过步骤”：命令先确认当前步骤确实需要该 Agent，
 再用 `_ack_verified(exact=True)` 核对用户当前步骤原话，拒绝脏源码，记录风险/step/task SHA/HEAD；`ev_agent_ran` 只把这一项视为通过。
 CodeCheck 的现场扫描、clean_paths、提交、分支和归档等证据继续执行。新任务卡、源码变化、goto、推进和退出恢复都会废弃放行。
-**非正常收尾自动尸检**（2026-07-20，治"agent 奇怪退出无人知晓死因"）：无标记收尾/重答仍失败时，把轮数、临终输出、检出的报错特征落 `%TEMP%/mae-flow-agent-autopsy.log`，并把一行「尸检线索」嵌进打回消息——主 agent 重启新实例必须转告（SKILL 铁律）；配套五个 agent 契约的"带着情报死"条款（工具连败 2 次→FAIL/BLOCKED 收尾写明详情；轮次过半未完成→提前收尾出部分成果，不许干到被硬切）。
+**非正常收尾自动尸检**（2026-07-20，治"agent 奇怪退出无人知晓死因"）：无标记收尾/重答仍失败时，把轮数、临终输出、检出的报错特征落 `%TEMP%/mae-flow-agent-autopsy.log`，并把一行「尸检线索」嵌进打回消息——主 agent 重启新实例必须转告（SKILL 铁律）；配套四个 agent 契约的"带着情报死"条款（工具连败 2 次→FAIL/BLOCKED 收尾写明详情；轮次过半未完成→提前收尾出部分成果，不许干到被硬切）。
 
-### 3.5 环境检查（env_checks）
+### 3.5 内嵌运行时与 CodeCheck
 
-类型：`cmd`（退出码 0）、`cmd_contains`、`node_min`、`path_any`、`file_contains`。
-**判 CLI 可用性别赌 `--help`/`--version` 的退出码**（2026-07-21 实战：`codecheck fullcheck --help` 打印帮助后 exit 1，被 `cmd` 类型误判"不可用"，白派诊断/白拦流程）。commander/Java 系 CLI 的 help 常以非零码退出——用 `cmd_contains` 看输出特征字样（如 `fullcheck`），退出码无关。同理 `ev_codecheck_clean` 不看退出码，而是解析提示行、Markdown 汇总/明细或 JSON；全都不认识时保存现场并走用户核对恢复口。
-Windows 上 npm 全局 CLI 实体是 `codecheck.cmd`：执行层沿用公司实机验证过的 `shell=True` + PATHEXT 解析。
-不要再手工拼 `cmd.exe /s /c`；2026-07-22 实战已证实其首尾引号规则会把原本可用的命令变成“找不到”。
-**缓存**：机器级慢检查全绿后 touch `~/.mae-flow-env-ok`，24h 内跳过；`FAST_TYPES`（path_any / file_contains，项目级）永远实测；`envcheck` 命令永远全量并刷新缓存。新增检查时想清楚它是机器级还是项目级。
-**安装三层策略**（2026-07-20 实战定型，comet init 全平台初始化事故后重构）：A 类确定性安装 → `setup.py`（零创造力、幂等、失败带诊断线索、终验复用 envcheck）；C 类诊断 → env-setup-agent（读日志修环境参数后**重跑 setup.py**，禁止绕过它手工装——"用另一条路装上"不可复现）；B 类交互 → 人工三要素话术（comet init 会话内 gate 硬拦）。环境常量全在 env-profile.json，换代理/镜像/插件命令只改一处。教训：把智能用在确定性工作上，幺蛾子是创造力的副产品。
+`init` 在创建 `.mae-flow.json` **之前**调用 `prepare_project()`：校验内嵌 OpenSpec 版本，使用
+`--tools none` 创建 `openspec/config.yaml`，并确定性写入 `.comet/config.yaml`。失败时没有流程状态，
+所有 Hook 仍处于 inactive 旁路，绝不能出现“初始化失败但普通开发也被锁住”。
+
+`runtime/vendor/manifest.json` 是开源组件版本真相源；`runtime/THIRD_PARTY_NOTICES.md` 和每个组件的
+LICENSE 必须随包。OpenSpec CLI 是自包含 ESM；打包时只能保留一个 `runCli()` 入口，重复入口会让 archive
+第一次已移动目录、第二次再移动时报错。`scripts/tests/test_capabilities.py` 用中文+空格路径覆盖完整生命周期，
+任何组件升级都必须让此测试先红后绿。
+
+CodeCheck 不属于公开运行时。`ensure_codecheck()` 先解析 PATH、Windows `%APPDATA%\npm\codecheck.cmd` 和
+`npm prefix -g`；探测看 `fullcheck --help` 输出是否含 `fullcheck`，**不信退出码**。缺失时只在真正使用
+CodeCheck 时执行一次公司 npm 安装，registry 用命令行一次性参数，禁止永久修改 npm config。失败记录
+30 分钟冷却，普通流程给 `codecheck_tool` 风险出口，月光模式记入晨间报告。Windows 执行继续使用
+`shell=True` + PATHEXT，不手工拼 `cmd.exe /s /c`。
 
 ### 3.6 子 agent 契约
 
@@ -225,20 +241,21 @@ Windows 上 npm 全局 CLI 实体是 `codecheck.cmd`：执行层沿用公司实�
 ①**喂到嘴边**——原料原文进任务提示（spec 条目/文件清单/告警明细），不给路径让它自己花轮次读；
 ②**分批小实例**——复杂工作切批逐实例（UT 每批 3-5 方法带收口批、codecheck >30 告警按文件分批、编译按模块），单实例马拉松 60-80 轮后被上下文裁剪拖垮，加轮次预算救不了；
 ③**长间隔轮询**——等待类动作单次调用内 sleep 再看结果，严禁秒级高频轮询烧预算。
-maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIELD-TEST 0.7 持续校准）。
+maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0.7 持续校准）。
 新增 agent 时：契约文件放 agents/，且必须把 agent 名加进 dispatch.py `ev_subagentstop` 的识别正则和标记正则，否则契约校验不生效。
 
 ## 四、与 comet 的集成合同（破坏任何一条都会出鬼故事）
 
 | 约定 | 原因 | 落点 |
 |---|---|---|
-| `.comet/config.yaml` 含 `auto_transition: false` | mae-flow 独占节奏，禁止 comet 自动衔接阶段 | 环境检查 + env-setup-agent 创建 |
-| `review_mode: standard` | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | 同上 + build.md |
-| isolation=branch、tdd=direct+direct_override、executing-plans | comet-build 四选项的公司标准答案 | build.md |
+| `.comet/config.yaml` 含 `auto_transition: false` | mae-flow 独占节奏，禁止 comet 自动衔接阶段 | `prepare_project()` 创建/纠正 |
+| `review_mode: standard` | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | `prepare_project()` + build.md |
+| isolation=branch、tdd=direct+direct_override、executing-plans | 不让 Agent 记五个字段；完整流程离开 build 前必须已写状态 | `capability comet-build-defaults` |
 | comet verify 的分支处理选"保持分支" | 推送归 push 步，MR 人工建 | verify_comet.md |
 | 依赖 `.comet.yaml` 的 `design_doc`/`verify_result` 字段 | yaml_field 证据的数据源 | flow.json |
-| comet 锁 **0.3.x** | 字段名/guard 行为按 0.3 语义编写 | env-setup-agent |
-| `.claude` → `.cac` 迁移 + 会话内 `/reload-skills` | codeagent 只加载 .cac | env-setup-agent step 11 |
+| comet 锁 **0.3.9** | 字段名/guard 行为按固定源码编写，不读取全局版本 | `runtime/vendor/manifest.json` |
+| OpenSpec 锁 **1.6.0** | schema/CLI/归档语义固定，避免机器差异 | 内嵌 ESM + schema/templates |
+| 不创建 `.cac/.claude`、不 reload | 安装插件就应可用，不污染项目或个人目录 | `prepare_project()` 回归测试 |
 | tweak 也走归档 | 防僵尸活跃 change 干扰 comet 阶段检测 | flow.json + archive.md |
 | verify 链固定顺序 Ponytail→CodeCheck→UT→Comet | 删→改→测→验：重构定稿后 UT 才覆盖得上最终形态 | flow.json + 各 verify step md |
 | ponytail 红线：YAGNI 不砍 spec、禁 ultra 档 | spec 是合同；质疑需求归 grill 阶段 | build.md + verify_ponytail.md |
@@ -259,19 +276,23 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 
 **团队推广的四条运营纪律**（经验层，违反不会立刻坏，但会慢性失血）：
 1. **CLAUDE.md 分工**：仓库 CLAUDE.md 只放仓库事实（构建/目录/领域约定），流程规则只活在插件里——两处都写会形成双源打架，弱模型无所适从。
-2. **permissions 基线**：团队 settings 里 `deny` 密钥类文件的 Read（对模型不可见，比 hook 拦更彻底）+ `allow` 常用只读命令（每次权限弹窗打断都是弱模型的跑偏机会）。已固化为 `skills/mae-flow/assets/settings-baseline.json`，env-setup-agent 自动合并进项目 settings（追加缺失、不覆盖既有）；团队按需在该文件增删条目。
+2. **宿主权限由团队统一维护**：插件不再修改个人/项目 settings。密钥读取 deny 和常用只读命令 allow
+   应由 CodeAgent 团队基线统一下发，避免 Mae-Flow 安装时覆盖不同人的环境。
 3. **会话卫生**：一单一会话为佳；改插件/agent/settings 后必须重启会话（定义在会话启动时缓存）；长会话行为漂移时 /clear（状态在磁盘，进度不丢）。重上下文步骤（build、verify 链入口）的 `current` 会主动提示 /clear 时机（`clear_hint` 标记）；重步骤 md 内置「中断恢复先读什么」清单（`current` 每次打印，恢复质量不赌模型自觉）；build 的批次 commit 后是安全 /clear 点，批次结论/调试根因假设要求写进 tasks.md 备注行（中间推理不留在会话里）。
 4. **仓库预设**：`.mae-flow-defaults.json` 提交进仓（编译方式/UT生成方式/UT运行命令等恒定项），config_confirm 时 `current` 自动展示预填，新人第二单起免逐项来回；基线分支与需求文档不预设免问。另支持**机器直读键**「测试路径」（正则数组，gate 直接消费，启用 verify_ut 的测试路径收紧）——预填展示类键与机器直读键的区别要在改代码时留意。
 
 **阶段互锁哨兵（2026-07-21，治"comet 与 mae-flow 双状态机冲突像随机 bug"）**：mae-flow 主导、每步核对 comet 跟队。`current`/`doctor` 内置「步骤↔comet phase 合法区间」映射（`COMET_PHASE_EXPECT`），phase 掉队（多为闪退打断 guard --apply）或活跃 change >1（僵尸）时**强预警不硬拒**（硬闸在转换点的 phase 证据/glob_absent 上，哨兵只做诊断避免制造新死锁）。三个真因固化：①僵尸放大器（comet 多活跃按字典序抽一个管全场，`_active_change_count` 检测）②双状态机无互锁（design/build 收尾自查 phase 已推进）③Bash/Write 不对称（comet hook 只拦 Write，SKILL 铁律"被 GUARD 拦禁止换工具硬绕，先 doctor"，change 目录内写用 git mv）。
 
-**升级 comet 版本 checklist**：对照新版 `comet-state.sh` 核实 `design_doc`/`verify_result`/`auto_transition` 字段仍存在且语义不变 → 核实 guard `--apply` 仍是 phase 推进唯一入口 → 核实 comet init 产物目录结构 → 跑一单 tweak 冒烟 → 改 env-setup-agent 的版本号。
+**升级内嵌组件 checklist**：更新 `runtime/vendor/manifest.json` 与许可证 → 重新生成 OpenSpec 单入口 bundle →
+核对 Comet state/guard 字段和事件 → 核对 `CAPABILITY_PACKS` 选中的上游标题仍存在 → 跑 capability 生命周期、
+selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:*`、外部 Skill 加载或用户目录路径。
 
 ## 五、常见维护任务
 
 - **改某步的行为** → 只改 `flow/steps/<step>.md`。指令是给模型的，写清楚"做什么、何时停、done 带什么参数"。
 - **加一个步骤** → flow.json 加节点（接好上下游 next）+ 建同名 steps md + 若需新证据见 3.2。跑 `python -c "json.load(...)"` 和流程图连通性检查。
-- **加环境检查** → flow.json `env_checks` 加项；若 agent 能修，env-setup-agent.md 加对应 Step（必须幂等）。
+- **加内嵌能力** → 固定源码进 `runtime/vendor`，登记 manifest/NOTICE/LICENSE；在 `CAPABILITY_PACKS`
+  选择需要的上游原文章节并补生命周期测试。禁止复制到用户 Skill 目录。
 - **改 gate 规则** → mae-flow.py `cmd_gate`。记住 Edit/Bash 两路都要改，路径匹配带 `re.I`，改完必须跑冒烟用例（见第七节）。
 - **动 dispatch.py** → 任何新增 IO 都要问：会阻塞吗？超时了吗？失败会留日志吗？
 - **发版/打包前必跑 `python scripts/selftest.py`** → 语法/JSON/流程图/证据注册/占位符/agent 同步/关键文件自检，任何 ❌ 禁止发布。
@@ -279,8 +300,8 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60 / env=40（FIE
 ### 发版收口
 
 1. 更新根目录 `VERSION` 和 `CHANGELOG.md`，插件市场版本必须与 `VERSION` 一致；
-2. 固定 `env-profile.json` 中已经实测的公开依赖版本；公司内网包无法在外部复验时，记录公司机实测版本；
-3. 运行两套自动测试，再执行 `git archive HEAD` 解包并在干净目录重跑；
+2. 核对 `runtime/vendor/manifest.json`、第三方许可证和内嵌 bundle 单入口；
+3. 运行状态内核、能力生命周期与 selftest，再执行 `git archive HEAD` 解包并在干净目录重跑；
 4. 按 `FIELD-TEST.md` 阶段 0 在公司 Windows 实机做金丝雀；
 5. 创建并推送与 `VERSION` 一致的 `vX.Y.Z` tag。
 

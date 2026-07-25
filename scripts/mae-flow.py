@@ -33,6 +33,7 @@ import glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
 from mae_flow_core import (
+    CapabilityError,
     RuntimeMode,
     StateStoreError,
     action_work_dir as core_action_work_dir,
@@ -48,6 +49,13 @@ from mae_flow_core import (
     save_action as core_save_action,
     save_versioned_json,
     update_json,
+    capability_diagnostics,
+    configure_comet_build,
+    ensure_codecheck,
+    prepare_project,
+    render_pack,
+    run_comet,
+    run_openspec,
 )
 from mae_flow_core.moonlight import (
     QUALITY_STEPS as MOONLIGHT_QUALITY_STEPS,
@@ -123,7 +131,17 @@ def load_state():
     raw, err = safe_read_json(STATE_PATH)
     if err:
         raise ValueError(err)
-    return normalize_document(raw, "flow")
+    st = normalize_document(raw, "flow")
+    # Older releases could stop in the project setup phase. Setup is no longer
+    # part of the workflow; migrate in place so an upgrade resumes normally.
+    if st.get("current") == "env_setup":
+        st["current"] = "config_confirm"
+        st.setdefault("migrations", []).append({
+            "type": "remove-project-setup", "from": "env_setup",
+            "to": "config_confirm", "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        save_state(st)
+    return st
 
 
 def save_state(st):
@@ -526,9 +544,9 @@ def _source_changed_since(head, st=None):
 RISK_AGENT_LABELS = {
     "COMPILE": "没有可验证的编译成功证据，代码可能无法构建",
     "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；现场复核仍会执行，真实遗留告警不会被放过",
+    "CODECHECK_TOOL": "CodeCheck CLI 自动安装或执行失败，本次将缺少代码规范检查结果",
     "UT": "没有可验证的 UT 生成/运行通过证据，回归问题可能进入后续阶段",
     "STORY": "没有可验证的 STORY 专项 Agent 收尾证据",
-    "ENV": "环境修复 Agent 没有合法收尾，后续工具可能不可用",
     "GRILL": "需求追问 Agent 没有合法收尾，需求边界可能仍有遗漏",
     "ASKUSER": "宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话",
     "UTRUN": "没有观测到 UT 命令真实调起",
@@ -836,7 +854,8 @@ def _batches(files, maxlen=6000):
 def _codecheck_launch(batch, executable=None, windows=None):
     """构造 CodeCheck 启动方式；Windows 沿用已在公司实机验证过的 shell/PATHEXT 解析。"""
     is_windows = os.name == "nt" if windows is None else windows
-    base_argv = ["codecheck", "fullcheck", "-f", ",".join(batch)]
+    program = executable or "codecheck"
+    base_argv = [program, "fullcheck", "-f", ",".join(batch)]
     display = subprocess.list2cmdline(base_argv)
     if is_windows:
         # npm 全局 CLI 是 codecheck.cmd。旧版 shell=True 已在公司 Windows 实机稳定执行；
@@ -851,9 +870,19 @@ def _codecheck_launch(batch, executable=None, windows=None):
 
 def _run_codecheck(files):
     """执行 CodeCheck 并返回机器结果；scan、done 复核共用，避免两套解析口径漂移。"""
+    capability = ensure_codecheck(install=True)
+    if not capability.get("available"):
+        detail = str(capability.get("detail", "")).strip()[-1200:]
+        return None, (
+            "CodeCheck CLI 当前不可用。Mae-Flow 已按公司内网源尽力自动安装，但没有成功；"
+            "这不会触发重复安装或派修复 Agent。"
+            + (" 诊断: " + detail if detail else "")
+            + "。普通模式请向用户展示风险后使用错误信息给出的恢复通道；"
+            "月光宝盒模式记录为未完成质量项后继续。")
+    executable = capability.get("path") or None
     total, pairs, commands = 0, [], []
     for batch in _batches(files):
-        launch, use_shell, cmd = _codecheck_launch(batch)
+        launch, use_shell, cmd = _codecheck_launch(batch, executable=executable)
         commands.append(cmd)
         started = time.time()
         try:
@@ -1057,6 +1086,12 @@ def ev_codecheck_clean(spec, st):
 
 def ev_review_codecheck(spec, st):
     """统一规范检查协议：机器先扫；有告警才派修复 agent；最后机器复核。"""
+    accepted, _ = _risk_acceptance("CODECHECK_TOOL", st)
+    if accepted:
+        # CodeCheck is the one optional company CLI. A real user may explicitly
+        # accept its absence after seeing the risk; otherwise an internal npm or
+        # PATH outage would dead-lock the whole delivery.
+        return True, ""
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if scan.get("step") != st.get("current"):
         return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
@@ -1074,77 +1109,13 @@ def ev_review_codecheck(spec, st):
     return ev_codecheck_clean(spec, st)
 
 
-ENV_CACHE = os.path.join(os.path.expanduser("~"), ".mae-flow-env-ok")
-ENV_MARK = "mae-flow-env-ok-v1"              # 缓存有效标记:防裸 touch 伪造(空文件/外来内容一律无效)
-FAST_TYPES = ("path_any", "file_contains", "path_absent")
-
-
 def run_env_checks(force_all=False):
-    """现场实测环境就绪度,返回失败项名列表。检查项定义在 flow.json 的 env_checks。
-    机器级慢检查(CLI/插件探测)全绿后缓存 24h(标记文件 ~/.mae-flow-env-ok),
-    项目级快检查每次都跑;envcheck 命令 force_all 全量实测并刷新缓存。"""
-    cached = False
-    if not force_all:
-        try:
-            cached = (time.time() - os.path.getmtime(ENV_CACHE) < 86400
-                      and open(ENV_CACHE, encoding="utf-8").read().strip() == ENV_MARK)
-        except OSError:
-            pass
-    fails = []
-    for c in (FLOW or {}).get("env_checks", []):
-        if cached and c["type"] not in FAST_TYPES:
-            continue
-        t, v, ok = c["type"], c["value"], False
-        try:
-            if t == "cmd":
-                ok = subprocess.run(v, shell=True, capture_output=True, timeout=20).returncode == 0
-            elif t == "cmd_contains":
-                r = subprocess.run(v, shell=True, capture_output=True, text=True,
-                                   encoding="utf-8", errors="replace", timeout=20)
-                ok = c["contains"].lower() in (r.stdout + r.stderr).lower()
-            elif t == "node_min":
-                m = re.match(r"v(\d+)\.(\d+)\.(\d+)", sh("node --version"))
-                ok = bool(m) and tuple(map(int, m.groups())) >= tuple(map(int, v.split(".")))
-            elif t == "path_any":
-                ok = any(os.path.exists(p) for p in v)
-            elif t == "path_absent":   # 标记文件不存在才算就绪(如"待重启"标记被 SessionStart 清除后)
-                ok = not any(os.path.exists(p) for p in v)
-            elif t == "file_contains":
-                ok = os.path.exists(v) and c["contains"] in open(v, encoding="utf-8", errors="replace").read()
-        except Exception:
-            ok = False
-        if not ok:
-            fails.append(c["name"])
-    if not fails and not cached:
-        try:
-            open(ENV_CACHE, "w", encoding="utf-8").write(ENV_MARK)
-        except Exception:
-            pass
-    return fails
+    """Compatibility view of self-contained runtime diagnostics."""
+    checks = capability_diagnostics(os.getcwd(), include_codecheck=False)
+    return [item["name"] for item in checks if not item["ok"]]
 
 
-RELOAD_MARK = ".mae-flow-need-reload"
-
-
-def ev_env_ok(spec, st):
-    # 待重启标记优先于一切:磁盘装好了但会话没加载,派 agent/重装都没用,只有重启会话能清标记。
-    # 提到最前面拦——不重启就往下走,skill/plugin 未注册,AI 会手搓空壳绕过(2026-07-20 实战)。
-    if os.path.exists(RELOAD_MARK):
-        try:
-            why = open(RELOAD_MARK, encoding="utf-8", errors="replace").read().strip().replace("\n", ";")
-        except Exception:
-            why = ""
-        return False, ("环境有变更待生效(不要派 env-setup-agent、不要重装):" + why
-                       + "。二选一让它生效:①在当前会话执行 **/reload-skills**(装了插件的再执行 /reload-plugins,"
-                       "若你的 codeagent 支持),完成后**用户明确说一声**(如\"刷新好了\"),你再执行 "
-                       "`mae-flow reloaded --ack \"用户原话\"` 清标记继续;②或**重启会话**(自动清标记)后说\"继续\"。")
-    fails = run_env_checks()
-    if not fails:
-        return True, ""
-    return False, "环境未就绪(现场实测): " + "、".join(fails) + " —— 启动 env-setup-agent 修复后重试 done"
-
-
-EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok, "env_ok": ev_env_ok,
+EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
@@ -1395,6 +1366,13 @@ def _step_md_text(sid, st):
         txt = txt.replace(ph, os.path.abspath(
             os.path.join(HERE, "..", "skills", "mae-flow", "assets", name)))
     txt = txt.replace("{MAEFLOW_PATH}", os.path.abspath(sys.argv[0]))
+    for pack in re.findall(r"\{\{CAPABILITY_PACK:([a-z0-9-]+)\}\}", txt):
+        marker = "{{CAPABILITY_PACK:%s}}" % pack
+        try:
+            txt = txt.replace(marker, render_pack(pack))
+        except CapabilityError as exc:
+            die("插件内嵌能力包损坏，当前步骤不能可靠执行: %s。"
+                "请升级/重装 Mae-Flow；流程状态尚未推进。" % exc, 2)
     return subst(txt, st)
 
 
@@ -2154,7 +2132,8 @@ def _resume_direct_mode(ack=""):
         if workflow == "review" and old_step in ("rf_compile", "rf_codecheck", "rf_ut", "push", "end"):
             target = "rf_compile"
         elif workflow == "tweak" and old_step in (
-                "tw_compile", "tw_codecheck", "tw_ut", "archive_confirm", "archive", "push", "end"):
+                "tw_compile", "tw_codecheck", "tw_ut", "tw_verify",
+                "archive_confirm", "archive", "push", "end"):
             target = "tw_compile"
         elif old_step in ("verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
                           "verify_codecheck", "verify_ut", "verify_comet", "archive_confirm",
@@ -2208,6 +2187,10 @@ def cmd_init(flow, args):
                   f"旧状态备份为 {STATE_PATH}.last,开启新流程。")
         else:
             die(f"流程已存在(进行中,当前步骤 {sid}),查看用 status;确要重来先删除 " + STATE_PATH)
+    try:
+        prepared = prepare_project(os.getcwd())
+    except CapabilityError as exc:
+        die("插件运行时预检失败，尚未创建流程状态，因此不会拦截普通开发: %s" % exc, 2)
     _gitignore()
     dirty = _dirty_paths()
     st = {"current": flow["start"], "config": {}, "choices": {},
@@ -2215,14 +2198,72 @@ def cmd_init(flow, args):
           "initial_dirty": dirty,
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
     save_state(st)
-    print("[mae-flow] 流程已初始化。")
+    print("[mae-flow] 流程已初始化；内嵌运行时已就绪"
+          "（OpenSpec %s，未创建项目级 Skill）。" % prepared.get("openspec", "?"))
     print_current(flow, st)
+
+
+def _capability_arguments(args):
+    values = list(getattr(args, "arguments", []) or [])
+    return values[1:] if values[:1] == ["--"] else values
+
+
+def cmd_capability(args):
+    action = args.capability_action
+    if action == "status":
+        checks = capability_diagnostics(
+            os.getcwd(), include_codecheck=bool(args.codecheck))
+        for check in checks:
+            print("%s %s — %s" % (
+                "✅" if check["ok"] else "❌",
+                check["name"], check["detail"]))
+        if not all(item["ok"] for item in checks
+                   if item["name"] != "CodeCheck"):
+            sys.exit(2)
+        return
+    if action == "prepare":
+        try:
+            result = prepare_project(os.getcwd())
+        except CapabilityError as exc:
+            die("插件运行时预检失败: " + str(exc), 2)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if action == "codecheck":
+        result = ensure_codecheck(install=bool(args.install))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if not result["available"]:
+            sys.exit(2)
+        return
+    if action == "comet-build-defaults":
+        try:
+            applied = configure_comet_build(args.change, cwd=os.getcwd())
+        except CapabilityError as exc:
+            die("内嵌能力执行失败: " + str(exc), 2)
+        print(json.dumps(
+            {"change": args.change, "applied": applied},
+            ensure_ascii=False, indent=2))
+        return
+    try:
+        if action == "openspec":
+            result = run_openspec(_capability_arguments(args), cwd=os.getcwd())
+        else:
+            comet_action = action.replace("comet-", "")
+            result = run_comet(
+                comet_action, _capability_arguments(args), cwd=os.getcwd())
+    except CapabilityError as exc:
+        die("内嵌能力执行失败: " + str(exc), 2)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    if result.returncode:
+        sys.exit(result.returncode)
 
 
 def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
-    lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-need-reload", ".mae-flow-work/"]
+    lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-work/"]
     txt = open(gi, encoding="utf-8").read() if os.path.exists(gi) else ""
     add = [l for l in lines if l not in txt]
     if add:
@@ -2306,12 +2347,6 @@ def advance(flow, st, sid, step, tag, note=""):
         ml["pushed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         ml["pushed_head"] = sh("git rev-parse --verify HEAD")
         nxt = "moonlight_review"
-    if _moonlight(st) and sid == "env_setup":
-        # 晨间修复若先处理夜间遗留的环境问题，环境关结束后回到质量链入口，
-        # 不重新跑配置确认、需求澄清和设计。
-        repair_next = _moonlight_data(st).pop("repair_after_environment", "")
-        if repair_next:
-            nxt = repair_next
     st["current"] = nxt
     if nxt:
         st.setdefault("step_heads", {})[nxt] = sh("git rev-parse --verify HEAD")
@@ -2384,7 +2419,7 @@ def cmd_done(flow, st, args):
     if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
     want = st.get("config", {}).get("分支名", "")
-    if sid not in ("env_setup", "config_confirm", "workflow_select", "branch_create") and want:
+    if sid not in ("config_confirm", "workflow_select", "branch_create") and want:
         cur = sh("git branch --show-current")
         if cur != want:
             save_state(st)
@@ -2509,6 +2544,7 @@ def _step_agent_kinds(step):
         typ = spec.get("type")
         if typ == "review_codecheck":
             kinds.add("CODECHECK")
+            kinds.add("CODECHECK_TOOL")
         elif typ in ("agent_ran", "agent_or_no_source", "review_agent_or_no_code") and spec.get("agent"):
             kinds.add(str(spec["agent"]).upper())
     return kinds
@@ -2695,14 +2731,12 @@ def cmd_gate(flow, st, args):
             die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
                 "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
         if re.search(r"(mkdir|md|new-item)\b", c, re.I) and hits_path(r"(^|/)openspec/"):
-            die("禁止手动创建 openspec 目录:openspec/changes/ 由 comet 工具建(comet-open 技能 / comet-state init),"
+            die("禁止手动创建 openspec 目录：change 必须由 Mae-Flow 内嵌命令创建，"
                 "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"
-                "若 /comet-open 调不起来,十有八九是 skill 没加载:先重启会话(检查有无 .mae-flow-need-reload 提示),别手搓绕过。", 2)
+                "先执行 current，并照其中的 `capability openspec` / `capability comet-state` 命令处理。", 2)
         if re.search(r"\bcomet\s+init\b", c):
-            die("comet init 是交互式 TUI,禁止在会话内执行(含子 agent、含 echo/yes 管道喂输入等一切自动化变体)——"
-                "非交互执行会把全部 agent 平台的配置初始化出来污染仓库(2026-07-20 实战)。"
-                "把三要素交给用户手动执行:①目录=项目根 ②命令=comet init --language zh --scope project "
-                "③交互里平台只选 Claude Code。用户跑完说\"好了\"再继续。", 2)
+            die("禁止执行全局 comet init：它会初始化无关平台并污染项目。"
+                "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，无需人工初始化。", 2)
         # 危险命令 denylist(社区共识高信号项;普通目录的 rm -r 不拦,只拦毁灭性目标)
         if re.search(r"(curl|wget|iwr|invoke-webrequest)[^|&;]*\|\s*(sudo\s+)?(sh|bash|zsh|iex|powershell)", c, re.I):
             die("危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。", 2)
@@ -2828,10 +2862,13 @@ def cmd_agent_task(flow, st, args):
                   "Harness首检告警(规则|文件): " + "、".join(r + "|" + f for r, f in scan.get("pairs", [])),
                   "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
     elif kind == "UT":
-        lines += ["职责:只对任务卡范围补/改测试；必须按 UT生成方式调用对应 Skill；参考 UT运行命令提示真实执行测试。该项写随生成方式自带时，由 UT Skill 按项目决定实际命令，并在 EXECUTED_UT 如实报告。",
+        lines += ["职责:只对任务卡范围补/改测试；必须调用任务卡指定的 Mae-Flow 自带"
+                  " AutoUT/java-autout Skill（或明确配置的既有写法），并真实执行测试。"
+                  "写“随生成方式自带”时由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。",
                   "评审意见处理不修改规格，测试依据使用上面列出的既有需求/规格。"]
     else:
-        lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 build-fix Skill，禁止猜命令。"]
+        lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 Mae-Flow"
+                  " 插件自带的 build-fix Skill，禁止自己猜命令。"]
     body = "\n".join(lines).rstrip() + "\n"
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
     body += f"TASK_CARD_SHA256: {digest}\n"
@@ -2875,7 +2912,9 @@ def cmd_codecheck_scan(flow, st, args):
         die(err, 2)
     result, err = _run_codecheck(files) if files else ({"total": 0, "pairs": [], "commands": []}, "")
     if err:
-        die(err, 2)
+        if _moonlight(st):
+            die(err + "；月光宝盒请按提示执行 moonlight defer 留痕继续。", 2)
+        die(err + "；" + _risk_option("CODECHECK_TOOL"), 2)
     st.setdefault("quality", {})["codecheck_scan"] = {
         "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
@@ -2974,11 +3013,13 @@ def cmd_template(flow, args):
 
 
 def cmd_envcheck(flow, args):
-    fails = run_env_checks(force_all=True)
-    names = [c["name"] for c in flow.get("env_checks", [])]
-    for n in names:
-        print(("❌ " if n in fails else "✅ ") + n)
-    if fails:
+    checks = capability_diagnostics(os.getcwd(), include_codecheck=True)
+    for item in checks:
+        print(("✅ " if item["ok"] else "❌ ") + item["name"] + ": " + item["detail"])
+    # CodeCheck is optional and is installed only when first used; its absence
+    # does not make the plugin itself unusable.
+    required_failed = [x for x in checks if not x["ok"] and x["name"] != "CodeCheck"]
+    if required_failed:
         sys.exit(2)
 
 
@@ -3042,7 +3083,8 @@ def cmd_doctor(flow, st, args):
     else:
         print("✅ 当前步证据已满足(或本步无证据要求)")
     ef = run_env_checks()
-    print(("✅ 环境实测: 全部就绪" if not ef else "❌ 环境实测未就绪: " + "、".join(ef)))
+    print(("✅ 插件运行时: 完整" if not ef else
+           "❌ 插件运行时不完整: " + "、".join(ef)))
     for k in ("单号", "编译方式", "UT生成方式"):
         print(("✅" if st["config"].get(k) else "❌") + f" 配置 {k}: {st['config'].get(k, '缺失')}")
     if step.get("tests_only"):
@@ -3546,9 +3588,8 @@ def cmd_moonlight(flow, st, args):
         if not target:
             die("无法根据工作流选择修复入口，当前 workflow=" + (workflow or "未设置"), 2)
         ml = _moonlight_data(st)
-        if any(x.get("kind") == "environment" for x in issues):
-            ml["repair_after_environment"] = target
-            target = "env_setup"
+        # Old reports may still contain an environment issue. Keep it visible,
+        # but plugin-owned capabilities no longer have a setup repair phase.
         ml["cycle"] = int(ml.get("cycle", 1)) + 1
         ml["repair_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         for issue in issues:
@@ -3632,24 +3673,8 @@ def cmd_report_all():
 
 
 def cmd_reloaded(flow, st, args):
-    """用户在当前会话手动 /reload-skills(+/reload-plugins)后清除待重启标记的合法通道。
-    外部脚本测不了 skill 是否真加载,所以靠用户确认(--ack 三级验真,伪造被拒)+ open 步兜底
-    (真没 reload 成功,/comet-open 仍会失败并指回本处)。重启会话则由 SessionStart 自动清,不用本命令。"""
-    if not os.path.exists(RELOAD_MARK):
-        print("[mae-flow] 无待重启标记,无需操作,直接 current 继续。")
-        return
-    if not args.ack:
-        die("reloaded 需携带用户确认原话:--ack \"用户原话\"。必须是用户**明确说过**已执行 /reload-skills"
-            "(或已重启),你不能替用户声称刷新过——没 reload 就清标记,skill 仍没加载,open 步照样卡。", 2)
-    ok, why = _ack_verified(st, args.ack)
-    if not ok:
-        die("reloaded 授权验真失败:" + why, 2)
-    try:
-        os.remove(RELOAD_MARK)
-    except Exception as e:
-        die("清除待重启标记失败: %s" % e)
-    print("[mae-flow] 已确认 skill/plugin 重载,待重启标记已清除。执行 current 继续"
-          "(若后续 /comet-open 等技能仍报不存在,说明 reload 未生效,请改用重启会话)。")
+    """Backward-compatible no-op for scripts written before embedded runtime."""
+    print("[mae-flow] 当前版本的能力随插件直接加载，不再需要 reload。执行 current 继续。")
 
 
 def cmd_goto(flow, st, args):
@@ -3787,7 +3812,8 @@ def cmd_exit(flow, st, args):
     compat_warnings = list(errors)
     if _active_change_count() > 0 and not found:
         compat_warnings.append(
-            "存在在建规格但未发现项目级 Comet Hook；若其他插件仍拦截，请运行 setup 修复其直接模式兼容")
+            "存在在建规格但未发现旧版项目级 Comet Hook（新版本内嵌运行时下属正常现象）；"
+            "若退出后仍被其他旧插件拦截，请更新或移除旧插件，不要运行 setup")
 
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     sid = st.get("current", "")
@@ -3984,6 +4010,8 @@ def main():
             "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
     if args.cmd == "envcheck":
         return cmd_envcheck(flow, args)
+    if args.cmd == "capability":
+        return cmd_capability(args)
     if args.cmd == "template":
         return cmd_template(flow, args)
     if args.cmd == "init":

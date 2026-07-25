@@ -1,2 +1,6 @@
 # Keep source releases small. Share assets remain available in the repository.
 docs/share/ export-ignore
+
+# Preserve third-party source byte-for-byte. Generated bundles may contain
+# whitespace that is meaningful to embedded template literals.
+runtime/vendor/** -whitespace

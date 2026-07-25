@@ -194,7 +194,7 @@ class RuntimeAndStateTests(unittest.TestCase):
 
             save_versioned_json(
                 os.path.join(child, ".mae-flow.json"),
-                {"current": "env_setup", "config": {}, "choices": {},
+                {"current": "config_confirm", "config": {}, "choices": {},
                  "history": [], "started": "2026-01-01 00:00:00"},
                 "flow", project_root=child)
             atomic_write_json(
@@ -203,7 +203,7 @@ class RuntimeAndStateTests(unittest.TestCase):
             second = subprocess.run(
                 [sys.executable, os.path.join(SCRIPTS, "statusline.py")],
                 input=payload, text=True, capture_output=True, env=env, timeout=15)
-            self.assertIn("环境就绪", second.stdout)
+            self.assertIn("配置确认", second.stdout)
             self.assertNotIn("已退出", second.stdout)
 
     def test_corrupt_exit_marker_has_deterministic_repair(self):

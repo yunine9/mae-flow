@@ -62,9 +62,6 @@
      最后 `action finish --report "<澄清文档>"`。默认不提交文档。
    - **cancel / task cancel** — 仅取消当前独立 UT/CodeCheck/Grill 任务：
      `mae-flow.py action cancel`。保留已经产生的代码和报告，不回滚，也不影响普通开发。
-   - **setup** — 仅环境:执行 `mae-flow envcheck`;有 ❌ → 直接跑 python "<插件>/scripts/setup.py"
-     (确定性安装器)→ ⚠人工项原样转用户、❌ 项才派 env-setup-agent 诊断(传日志路径与 scripts 目录),
-     与 env_setup 步骤同一套三层分流;**不 init 流程**,修完汇报结果即结束。
    - **chain** — 跨仓需求的链路分解,**不 init 流程**,先于任何仓的交付执行。由你(主模型)亲自做,
      禁止外包给子 agent(全程需要与用户问答)。步骤:
      ① 按 config_confirm 的同一套纪律确定单号与需求文档;
@@ -94,6 +91,9 @@
      ① 30 秒上手(用户只做三件事:发起「交付 <单号>+SE 文档」、在确认点拍板、最后去平台建 MR;
      开新局敲命令,进行中直接说话);② 常见问题标题清单(用户点名哪条再展开);③ README 完整路径。
      用户后续追问,一律以 README 内容为准作答。
+   - **envcheck / doctor** — 只诊断，不安装：检查 Mae-Flow 随插件内嵌的运行时是否完整。
+     CodeCheck 缺失只提示“首次使用时会尽力安装”，不把插件判成不可用；禁止引导用户运行 setup、
+     迁移 `.claude/.cac`、执行 reload 或全局初始化。
    - **story** — 仅补生成 STORY,**不 init 流程**。单号按此顺序确定,拿不到就问,禁止瞎猜:
      ① 命令参数里带了单号(如 `/mae-flow story REQ2026071801`)→ 直接用;
      ② 没带,但项目根 .mae-flow.json(或 .mae-flow.json.last)里有单号 → 向用户确认"是给 <单号> 补吗?";

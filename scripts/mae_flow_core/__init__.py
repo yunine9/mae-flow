@@ -13,6 +13,17 @@ from .runtime import (
     find_project_root,
     resolve_runtime,
 )
+from .capabilities import (
+    CAPABILITY_PACKS,
+    CapabilityError,
+    configure_comet_build,
+    diagnostics as capability_diagnostics,
+    ensure_codecheck,
+    prepare_project,
+    render_pack,
+    run_comet,
+    run_openspec,
+)
 from .state_store import (
     CURRENT_SCHEMA_VERSION,
     ProjectStateLock,
@@ -46,6 +57,15 @@ __all__ = [
     "ProjectStateLock",
     "RuntimeMode",
     "RuntimeSnapshot",
+    "CAPABILITY_PACKS",
+    "CapabilityError",
+    "configure_comet_build",
+    "capability_diagnostics",
+    "ensure_codecheck",
+    "prepare_project",
+    "render_pack",
+    "run_comet",
+    "run_openspec",
     "StateConflictError",
     "StateLockTimeout",
     "StateStoreError",

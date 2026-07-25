@@ -4,9 +4,10 @@
 若证据提示需要 COMPILE：
 1. 执行 `python "{MAEFLOW_PATH}" agent-task compile`；
 2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；
-3. compile-agent 必须读取任务卡。配置为 build-fix 时由它调用 build-fix Skill；主会话不编译、不猜命令；
+3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；
+   主会话不编译、不猜命令；
 4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。
 
-任务卡指纹、实际编译方式和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。
+任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。
 任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，
 不是让模型用宽 `git add .` 把无关文件一起提交。

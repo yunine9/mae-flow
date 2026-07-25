@@ -1,20 +1,11 @@
 {
-  "start": "env_setup",
+  "start": "config_confirm",
   "state_file": ".mae-flow.json",
   "source_patterns": [
     "(^|/)(service|src|include|lib|app|modules?)/"
   ],
   "specs_truth": "(^|/)openspec/specs/",
   "steps": {
-    "env_setup": {
-      "title": "环境就绪",
-      "evidence": [
-        {
-          "type": "env_ok"
-        }
-      ],
-      "next": "config_confirm"
-    },
     "config_confirm": {
       "title": "配置确认",
       "user_ack": true,
@@ -377,6 +368,18 @@
           ]
         }
       ],
+      "next": "tw_verify"
+    },
+    "tw_verify": {
+      "title": "小改 — 对照需求检查",
+      "evidence": [
+        {
+          "type": "yaml_field",
+          "file": "openspec/changes/{CHANGE_NAME}/.comet.yaml",
+          "field": "verify_result",
+          "value": "pass"
+        }
+      ],
       "next": "archive_confirm"
     },
     "build": {
@@ -528,78 +531,5 @@
       "title": "交付完成",
       "terminal": true
     }
-  },
-  "env_checks": [
-    {
-      "name": "Node.js >= 20.19",
-      "type": "node_min",
-      "value": "20.19.0"
-    },
-    {
-      "name": "OpenSpec CLI",
-      "type": "cmd",
-      "value": "openspec --version"
-    },
-    {
-      "name": "Comet CLI",
-      "type": "cmd",
-      "value": "comet --version"
-    },
-    {
-      "name": "Superpowers 插件",
-      "type": "cmd_contains",
-      "value": "codeagent plugin list",
-      "contains": "superpowers"
-    },
-    {
-      "name": "Ponytail 插件",
-      "type": "cmd_contains",
-      "value": "codeagent plugin list",
-      "contains": "ponytail"
-    },
-    {
-      "name": "CodeCheck CLI(@baize/codecheckcli,fullcheck 可用)",
-      "type": "cmd_contains",
-      "value": "codecheck fullcheck --help",
-      "contains": "fullcheck"
-    },
-    {
-      "name": "git 仓库(项目根含 .git)",
-      "type": "path_any",
-      "value": [
-        ".git"
-      ]
-    },
-    {
-      "name": "Comet 项目已 init 且已迁移(.cac/skills/comet 就位)",
-      "type": "path_any",
-      "value": [
-        ".cac/skills/comet"
-      ]
-    },
-    {
-      "name": "skill 已加载(迁移后已重启会话,无待重启标记)",
-      "type": "path_absent",
-      "value": [
-        ".mae-flow-need-reload"
-      ]
-    },
-    {
-      "name": "auto_transition 已关闭(.comet/config.yaml)",
-      "type": "file_contains",
-      "value": ".comet/config.yaml",
-      "contains": "auto_transition: false"
-    },
-    {
-      "name": "review_mode 已设为 standard(.comet/config.yaml)",
-      "type": "file_contains",
-      "value": ".comet/config.yaml",
-      "contains": "review_mode: standard"
-    },
-    {
-      "name": "Git Bash(comet 全部 .sh 脚本的运行依赖)",
-      "type": "cmd",
-      "value": "bash --version"
-    }
-  ]
+  }
 }

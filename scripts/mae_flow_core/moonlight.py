@@ -4,7 +4,6 @@ import time
 
 
 QUALITY_STEPS = {
-    "env_setup": "environment",
     "build": "compile",
     "rf_compile": "compile",
     "tw_compile": "compile",
@@ -17,6 +16,7 @@ QUALITY_STEPS = {
     "tw_ut": "ut",
     "verify_ut": "ut",
     "verify_comet": "comet",
+    "tw_verify": "comet",
 }
 
 REPAIR_ENTRY = {

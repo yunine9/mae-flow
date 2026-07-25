@@ -3,7 +3,7 @@
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import importlib.util, json, os, py_compile, re, subprocess, sys, tempfile, time, types
+import importlib.util, json, os, re, subprocess, sys, tempfile, time, types
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,16 +19,19 @@ def check(name, ok, detail=""):
 
 # 1. 语法
 for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
-          "scripts/statusline.py", "scripts/setup.py",
+          "scripts/statusline.py", "scripts/mae_flow_core/capabilities.py",
           "scripts/mae_flow_core/__init__.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
           "scripts/mae_flow_core/state_store.py",
           "scripts/mae_flow_core/standalone.py",
           "scripts/mae_flow_core/moonlight.py",
-          "scripts/tests/test_state_core.py"):
+          "scripts/tests/test_state_core.py",
+          "scripts/tests/test_capabilities.py"):
     try:
-        py_compile.compile(os.path.join(ROOT, f), doraise=True)
+        path = os.path.join(ROOT, f)
+        with open(path, encoding="utf-8") as stream:
+            compile(stream.read(), path, "exec")
         check(f"语法 {f}", True)
     except Exception as e:
         check(f"语法 {f}", False, str(e))
@@ -39,11 +42,16 @@ core_tests = subprocess.run(
     text=True, capture_output=True, timeout=90)
 check("共享状态内核回归", core_tests.returncode == 0,
       (core_tests.stdout + core_tests.stderr)[-3000:])
+capability_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_capabilities.py")],
+    text=True, capture_output=True, timeout=240)
+check("内嵌能力完整生命周期回归", capability_tests.returncode == 0,
+      (capability_tests.stdout + capability_tests.stderr)[-5000:])
 
 # 2. JSON
 flow = hooks = None
-for f in ("flow/flow.json", "hooks/hooks.json", "skills/mae-flow/assets/settings-baseline.json",
-          "skills/mae-flow/assets/env-profile.json"):
+for f in ("flow/flow.json", "hooks/hooks.json", "runtime/vendor/manifest.json"):
     try:
         d = json.load(open(os.path.join(ROOT, f), encoding="utf-8"))
         if f == "flow/flow.json":
@@ -92,7 +100,8 @@ if flow:
     check("主流程 UT 改源码后回流专用编译节点",
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
-    tweak_chain = ["tw_change", "tw_compile", "tw_codecheck", "tw_ut", "archive_confirm"]
+    tweak_chain = ["tw_change", "tw_compile", "tw_codecheck", "tw_ut",
+                   "tw_verify", "archive_confirm"]
     got, cur = [], "tw_change"
     for _ in range(len(tweak_chain)):
         got.append(cur)
@@ -114,21 +123,23 @@ if flow:
     ]
     check("CodeCheck 告警数多格式解析",
           all(mf._parse_codecheck_count(a, b) == n for a, b, n in parser_cases))
-    real_run, real_which = mf.subprocess.run, mf.shutil.which
+    real_run, real_ensure = mf.subprocess.run, mf.ensure_codecheck
     try:
         sample = """[CodeCheck] 代码检查完成!\n### 1. [Minor] R.ONE 示例\n- **文件**: `Foo.cpp`\n- **规则**: R.ONE 示例\n💡 提示: 共有 1 条告警。"""
-        mf.shutil.which = lambda _: "/fake/codecheck"
+        mf.ensure_codecheck = lambda install=True: {
+            "available": True, "path": "/fake/codecheck", "detail": ""}
         mf.subprocess.run = lambda *a, **k: types.SimpleNamespace(
             stdout=sample, stderr="", returncode=1)
         result, err = mf._run_codecheck(["src/Foo.cpp"])
         check("CodeCheck 成功不依赖退出码 0",
               not err and result["total"] == 1 and result["pairs"] == [("R.ONE", "src/Foo.cpp")])
     finally:
-        mf.subprocess.run, mf.shutil.which = real_run, real_which
+        mf.subprocess.run, mf.ensure_codecheck = real_run, real_ensure
     win_argv, win_shell, _ = mf._codecheck_launch(
         ["src/My File.cpp"], executable=r"C:\Users\dev\AppData\Roaming\npm\codecheck.cmd", windows=True)
     check("Windows CodeCheck 沿用已验证的 shell/PATHEXT 路径",
-          win_shell and isinstance(win_argv, str) and "codecheck fullcheck" in win_argv
+          win_shell and isinstance(win_argv, str) and "codecheck.cmd" in win_argv
+          and "fullcheck" in win_argv
           and '"src/My File.cpp"' in win_argv)
     with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as f:
         json.dump({"issues": [{"uuid": "1", "rule": "R.ONE", "file": "a/Foo.cpp"},
@@ -245,43 +256,36 @@ if flow:
                   "熔断" in second_why and "/mae-flow exit" in second_why)
         finally:
             os.chdir(old_cwd)
-    setup_spec = importlib.util.spec_from_file_location(
-        "mae_flow_setup", os.path.join(ROOT, "scripts", "setup.py"))
-    setup_module = importlib.util.module_from_spec(setup_spec)
-    setup_spec.loader.exec_module(setup_module)
-    original_dry = setup_module.DRY
-    original_run = setup_module.subprocess.run
-    try:
-        setup_module.DRY = True
-        setup_module.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("dry-run 修改命令不应进入 subprocess"))
-        dry_rc, dry_out = setup_module.sh(
-            "npm config set registry https://example.invalid", mutate=True)
-        check("setup dry-run 不执行配置写入或安装命令",
-              dry_rc == 0 and dry_out == "")
-    finally:
-        setup_module.DRY = original_dry
-        setup_module.subprocess.run = original_run
+    # Plugin-owned runtime is prepared in-process: no project Skill directory,
+    # global npm mutation, setup script or reload marker.
     with tempfile.TemporaryDirectory() as td:
-        config_path = os.path.join(td, "config.yaml")
-        open(config_path, "w", encoding="utf-8").write(
-            "auto_transition: true\nreview_mode: strict\nauto_transition: false\n")
-        auto_changed = setup_module.ensure_yaml_value(
-            config_path, "auto_transition", "false")
-        review_changed = setup_module.ensure_yaml_value(
-            config_path, "review_mode", "standard")
-        config_text = open(config_path, encoding="utf-8").read()
-        check("setup 会纠正错误 YAML 值并清理重复键",
-              auto_changed and review_changed
-              and config_text.count("auto_transition:") == 1
-              and "auto_transition: false" in config_text
-              and "review_mode: standard" in config_text)
-    profile = json.load(open(
-        os.path.join(ROOT, "skills", "mae-flow", "assets", "env-profile.json"),
-        encoding="utf-8"))
-    check("公开 npm 依赖固定为实测精确版本",
-          profile["npm_packages"]["openspec"].endswith("@1.6.0")
-          and profile["npm_packages"]["comet"].endswith("@0.3.9"))
+        subprocess.run(["git", "init", "-q", td], check=True)
+        prepared = mf.prepare_project(td)
+        check("安装后项目能力可直接准备且不生成 .cac/.claude",
+              prepared.get("openspec") == "1.6.0"
+              and os.path.isfile(os.path.join(td, "openspec", "config.yaml"))
+              and os.path.isfile(os.path.join(td, ".comet", "config.yaml"))
+              and not os.path.exists(os.path.join(td, ".cac"))
+              and not os.path.exists(os.path.join(td, ".claude")))
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            with open(mf.STATE_PATH, "w", encoding="utf-8") as stream:
+                json.dump({
+                    "current": "env_setup", "config": {}, "choices": {},
+                    "history": [], "started": "2026-01-01 00:00:00",
+                }, stream)
+            migrated = mf.load_state()
+            check("旧版环境步骤断点升级后自动迁移到配置确认",
+                  migrated.get("current") == "config_confirm"
+                  and any(x.get("type") == "remove-project-setup"
+                          for x in migrated.get("migrations", [])))
+        finally:
+            os.chdir(old_cwd)
+    packs_ok = all(
+        "当前会话已经加载" in mf.render_pack(name)
+        for name in ("open", "design", "build", "review-fix", "ponytail-review", "verify"))
+    check("公开工作方法固定版本并由当前步骤直接加载", packs_ok)
     check("同名文件豁免键不会碰撞",
           mf._approval_key("R", "a/Foo.cpp") != mf._approval_key("R", "b/Foo.cpp"))
     check("豁免规则与文件必须在同一条记录",
@@ -899,19 +903,15 @@ if flow:
             env_morning["moonlight"]["issues"].append({
                 "id": "ML-003", "kind": "environment", "step": "env_setup",
                 "at": now, "head": mf.sh("git rev-parse --verify HEAD"),
-                "reason": "夜间环境安装后需要人工刷新插件，尚未完成现场复验",
+                "reason": "旧版报告遗留的环境项",
             })
             mf.save_state(env_morning)
             mf.cmd_moonlight(flow, env_morning, types.SimpleNamespace(
                 action="repair", ack=None, reason=None))
             env_repair = mf.load_state()
-            env_route_ok = (
-                env_repair.get("current") == "env_setup"
-                and (env_repair.get("moonlight") or {}).get("repair_after_environment")
-                == "rf_compile")
-            mf.advance(flow, env_repair, "env_setup", flow["steps"]["env_setup"], "done")
-            check("晨间修复会先处理环境遗留再回到质量链而不重跑需求流程",
-                  env_route_ok and mf.load_state().get("current") == "rf_compile")
+            check("旧版环境遗留不再把修复轮送回已删除的 setup",
+                  env_repair.get("current") == "rf_compile"
+                  and not (env_repair.get("moonlight") or {}).get("repair_after_environment"))
 
             # 这里是在同一个临时仓库中构造另一条晨间修复分支，不是拿生产中的
             # 旧快照覆盖新状态；去掉 CAS 字段，明确表达“测试夹具重新装载”。
@@ -1368,7 +1368,7 @@ with tempfile.TemporaryDirectory() as td:
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=td, check=True)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
-        json.dump({"current": "env_setup", "config": {}, "choices": {},
+        json.dump({"current": "config_confirm", "config": {}, "choices": {},
                    "history": [], "started": now}, f, ensure_ascii=False)
     exit_payload = json.dumps({"cwd": td, "prompt": "/mae-flow exit"},
                               ensure_ascii=False) + "\n"
@@ -1465,8 +1465,11 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/CHAIN-TEMPLATE.md",
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
-          "skills/mae-flow/assets/settings-baseline.json",
-          "skills/mae-flow/assets/env-profile.json", "scripts/setup.py", "scripts/comet_compat.py",
+          "scripts/comet_compat.py", "scripts/mae_flow_core/capabilities.py",
+          "scripts/tests/test_capabilities.py",
+          "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
+          "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
+          "runtime/vendor/ponytail/LICENSE",
           "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md",
           "MAINTAINERS.md", "VERSION", "CHANGELOG.md", ".gitattributes"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))

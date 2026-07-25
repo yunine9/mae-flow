@@ -26,7 +26,18 @@ jobs:
         with:
           node-version: '20'
       - name: Run selftest (full release gate)
-        run: python scripts/selftest.py
+        shell: bash
+        # 失败项打成 ::error:: annotations——GitHub 的 job 日志端点要 admin
+        # 权限,annotations 走 checks API 公开可读,远程诊断全靠它。
+        run: |
+          python scripts/selftest.py 2>&1 | tee selftest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            grep "❌" selftest.log | head -20 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          fi
+          exit "$status"
         env:
           # 双保险:selftest/探针自带 stdout 自愈,此处再钉 UTF-8,
           # 避免 Windows runner 代码页差异干扰断言输出比较。

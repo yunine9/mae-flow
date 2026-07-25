@@ -1632,7 +1632,8 @@ with tempfile.TemporaryDirectory() as td:
 with tempfile.TemporaryDirectory() as td:
     guard = os.path.join(td, ".cac", "skills", "comet", "scripts", "comet-hook-guard.sh")
     os.makedirs(os.path.dirname(guard), exist_ok=True)
-    open(guard, "w", encoding="utf-8").write(
+    # bash 脚本必须钉 LF:Windows 文本模式会把 \n 写成 \r\n,#!/bin/bash\r 直接崩
+    open(guard, "w", encoding="utf-8", newline="\n").write(
         "#!/bin/bash\nset -euo pipefail\necho blocked >&2\nexit 2\n")
     found1, patched1, errors1 = ensure_direct_mode_compat(td)
     found2, patched2, errors2 = ensure_direct_mode_compat(td)

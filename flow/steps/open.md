@@ -9,6 +9,14 @@
 
 随后通过内嵌 CLI 的 `status` / `instructions` 获取真实模板和规则，逐项生成 proposal、specs、design、tasks。
 禁止手工猜模板；下方原文里的 `openspec` 命令已经自动改写为内嵌 CLI。
+**specs 的格式指令必须显式取一次**(下方原文循环只列了 proposal/design/tasks 三条,而 specs 是格式合同
+最重的一份——标题结构、`#### Scenario:` 恰好四个井号、MODIFIED 须整段复制,漏取=凭感觉手写规格,
+病灶潜伏到规格定稿才爆):
+`python "{MAEFLOW_PATH}" capability openspec -- instructions specs --change "<英文短名>" --json`
+每条 `### Requirement:` 正文须含 SHALL/MUST 关键词(上游校验认英文关键词;中文正文中英混写即可,
+如「系统 SHALL 在…时返回…」)。
+四类产物齐后、done 之前先结构自检——错误当步就修,不许潜伏到定稿:
+`python "{MAEFLOW_PATH}" capability openspec -- validate "<英文短名>"`
 产物骨架存在后执行：
 
 `python "{MAEFLOW_PATH}" capability comet-state -- init "<英文短名>" full`
@@ -22,7 +30,8 @@ clarifications 里已是 EARS 的答案直接沿用)——UT 阶段将按这些�
 逐条比对 delta spec 与 SE 文档,不一致则修正;记录 CHANGE_NAME;确认 .comet.yaml phase=open。
 **规格呈审协议(spec 是后面写码/补测/验收的唯一合同,代码质量的上限在这一步就定了)**:
 展示用「决策摘要卡」而非甩全文——共 N 条 Scenario/EARS,按来源分三类:
-①有需求文档/澄清答案依据的(报条数,引导用户抽查边界值与错误语义);
+①有需求文档/澄清答案依据的(报条数,引导用户抽查边界值与错误语义;**这些在质询/文档里已经
+拍板过,禁止逐条重新提问**——重问一遍是用户最烦的重复劳动);
 ②**AI 自行推断、没有需求依据的**(逐条列出+推断理由);③AI 拿不准的。
 **②③类必须用 AskUserQuestion 逐条呈用户拍板**——done 硬校验本步内真实问过(ASKUSER 令牌),
 无脑回车在这一步机器上过不去;用户改判的当场改 spec。

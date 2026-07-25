@@ -8,6 +8,10 @@
 这条确定性命令一次写入 branch、executing-plans、direct、standard 等公司固定选择，
 禁止由 Agent 自己记五六个字段，也不要手写 `.comet.yaml`。
 按下方内嵌的实现计划与连续执行规则生成计划并实施，不调用外部 Skill。
+计划由主会话**亲自**按内嵌 writing-plans 方法生成——禁止把"制定计划"派给子代理:子代理上下文里
+没有本页能力包文本,产出会丢失 bite-sized/No Placeholders 纪律(下方原文如出现"派发计划子代理"
+字样,以本条为准)。计划的任务步骤**不包含写测试步骤**:测试统一由 verify 阶段 AutoUT 按 EARS
+条目补齐(tdd_mode=direct 已获授权),计划里织入"先写失败测试"步骤=与验证台账失配。
 原方法中的执行方式选择按公司标准固定，禁止现场即兴:
 - 隔离方式=branch(分支已在 branch_create 建好,直接沿用,不新建、不用 worktree);
 - 执行方式=executing-plans(如用户明确要求 subagent-driven,派发契约中必须注明 commit 格式为 [单号][类型]描述,否则子 agent 的提交会被拦截);

@@ -3,6 +3,9 @@
 先执行 `python "{MAEFLOW_PATH}" capability comet-state -- check "{CHANGE_NAME}" design`，
 再执行 `python "{MAEFLOW_PATH}" capability comet-handoff -- "{CHANGE_NAME}" design --write` 生成可追溯交接包。
 按下方内嵌的方案讨论原文做深度设计；**必须把 clarifications-{单号}.md(如有)作为输入**并声明:
+- **跳过原文里的"理解问题/背景发现"提问阶段**——那是给没做过需求质询的项目准备的,
+  本流程的 WHAT 层已由质询+规格覆盖,再问一遍就是 grill 的重复(用户已抱怨过这类重复);
+  问题清单直接 =「留给设计阶段」清单 + 规格里标记的开放技术点;
 - 文档中已拍板的需求级决策**不得重问**,直接作为设计约束引用;
 - 「留给设计阶段」清单里的技术分歧是本阶段该聚焦的问题,优先展开;
 - brainstorming 中若发现新的**需求级**缺口 → 停下补录进 clarifications 并与用户确认,再继续设计。

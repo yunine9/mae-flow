@@ -66,7 +66,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+复验摘录一致性防吞告警；**done 的 codecheck_clean 现场重跑 CLI 亲数遗留（agent 报数不作数）**；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
 | 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
 | 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
-| 正确性/漏洞 | comet review（standard） | build 收尾 + verify 内 | 与规范/复杂度维度不重叠，这一维只有它管 |
+| 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘 tasks.md 备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
 
 ### 确认点预算（人工停顿的取舍原则）
@@ -255,7 +255,7 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 | 约定 | 原因 | 落点 |
 |---|---|---|
 | `.comet/config.yaml` 含 `auto_transition: false` | mae-flow 独占节奏，禁止 comet 自动衔接阶段 | `prepare_project()` 创建/纠正 |
-| `review_mode: standard` | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | `prepare_project()` + build.md |
+| `review_mode: standard`（full/hotfix；tweak 上游硬编码 off，有意接受——tw 链另有 compile/CodeCheck/UT 兜底 + tw_verify 装载 verify 包做正确性核对） | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | `prepare_project()` + build.md |
 | isolation=branch、tdd=direct+direct_override、executing-plans | 不让 Agent 记五个字段；完整流程离开 build 前必须已写状态 | `capability comet-build-defaults` |
 | comet verify 的分支处理选"保持分支" | 推送归 push 步，MR 人工建 | verify_comet.md |
 | 依赖 `.comet.yaml` 的 `design_doc`/`verify_result` 字段 | yaml_field 证据的数据源 | flow.json |
@@ -357,6 +357,7 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 **全流程硬度审计结论（2026-07-18，逐步过完 18 步）**：正确性级缝隙已清零。以下软点为**有意接受**，各有兜底，不要误判为疏漏：
 
 - **verify_ponytail 零证据**——跳过无人知；兜底：复杂度维度有 build 期 ponytail 常驻 + codecheck + comet review 三重冗余。
+- **end 沉淀纪律零机器锚点**——逐条用户确认/只记仓库事实/30 条上限全是提示词约束（end 为终态步无证据）；兜底：装载侧把条目直接喂进 agent 任务提示，污染可在 report/复盘发现；机制化（拆出终态+ASKUSER 令牌+content_free 行数校验）留待实际出现污染再加。
 - **codecheck REMAINING 的用户决策语义仍不可完全验真**——但 `approve-exemption` 已要求本步 ASKUSER 令牌、用户原话验真并写状态审批账；手写豁免文件不能放行。
 - **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。配置确认是特殊强类型通道：`config-review` 先冻结完整配置、需求文档 SHA 与一次性收据 ID，用户最终回答必须绑定该收据；多问题的局部回答不能代替整单确认。连续失败只停止同命令自动重试，不形成永久锁，也不要求 exit/init。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。

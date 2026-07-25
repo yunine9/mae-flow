@@ -1,5 +1,157 @@
 # 更新记录
 
+## 2026-07-25：流程魔改——轻量化与质量的平衡批次
+
+准则:轻量化只删"重复劳动"(同一决定问两遍/同一 agent 白跑),不删决策点与证据;
+每项过三问——删的是重复还是必要冗余?错误还有没有另一层接住?用户能否退回重路径?
+
+### 一卡合一(体验)
+
+- 配置确认卡合并收集四个开场决策(配置确认/交付方式/是否质询/是否 STORY,各带推荐):
+  完整开发的用户停顿从 5 次降到 2 次(开场一卡 + 定稿确认);
+- workflow_select/grill_ask/story_ask 直接消费配置卡捕获的真实答案(`_current_ack_messages`
+  预答通道,仍验真、改选仍被抓、预答缺失自动回退逐步提问)。
+
+### grill 与 brainstorming 去重(体验)
+
+用户实感的重复有三处,病根不是"两步该合并"(WHAT 在规格前、HOW 在规格后,时序正确):
+
+- open 决策摘要卡①类(有质询/文档依据的 Scenario)明确**禁止逐条重问**——已拍板的事再确认
+  一遍是最烦的重复劳动;②③类(AI 推断/拿不准)照旧逐条呈审;
+- design 步明确**跳过 brainstorming 原文的"理解问题/发现"提问阶段**——WHAT 层已由质询+规格
+  覆盖,问题清单直接=「留给设计阶段」清单+规格开放点;
+- 需求级新缺口回流质询的通道原样保留(去重不去防线)。
+
+### 质量补强(与轻量化对冲)
+
+- `agent-task` 生成任务卡时统一注入 delivery-notes 沉淀经验(≤40 行,冲突时任务卡优先):
+  一处改动,主流程/评审/小改三条质量链的 agent 全部拿到踩坑经验(原先 rf/tw 链拿不到);
+- 独立质询补链:备课表纳入 hook 章节校验(路径正则放宽至 standalone 目录)、start 给出模板
+  绝对路径、finish 硬校验 prep 轮 critic 执行过(README"开始和结束各查一次"落为机制);
+- verify_ponytail 出界的 correctness 发现必须落盘 tasks.md 备注(只留会话里=一次 /clear 蒸发);
+- 拍板两项悬案:tweak 线 comet review 判"有意 off"(tw_verify 的 verify 包+三重质量链兜底,
+  文档同步);comet review 定为 verify 单点(五维表修正,不再声称 build 收尾双点)。
+
+### 明确拒绝的轻量化(质量优先)
+
+- verify 链保持 删→改→测→验 串行(各步顺序理由成立,融合会破坏任务卡隔离与令牌语义);
+- current 保持全量重印方法文本(弱模型中断恢复不赌记忆,这是保命绳不是浪费)。
+
+## 2026-07-25：误拦治理与月光/comet 集成加固
+
+目标：把硬拦截收敛到"只拦真违规"，误拦弹回是最大的 token 浪费源；同时补上月光宝盒
+与 comet 集成审计发现的真实质量洞。done 侧证据体系未做任何放松。
+
+### 误拦六修（流畅性）
+
+- gate 源码判定统一"项目根相对+正斜杠"匹配（原始与 realpath 双口径）：仓库祖先目录名
+  含 src/app/lib 时全仓 Edit 被误判源码、defaults 锚定正则(`^ut/`)永不命中，两者同根修复；
+- Bash 写盘检测强弱分层：`2>&1` 等裸重定向不再算写盘，改为解析真实落盘目标；
+  `git format-patch` 不再命中 `patch`；cp/mv/tee/patch 弱启发降为软提醒（按 3.3 软层定位），
+  重定向写源码与 sed -i 等强动词照拦；
+- **修复"openspec 路径被判手动创建"黑事件**：`(mkdir|md|new-item)` 左侧未锚定，
+  `git add openspec/.../proposal.md` 里 "proposal.md" 命中 "md" 被拦，而 clean_paths 证据
+  又要求必须提交——门禁与证据互锁卡死。动词改为命令位锚定且只检查其自身参数；
+- 分支 gate 排除 `checkout HEAD -- 文件` / `checkout .` / sha 游离检出等文件恢复形态；
+- choice 验真从全文子串搜索改为"全等或标签前缀"（ASCII 代号只认全等）：
+  "这次不是 hotfix，走完整开发" 不再被误判为 Agent 替用户改选；
+- SubagentStop 多标记打回放宽：同名同值重复标记视为无歧义直接接受，矛盾标记才打回，
+  且打回话术如实说明"标记互相矛盾"而非误导性的"第一行必须是标记"。
+
+### break-glass 兜底：一次性放行令 + 三振熔断（gate 误报的优雅出口）
+
+gate 的误报不可能降到零(静态文本判断动态行为)。兜底纪律:
+
+- **规则分两类**:绝对类(密钥/危险命令/状态文件/伪造通道)永远没有放行令,用户手动
+  执行就是它们的逃生口;裁决类(源码步骤判定/测试路径/分支与提交约定/openspec 目录等
+  全部可能误报的启发式,共 14 条)接入统一 break-glass 出口;
+- **三振熔断**:同一规则同一步骤连拦 3 次,拦截消息自动升级,附本次动作的放行令编号
+  与签发指引——出口平时不广告,卡死的那一刻自己出现;
+- **一次性放行令** `mae-flow allow <编号> --ack "用户原话"`:与 accept-risk 同级强验真;
+  只豁免触发的那一条规则、只对这一个动作生效一次,绑定当前代码版本与步骤,
+  用后即废、代码变化即废,签发与消费全部进历史账本;
+- **月光模式**下没有用户,放行令天然签不出来:三振升级改为指向 moonlight blocked/defer
+  留痕停在安全点,早晨由用户裁决——夜间完整性零妥协;
+- **兜底同时是误报采集器**:三振记录进 doctor(「疑似误拦」条目),反复出现即修规则的
+  工单,残余误报从事故变成带标签的 bug 报告;
+- **done 证据连拒 ≥2 次时亮出用户裁决出口**:用户明确说"跳过吧/可以了"时,拒绝消息
+  直接给出 `goto <下一步> --force --ack "用户原话"` 的整步跳过命令(留痕审计)——
+  该通道一直存在但只写在维护文档里,"用户说跳过、hook 不听"的体验源于不可发现,
+  不是不可为。没有用户原话时 Agent 仍不得自行跳过。
+
+### 拦截时机前移（拦截时机 = 错误发生时机）
+
+不在对的时机拦不如不拦：检测点离错误点越远，积累的重做成本越高，late 拒绝只会让
+Agent 面对无法归因的证据错误然后罢工。两处重灾区前移：
+
+- **质量 agent 派发前验任务卡**（PreToolUse 新增 Task 匹配）：compile/codecheck/UT
+  派发时任务卡缺失或 HEAD 过期立即拦下并给出重签命令——原来要跑完上百轮才在
+  SubagentStop/done 被打回整只重来；story 等无任务卡机制的 agent 不受影响；
+- **提交时验分支**：`git commit` 的 gate 在提交这一刻校验当前分支==约定分支——
+  原来只在 done 时查，站错分支提交一整步才发现，返工要 cherry-pick。
+
+### Hook 自身健壮性
+
+- hooks.json 六命令加文件存在守卫（if/exec 保退出码）：插件根变量缺失/文件被隔离时
+  旁路放行，不再以 exit 2 锁死整个会话；dispatch 对 mae-flow.py 缺失同样 fail-open，
+  子进程退出码白名单化（非 0/2 按插件故障放行并留日志）；
+- stdin 兜底线程超时后改走 os._exit 收尾：消除"Fatal Python error + exit 134"；
+  statusline 同样补 stdin 超时守护；
+- 状态写盘对杀软短锁做指数退避重试（os.replace/os.remove 全路径）；exit 删除主状态
+  失败时如实报"退出未生效"（原实现谎报成功但门禁仍在）；
+- hook 日志超 5MB 滚动；DIRECT/CORRUPT 每条消息的横幅改为每会话一次；
+  UTRUN 探测收窄到 UT 步骤（FIELD-TEST 0.2 待办）。
+
+### 月光宝盒（按场景化审计修复）
+
+- Stop 反收工护栏从"链级一发"改为无进展计数：状态 revision 有推进就继续拦，
+  连续三次零进展才 fail-open——修复"第一次打回后任何收工都放行"的静默白夜；
+- `moonlight off` 与 on 对称要求用户原话授权，夜间 Agent 不能自行拆除约束；
+  off 后 moonlight_review 的 repair/finalize 不再要求"已开启"（消除互相踢皮球）；
+- defer 复用 done 的源码回流纪律：UT 步内改过被测源码后 defer 自动回流重新编译，
+  不再出现"改过源码未复验就推送"；
+- `moonlight on` 冷启动补 prepare_project 前检（环境问题启动即报，不留到凌晨）；
+  在已完成的终态单上开月光会先按 init 规则换单滚动，不再整夜停在"交付完成"；
+- `init --ack` 接回流程时清除月光标记，恢复普通交互不再被 Ask 拦截。
+
+### comet 集成收口（按上游 0.3.9 对照审计）
+
+- tw_verify 证据键 `value` 改为 `equals`（原写法被静默忽略，pending/fail 也能过）；
+  ev_yaml 兼容 value 别名并保持 equals 语义；
+- `.comet.yaml/.openspec.yaml` 的 Bash 写路与 Edit 对称拦截；`comet-state set` 禁止直写
+  verify_result/phase/archived/verified_at（transition 专属）；拦 COMET_FORCE_PHASE 与
+  直接执行内嵌脚本；run_comet 环境剔除 COMET_FORCE_PHASE；
+- 阶段互锁哨兵补齐 tweak/hotfix 线映射（原先全裸）；
+- 项目 .gitattributes 自动补 `openspec/** text eol=lf`，插件自身 vendor 目录加 `-text`
+  （CRLF 检出会让 comet bash 侧读到 `pass\r` 全线报错、四组件哈希全部误报损坏）。
+
+### OpenSpec/Superpowers/轻量思想源继承收口（按上游逐源对照审计）
+
+- `capability openspec` 透传通道加策略：`archive` 钉在 archive 步——它曾是真相源写保护之外
+  的第三条未设防写路，verify 链任意步一条命令即可绕过验证与用户定稿确认合并真相源；
+  `init` 指向 capability prepare。gate 增拦裸调全局 `openspec` 与 `runtime/bin/openspec`
+  直执（"禁止调用机器全局版本"从宣示落为机制）；
+- open 步三连修（规格格式合同断供）：显式取 `instructions specs`（原循环只列
+  proposal/design/tasks 三条）、done 前 `validate` 结构自检（错误当步修，不潜伏到定稿）、
+  Requirement 正文 SHALL/MUST 关键词提示（上游校验认英文，纯中文正文会卡死归档）；
+- build 步：计划由主会话亲自按 writing-plans 生成——派"制定计划"子代理拿不到能力包文本，
+  产出丢失 bite-sized/No Placeholders 纪律；计划任务不含写测试步骤（TDD 弃用与验证台账对齐）；
+- 上游 SKILL 目录内相对引用统一改写为内嵌绝对路径（评审模板 code-reviewer.md 与
+  systematic-debugging 三份支撑技术，此前渲染语境不可达）；
+- end 步经验回顾增加 `ponytail:` 天花板标记盘点（上游 debt 收割意图的最小承接）；
+  end 沉淀纪律零机器锚点登记进 MAINTAINERS 已知局限清单（完成"有意接受"程序）。
+
+### 其他
+
+- 团队预设 `.mae-flow-defaults.json` 纳入 gate 黑名单（它决定门禁口径），JSON 读取统一
+  utf-8-sig 且解析失败可见（BOM/GBK 不再静默让源码/测试路径失效）；
+- `_ensure_review_base` 的 rev-parse 补 `--verify --quiet`（root commit 场景不再产生
+  伪基点导致 review 质量链静默全过）；CodeCheck 拒绝含 cmd 元字符/逗号的文件名；
+- 归档回退优先走内嵌 comet-state（原实现只找 `.cac/.claude` 旧目录，纯内嵌项目必死）；
+  用户仓 .gitignore 按 errors=replace 读（GBK 注释不再让 init 崩栈）；
+- grill_ask 按钮别名与步骤文案对齐；archive.md 修正永不替换的占位符；
+  selftest 的 Stop 护栏用例更新为无进展计数语义。
+
 ## 2026-07-25：Windows 与确认流程修正
 
 - 修复 Windows 插件路径中的 `\U` 被 `re.sub` 当作转义序列，导致 `envcheck` 和阶段能力加载失败；

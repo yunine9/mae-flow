@@ -587,6 +587,9 @@ if flow:
             open(prep, "w", encoding="utf-8").write("# 备课\n\n八维检查已完成。\n")
             open(clarification, "w", encoding="utf-8").write(
                 "# 澄清结果\n\nWHEN 输入名称为空 THE SYSTEM SHALL 返回参数错误。\n")
+            # 双查承诺:prep 与 final 各一轮;finish 现在硬校验 prep 是否执行过
+            mf.cmd_action_critic(types.SimpleNamespace(
+                stage="prep", document=prep))
             mf.cmd_action_critic(types.SimpleNamespace(
                 stage="final", document=clarification))
             grill = mf._load_action()
@@ -852,16 +855,24 @@ if flow:
             fresh["current"] = "config_confirm"
             mf.save_state(fresh)
             stop_payload = json.dumps({"cwd": td, "stop_hook_active": False}) + "\n"
-            stopped = subprocess.run(
-                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
-                cwd=td, input=stop_payload, text=True, capture_output=True, timeout=10)
-            recursive_stop = subprocess.run(
-                [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
-                cwd=td, input=json.dumps({"cwd": td, "stop_hook_active": True}) + "\n",
-                text=True, capture_output=True, timeout=10)
+
+            def _stop_once(active):
+                return subprocess.run(
+                    [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "stop"],
+                    cwd=td, input=json.dumps({"cwd": td, "stop_hook_active": active}) + "\n",
+                    text=True, capture_output=True, timeout=10)
+
+            stopped = _stop_once(False)
+            # 反收工护栏是「无进展计数」:stop_hook_active 在同一延续链恒为 true,
+            # 一发放行会造成整夜静默白夜。零进展连续 3 次打回后才 fail-open;
+            # 状态 revision 推进后重新计数、继续拦。
+            zero_progress = [_stop_once(True).returncode for _ in range(4)]
+            mf.save_state(fresh)   # revision 推进 = 有真实进展(复用同一对象,保住后续 CAS)
+            progressed_stop = _stop_once(True)
             check("月光宝盒非安全停点会由Stop Hook阻止主Agent提前结束",
                   stopped.returncode == 2 and "禁止提前结束" in stopped.stderr
-                  and recursive_stop.returncode == 0)
+                  and zero_progress == [2, 2, 0, 0]
+                  and progressed_stop.returncode == 2)
             mf.cmd_moonlight(flow, fresh, types.SimpleNamespace(
                 action="blocked", ack=None,
                 reason="缺少公司远端环境访问权限，已检查本地配置仍无法取得，夜间不能继续"))

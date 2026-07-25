@@ -521,12 +521,19 @@ def _capture_usermsg(text):
         if not text:
             return
         step = ""
+        config_review_sha = ""
+        config_review_id = ""
         action = None
         if os.path.exists(STATE):
             try:
                 raw, err = safe_read_json(STATE)
-                step = normalize_document(
-                    raw, "flow").get("current", "") if not err and raw else ""
+                flow_state = normalize_document(
+                    raw, "flow") if not err and raw else {}
+                step = flow_state.get("current", "")
+                review = flow_state.get("config_review") or {}
+                if step == "config_confirm" and review.get("step") == step:
+                    config_review_sha = str(review.get("sha256", ""))
+                    config_review_id = str(review.get("id", ""))
             except Exception:
                 pass
         else:
@@ -547,6 +554,9 @@ def _capture_usermsg(text):
             "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
             "input_encoding": _INPUT_ENCODING or "unknown",
         }
+        if config_review_sha:
+            row["config_review_sha256"] = config_review_sha
+            row["config_review_id"] = config_review_id
 
         def append_message(msgs):
             if not isinstance(msgs, list):

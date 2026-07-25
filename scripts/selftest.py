@@ -3,7 +3,7 @@
 """mae-flow 插件自检 — 发版/打包前必跑(工程习惯抄自上游 comet 的 check-* 脚本)。
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、关键文件存在。任何 ❌ 退出码 1。"""
-import importlib.util, json, os, re, subprocess, sys, tempfile, time, types
+import contextlib, importlib.util, io, json, os, re, subprocess, sys, tempfile, time, types
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -217,15 +217,15 @@ if flow:
                           f, ensure_ascii=False)
             failed = False
             try:
-                mf.cmd_done(flow, config_state, types.SimpleNamespace(
-                    ack="我确认以上配置", choice=None,
+                mf.cmd_config_review(flow, config_state, types.SimpleNamespace(
                     set=["工号=u1", "基线分支=main", "单号=REQ1", "单号类型=feat",
                          "需求文档=" + bad_path, "编译方式=build-fix",
                          "UT生成方式=AutoUT", "UT运行命令=mcde test --ut"]))
             except SystemExit as exc:
                 failed = exc.code == 2
             check("配置失败不会把半套或乱码值写入状态",
-                  failed and mf.load_state().get("config") == {})
+                  failed and mf.load_state().get("config") == {}
+                  and not mf.load_state().get("config_review"))
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{"id": "msg001", "text": "支持中文基站名称查询",
                             "step": "config_confirm", "at": now}], f, ensure_ascii=False)
@@ -252,8 +252,96 @@ if flow:
                   direct_req_edit_blocked and direct_req_shell_blocked)
             mf._ack_verified(config_state, "错误确认")
             _, second_why = mf._ack_verified(config_state, "错误确认")
-            check("同一确认通道连续失败两次会熔断并给独立退出路径",
-                  "熔断" in second_why and "/mae-flow exit" in second_why)
+            check("确认失败只停止重复尝试而不会锁死流程",
+                  "停止重复执行" in second_why and "流程没有锁死" in second_why
+                  and "exit/init" in second_why)
+
+            config_sets = [
+                "工号=u1", "基线分支=main", "单号=REQ1", "单号类型=feat",
+                "需求文档=" + good_path, "编译方式=build-fix",
+                "UT生成方式=AutoUT", "UT运行命令=mcde test --ut",
+            ]
+            mismatched_branch_blocked = False
+            try:
+                mf.cmd_config_review(
+                    flow, mf.load_state(), types.SimpleNamespace(
+                        set=config_sets + ["分支名=agent_guessed_branch"]))
+            except SystemExit as exc:
+                mismatched_branch_blocked = exc.code == 2
+            check("工作分支名由脚本确定生成而不是交给 Agent 拼接",
+                  mismatched_branch_blocked
+                  and not mf.load_state().get("config_review"))
+            mf.cmd_config_review(
+                flow, mf.load_state(), types.SimpleNamespace(set=config_sets))
+            reviewed = mf.load_state()
+            review_sha = reviewed.get("config_review", {}).get("sha256", "")
+            review_id = reviewed.get("config_review", {}).get("id", "")
+            resumed_output = io.StringIO()
+            with contextlib.redirect_stdout(resumed_output):
+                mf.print_current(flow, reviewed)
+            check("配置确认单可在清空会话后由 current 原样恢复",
+                  review_id in resumed_output.getvalue()
+                  and review_sha[:12] in resumed_output.getvalue()
+                  and mf.CONFIG_CONFIRM_ACK in resumed_output.getvalue())
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps({
+                        "answers": {
+                            "基线分支": "确认 master",
+                            "单号": "沿用 REQ1",
+                            "需求文档": "沿用需求文档",
+                        },
+                    }, ensure_ascii=False),
+                    "step": "config_confirm", "at": now,
+                    "config_review_sha256": review_sha,
+                    "config_review_id": review_id,
+                }], f, ensure_ascii=False)
+            partial_ok, partial_why = mf._config_ack_verified(
+                reviewed, "确认 master", review_sha, review_id)
+            check("配置单项回答不能替整份配置背书",
+                  not partial_ok and "完整配置" in partial_why)
+
+            original_requirement = open(good_path, encoding="utf-8").read()
+            open(good_path, "a", encoding="utf-8").write("\n临时变化\n")
+            changed_doc_blocked = False
+            try:
+                mf.cmd_done(
+                    flow, reviewed,
+                    types.SimpleNamespace(
+                        ack=mf.CONFIG_CONFIRM_ACK, choice=None, set=None))
+            except SystemExit as exc:
+                changed_doc_blocked = exc.code == 2
+            open(good_path, "w", encoding="utf-8").write(original_requirement)
+            check("需求文档呈现后变化会让旧配置确认单失效",
+                  changed_doc_blocked)
+
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps({
+                        "questions": [{"header": "基线分支"}, {"header": "最终确认"}],
+                        "answers": {
+                            "基线分支": "确认 master",
+                            "单号": "沿用 REQ1",
+                            "最终确认": mf.CONFIG_CONFIRM_ACK,
+                        },
+                    }, ensure_ascii=False),
+                    "step": "config_confirm", "at": now,
+                    "config_review_sha256": review_sha,
+                    "config_review_id": review_id,
+                }], f, ensure_ascii=False)
+            stale_ok, stale_why = mf._config_ack_verified(
+                reviewed, mf.CONFIG_CONFIRM_ACK, review_sha, "old-review")
+            check("旧配置确认收据不能复用到新一轮呈现",
+                  not stale_ok and "绑定" in stale_why)
+            mf.cmd_done(
+                flow, reviewed,
+                types.SimpleNamespace(
+                    ack=mf.CONFIG_CONFIRM_ACK, choice=None, set=None))
+            completed_config = mf.load_state()
+            check("多问题结构化回答以最终确认绑定配置指纹后可推进",
+                  completed_config.get("current") == "workflow_select"
+                  and completed_config.get("config", {}).get("单号") == "REQ1"
+                  and not completed_config.get("config_review"))
         finally:
             os.chdir(old_cwd)
     # Plugin-owned runtime is prepared in-process: no project Skill directory,
@@ -1282,8 +1370,15 @@ with tempfile.TemporaryDirectory() as td:
         cwd=td, input=payload, text=True, capture_output=True, timeout=10)
     check("仅安装插件、未 init 时所有工具门禁完整旁路", inactive.returncode == 0)
 
+    review_sha = "a" * 64
+    review_id = "review-test-001"
     state = {"current": "config_confirm", "config": {}, "choices": {},
-             "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S")}
+             "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+             "config_review": {
+                 "step": "config_confirm", "id": review_id,
+                 "sha256": review_sha,
+                 "config": {"单号": "REQ1"},
+             }}
     with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False)
     user_payload = json.dumps({
@@ -1298,7 +1393,27 @@ with tempfile.TemporaryDirectory() as td:
     check("Windows 非 UTF-8 控制台下 Hook 仍按原始 UTF-8 捕获中文",
           captured.returncode == 0
           and messages[-1]["text"] == "我确认中文需求：支持基站名称查询"
-          and messages[-1].get("input_encoding") == "utf-8-sig")
+          and messages[-1].get("input_encoding") == "utf-8-sig"
+          and messages[-1].get("config_review_sha256") == review_sha
+          and messages[-1].get("config_review_id") == review_id)
+    answer_payload = json.dumps({
+        "cwd": td,
+        "tool_name": "AskUserQuestion",
+        "tool_response": {
+            "questions": [{"header": "最终确认"}],
+            "answers": {"最终确认": mf.CONFIG_CONFIRM_ACK},
+        },
+    }, ensure_ascii=False) + "\n"
+    answer_capture = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "posttooluse"],
+        cwd=td, input=answer_payload.encode("utf-8"), capture_output=True,
+        timeout=10, env=env)
+    messages = json.load(open(os.path.join(td, ".mae-flow.json.usermsg"), encoding="utf-8"))
+    check("AskUserQuestion 多回答结构绑定当前配置指纹",
+          answer_capture.returncode == 0
+          and messages[-1].get("config_review_sha256") == review_sha
+          and messages[-1].get("config_review_id") == review_id
+          and mf.CONFIG_CONFIRM_ACK in messages[-1].get("text", ""))
 
 with tempfile.TemporaryDirectory() as td:
     subprocess.run(["git", "init", "-q", td], check=True)
@@ -1471,16 +1586,8 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
           "runtime/vendor/ponytail/LICENSE",
           "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md",
-          "MAINTAINERS.md", "VERSION", "CHANGELOG.md", ".gitattributes"):
+          "MAINTAINERS.md", "CHANGELOG.md", ".gitattributes"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))
-
-version = open(os.path.join(ROOT, "VERSION"), encoding="utf-8").read().strip()
-changelog = open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8").read()
-readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
-check("VERSION、README 与 CHANGELOG 版本一致",
-      bool(re.fullmatch(r"\d+\.\d+\.\d+", version))
-      and ("## " + version) in changelog
-      and ("`" + version + "`") in readme)
 
 print(f"\n{'全部通过 ✅' if not fails else f'失败 {len(fails)} 项 ❌'}")
 sys.exit(1 if fails else 0)

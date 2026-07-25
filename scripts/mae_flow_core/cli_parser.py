@@ -21,7 +21,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" done --ack "用户原话" [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|"
-            "agent-task|accept-risk|moonlight|action|messages|requirement-record|"
+            "agent-task|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "codecheck-scan|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
@@ -95,7 +95,11 @@ def parse_args(argv=None):
     finish.add_argument("--report")
     actions.add_parser("cancel")
 
-    sub.add_parser("messages")
+    messages = sub.add_parser("messages")
+    messages.add_argument("--full", action="store_true")
+    messages.add_argument("--id")
+    config_review = sub.add_parser("config-review")
+    config_review.add_argument("--set", action="append", required=True)
     requirement = sub.add_parser("requirement-record")
     requirement.add_argument("--message-id")
     requirement.add_argument("--source")

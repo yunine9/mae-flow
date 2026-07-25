@@ -22,6 +22,7 @@
   mae-flow.py moonlight on|off|report|defer|repair|finalize
                                          无人值守开发、带遗留推送与晨间修复闭环
   mae-flow.py messages                    查看当前步骤捕获的用户消息 ID/编码
+  mae-flow.py config-review --set k=v ... 校验并展示完整配置，生成待确认收据
   mae-flow.py requirement-record ...      将用户原话/已有文本规范化为 UTF-8 需求入口
   mae-flow.py action start|confirm-scope|status|critic|finish|cancel
                                          独立运行 UT/CodeCheck/Grill，不启动完整流程
@@ -91,6 +92,7 @@ EXIT_INTENT_PATH = STATE_PATH + ".exit-intent"
 FAILURE_PATH = STATE_PATH + ".failures"
 ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
 ACTION_SCOPE_ACK = "确认以上范围"
+CONFIG_CONFIRM_ACK = "确认以上全部配置"
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
@@ -1128,7 +1130,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
 
 
 def _ack_failure(st, reason="", success=False):
-    """记录确认通道连续失败；第二次起明确熔断，防弱模型无限重复提问。"""
+    """记录确认通道失败；只停止盲目重试，不制造不可恢复的锁。"""
     sid = (st or {}).get("current", "")
     key = "ack:" + sid
     result = [0]
@@ -1185,48 +1187,131 @@ def _ack_candidates(text):
     return [re.sub(r"\s+", "", v) for v in out if re.sub(r"\s+", "", v)]
 
 
+def _current_ack_messages(st):
+    try:
+        msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+    except Exception:
+        return []
+    sid = st.get("current", "")
+    entered = _step_entered_at(st)
+    return [
+        item for item in msgs
+        if item.get("at", "") >= entered
+        and (not item.get("step") or item.get("step") == sid)
+    ]
+
+
+def _ack_retry_guidance(count):
+    if count < 2:
+        return ""
+    return (
+        " 同一确认自动校验已连续失败 %d 次，现停止重复执行同一条命令。"
+        "流程没有锁死，也不需要 exit/init：先运行 messages 查看实际捕获答案；"
+        "若结构化选择未回传，让用户发送一条当前页面要求的普通确认消息，再原样提交。"
+    ) % count
+
+
 def _ack_verified(st, ack, exact=True):
     """ack 必须来自当前步骤之后的真实用户输入；旧步骤的“可以”不能循环使用。
 
     如果宿主拿不到 AskUserQuestion 的应答正文，用户再发一条普通消息即可恢复；不允许静默降级为
     “模型自己写一句 --ack 也算用户确认”。
     """
-    try:
-        msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
-    except Exception:
-        msgs = []
+    msgs = _current_ack_messages(st)
     if not msgs:
         why = ("harness 尚未记录到用户回复。先执行 doctor 检查 UserPromptSubmit 输入，"
-               "不要让用户反复说同一句确认。")
+               "不要重复执行相同 done，也无需退出重开。")
         count = _ack_failure(st, why)
-        if count >= 2:
-            why += (" 同一确认通道已连续失败 %d 次，现已熔断：禁止继续循环。"
-                    "用户可直接发送 `/mae-flow exit`；Hook 也坏时在真实终端执行 exit --interactive。") % count
-        return False, why
+        return False, why + _ack_retry_guidance(count)
 
     def nt(s):
         return re.sub(r"\s+", "", s or "")
 
     na = nt(ack)
-    sid = st.get("current", "")
-    entered = _step_entered_at(st)
-    current_msgs = [m for m in msgs
-                    if m.get("at", "") >= entered and (not m.get("step") or m.get("step") == sid)]
-
-    actual = [v for m in current_msgs for v in _ack_candidates(m.get("text", ""))]
+    actual = [v for m in msgs for v in _ack_candidates(m.get("text", ""))]
     matched = any((na == v if exact else na in v) for v in actual) if na else False
     if matched:
         _ack_failure(st, success=True)
         return True, ""
     why = ("--ack 与当前步骤开始后的用户真实输入不匹配。"
-           "ack 必须是用户回复/选项的原文复制；先执行 messages/doctor 核对捕获内容和编码，"
-           "不要再次向用户重复同一个问题。")
+           "ack 必须是用户回复/选项的原文复制；先执行 messages 核对实际捕获答案，"
+           "不要再次执行相同命令。")
     count = _ack_failure(st, why)
-    if count >= 2:
-        why += (" 同一确认通道已连续失败 %d 次，现已熔断：停止重试。"
-                "需要继续排查用 doctor；不想继续则发送 `/mae-flow exit`，"
-                "Hook 损坏时使用真实终端 exit --interactive。") % count
-    return False, why
+    return False, why + _ack_retry_guidance(count)
+
+
+def _requirement_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _config_sha256(config, requirement_sha=""):
+    payload = json.dumps(
+        {"config": config or {}, "requirement_sha256": requirement_sha},
+        ensure_ascii=False, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _is_full_config_confirmation(value):
+    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
+    if not compact or re.search(
+            r"不确认|不是|不要|不能|没有|没法|否认|拒绝|暂不|修改|调整|"
+            r"不对|有误|有问题|什么意思|怎么|是否|能否|为什么|[?？]",
+            compact):
+        return False
+    return (
+        compact in (
+            re.sub(r"\s+", "", CONFIG_CONFIRM_ACK),
+            "全部正确",
+            "以上配置全部正确",
+            "所有配置都正确",
+        )
+        or bool(re.search(r"确认(?:以上|全部|所有).{0,4}配置", compact))
+    )
+
+
+def _config_ack_verified(st, ack, config_sha, review_id):
+    """Verify one final confirmation bound to the exact reviewed config."""
+    messages = [
+        item for item in _current_ack_messages(st)
+        if item.get("config_review_sha256") == config_sha
+        and item.get("config_review_id") == review_id
+    ]
+    normalized_ack = re.sub(r"\s+", "", ack or "")
+    matched = False
+    for item in messages:
+        for candidate in _ack_candidates(item.get("text", "")):
+            if normalized_ack == candidate and _is_full_config_confirmation(candidate):
+                matched = True
+                break
+        if matched:
+            break
+    if matched:
+        _ack_failure(st, success=True)
+        return True, ""
+
+    if not _is_full_config_confirmation(normalized_ack):
+        why = (
+            "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
+            "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"
+        )
+    elif not messages:
+        why = (
+            "没有捕获到与当前配置确认单绑定的用户回复。AskUserQuestion 的应答可能未被宿主回传；"
+            "无需退出或重新初始化，让用户发送一条普通消息“%s”即可恢复。"
+            % CONFIG_CONFIRM_ACK
+        )
+    else:
+        why = (
+            "--ack 与当前配置确认单后的真实用户答案不一致。执行 messages 查看“提取答案”，"
+            "不要拼接或改写多个问题的答案。"
+        )
+    count = _ack_failure(st, why)
+    return False, why + _ack_retry_guidance(count)
 
 
 def check_evidence(step, st):
@@ -1438,7 +1523,10 @@ def print_current(flow, st):
                   "请先在 .mae-flow-defaults.json 配置「测试路径」，禁止用 unlock 把长期目录差异当单次源码缺陷处理。")
     if step.get("clear_hint"):
         print("💡 会话卫生:本步开始前若会话已较长,建议 /clear 后说「继续」——状态在磁盘,进度不丢,防长上下文行为漂移。")
-    if step.get("user_ack") and not _moonlight(st):
+    if sid == "config_confirm" and not _moonlight(st):
+        print("⚠ 本步先收集配置值，再由 config-review 生成完整确认单。"
+              "只有确认单后的最终回答能推进；基线分支、单号等局部回答不能代替整单确认。")
+    elif step.get("user_ack") and not _moonlight(st):
         print("⚠ 本步需要用户确认:优先用 AskUserQuestion 等结构化提问工具呈现选项拿用户选择(选完同轮继续);"
               "该工具不可用才结束回复纯文本等待。done 必须携带 --ack \"用户选择/回复原文\",拿到前禁止推进。")
     elif step.get("user_ack") and _moonlight(st):
@@ -1490,13 +1578,25 @@ def print_current(flow, st):
             for k, v in show.items():
                 print(f"  {k} = {v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)}")
     print("──── 完成后执行 ────")
+    if sid == "config_confirm" and not _moonlight(st):
+        review = st.get("config_review") or {}
+        if review.get("sha256"):
+            _print_config_review(review, step)
+            print("展示上述确认单后只问一次最终确认；不要再拼接前面的单项回答。")
+            print('python "%s" done --ack "%s"' % (
+                os.path.abspath(sys.argv[0]), CONFIG_CONFIRM_ACK))
+        else:
+            sets = " --set ".join(
+                key + "=<值>" for key in step.get("require_sets", []))
+            print('python "%s" config-review --set %s' % (
+                os.path.abspath(sys.argv[0]), sets))
+            print("该命令会一次性校验并展示完整配置；用户最终确认后再执行它输出的简短 done 命令。")
+        return
     extra = ""
     if step.get("choice_key"):
         extra += f" --choice <{'|'.join(step['choices'])}>"
     if step.get("require_sets"):
         extra += " --set " + " --set ".join(k + "=<值>" for k in step["require_sets"])
-        if "基线分支" in step["require_sets"]:   # 分支名派生自基线分支,只在 config_confirm 提示
-            extra += " --set 分支名=<基线分支>_<工号>_<单号>"
     if step.get("user_ack") and not _moonlight(st):
         extra += " --ack \"<用户原话>\""
     # python(非 python3:Windows 无此命令);abspath(非 relpath:跨盘符 relpath 抛 ValueError)
@@ -2001,29 +2101,36 @@ def cmd_action_cancel():
 
 
 def _captured_user_messages(st):
-    try:
-        rows = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
-    except Exception:
-        return []
-    sid = (st or {}).get("current", "")
-    entered = _step_entered_at(st or {})
-    return [m for m in rows
-            if m.get("at", "") >= entered and (not m.get("step") or m.get("step") == sid)]
+    return _current_ack_messages(st or {})
 
 
-def cmd_messages(st):
-    """只展示短预览与稳定 ID，长中文正文不再经过 shell 参数往返。"""
+def cmd_messages(st, args):
+    """Show stable IDs and trusted answer fields instead of question metadata."""
     rows = _captured_user_messages(st)
+    if getattr(args, "id", None):
+        rows = [item for item in rows if item.get("id") == args.id]
     if not rows:
         die("当前步骤没有捕获到用户消息。检查 UserPromptSubmit hook；"
-            "不要反复让用户确认，可直接使用 `/mae-flow exit` 退出。", 2)
+            "不要重复执行同一条确认命令；AskUserQuestion 不回传时，"
+            "让用户发送当前页面要求的普通确认消息即可恢复。", 2)
     print("[mae-flow] 当前步骤捕获到的用户消息（需求落盘请使用左侧 ID）:")
     for m in rows:
         text = re.sub(r"\s+", " ", m.get("text", "")).strip()
         health = _text_corruption_reason(m.get("text", ""))
+        preview = text if getattr(args, "full", False) else text[:100]
         print("  %s  %s  %s%s" % (
-            m.get("id", "(旧记录无ID)"), m.get("at", "?"), text[:100],
+            m.get("id", "(旧记录无ID)"), m.get("at", "?"), preview,
             ("  ❌疑似乱码:" + health) if health else ""))
+        extracted = [
+            value for value in _ack_candidates(m.get("text", ""))
+            if value != re.sub(r"\s+", "", m.get("text", ""))
+        ]
+        if extracted:
+            print("    提取答案: " + " | ".join(extracted))
+        if m.get("config_review_sha256"):
+            print("    绑定配置: 收据 %s / 指纹 %s" % (
+                m.get("config_review_id", "?"),
+                m["config_review_sha256"][:12]))
 
 
 def cmd_requirement_record(st, args):
@@ -2322,7 +2429,7 @@ def advance(flow, st, sid, step, tag, note=""):
         if not base:
             die("无法记录评审意见处理基点 HEAD,拒绝进入本轮修改。", 2)
         st["review_base_head"] = base
-    # 兼容 2.0.2 已经停在旧 rf_verify 的在途单：按 history 自动恢复返工前 HEAD。
+    # 兼容旧版已经停在 rf_verify 的在途单：按 history 自动恢复返工前 HEAD。
     if sid == "rf_verify" and st.get("choices", {}).get("workflow") == "review":
         _, err = _ensure_review_base(st)
         if err:
@@ -2357,19 +2464,14 @@ def advance(flow, st, sid, step, tag, note=""):
     print_current(flow, st)
 
 
-def cmd_done(flow, st, args):
+def _validated_pending_config(step, st, set_values):
+    """Build and fully validate a candidate without touching confirmed config."""
     sid = st["current"]
-    step = flow["steps"][sid]
-    if step.get("terminal"):
-        die("流程已在终态。")
-    if sid == "moonlight_review":
-        die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
-            "不能用 done 跳过报告闭环。", 2)
     # 配置先在内存候选副本里完成全部校验；任何一步失败都不污染已确认状态。
     # 旧实现遇到需求路径不存在会先 save_state，导致下一轮继续携带半套/乱码配置。
     pending_config = dict(st.get("config", {}) or {})
     allowed_sets = _allowed_set_keys(step)
-    for kv in args.set or []:
+    for kv in set_values or []:
         if "=" not in kv:
             die(f"--set 需为 k=v 形式: {kv}")
         k, v = kv.split("=", 1)
@@ -2384,7 +2486,7 @@ def cmd_done(flow, st, args):
         pending_config["单号类型"] = "feat" if pending_config["单号"].startswith("REQ") else "fix"
     # 需求文档:单号与需求完全解耦(单号只管 git 命名,需求只管做什么),内容对不对只有用户能判定,
     # 机器只拦"路径是假的"这一种硬错;"拿对文档"靠 config_confirm 的单独确认(展示摘录给用户核实)
-    new_keys = [kv.split("=", 1)[0] for kv in (args.set or []) if "=" in kv]
+    new_keys = [kv.split("=", 1)[0] for kv in (set_values or []) if "=" in kv]
     doc = pending_config.get("需求文档", "")
     if "需求文档" in new_keys and not os.path.exists(doc):
         die(f"需求文档「{doc}」不存在——路径必须真实可读。"
@@ -2403,19 +2505,135 @@ def cmd_done(flow, st, args):
                       "当前分支和代码事实中保守取得，不能编造"
                       if _moonlight(st) else "用 --set 补齐;缺失项应询问用户")
             die("配置缺失,禁止推进: " + "、".join(missing) + "(" + remedy + ")", 2)
-        if "基线分支" in step["require_sets"] and not pending_config.get("分支名"):
-            pending_config["分支名"] = "{基线分支}_{工号}_{单号}".format(**pending_config)
-    if step.get("user_ack") and not _moonlight(st) and not args.ack:
-        die("本步需要用户确认:必须携带 --ack \"用户确认原话\"。没有拿到用户回复就调用 done = 违规。", 2)
-    if step.get("user_ack") and not _moonlight(st) and args.ack:
-        ok, why = _ack_verified(st, args.ack)
+        if "基线分支" in step["require_sets"]:
+            derived_branch = "{基线分支}_{工号}_{单号}".format(**pending_config)
+            supplied_branch = pending_config.get("分支名", "")
+            if supplied_branch and supplied_branch != derived_branch:
+                die(
+                    "分支名无需 Agent 拼接，脚本按基线分支、工号和单号确定生成。"
+                    "收到的分支名「%s」与应为的「%s」不一致；删除该 --set 后重试。"
+                    % (supplied_branch, derived_branch), 2)
+            pending_config["分支名"] = derived_branch
+    return pending_config
+
+
+def _config_review_excerpt(path):
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return ""
+    lines = [re.sub(r"\s+", " ", line).strip()
+             for line in text.splitlines() if line.strip()]
+    return " / ".join(lines[:3])[:300]
+
+
+def _print_config_review(review, step):
+    pending = review.get("config") or {}
+    print("[mae-flow] 完整配置确认单（收据 %s，指纹 %s）" % (
+        review.get("id", "?"), str(review.get("sha256", ""))[:12]))
+    for key in step.get("require_sets", []):
+        print("  %s: %s" % (key, pending.get(key, "")))
+    print("  分支名: %s" % pending.get("分支名", ""))
+    excerpt = _config_review_excerpt(pending.get("需求文档", ""))
+    if excerpt:
+        print("  需求内容摘录: " + excerpt)
+
+
+def cmd_config_review(flow, st, args):
+    if st.get("current") != "config_confirm":
+        die("config-review 只用于配置确认阶段。其他步骤的已确认配置不能偷偷改写。", 2)
+    if _moonlight(st):
+        die("月光宝盒不询问用户，不需要 config-review；按 current 指令保守补齐配置后直接 done。", 2)
+    step = flow["steps"]["config_confirm"]
+    pending = _validated_pending_config(step, st, args.set or [])
+    requirement_sha = _requirement_sha256(pending.get("需求文档", ""))
+    digest = _config_sha256(pending, requirement_sha)
+    review_id = hashlib.sha256(
+        (digest + "\0" + str(time.time_ns())).encode("utf-8")).hexdigest()[:16]
+    st["config_review"] = {
+        "step": "config_confirm",
+        "id": review_id,
+        "sha256": digest,
+        "config": pending,
+        "requirement_sha256": requirement_sha,
+        "head": sh("git rev-parse --verify HEAD"),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_state(st)
+    _ack_failure(st, success=True)
+
+    _print_config_review(st["config_review"], step)
+    print("\n现在只做一次最终确认。用 AskUserQuestion 原样询问：")
+    print("  上述完整配置是否正确？")
+    print("选项：")
+    print("  - " + CONFIG_CONFIRM_ACK)
+    print("  - 需要修改")
+    print("不要把前面多个单项回答拼成 ack，也不要再次调用 config-review。")
+    print("用户选择确认后执行：")
+    print('python "%s" done --ack "%s"' % (
+        os.path.abspath(sys.argv[0]), CONFIG_CONFIRM_ACK))
+    print("若 AskUserQuestion 的选择结果未被宿主回传，让用户直接发送同一句普通消息后重试；"
+          "无需退出或重新初始化。")
+
+
+def cmd_done(flow, st, args):
+    sid = st["current"]
+    step = flow["steps"][sid]
+    if step.get("terminal"):
+        die("流程已在终态。")
+    if sid == "moonlight_review":
+        die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
+            "不能用 done 跳过报告闭环。", 2)
+
+    review = st.get("config_review") if sid == "config_confirm" else None
+    if sid == "config_confirm" and not _moonlight(st):
+        if not isinstance(review, dict) or not review.get("sha256"):
+            die(
+                "尚未生成完整配置确认单。先按 current 输出执行 config-review --set ...；"
+                "脚本会校验并展示全部配置，再让用户只做一次最终确认。"
+                "不要直接拿基线分支、单号等局部回答调用 done。", 2)
+        if args.set:
+            pending_config = _validated_pending_config(step, st, args.set)
+            current_requirement_sha = _requirement_sha256(
+                pending_config.get("需求文档", ""))
+            if _config_sha256(
+                    pending_config, current_requirement_sha) != review.get("sha256"):
+                die(
+                    "done 携带的配置与用户看到的确认单不一致。禁止确认 A、提交 B；"
+                    "请用新配置重新执行 config-review。", 2)
+        else:
+            review_state = dict(st)
+            review_state["config"] = dict(review.get("config") or {})
+            pending_config = _validated_pending_config(step, review_state, [])
+            current_requirement_sha = _requirement_sha256(
+                pending_config.get("需求文档", ""))
+            if _config_sha256(
+                    pending_config, current_requirement_sha) != review.get("sha256"):
+                die("配置或需求文档在呈现后发生变化，旧确认单已自动失效。"
+                    "重新执行 config-review 即可恢复，无需退出流程。", 2)
+        if not args.ack:
+            die(
+                '等待用户确认完整配置。AskUserQuestion 只问“上述完整配置是否正确？”，'
+                '确认后执行 done --ack "%s"。' % CONFIG_CONFIRM_ACK, 2)
+        ok, why = _config_ack_verified(
+            st, args.ack, review.get("sha256"), review.get("id", ""))
         if not ok:
             die(why, 2)
+    else:
+        pending_config = _validated_pending_config(step, st, args.set or [])
+        if step.get("user_ack") and not _moonlight(st) and not args.ack:
+            die("本步需要用户确认:必须携带 --ack \"用户确认原话\"。没有拿到用户回复就调用 done = 违规。", 2)
+        if step.get("user_ack") and not _moonlight(st) and args.ack:
+            ok, why = _ack_verified(st, args.ack)
+            if not ok:
+                die(why, 2)
     if step.get("choice_key"):
         if args.choice not in step.get("choices", []):
             die(f"--choice 必须为: {'|'.join(step['choices'])}", 2)
     # 到这里配置、文档、用户确认和 choice 已全部通过，才提交候选值。
     st["config"] = pending_config
+    if sid == "config_confirm":
+        st.pop("config_review", None)
     if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
     want = st.get("config", {}).get("分支名", "")
@@ -3119,7 +3337,7 @@ def cmd_doctor(flow, st, args):
         rec = failures.get("ack:" + sid, {})
         if rec:
             print(("❌" if int(rec.get("count", 0)) >= 2 else "⚠")
-                  + " 当前确认通道连续失败: %s 次（%s）" % (
+                  + " 当前确认自动校验失败: %s 次（%s）。流程未锁死；正确的新回复仍可恢复" % (
                       rec.get("count", 0), rec.get("reason", "")[:160]))
     except Exception:
         pass
@@ -3365,6 +3583,7 @@ def cmd_moonlight(flow, st, args):
             activation_request = _moonlight_request_from_messages(st, args.ack)
         ml = _moonlight_data(st)
         if not ml.get("enabled"):
+            st.pop("config_review", None)
             ml.update({
                 "enabled": True,
                 "activated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -3674,7 +3893,7 @@ def cmd_report_all():
 
 def cmd_reloaded(flow, st, args):
     """Backward-compatible no-op for scripts written before embedded runtime."""
-    print("[mae-flow] 当前版本的能力随插件直接加载，不再需要 reload。执行 current 继续。")
+    print("[mae-flow] 能力随插件直接加载，不再需要 reload。执行 current 继续。")
 
 
 def cmd_goto(flow, st, args):
@@ -3690,6 +3909,7 @@ def cmd_goto(flow, st, args):
         die("未知步骤: " + args.step)
     st.pop("unlock", None)   # 跳转同样使解锁失效
     st.pop("risk_acceptances", None)
+    st.pop("config_review", None)
     st["history"].append({"step": st["current"], "result": "goto:" + args.step,
                           "note": "manual", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     st["current"] = args.step
@@ -4058,7 +4278,9 @@ def main():
     if args.cmd == "exit":
         return cmd_exit(flow, st, args)
     if args.cmd == "messages":
-        return cmd_messages(st)
+        return cmd_messages(st, args)
+    if args.cmd == "config-review":
+        return cmd_config_review(flow, st, args)
     if args.cmd == "requirement-record":
         return cmd_requirement_record(st, args)
     if args.cmd == "moonlight":

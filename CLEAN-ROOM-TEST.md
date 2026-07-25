@@ -1,6 +1,6 @@
 # Mae-Flow 干净环境验证
 
-目标：把旧组件全部卸掉，只保留 Mae-Flow `2.2.1`，确认它没有偷偷依赖机器上的全局版本。
+目标：把旧组件全部卸掉，只保留当前安装的 Mae-Flow，确认它没有偷偷依赖机器上的全局组件。
 
 ## 1. 卸载旧组件
 
@@ -12,7 +12,7 @@
 
 保留或重新安装：
 
-- Mae-Flow `2.2.1`；
+- 当前准备验证的 Mae-Flow；
 - 内网版随包提供的 build-fix、AutoUT、java-autout；
 - `@baize/codecheckcli`（CodeCheck，可不卸载）。
 
@@ -52,7 +52,7 @@ Get-Content "$env:TEMP\mae-flow-hook.log" -Tail 50
 - Python、Git、Node.js、Git Bash 均为 ✅，并显示实际版本和绝对路径；
 - OpenSpec、Comet 和全部阶段能力均为 ✅；
 - OpenSpec 版本为 `1.6.0`；
-- 路径位于 `mae-flow\2.2.1\runtime\vendor\`；
+- 路径位于当前 Mae-Flow 插件缓存目录的 `runtime\vendor\`；
 - comet、openspec、superpowers、ponytail 四个 SHA-256 全部通过；
 - 不要求 setup、reload 或 `comet init`。
 

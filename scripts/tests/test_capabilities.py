@@ -210,7 +210,7 @@ class EmbeddedCapabilityTests(unittest.TestCase):
     def test_windows_plugin_path_is_literal_in_embedded_commands(self):
         windows_script = (
             r"C:\Users\l00899311\.cac\plugins\cache\aimarket"
-            r"\mae-flow\2.2.1\scripts\mae-flow.py")
+            r"\mae-flow\current\scripts\mae-flow.py")
         source = "\n".join((
             "openspec status",
             '"$COMET_BASH" "$COMET_STATE" init demo full',

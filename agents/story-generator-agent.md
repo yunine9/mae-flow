@@ -36,12 +36,13 @@ PENDING_CONFIRM——**禁止写死结论,禁止书写"(已确认)"**(那是主�
 
 ## 期望的传入信息
 
-主 agent 启动你时应提供:单号、CHANGE_NAME、proposal.md / design.md / delta spec 的路径、模式标记(`常规生成` 或 `补生成`)。缺失的项按下方「输入」优先级自行查找;查找不到且无法推进的,返回 FAIL 并列出缺失项。
+主 agent 启动你时应提供:单号、CHANGE_NAME、变更产物路径(v5 布局 = 一个四合一 change.md,其中「# 为什么」=proposal、「# 规格条目：<域>」=delta spec、「# 方案」=design;旧布局在途单 = proposal.md / design.md / delta spec 三个路径)、模式标记(`常规生成` 或 `补生成`)。缺失的项按下方「输入」优先级自行查找;查找不到且无法推进的,返回 FAIL 并列出缺失项。
 
 ## 输入(按优先级查找,有什么用什么)
 
-1. SPEC 文档 → `openspec/specs/` 或 `openspec/changes/` 下查找;补生成模式优先查找归档目录
-   (Glob `openspec/changes/archive/*{CHANGE_NAME}*` 或 `openspec/archive/*{CHANGE_NAME}*`——归档目录名可能带日期前缀)
+1. SPEC 文档 → 先找 `openspec/changes/{CHANGE_NAME}/change.md`(v5:规格在「# 规格条目：<域>」节),
+   没有再在 `openspec/specs/` 或 `openspec/changes/` 下查找旧布局 spec.md;补生成模式优先查找归档目录
+   (Glob `openspec/changes/archive/*{CHANGE_NAME}*` 或 `openspec/archive/*{CHANGE_NAME}*`——归档目录名可能带日期前缀,v5 档案里只有 change.md)
 2. 设计文档 → `docs/` 下查找
 3. 已有代码 → 主 agent 指定路径或从 git log 提取变更文件
 4. 单号 → 主 agent 提供
@@ -50,7 +51,7 @@ PENDING_CONFIRM——**禁止写死结论,禁止书写"(已确认)"**(那是主�
 
 如果没有 SPEC,先从代码反向提取 requirement。
 
-**轮次纪律**:动笔前把全部输入(proposal/design/delta spec/模板)**一次性集中读完**再开始写作;
+**轮次纪律**:动笔前把全部输入(change.md 或旧布局 proposal/design/delta spec,加模板)**一次性集中读完**再开始写作;
 禁止写一段回头读一个文件的碎步往返——轮次是预算,读散步是漏勺。
 
 ## 约束
@@ -68,7 +69,7 @@ PENDING_CONFIRM——**禁止写死结论,禁止书写"(已确认)"**(那是主�
 
 ## 填充规则
 
-- 1.1 客户场景 → 从 proposal.md 的 why 部分提取
+- 1.1 客户场景 → 从 change.md 的「# 为什么」节(旧布局:proposal.md 的 why 部分)提取
 - 2.1.2 需求规格 → 引用 SPEC 的 requirement 条目
 - 2.1.3 验收标准 → 从 SPEC 的约束和边界条件转化
 - 2.2.1-2.2.6 详细设计 → 从设计文档或代码提取,PlantUML 绘制视图

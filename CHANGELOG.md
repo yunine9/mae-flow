@@ -1,5 +1,77 @@
 # 更新记录
 
+## 2026-07-25：v5 单据轻量化——四合一 change.md，每单入库 7-9 件 → 1 件
+
+目标:完整开发单入库 7-9 个文件(proposal/design/tasks/delta spec/.openspec.yaml/
+superpowers plan/…)、局部修改 4 个,降到"change.md 一个为主"。方法:改"内容从哪来"
+与"定稿移什么",**delta 解析与合并核心(_parse_delta_spec/_build_updated_spec)一行未动**,
+13 个差分对拍原样全绿。
+
+### 四合一 change.md(每单唯一入库产物)
+
+- 四个固定小节用一级标题分隔:「# 为什么」(原 proposal 浓缩)/「# 规格条目：<域>」
+  (每域一节,**节体=标准 delta spec 原格式**,二级 delta 分节头自然嵌套在一级小节下,
+  层级零冲突)/「# 方案」(原 design 结论)/「# 实现清单」(原 tasks 复选框);
+- 按工作流分档:full 四节齐全;hotfix 免方案节(修复思路并入为什么);tweak 只要
+  为什么+实现清单,无规格变化不写规格条目。`spec new` 按 workflow 自动产对应骨架,
+  **不再写 .openspec.yaml**(schema 走项目 config 回退,日期由归档名承载);
+- `spec instructions change`:一次取全四合一结构说明+规格条目格式合同(specs 制品的
+  vendored instruction/template 原文嵌入,格式真源不出第二份);
+- 骨架占位分两档:「（待填」open 当步必须消,「（待设计」design 步才消——open 步
+  不会被还没到期的方案节拦住。
+
+### 引擎双布局(在途单照原样走完)
+
+- 布局按 change.md 存在性探测;validate/任务计数/归档合并/status 全部双路,
+  legacy 路径与 CLI 的对拍语义分毫未动;**两种布局标志并存判混用、validate 报
+  ERROR、archive 在任何写盘前拒绝**——无 delta 的混用单若放行,会把未合并的旧
+  delta 悄悄埋进档案;
+- 域名从文本提取,新增路径安全门(禁 / \ .. 与未替换占位符);小节内一级标题会
+  切断小节,validate 给 INFO 指出(围栏代码块里的 # 注释不算边界);
+- 定稿移动逻辑不动(整目录原子移动+半成功免疫),v5 目录里只有 change.md,
+  效果即"只移一个文件";旧单四件套照旧随目录进档案;
+- 新守护:**等价性测试**——同一 delta 内容(多域、四种操作齐全)在 legacy 与 v5
+  两种布局下归档,主 specs 真相源逐字节一致、totals/merged 一致。
+
+### 流程与证据
+
+- 新证据 `spec_validate`:内置引擎 validate 通过成为 open/hf_open/tw_open/design
+  的 done 硬证据(open 步原 specs glob 只查文件存在,现在查格式合法);hotfix/tweak
+  配 `allow_empty`(无规格轻量单直接过,声明了规格就必须过全套);占位残留机器拦;
+- `tasks_checked`/verify-pass/moonlight defer 的实现清单来源改由引擎 `tasks_source`
+  统一裁决(v5=change.md 实现清单节,legacy=tasks.md,计数正则各自语义不变);
+- open 步 glob 双认 change.md|proposal.md;archive 步 glob_absent 加 change.md
+  (v5 假定稿同样拦);
+- 过程件全面下沉 .mae-flow-work/(git 本地排除已有):superpowers 设计文档改写到
+  .mae-flow-work/design-{单号}.md 并由 design_doc 指针登记,设计结论浓缩进
+  change.md 方案节;design 步 clean_paths 去掉 docs/superpowers;survey 笔记本就
+  在 .mae-flow-work/。clarifications 与 STORY 是需求级正式记录,保持入库;
+- 步骤文档 open/hf_open/tw_open/design/build/verify_ponytail/verify_comet/archive
+  同步改写,均带"在途旧布局单照旧走"救济句;CAPABILITY_PACKS 方法原文一字未动
+  (以"本页为准"覆盖声明处理,沿用 openspec 命令改写的先例)。
+
+### 测试
+
+- specengine 46→59:V5LayoutTests 13 项(三档骨架、v5 校验正反、布局混用、
+  等价性逐字节、单文件归档、纯移动、任务计数、status、instructions、围栏边界);
+- capabilities 11→12:生命周期用例换轨 v5(骨架断言、档案单文件断言),新增
+  legacy 四件套全链兼容用例(tasks.md 计数、specs 合并、四件套进档案);
+- selftest 212→213:新增"v5 规格校验硬证据在位"防回退(open/hf_open/tw_open/
+  design 的 spec_validate 被删即红);
+- 探针**入库常驻**(结束"历次会话临时重建 92+17 项"的浪费):
+  `scripts/tests/probe_gate_smoke.py` 24 项(gate 拦/放抽样+spec_validate 八路+
+  tasks_checked 四路+glob/glob_absent 双布局+坏编码三路)、
+  `scripts/tests/probe_spec_semantics.py` 21 项(三档端到端、混用、阶段机、
+  伪造通道),selftest 点名跑、发版门覆盖;
+- 流畅性收口(核心原则:流畅易用,不能因 hook/证据卡死):v5 全部新校验都在
+  done/spec 命令层,hook 热路径零新增;证据函数宽兜底——任何异常(含
+  UnicodeDecodeError 坏编码,它不是 OSError,原本会裸 traceback 穿透)一律转
+  "拒+可执行指引",done 可重试、连拒两次自动亮 goto --force 用户裁决出口;
+  _read_change_doc 把编码错误收口为 SpecEngineError,CLI validate 优雅报错。
+
+回归:state_core 7、specengine 59(含 13 差分对拍)、capabilities 12、selftest 215
+(213+2 探针纳管)、gate 冒烟探针 24、spec 语义探针 21,全绿。
+
 ## 2026-07-25：v3+v4 引擎内化——单一状态机、零 Node 依赖
 
 目标:阶段状态只有一个裁决源;宿主前置从四件套(Python/Git/Node/Git Bash)减为三件

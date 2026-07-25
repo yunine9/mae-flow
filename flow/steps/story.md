@@ -3,7 +3,7 @@ STORY 模板绝对路径 = {STORY_TEMPLATE_PATH}(直接传给 agent,勿再查找
 (文档即状态,agent 无需重跑;文档不存在才重新派 agent)。
 启动 story-generator-agent(契约见 agents/story-generator-agent.md)。
 **模板禁止编造**:任何情况下不得"按标准结构自行创建"——传入的路径读不到就如实 FAIL 上报。
-传入:单号、CHANGE_NAME、proposal/design/delta spec 路径、**上述模板绝对路径**、模式=常规生成。
+传入:单号、CHANGE_NAME、变更产物路径(v5=change.md 一个;在途旧布局单=proposal/design/delta spec 三个)、**上述模板绝对路径**、模式=常规生成。
 **给 agent 的任务提示禁止包含终态指标**("零待确认残留""写成不涉及(已确认)"等 done 校验要求)——
 那些是**你**在用户确认后要达成的,塞给 agent 只会诱导它伪造终态;agent 的交付标准只有它契约里那几条。
 agent 异常中断/无 STORY_RESULT 标记 → 先读真实拒签原因;只是报告格式时廉价重答,

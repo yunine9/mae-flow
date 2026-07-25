@@ -538,13 +538,20 @@ def ev_branch_ok(spec, st):
 
 
 def ev_tasks_checked(spec, st):
+    """实现清单全勾。清单从哪来由引擎统一裁决(v5=change.md 的"# 实现清单"节,
+    legacy=tasks.md);宽松缩进的计数正则是本证据的历史语义,保持不变。"""
     cn = st["config"].get("CHANGE_NAME", "")
-    files = globmod.glob(f"openspec/changes/{cn}/tasks.md") if cn else []
-    if not files:
-        return False, ("未找到本 change 的 tasks.md: openspec/changes/%s/tasks.md" % (cn or "{CHANGE_NAME 未设置}"))
-    txt = open(files[0], encoding="utf-8").read()
+    if not cn:
+        return False, "未找到本 change 的实现清单: CHANGE_NAME 未设置"
+    from mae_flow_core import specengine
+    try:
+        label, txt = specengine.tasks_source(os.getcwd(), cn)
+    except Exception as exc:  # 宽兜底:证据不 traceback,拒+指引可重试
+        return False, "实现清单无法读取(%s): %s" % (type(exc).__name__, exc)
+    if txt is None:
+        return False, "未找到本 change 的实现清单: " + label
     n = len(re.findall(r"^\s*[-*]\s*\[\s\]", txt, re.M))
-    return (n == 0, "" if n == 0 else f"tasks.md 还有 {n} 个未勾选任务")
+    return (n == 0, "" if n == 0 else f"{label} 还有 {n} 个未勾选任务")
 
 
 def ev_spec_field(spec, st):
@@ -569,6 +576,48 @@ def ev_spec_field(spec, st):
     if field in SPEC_REGISTER_FIELDS and not os.path.isfile(val):
         return False, (f"交付登记 {field} 指向 {val},但该文件现在不存在(被删或改名);"
                        "重新生成产物并重新登记")
+    return True, ""
+
+
+def ev_spec_validate(spec, st):
+    """规格结构校验作硬证据:调内置引擎对本 change 跑 validate。
+
+    spec 可带 {"allow_empty": true}(hotfix/tweak 档):change 未声明任何规格
+    变化时直接判过(轻量单允许无规格);一旦声明了规格条目/delta,格式必须过
+    全套校验。v5 布局顺带拦骨架占位残留(占位进档案等于没写);查哪些前缀由
+    {"placeholders": [...]} 配置,缺省只查「（待填」——方案节的「（待设计」
+    属设计阶段,由 design 步的证据配置追加。布局混用(change.md 与旧四件套
+    并存)在 has_delta/validate 里就会报错。"""
+    cn = st["config"].get("CHANGE_NAME", "")
+    if not cn:
+        return False, "CHANGE_NAME 未设置,无法校验规格"
+    from mae_flow_core import specengine
+    # 宽兜底:证据函数抛裸异常会让 done 直接 traceback(check_evidence 无全局
+    # 兜底)。核心原则是流畅易用不卡死——任何异常都转成"拒+可执行指引",
+    # done 可重试、连拒两次自动亮 goto --force 用户裁决出口。
+    try:
+        need_validate = True
+        if spec.get("allow_empty") and not specengine.has_delta(os.getcwd(), cn):
+            need_validate = False
+        if need_validate:
+            ok, messages = specengine.validate(os.getcwd(), cn)
+            if not ok:
+                errors = [m for m in messages if m.startswith("[错误]")]
+                shown = "; ".join(errors[:3]) + ("…" if len(errors) > 3 else "")
+                return False, ("规格结构校验未通过: " + shown
+                               + "。跑 spec validate 看全部并逐条修正")
+        doc_path = os.path.join("openspec", "changes", cn, "change.md")
+        if os.path.isfile(doc_path):
+            txt = open(doc_path, encoding="utf-8").read()
+            hit = [p for p in (spec.get("placeholders") or ["（待填"]) if p in txt]
+            if hit:
+                return False, ("change.md 残留「%s…」骨架占位;"
+                               "把占位替换成实际内容后重试" % "、".join(hit))
+    except specengine.SpecEngineError as exc:
+        return False, "规格校验无法执行: " + str(exc)
+    except Exception as exc:
+        return False, ("规格校验异常(%s: %s);检查 change.md 编码为 UTF-8、"
+                       "内容为文本后重试" % (type(exc).__name__, exc))
     return True, ""
 
 
@@ -1184,6 +1233,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
             "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
+            "spec_validate": ev_spec_validate,
             "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
             "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
@@ -3244,13 +3294,16 @@ def cmd_spec(flow, st, args):
                 out["artifacts_error"] = str(exc)
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return
+    # v5:新单一律四合一 change.md,档位跟随交付方式(review 不建单,缺省按 full)。
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    tier = workflow if workflow in ("full", "hotfix", "tweak") else "full"
     if action == "new":
         name = (args.value or cn or "").strip()
         if not name:
             die("需要变更目录名:spec new <英文短名>。", 2)
         try:
             specengine.ensure_config(os.getcwd())
-            info = specengine.new_change(os.getcwd(), name)
+            info = specengine.new_change(os.getcwd(), name, tier=tier)
         except specengine.SpecEngineError as exc:
             die("创建变更目录失败: " + str(exc), 2)
         print(json.dumps(info, ensure_ascii=False, indent=2))
@@ -3260,7 +3313,8 @@ def cmd_spec(flow, st, args):
         if not cn:
             die("先记录 CHANGE_NAME(done --set CHANGE_NAME=<英文短名>)。", 2)
         try:
-            print(specengine.instructions(os.getcwd(), artifact, cn), end="")
+            print(specengine.instructions(os.getcwd(), artifact, cn, tier=tier),
+                  end="")
         except specengine.SpecEngineError as exc:
             die("获取产物格式指令失败: " + str(exc), 2)
         return

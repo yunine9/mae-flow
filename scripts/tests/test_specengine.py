@@ -29,9 +29,11 @@ from mae_flow_core.specengine import (  # noqa: E402
     SpecEngineError,
     archive,
     ensure_config,
+    has_delta,
     instructions,
     new_change,
     status,
+    tasks_source,
     validate,
 )
 
@@ -985,6 +987,279 @@ class ArchiveUnitTests(unittest.TestCase):
             archive(self.root, "dated", date="2026/01/02")
         with self.assertRaises(SpecEngineError):
             archive(self.root, "never-created")
+
+
+# ---------------------------------------------------------------------------
+# v5 四合一布局
+# ---------------------------------------------------------------------------
+
+SWEEP_DELTA = (
+    "## MODIFIED Requirements\n\n"
+    "### Requirement: Session expiry\n"
+    "The system SHALL expire sessions after 15 minutes.\n\n"
+    "#### Scenario: Timeout\n- **WHEN** idle 15\n- **THEN** out\n\n"
+    "## REMOVED Requirements\n\n### Requirement: Logout\n\n"
+    "## RENAMED Requirements\n\n"
+    "- FROM: `### Requirement: User login`\n"
+    "- TO: `### Requirement: Sign in`\n\n"
+    "## ADDED Requirements\n\n"
+    "### Requirement: Password reset\n"
+    "The system SHALL allow password reset.\n\n"
+    "#### Scenario: Reset\n- **WHEN** ask\n- **THEN** email\n")
+
+
+def seed_v5_change(root, name, why="Reason explained long enough.",
+                   domains=None, design=None, tasks="- [ ] 1. do the work"):
+    """构造 v5 四合一 change 目录（目录里只有一个 change.md）。"""
+    parts = ["# 变更：%s" % name, "", "# 为什么", "", why, ""]
+    for domain, delta in (domains or {}).items():
+        parts += ["# 规格条目：%s" % domain, "", delta, ""]
+    if design is not None:
+        parts += ["# 方案", "", design, ""]
+    if tasks is not None:
+        parts += ["# 实现清单", "", tasks, ""]
+    write(root, "openspec/changes/%s/change.md" % name, "\n".join(parts))
+
+
+def specs_snapshot(root):
+    """openspec/specs 子树 → {相对 posix 路径: 内容 bytes}（行尾归一）。"""
+    snapshot = {}
+    base = os.path.join(root, "openspec", "specs")
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames.sort()
+        for name in sorted(filenames):
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, base).replace(os.sep, "/")
+            with open(full, "rb") as stream:
+                snapshot[rel] = stream.read().replace(b"\r\n", b"\n")
+    return snapshot
+
+
+class V5LayoutTests(unittest.TestCase):
+    maxDiff = None
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="specengine-v5-")
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self.root = os.path.realpath(self._tmp)
+
+    # ---- new_change 档位与骨架 ----
+
+    def test_new_change_tiers_write_single_file_skeleton(self):
+        seed_project(self.root)
+        for tier, has_design in (("full", True), ("hotfix", False),
+                                 ("tweak", False)):
+            name = "v5-%s" % tier
+            info = new_change(self.root, name, tier=tier)
+            self.assertEqual("v5", info["layout"])
+            self.assertEqual(tier, info["tier"])
+            change_dir = os.path.join(self.root, "openspec", "changes", name)
+            # v5 单文件承诺：目录里只有 change.md，没有 .openspec.yaml
+            self.assertEqual(["change.md"], sorted(os.listdir(change_dir)))
+            skeleton = read_text(
+                self.root, "openspec/changes/%s/change.md" % name)
+            self.assertIn("# 为什么", skeleton)
+            self.assertIn("# 实现清单", skeleton)
+            self.assertIn("（待填", skeleton)
+            if has_design:
+                self.assertIn("# 方案", skeleton)
+                self.assertIn("（待设计", skeleton)
+            else:
+                self.assertNotIn("# 方案", skeleton)
+        with self.assertRaises(SpecEngineError):
+            new_change(self.root, "v5-bad", tier="nonsense")
+
+    # ---- validate ----
+
+    def test_v5_validate_verdict_matches_legacy_for_same_delta(self):
+        seed_project(self.root)
+        seed_change(self.root, "leg", {"dom": ADDED_OK})
+        seed_v5_change(self.root, "vee", domains={"dom": ADDED_OK})
+        ok_legacy, _ = validate(self.root, "leg")
+        ok_v5, messages = validate(self.root, "vee")
+        self.assertTrue(ok_legacy)
+        self.assertTrue(ok_v5, messages)
+
+    def test_v5_validate_rejects_bad_delta_with_section_label(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "vee", domains={"dom": ADDED_OK.replace(
+            "The system SHALL allow", "The system allows")})
+        ok, messages = validate(self.root, "vee")
+        self.assertFalse(ok)
+        self.assertTrue(any("change.md 规格条目：dom" in m for m in messages),
+                        messages)
+
+    def test_v5_validate_no_delta_points_to_change_md(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "vee")
+        ok, messages = validate(self.root, "vee")
+        self.assertFalse(ok)
+        self.assertTrue(any("change.md 里加" in m and "规格条目" in m
+                            for m in messages), messages)
+
+    def test_v5_structural_issues(self):
+        seed_project(self.root)
+        # 重复域
+        write(self.root, "openspec/changes/dup/change.md",
+              "# 为什么\n\nWhy text.\n\n# 规格条目：dom\n\n%s\n"
+              "# 规格条目：dom\n\n%s\n# 实现清单\n\n- [ ] 1. x\n"
+              % (ADDED_OK, ADDED_OK.replace("Data export", "Other")))
+        ok, messages = validate(self.root, "dup")
+        self.assertFalse(ok)
+        self.assertTrue(any("规格条目域" in m and "重复" in m for m in messages),
+                        messages)
+        # 非法域名（含路径分隔符）
+        write(self.root, "openspec/changes/bad/change.md",
+              "# 为什么\n\nWhy.\n\n# 规格条目：../evil\n\n%s\n"
+              "# 实现清单\n\n- [ ] 1. x\n" % ADDED_OK)
+        ok, messages = validate(self.root, "bad")
+        self.assertFalse(ok)
+        self.assertTrue(any("路径分隔符" in m or "'..'" in m for m in messages),
+                        messages)
+        # 小节内的未知一级头切断小节 → INFO 提示
+        write(self.root, "openspec/changes/stray/change.md",
+              "# 变更：stray\n\n# 为什么\n\nWhy.\n\n# 背景补充\n\nlost.\n\n"
+              "# 规格条目：dom\n\n%s\n# 实现清单\n\n- [ ] 1. x\n" % ADDED_OK)
+        ok, messages = validate(self.root, "stray")
+        self.assertTrue(ok, messages)
+        self.assertTrue(any(m.startswith("[提示]") and "背景补充" in m
+                            for m in messages), messages)
+
+    def test_layout_mixing_rejected_everywhere(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "mixed", domains={"dom": ADDED_OK})
+        write(self.root, "openspec/changes/mixed/tasks.md", "- [ ] 1. old\n")
+        ok, messages = validate(self.root, "mixed")
+        self.assertFalse(ok)
+        self.assertTrue(any("布局混用" in m for m in messages), messages)
+        with self.assertRaises(SpecEngineError):
+            has_delta(self.root, "mixed")
+        with self.assertRaises(SpecEngineError):
+            archive(self.root, "mixed", date="2026-01-02")
+        # 混用拒绝必须发生在任何写盘之前
+        self.assertTrue(os.path.isfile(os.path.join(
+            self.root, "openspec", "changes", "mixed", "change.md")))
+
+    # ---- 等价性：v5 与 legacy 同一 delta 合并结果逐字节一致 ----
+
+    def test_equivalence_legacy_vs_v5_archive_bytes(self):
+        legacy_root = os.path.join(self.root, "legacy")
+        v5_root = os.path.join(self.root, "v5")
+        for base in (legacy_root, v5_root):
+            os.makedirs(base)
+            seed_project(base, with_main_spec=True)
+        deltas = {"user-auth": SWEEP_DELTA, "data-export": ADDED_OK}
+        seed_change(legacy_root, "same-change", deltas,
+                    tasks="- [x] 1. done\n")
+        seed_v5_change(v5_root, "same-change", domains=deltas,
+                       design="Use builtin engine.", tasks="- [x] 1. done")
+        result_legacy = archive(legacy_root, "same-change", date="2026-01-02")
+        result_v5 = archive(v5_root, "same-change", date="2026-01-02")
+        self.assertEqual(result_legacy["totals"], result_v5["totals"])
+        self.assertEqual(result_legacy["merged"], result_v5["merged"])
+        self.assertEqual(specs_snapshot(legacy_root), specs_snapshot(v5_root))
+
+    # ---- archive ----
+
+    def test_v5_archive_moves_single_file_and_merges(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "solo", domains={"data-export": ADDED_OK},
+                       design="Plan.", tasks="- [x] 1. done")
+        result = archive(self.root, "solo", date="2026-01-02")
+        self.assertEqual({"added": 1, "modified": 0, "removed": 0,
+                          "renamed": 0}, result["totals"])
+        archive_dir = os.path.join(
+            self.root, "openspec", "changes", "archive", "2026-01-02-solo")
+        # 定稿移动 = 档案里只有一个 change.md
+        self.assertEqual(["change.md"], sorted(os.listdir(archive_dir)))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.root, "openspec", "changes", "solo")))
+        merged = read_text(self.root, "openspec/specs/data-export/spec.md")
+        self.assertIn("### Requirement: Data export", merged)
+        self.assertNotIn("## ADDED Requirements", merged)
+
+    def test_v5_archive_without_delta_moves_only(self):
+        seed_project(self.root, with_main_spec=True)
+        seed_v5_change(self.root, "tiny", tasks="- [x] 1. done")
+        before = specs_snapshot(self.root)
+        result = archive(self.root, "tiny", date="2026-01-02")
+        self.assertEqual([], result["merged"])
+        self.assertEqual({"added": 0, "modified": 0, "removed": 0,
+                          "renamed": 0}, result["totals"])
+        self.assertEqual(before, specs_snapshot(self.root))
+        self.assertTrue(os.path.isfile(os.path.join(
+            self.root, "openspec", "changes", "archive", "2026-01-02-tiny",
+            "change.md")))
+
+    # ---- 任务计数与状态 ----
+
+    def test_v5_tasks_counting_and_source(self):
+        seed_project(self.root)
+        seed_v5_change(self.root, "tasked",
+                       tasks="- [x] 1. done\n- [ ] 2. pending\n"
+                             "  - [ ] indented not counted\n")
+        label, text = tasks_source(self.root, "tasked")
+        self.assertIn("change.md", label)
+        self.assertIn("实现清单", label)
+        self.assertIn("- [ ] 2. pending", text)
+        info = status(self.root, "tasked")
+        self.assertEqual({"total": 2, "completed": 1}, info["tasks"])
+        # legacy 对照：同名结构走 tasks.md
+        seed_change(self.root, "legacy-tasked", {"dom": ADDED_OK},
+                    tasks="- [x] 1. a\n- [ ] 2. b\n")
+        label, text = tasks_source(self.root, "legacy-tasked")
+        self.assertIn("tasks.md", label)
+        self.assertEqual(
+            {"total": 2, "completed": 1}, status(self.root, "legacy-tasked")["tasks"])
+
+    def test_v5_status_shape(self):
+        seed_project(self.root, with_main_spec=True)
+        seed_v5_change(self.root, "shaped", domains={"dom": ADDED_OK},
+                       design="Plan.")
+        info = status(self.root, "shaped")
+        self.assertEqual("v5", info["layout"])
+        self.assertEqual(["dom"], info["spec_domains"])
+        self.assertTrue(info["sections"]["为什么"])
+        self.assertTrue(info["sections"]["方案"])
+        self.assertTrue(info["sections"]["实现清单"])
+        self.assertTrue(info["is_complete"])
+        self.assertIn("user-auth", info["specs"])
+        self.assertTrue(has_delta(self.root, "shaped"))
+        seed_v5_change(self.root, "no-spec")
+        self.assertFalse(has_delta(self.root, "no-spec"))
+
+    # ---- instructions ----
+
+    def test_v5_instructions_change_artifact(self):
+        seed_project(self.root)
+        new_change(self.root, "guide", tier="full")
+        text = instructions(self.root, "change", "guide", tier="full")
+        self.assertIn('<artifact id="change" change="guide"', text)
+        self.assertIn("<spec_format>", text)
+        self.assertIn("#### Scenario:", text)
+        self.assertIn("full（完整开发）", text)
+        self.assertNotIn("hotfix（已定位修复）", text)
+        tweak_text = instructions(self.root, "change", "guide", tier="tweak")
+        self.assertIn("tweak（局部修改）", tweak_text)
+        # 未知制品的报错要把 change 列进可选清单
+        with self.assertRaises(SpecEngineError) as ctx:
+            instructions(self.root, "nope", "guide")
+        self.assertIn("change", str(ctx.exception))
+
+    # ---- 围栏内一级头不是小节边界 ----
+
+    def test_code_fence_h1_is_not_section_boundary(self):
+        seed_project(self.root)
+        write(self.root, "openspec/changes/fenced/change.md",
+              "# 为什么\n\nWhy.\n\n# 规格条目：dom\n\n%s\n"
+              "# 方案\n\n```bash\n# this comment must not split the section\n"
+              "echo done\n```\n方案继续。\n\n"
+              "# 实现清单\n\n- [x] 1. done\n" % ADDED_OK)
+        info = status(self.root, "fenced")
+        self.assertTrue(info["sections"]["方案"])
+        self.assertEqual({"total": 1, "completed": 1}, info["tasks"])
+        ok, messages = validate(self.root, "fenced")
+        self.assertTrue(ok, messages)
 
 
 if __name__ == "__main__":

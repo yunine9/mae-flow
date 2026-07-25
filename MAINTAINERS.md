@@ -66,7 +66,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+复验摘录一致性防吞告警；**done 的 codecheck_clean 现场重跑 CLI 亲数遗留（agent 报数不作数）**；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
 | 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
 | 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
-| 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘 tasks.md 备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
+| 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘实现清单备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
 
 ### 确认点预算（人工停顿的取舍原则）
@@ -167,7 +167,8 @@ flow.json 步骤字段语义：
 | `glob` | 文件存在（`any` 数组任一命中；pattern 支持 `{配置键}` 占位） |
 | `branch_ok` | 当前 git 分支 == 配置的分支名（实测） |
 | `env_ok` | 环境检查全绿（实测，带 24h 缓存，见 3.5） |
-| `tasks_checked` | 本 change 的 tasks.md 无未勾选项 |
+| `tasks_checked` | 本 change 的实现清单无未勾选项（v5 = change.md 的「# 实现清单」节；旧布局在途单 = tasks.md，来源由引擎 `tasks_source` 统一裁决） |
+| `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `yaml_field` | 读本 change `.comet.yaml` 字段：`equals` 精确匹配或非空即过（**首选**——comet-guard 机器写入，不可伪造） |
 | `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送） |
@@ -272,8 +273,8 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 | 用户话术 | 上游/内部 |
 |---|---|
 | 完整开发 / 已定位问题修复 / 局部修改 / 处理评审意见 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
-| 提案与规格、规格条目 | openspec proposal / delta spec |
-| 变更目录 | change（openspec/changes/<CHANGE_NAME>） |
+| 提案与规格、规格条目 | v5 四合一 change.md 的「# 为什么」/「# 规格条目：<域>」节（规格条目节体=openspec delta spec 原格式；在途旧布局单为 proposal.md / specs/<域>/spec.md） |
+| 变更目录 | change（openspec/changes/<CHANGE_NAME>；v5 布局目录里只有一个 change.md） |
 | 规格定稿 | archive / 归档 |
 | 方案讨论 | superpowers brainstorming |
 | 代码精简 | ponytail review |
@@ -284,7 +285,7 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 1. **CLAUDE.md 分工**：仓库 CLAUDE.md 只放仓库事实（构建/目录/领域约定），流程规则只活在插件里——两处都写会形成双源打架，弱模型无所适从。
 2. **宿主权限由团队统一维护**：插件不再修改个人/项目 settings。密钥读取 deny 和常用只读命令 allow
    应由 CodeAgent 团队基线统一下发，避免 Mae-Flow 安装时覆盖不同人的环境。
-3. **会话卫生**：一单一会话为佳；改插件/agent/settings 后必须重启会话（定义在会话启动时缓存）；长会话行为漂移时 /clear（状态在磁盘，进度不丢）。重上下文步骤（build、verify 链入口）的 `current` 会主动提示 /clear 时机（`clear_hint` 标记）；重步骤 md 内置「中断恢复先读什么」清单（`current` 每次打印，恢复质量不赌模型自觉）；build 的批次 commit 后是安全 /clear 点，批次结论/调试根因假设要求写进 tasks.md 备注行（中间推理不留在会话里）。
+3. **会话卫生**：一单一会话为佳；改插件/agent/settings 后必须重启会话（定义在会话启动时缓存）；长会话行为漂移时 /clear（状态在磁盘，进度不丢）。重上下文步骤（build、verify 链入口）的 `current` 会主动提示 /clear 时机（`clear_hint` 标记）；重步骤 md 内置「中断恢复先读什么」清单（`current` 每次打印，恢复质量不赌模型自觉）；build 的批次 commit 后是安全 /clear 点，批次结论/调试根因假设要求写进实现清单备注行（中间推理不留在会话里）。
 4. **仓库预设**：`.mae-flow-defaults.json` 提交进仓（编译方式/UT生成方式/UT运行命令等恒定项），config_confirm 时 `current` 自动展示预填，新人第二单起免逐项来回；基线分支与需求文档不预设免问。另支持**机器直读键**「测试路径」（正则数组，gate 直接消费，启用 verify_ut 的测试路径收紧）——预填展示类键与机器直读键的区别要在改代码时留意。
 
 **阶段互锁哨兵（2026-07-21，治"comet 与 mae-flow 双状态机冲突像随机 bug"）**：mae-flow 主导、每步核对 comet 跟队。`current`/`doctor` 内置「步骤↔comet phase 合法区间」映射（`COMET_PHASE_EXPECT`），phase 掉队（多为闪退打断 guard --apply）或活跃 change >1（僵尸）时**强预警不硬拒**（硬闸在转换点的 phase 证据/glob_absent 上，哨兵只做诊断避免制造新死锁）。三个真因固化：①僵尸放大器（comet 多活跃按字典序抽一个管全场，`_active_change_count` 检测）②双状态机无互锁（design/build 收尾自查 phase 已推进）③Bash/Write 不对称（comet hook 只拦 Write，SKILL 铁律"被 GUARD 拦禁止换工具硬绕，先 doctor"，change 目录内写用 git mv）。
@@ -349,6 +350,11 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 - **证据实测行为**：所有证据都可手动复现——直接跑报错消息里提示的那条命令。
 
 ### 冒烟用例（改 gate/证据/hook 后必跑）
+
+**常驻探针已入库**（v5 起，selftest 点名跑）：`scripts/tests/probe_gate_smoke.py`
+（gate 拦/放抽样 + spec_validate/tasks_checked/glob/glob_absent 证据全路径）、
+`scripts/tests/probe_spec_semantics.py`（spec 子命令三档端到端、布局混用、阶段机、
+伪造通道）。改 gate/证据后先跑这两个，再按下面的手工用例集补面。
 
 历次会话沉淀的用例集，最少覆盖：gate 的拦/放各路（状态文件+历史账本、插件目录、源码大小写、bash token、worktree、specs 双路）、证据正反例（yaml_field、pushed、非法工号）、dispatch 的 stdin 挂起（Popen 握管道不发 EOF，应 ~3s 自行退出）、子目录 init/current（应落项目根）、终态重 init（应备份重开 + 账本追加一行）、模板结构校验三路（STORY/CHAIN/GRILL-PREP）、`current` 的占位符替换与仓库预设展示、unlock 正反例（无 ack 拒/伪造 ack 拒/验真后放行 gate/推进自动失效/未配置仓 no-op）。
 

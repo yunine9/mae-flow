@@ -212,14 +212,12 @@
         {
           "type": "glob",
           "any": [
+            "openspec/changes/{CHANGE_NAME}/change.md",
             "openspec/changes/{CHANGE_NAME}/proposal.md"
           ]
         },
         {
-          "type": "glob",
-          "any": [
-            "openspec/changes/{CHANGE_NAME}/specs/*/spec.md"
-          ]
+          "type": "spec_validate"
         },
         {
           "type": "clean_paths",
@@ -249,6 +247,13 @@
           "field": "design_doc"
         },
         {
+          "type": "spec_validate",
+          "placeholders": [
+            "（待填",
+            "（待设计"
+          ]
+        },
+        {
           "type": "spec_field",
           "field": "phase",
           "equals": "build"
@@ -256,8 +261,7 @@
         {
           "type": "clean_paths",
           "paths": [
-            "openspec/changes/{CHANGE_NAME}",
-            "docs/superpowers"
+            "openspec/changes/{CHANGE_NAME}"
           ]
         }
       ],
@@ -330,6 +334,10 @@
         {
           "type": "spec_field",
           "field": "phase"
+        },
+        {
+          "type": "spec_validate",
+          "allow_empty": true
         }
       ],
       "next": "build",
@@ -347,6 +355,10 @@
         {
           "type": "spec_field",
           "field": "phase"
+        },
+        {
+          "type": "spec_validate",
+          "allow_empty": true
         }
       ],
       "next": "tw_change",
@@ -535,6 +547,7 @@
         {
           "type": "glob_absent",
           "any": [
+            "openspec/changes/{CHANGE_NAME}/change.md",
             "openspec/changes/{CHANGE_NAME}/proposal.md",
             "openspec/changes/{CHANGE_NAME}/tasks.md"
           ],

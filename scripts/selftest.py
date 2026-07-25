@@ -30,7 +30,9 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/specengine.py",
           "scripts/tests/test_state_core.py",
           "scripts/tests/test_capabilities.py",
-          "scripts/tests/test_specengine.py"):
+          "scripts/tests/test_specengine.py",
+          "scripts/tests/probe_gate_smoke.py",
+          "scripts/tests/probe_spec_semantics.py"):
     try:
         path = os.path.join(ROOT, f)
         with open(path, encoding="utf-8") as stream:
@@ -58,6 +60,16 @@ specengine_tests = subprocess.run(
     text=True, capture_output=True, timeout=300)
 check("内置规格引擎回归与差分对拍", specengine_tests.returncode == 0,
       (specengine_tests.stdout + specengine_tests.stderr)[-5000:])
+# v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
+# gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
+for probe_name, probe_file in (
+        ("gate 冒烟与证据全路径探针", "probe_gate_smoke.py"),
+        ("spec 语义端到端探针", "probe_spec_semantics.py")):
+    probe_run = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "tests", probe_file)],
+        text=True, capture_output=True, timeout=300)
+    check(probe_name, probe_run.returncode == 0,
+          (probe_run.stdout + probe_run.stderr)[-3000:])
 
 # 2. JSON
 flow = hooks = None
@@ -131,6 +143,12 @@ if flow:
     check("三条流程共用 CodeCheck 机器协议",
           all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
               for x in ("verify_codecheck", "tw_codecheck", "rf_codecheck")))
+    # v5 防回退:四合一 change.md 的规格结构校验是 open/design 链的硬证据,
+    # 删掉它=规格质量门从机器上消失,退回"凭感觉写规格"。
+    check("v5 规格校验硬证据在位",
+          all(any(e.get("type") == "spec_validate"
+                  for e in steps.get(x, {}).get("evidence", []))
+              for x in ("open", "hf_open", "tw_open", "design")))
 
     # CodeCheckCLI 的成功退出码/文案不稳定，至少守住三种已知输出
     parser_cases = [

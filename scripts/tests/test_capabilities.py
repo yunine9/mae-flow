@@ -66,6 +66,24 @@ DELTA_SPEC = (
     "#### Scenario: Runtime starts\n"
     "- **WHEN** a project starts Mae-Flow\n"
     "- **THEN** the embedded runtime is available\n")
+# v5 四合一 change.md:同一份 delta 内容嵌进「# 规格条目：runtime」节
+# (节体=delta spec 原格式,但没有旧文件那行 "# ... Specification" 一级文档标题
+# ——v5 里一级标题是小节边界)。
+CHANGE_DOC = (
+    "# 变更：%s\n\n"
+    "# 为什么\n\n"
+    "冒烟验证 v5 四合一布局的完整生命周期。\n\n"
+    "# 规格条目：runtime\n\n"
+    "## ADDED Requirements\n\n"
+    "### Requirement: Embedded runtime\n"
+    "The system SHALL execute the bundled runtime.\n\n"
+    "#### Scenario: Runtime starts\n"
+    "- **WHEN** a project starts Mae-Flow\n"
+    "- **THEN** the embedded runtime is available\n\n"
+    "# 方案\n\n"
+    "直接使用内置引擎,不引入外部依赖。\n\n"
+    "# 实现清单\n\n"
+    "- [ ] 1. Builtin engine works\n") % CHANGE
 
 
 def write(path, text):
@@ -190,6 +208,11 @@ class EmbeddedCapabilityTests(unittest.TestCase):
         阶段真相源是 `.comet.yaml`;v3/v4 之后阶段与产物指针都在 `.mae-flow.json`
         的 spec 段,引擎是纯 Python。断言强度不降反升 —— 每个"不许"都真跑一遍。
 
+        v5 换轨:新单产物从四件套(proposal/design/tasks/delta spec + .openspec.yaml)
+        换成单个四合一 change.md,本用例跟着走 v5 布局——并且把"v5 单在档案里
+        只有一个文件"作为硬断言;旧四件套的在途兼容由
+        test_legacy_layout_change_still_flows 独立守护,覆盖一条不少。
+
         旧版对 configure_comet_build 六项构建约定(isolation/build_mode/
         subagent_dispatch/tdd_mode/direct_override/review_mode)的对账断言随
         `.comet.yaml` 一起消失:那六个字段是第二状态机的私有配置,v3 之后不存在
@@ -215,12 +238,22 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             }, ensure_ascii=False))
             change = os.path.join(root, "openspec", "changes", CHANGE)
 
-            # --- 变更目录由内置引擎创建,重复创建被拒 ---
+            # --- 变更目录由内置引擎创建(v5:只有 change.md 骨架),重复创建被拒 ---
             created = self._spec_ok(root, "new", CHANGE, env=env)
-            self.assertEqual(
-                "spec-driven", json.loads(created.stdout)["schema"])
-            self.assertTrue(os.path.isfile(
+            created_info = json.loads(created.stdout)
+            self.assertEqual("spec-driven", created_info["schema"])
+            self.assertEqual("v5", created_info["layout"])
+            self.assertEqual("full", created_info["tier"])
+            self.assertTrue(os.path.isfile(os.path.join(change, "change.md")))
+            # v5 单文件承诺:不再产 .openspec.yaml(它会让"每单一个文件"变两个)
+            self.assertFalse(os.path.exists(
                 os.path.join(change, ".openspec.yaml")))
+            skeleton = open(os.path.join(change, "change.md"),
+                            encoding="utf-8").read()
+            self.assertIn("# 为什么", skeleton)
+            self.assertIn("# 方案", skeleton)      # full 档才有方案节
+            self.assertIn("# 实现清单", skeleton)
+            self.assertIn("（待设计", skeleton)
             self._spec_rejected(root, "new", CHANGE, env=env, needle="已存在")
 
             # --- 登记初始化:阶段真相源落在 .mae-flow.json ---
@@ -232,11 +265,18 @@ class EmbeddedCapabilityTests(unittest.TestCase):
 
             # --- 产物格式指令来自 vendored schema,而不是外部 CLI ---
             instructions = self._spec_ok(
+                root, "instructions", "change", env=env).stdout
+            self.assertIn('<artifact id="change" change="%s"' % CHANGE,
+                          instructions)
+            self.assertIn("<spec_format>", instructions)   # 规格条目格式合同
+            self.assertIn("# 规格条目：<域名>", instructions)
+            self.assertIn("change.md", instructions)
+            # 旧四制品指令保留(在途旧布局单还要用)
+            legacy_instructions = self._spec_ok(
                 root, "instructions", "proposal", env=env).stdout
             self.assertIn('<artifact id="proposal" change="%s"' % CHANGE,
-                          instructions)
-            self.assertIn("<template>", instructions)
-            self.assertIn("proposal.md", instructions)
+                          legacy_instructions)
+            self.assertIn("<template>", legacy_instructions)
             self._spec_rejected(root, "instructions", "不存在的制品", env=env)
 
             # --- 阶段机:不可跳跃、不可回退(archived 不可直达在 archive 阶段验证) ---
@@ -261,20 +301,13 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertEqual(
                 "docs/设计 doc.md", self._spec_state(root)["design_doc"])
 
-            # --- 规格结构校验真的会拦(内置引擎,无 Node) ---
-            write(os.path.join(change, "proposal.md"),
-                  "# Proposal\n\n## Why\n\nRuntime smoke.\n\n"
-                  "## What Changes\n\nUse the builtin spec engine.\n")
-            write(os.path.join(change, "design.md"),
-                  "# Design\n\nUse the pinned builtin engine.\n")
-            write(os.path.join(change, "tasks.md"),
-                  "# Tasks\n\n- [ ] 1. Builtin engine works\n")
-            broken = DELTA_SPEC.replace(
+            # --- 规格结构校验真的会拦(内置引擎,无 Node;v5 校验 change.md) ---
+            broken = CHANGE_DOC.replace(
                 "The system SHALL execute the bundled runtime.",
                 "The system executes the bundled runtime.")
-            write(os.path.join(change, "specs", "runtime", "spec.md"), broken)
+            write(os.path.join(change, "change.md"), broken)
             self._spec_rejected(root, "validate", env=env, needle="未通过")
-            write(os.path.join(change, "specs", "runtime", "spec.md"), DELTA_SPEC)
+            write(os.path.join(change, "change.md"), CHANGE_DOC)
             self._spec_ok(root, "validate", env=env)
 
             # --- 推进到验证阶段 ---
@@ -288,9 +321,11 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self._spec_ok(
                 root, "set", "verification_report", "docs/验证 report.md",
                 env=env)
+            # 任务清单在 v5 是 change.md 的「# 实现清单」节
             self._spec_rejected(root, "verify-pass", env=env, needle="未完成")
-            write(os.path.join(change, "tasks.md"),
-                  "# Tasks\n\n- [x] 1. Builtin engine works\n")
+            write(os.path.join(change, "change.md"),
+                  CHANGE_DOC.replace("- [ ] 1. Builtin engine works",
+                                     "- [x] 1. Builtin engine works"))
             self._spec_ok(root, "verify-pass", env=env)
             data = self._spec_state(root)
             self.assertEqual("pass", data["verify_result"])
@@ -313,9 +348,8 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertEqual(
                 os.path.basename(archived_dirs[0]),
                 self._spec_state(root)["archived_to"])
-            for name in ("proposal.md", "tasks.md"):
-                self.assertTrue(os.path.isfile(
-                    os.path.join(archived_dirs[0], name)), name)
+            # v5 目标本身:每单入库档案 = 一个 change.md,再无其他文件
+            self.assertEqual(["change.md"], sorted(os.listdir(archived_dirs[0])))
             main_spec = os.path.join(
                 root, "openspec", "specs", "runtime", "spec.md")
             self.assertTrue(os.path.isfile(main_spec))
@@ -338,6 +372,66 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                     list(filenames) + list(dirnames)
                     if name in (".comet.yaml", ".comet"))
             self.assertEqual([], comet_leftovers)
+
+    def test_legacy_layout_change_still_flows(self):
+        """v5 兼容承诺:在途旧布局单(四件套)在新代码下照原样走完。
+
+        手工构造旧布局(spec new 已只产 v5,在途单不会再 new),然后走
+        validate → verify-pass → archive 全链:tasks.md 计数生效、delta 从
+        specs/<域>/spec.md 合并、四件套全部随目录进档案。"""
+        with tempfile.TemporaryDirectory(prefix="mae legacy ") as base:
+            root = os.path.join(base, "legacy 仓库")
+            os.makedirs(root)
+            subprocess.run(
+                ["git", "init", "-q", root],
+                check=True, capture_output=True, text=True)
+            prepare_project(root)
+            env = self._env_without_node()
+            write(os.path.join(root, ".mae-flow.json"), json.dumps({
+                "current": "build",
+                "config": {"CHANGE_NAME": CHANGE, "单号": "REQ legacy"},
+                "choices": {"workflow": "full"},
+                "history": [],
+                "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, ensure_ascii=False))
+            change = os.path.join(root, "openspec", "changes", CHANGE)
+            write(os.path.join(change, ".openspec.yaml"),
+                  "schema: spec-driven\ncreated: 2026-07-25\n")
+            write(os.path.join(change, "proposal.md"),
+                  "# Proposal\n\n## Why\n\nLegacy smoke.\n")
+            write(os.path.join(change, "design.md"),
+                  "# Design\n\nKeep the pinned engine.\n")
+            write(os.path.join(change, "tasks.md"),
+                  "# Tasks\n\n- [ ] 1. Legacy flow works\n")
+            write(os.path.join(change, "specs", "runtime", "spec.md"),
+                  DELTA_SPEC)
+            self._spec_ok(root, "init", env=env)
+            self._spec_ok(root, "validate", env=env)
+            for phase in ("design", "build", "verify"):
+                self._spec_ok(root, "phase", phase, env=env)
+            write(os.path.join(root, "docs", "report.md"),
+                  "# Verification\n\nAll checks passed.\n")
+            self._spec_ok(
+                root, "set", "verification_report", "docs/report.md", env=env)
+            # 任务计数仍来自 tasks.md(旧语义分毫不变)
+            self._spec_rejected(root, "verify-pass", env=env, needle="未完成")
+            write(os.path.join(change, "tasks.md"),
+                  "# Tasks\n\n- [x] 1. Legacy flow works\n")
+            self._spec_ok(root, "verify-pass", env=env)
+            self._spec_ok(root, "archive", env=env)
+            self.assertFalse(os.path.exists(change))
+            archived_dirs = glob.glob(os.path.join(
+                root, "openspec", "changes", "archive", "*-" + CHANGE))
+            self.assertEqual(1, len(archived_dirs))
+            for name in ("proposal.md", "design.md", "tasks.md",
+                         ".openspec.yaml"):
+                self.assertTrue(os.path.isfile(
+                    os.path.join(archived_dirs[0], name)), name)
+            merged = open(os.path.join(
+                root, "openspec", "specs", "runtime", "spec.md"),
+                encoding="utf-8").read()
+            self.assertIn("### Requirement: Embedded runtime", merged)
+            self.assertNotIn("## ADDED Requirements", merged)
 
     # ------------------------------------------------------------------
     # prepare_project 契约

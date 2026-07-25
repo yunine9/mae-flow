@@ -3295,7 +3295,12 @@ def cmd_spec(flow, st, args):
 
     if action == "show":
         out = {"change": cn, **data}
-        if cn:
+        # 已归档单的 change 目录已移走,查产物必然报"不存在"——成功之后
+        # 看到报错违背流畅原则,改报归档去向。
+        if cn and str(data.get("phase", "")) == "archived":
+            out["note"] = "已归档: openspec/changes/archive/%s" % (
+                data.get("archived_to", "?"))
+        elif cn:
             try:
                 out["artifacts"] = specengine.status(os.getcwd(), cn)
             except Exception as exc:
@@ -3317,18 +3322,36 @@ def cmd_spec(flow, st, args):
         # dogfood 实测:spec init 要求 CHANGE_NAME 已记录,而记录动作(done --set)
         # 排在 init 之后,真实链路要撞两次墙才绕通。new 是真实动作、目录名就是
         # 事实,创建成功即顺手登记(为空才写;done --set 同值幂等,权威不变)。
-        if not cn:
+        # 注意:登记+吞并 init 的全部内存变更做完后【单次】save_state——
+        # save_versioned_json 保存后会 clear+deepcopy 重建 st,先前取出的
+        # data 引用即成孤儿,连续两次 save 的第二次会静默写空(实测踩雷)。
+        registered = not cn
+        if registered:
             st["config"]["CHANGE_NAME"] = name
             st.setdefault("history", []).append(
                 {"step": st["current"], "result": "spec:new", "note": name,
                  "at": now})
-            save_state(st)
-            # stdout 是 spec new 的 JSON 契约面,提示一律走 stderr
-            print("[mae-flow] CHANGE_NAME=%s 已随创建自动登记(done 无需重复 --set)。"
-                  % name, file=sys.stderr)
         elif cn != name:
             print("[mae-flow] ⚠ 已登记 CHANGE_NAME=%s 与新目录 %s 不一致;"
                   "一仓一单,请确认没有开重复单。" % (cn, name), file=sys.stderr)
+        # new 吞并 init(优化实测:init 只剩可推导字段,独立存在只制造
+        # "init 先于登记"类顺序撞墙)。幂等守卫:已初始化过则不重置 phase。
+        inited = (not data.get("initialized_at")) and (not cn or cn == name)
+        if inited:
+            data.update({"change": name, "phase": "open",
+                         "workflow": workflow, "initialized_at": now})
+            st.setdefault("history", []).append(
+                {"step": st["current"], "result": "spec:init", "note": name,
+                 "at": now})
+        if registered or inited:
+            save_state(st)
+        # stdout 是 spec new 的 JSON 契约面,提示一律走 stderr
+        if registered:
+            print("[mae-flow] CHANGE_NAME=%s 已随创建自动登记(done 无需重复 --set)。"
+                  % name, file=sys.stderr)
+        if inited:
+            print("[mae-flow] 交付登记已随创建初始化:change=%s phase=open"
+                  % name, file=sys.stderr)
         print(json.dumps(info, ensure_ascii=False, indent=2))
         return
     if action == "instructions":
@@ -3381,6 +3404,12 @@ def cmd_spec(flow, st, args):
     if action == "init":
         if not cn:
             die("先用 done --set CHANGE_NAME=<英文短名> 记录变更目录名。", 2)
+        # spec new 已自动初始化,本命令保留为在途兼容的幂等别名——重复 init
+        # 不得把已推进的 phase 重置回 open(旧实现的隐性坑,顺手关闭)。
+        if data.get("initialized_at"):
+            print("[mae-flow] 交付登记已存在:change=%s phase=%s(幂等,未改动)"
+                  % (data.get("change", cn), data.get("phase", "?")))
+            return
         data.update({"change": cn, "phase": "open", "workflow":
                      (st.get("choices", {}) or {}).get("workflow", ""),
                      "initialized_at": now})
@@ -3410,6 +3439,20 @@ def cmd_spec(flow, st, args):
             die("阶段只能是: %s" % "、".join(SPEC_PHASES), 2)
         cur = _spec_phase(st) or "open"
         order = list(SPEC_PHASES)
+        # 轻量单快进:hotfix/tweak 不经 design/build 步骤,phase 停在 open,而
+        # 防跳跃墙的报错本来就教模型机械连打三条——仪式改由机器代劳。
+        # 逐格推进逐格留痕,审计轨迹与手动三连逐字等价;full 单不放行
+        # (它的 design/build 推进各自绑在对应步骤的 done 证据里)。
+        wf = (st.get("choices", {}) or {}).get("workflow", "")
+        if target == "verify" and cur == "open" and wf in ("hotfix", "tweak"):
+            for p in ("design", "build", "verify"):
+                data["phase"] = p
+                st.setdefault("history", []).append(
+                    {"step": st["current"], "result": "spec:phase:" + p,
+                     "at": now})
+            save_state(st)
+            print("[mae-flow] 交付阶段(轻量单快进):open → design → build → verify")
+            return
         if order.index(target) < order.index(cur):
             die("阶段不能回退(%s → %s)。需要回流请走 goto --force --ack 由用户裁决。"
                 % (cur, target), 2)
@@ -3442,6 +3485,17 @@ def cmd_spec(flow, st, args):
         print("[mae-flow] 交付阶段:%s → %s" % (cur, target))
         return
     if action == "verify-pass":
+        # --report 合并"登记+判定"两连(优化实测:set verification_report 全仓
+        # 只在 verify-pass 前一行出现,拆开只制造"忘登记"撞墙)。校验与 history
+        # 与逐条执行完全一致;verify_result 不可直写的封印不动。
+        report_arg = (getattr(args, "report", "") or "").strip()
+        if report_arg:
+            if not os.path.isfile(report_arg):
+                die("登记失败:%s 不存在。先真实产出验证报告再登记。" % report_arg, 2)
+            data["verification_report"] = norm(report_arg)
+            st.setdefault("history", []).append(
+                {"step": st["current"], "result": "spec:set:verification_report",
+                 "note": report_arg, "at": now})
         cur = _spec_phase(st)
         if cur != "verify":
             die("verify-pass 只能在验证阶段执行(当前阶段 %s):没进入验证就宣布验证通过"

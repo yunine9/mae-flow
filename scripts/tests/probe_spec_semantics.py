@@ -20,6 +20,12 @@ import time
 
 SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAE = os.path.join(SCRIPTS, "mae-flow.py")
+# 非 UTF-8 控制台(公司 GBK 机器)下中文输出会编码崩——dispatch 同款自愈。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 PASS = 0
 FAIL = []
 
@@ -108,6 +114,10 @@ def main():
         check("new 自动登记 CHANGE_NAME(消灭 init 鸡生蛋弯路)",
               state["config"].get("CHANGE_NAME") == "probe-hotfix",
               str(state["config"]))
+        check("new 已自动初始化交付登记(phase=open,省独立 init)",
+              state.get("spec", {}).get("phase") == "open"
+              and state.get("spec", {}).get("initialized_at"),
+              str(state.get("spec")))
         skeleton = read(root, "openspec/changes/probe-hotfix/change.md")
         check("hotfix 骨架无方案节", "# 方案" not in skeleton)
         check("hotfix 骨架无 .openspec.yaml", not os.path.exists(
@@ -131,8 +141,22 @@ def main():
               and info.get("tier") == "tweak", r.stderr)
         write(root, "openspec/changes/probe-tweak/change.md",
               CHANGE_DOC_LIGHT % "tweak")
-        r, why = drive_to_archive(root, "probe-tweak")
-        check("tweak 无规格单全链到定稿", r is not None, why)
+        # tweak 档改走优化后的合并命令:phase verify 快进(机器代劳三跳)
+        r = spec(root, "phase", "verify")
+        check("轻量单 phase verify 快进(open 直达)",
+              r.returncode == 0 and "快进" in r.stdout, r.stdout + r.stderr)
+        write(root, "docs/report.md", "# Verification\n\nAll pass.\n")
+        r = spec(root, "verify-pass", "--report", "docs/report.md")
+        check("verify-pass --report 一条命令登记+判定", r.returncode == 0,
+              r.stderr)
+        state = json.load(open(os.path.join(root, ".mae-flow.json"),
+                               encoding="utf-8"))
+        check("--report 已登记指针且判定通过",
+              state["spec"].get("verification_report") == "docs/report.md"
+              and state["spec"].get("verify_result") == "pass",
+              str(state.get("spec")))
+        r = spec(root, "archive")
+        check("tweak 无规格单全链到定稿", r.returncode == 0, r.stderr)
 
         # --- full 档 + 规格合并 ---
         root = make_repo(base, "full 仓", "full")

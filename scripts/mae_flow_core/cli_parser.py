@@ -78,7 +78,10 @@ def parse_args(argv=None):
     spec_set.add_argument("value", help="产物真实路径（登记时校验存在）")
     spec_phase = spec_actions.add_parser("phase")
     spec_phase.add_argument("value", help="open|design|build|verify|archive")
-    spec_actions.add_parser("verify-pass")
+    spec_verify_pass = spec_actions.add_parser("verify-pass")
+    spec_verify_pass.add_argument(
+        "--report", default="",
+        help="可选:验证报告路径,等价于先执行 spec set verification_report")
     allow = sub.add_parser("allow")
     allow.add_argument(
         "block_id", help="gate 三振升级报错中给出的拦截编号(不要自行构造)")

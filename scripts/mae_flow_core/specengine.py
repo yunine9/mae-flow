@@ -2298,6 +2298,13 @@ def archive(root, change, date=None):
         rebuilt, counts, merge_warnings = _build_updated_spec(
             source_content, target_content, update["domain"], change)
         warnings.extend(merge_warnings)
+        if not update["exists"]:
+            # 新建域骨架的 Purpose 是 TBD 占位(与 CLI 逐字节一致,引擎不代写)。
+            # 不提醒的话 TBD 会静默入库,真相源积累空洞。
+            warnings.append(
+                "新建域 %s 的真相源 Purpose 是 TBD 占位:请从 change.md「为什么」"
+                "节浓缩补写 openspec/specs/%s/spec.md 的 Purpose 再提交"
+                % (update["domain"], update["domain"]))
         # 重建结果的 spec 级校验（镜像 validateSpecContent；ERROR 即中止）。
         spec_issues = _validate_main_spec_content(update["domain"], rebuilt)
         spec_errors = [text for level, text in spec_issues if level == "ERROR"]

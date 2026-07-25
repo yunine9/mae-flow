@@ -1,0 +1,33 @@
+# Windows 是唯一生产目标,但开发在 Mac——本工作流把全部发版门检查
+# (selftest 内含 state_core/specengine/capabilities 三套 + 两个探针,
+# specengine 在有 node 的环境会额外跑 13 个与内嵌 CLI 的差分对拍)
+# 放到真实 Windows 上跑:真反斜杠路径、真 Git for Windows/bash.exe、
+# CRLF 检出与 cp936 控制台语义,都是 Mac 上"过了也不算数"的面。
+name: selftest
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run selftest (full release gate)
+        run: python scripts/selftest.py
+        env:
+          # 双保险:selftest/探针自带 stdout 自愈,此处再钉 UTF-8,
+          # 避免 Windows runner 代码页差异干扰断言输出比较。
+          PYTHONUTF8: '1'

@@ -1,5 +1,54 @@
 # 更新记录
 
+## 2026-07-26：流畅性优化批次——六视角实测扫描后的第一二梯队落地
+
+六视角测量型扫描(摩擦计数/token 成本/已知局限重估/Windows CI/架构健康/v5 深化)
+产出 19 项机会+3 项有据"不做";本批落地 10 项:
+
+### 摩擦削减(每单命令数实测下降)
+
+- **spec new 吞并 init**:init 只剩可推导字段且全仓 3 处调用全部紧跟 new——new
+  成功即自动初始化(幂等守卫:不重置已推进 phase);init 保留为在途兼容幂等别名,
+  顺手关闭"重复 init 把 phase 拉回 open"的旧隐坑。
+  实现时踩雷并修复:save_versioned_json 保存后 clear+deepcopy 重建 st,先前取出
+  的 spec 段引用成孤儿,连续两次 save 的第二次静默写空——合并为单次保存,教训
+  注释留在现场;
+- **verify-pass --report** 合并"登记+判定"两连(set verification_report 全仓只在
+  verify-pass 前一行出现);history 双记录与逐条执行逐字等价;
+- **轻量单 phase verify 快进**:hotfix/tweak 从 open 一条命令直达 verify(机器代劳
+  逐格推进逐格留痕——防跳跃墙的报错本来就教模型机械连打三条,仪式改由机器执行);
+  full 单不放行,verify-pass 三重校验不动;
+- 合计:tweak/hotfix 的验证收尾 7 条压到 4 条,三条工作流每单再各省 1-2 条。
+
+### 上下文成本(实测 148.3KB → 131.0KB)
+
+- 三个整篇 FULL 注入的上游 SKILL 加选段(机制现成,方法原文一字未改只调选段范围):
+  openspec-explore 裁掉与"不得重复质询"矛盾的模糊入场对话示例;systematic-debugging
+  ×3 pack 保留 Iron Law/四阶段/Red Flags/速查裁掉人际结对语境;ponytail×3 裁掉已被
+  步骤钉死的档位表。build 步单次注入 38.7KB→34.7KB,每批 /clear 恢复都省;
+- build.md 清掉两处指向 v3 已删命令的化石文本("随后执行"后无命令的困惑点,
+  git 考古确认来源)。
+
+### 体验与暗区
+
+- **Windows CI 落地**:.github/workflows/selftest.yml(windows-latest+ubuntu 双矩阵
+  跑发版门全套,含 node 差分对拍)——唯一生产目标从零真机验证变为每次 push 自动验;
+- selftest+两探针补 dispatch 同款 stdout 自愈:非 UTF-8 控制台(公司 GBK 机器典型
+  形态)不再第一行编码崩,发版门开箱即跑;
+- spec show 对已归档单不再误报"change 不存在",改报归档去向;
+- 归档新建域 Purpose=TBD 时 warnings 明确提醒,archive 步指令要求从 change.md
+  「为什么」节浓缩补写后同 commit 入库(真相源不积累占位空洞;引擎不代写,
+  与 CLI 逐字节对拍语义不变)。
+
+### 明确不做(有数据的否决)
+
+clarifications 不并入 change.md(保 grill 断点恢复与审计粒度);STORY/REVIEW 不动
+(外部契约/已最小);mae-flow.py 不拆(零 bug 基线上的投机重构,以增长红线代替);
+预答选择步自动消费**暂缓**——动 done 推进主路径且预答链路依赖 harness 确认账,
+本机无法真实验证,留给公司机批次与 Windows 实测同批。
+
+回归:specengine 66、capabilities 12、探针 25+30、selftest 全绿。
+
 ## 2026-07-26：v5 完备性审计——六维 12-agent 对抗验证,31 项实锤清零
 
 对 v5+dogfood 全部改动面做六维审计(旧引用残留/引擎双布局/dogfood 三修边界/

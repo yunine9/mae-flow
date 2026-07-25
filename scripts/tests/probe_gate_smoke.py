@@ -23,6 +23,12 @@ SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAE = os.path.join(SCRIPTS, "mae-flow.py")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
+# 非 UTF-8 控制台(公司 GBK 机器)下中文输出会编码崩——dispatch 同款自愈。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 PASS = 0
 FAIL = []
 

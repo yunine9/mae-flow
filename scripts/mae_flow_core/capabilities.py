@@ -44,7 +44,22 @@ CAPABILITY_PACKS = {
                 "### 4. 内容完整性检查",
             ],
         ),
-        ("OpenSpec 需求探索", "openspec/skills/openspec-explore/SKILL.md"),
+        (
+            # 选段裁掉「Handling Different Entry Points」(~4KB '用户带模糊想法
+            # 进场'的对话示例)——本仓 open 步入口固定为已确认需求文档+
+            # clarifications,该章节与「不得重复质询」指令直接矛盾。
+            "OpenSpec 需求探索",
+            "openspec/skills/openspec-explore/SKILL.md",
+            [
+                "## The Stance",
+                "## What You Might Do",
+                "## OpenSpec Awareness",
+                "## What You Don't Have To Do",
+                "## Ending Discovery",
+                "## What We Figured Out",
+                "## Guardrails",
+            ],
+        ),
         ("OpenSpec 变更创建", "openspec/skills/openspec-new-change/SKILL.md"),
     ],
     "hotfix-open": [
@@ -103,21 +118,93 @@ CAPABILITY_PACKS = {
         ),
         ("Superpowers 实现计划", "superpowers/skills/writing-plans/SKILL.md"),
         ("Superpowers 连续执行", "superpowers/skills/executing-plans/SKILL.md"),
-        ("Superpowers 系统化调试",
-         "superpowers/skills/systematic-debugging/SKILL.md"),
-        ("Ponytail 精简纪律", "ponytail/skills/ponytail/SKILL.md"),
+        (
+            # 选段保留 Iron Law/四阶段/Red Flags/速查(行为护栏),裁掉
+            # When to Use(何时启用由步骤正文决定)与人际结对语境章节。
+            "Superpowers 系统化调试",
+            "superpowers/skills/systematic-debugging/SKILL.md",
+            [
+                "## Overview",
+                "## The Iron Law",
+                "## The Four Phases",
+                "## Red Flags - STOP and Follow Process",
+                "## Quick Reference",
+            ],
+        ),
+        (
+            # 选段裁掉 Intensity 档位表——档位已被步骤钉死(full 档,
+            # _adapt_embedded_method 亦已重写 /ponytail 切换命令)。
+            "Ponytail 精简纪律",
+            "ponytail/skills/ponytail/SKILL.md",
+            [
+                "## Persistence",
+                "## The ladder",
+                "## Rules",
+                "## Output",
+                "## When NOT to be lazy",
+                "## Boundaries",
+            ],
+        ),
     ],
     "review-fix": [
         ("Superpowers 评审意见处理",
          "superpowers/skills/receiving-code-review/SKILL.md"),
-        ("Superpowers 系统化调试",
-         "superpowers/skills/systematic-debugging/SKILL.md"),
-        ("Ponytail 精简纪律", "ponytail/skills/ponytail/SKILL.md"),
+        (
+            # 选段保留 Iron Law/四阶段/Red Flags/速查(行为护栏),裁掉
+            # When to Use(何时启用由步骤正文决定)与人际结对语境章节。
+            "Superpowers 系统化调试",
+            "superpowers/skills/systematic-debugging/SKILL.md",
+            [
+                "## Overview",
+                "## The Iron Law",
+                "## The Four Phases",
+                "## Red Flags - STOP and Follow Process",
+                "## Quick Reference",
+            ],
+        ),
+        (
+            # 选段裁掉 Intensity 档位表——档位已被步骤钉死(full 档,
+            # _adapt_embedded_method 亦已重写 /ponytail 切换命令)。
+            "Ponytail 精简纪律",
+            "ponytail/skills/ponytail/SKILL.md",
+            [
+                "## Persistence",
+                "## The ladder",
+                "## Rules",
+                "## Output",
+                "## When NOT to be lazy",
+                "## Boundaries",
+            ],
+        ),
     ],
     "tweak-build": [
-        ("Superpowers 系统化调试",
-         "superpowers/skills/systematic-debugging/SKILL.md"),
-        ("Ponytail 精简纪律", "ponytail/skills/ponytail/SKILL.md"),
+        (
+            # 选段保留 Iron Law/四阶段/Red Flags/速查(行为护栏),裁掉
+            # When to Use(何时启用由步骤正文决定)与人际结对语境章节。
+            "Superpowers 系统化调试",
+            "superpowers/skills/systematic-debugging/SKILL.md",
+            [
+                "## Overview",
+                "## The Iron Law",
+                "## The Four Phases",
+                "## Red Flags - STOP and Follow Process",
+                "## Quick Reference",
+            ],
+        ),
+        (
+            # 选段裁掉 Intensity 档位表——档位已被步骤钉死(full 档,
+            # _adapt_embedded_method 亦已重写 /ponytail 切换命令)。
+            "Ponytail 精简纪律",
+            "ponytail/skills/ponytail/SKILL.md",
+            [
+                "## Persistence",
+                "## The ladder",
+                "## Rules",
+                "## Output",
+                "## When NOT to be lazy",
+                "## Boundaries",
+            ],
+        ),
     ],
     "ponytail-review": [
         ("Ponytail 复杂度审查", "ponytail/skills/ponytail-review/SKILL.md"),

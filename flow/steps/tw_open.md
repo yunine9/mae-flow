@@ -4,10 +4,7 @@
 「（待填…」占位全部替换;无规格变化不写规格条目节(tweak 触碰规格即达升级条件)。
 下方原文里的 proposal/tasks 产物话术一律以本页 change.md 小节为准。
 在途旧布局单(已有 proposal.md/tasks.md 的)继续按旧产物补齐走完,不要新建 change.md。
-随后执行：
-
-1. `python "{MAEFLOW_PATH}" spec init`
-
+交付登记已由 spec new 自动完成(在途旧单缺登记时补一条 `python "{MAEFLOW_PATH}" spec init`)。
 展示改动范围，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮；
 用户点选确认后 done --set CHANGE_NAME=<change目录名>，不再要求输入确认句(done 硬校验占位不得残留)。
 若触发升级条件(5+ 文件/多模块协调/需新 capability/需规格条目)，停手展示原因并等用户确认；

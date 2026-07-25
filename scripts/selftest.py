@@ -6,6 +6,14 @@ agent 契约与 dispatch 识别名同步、v3/v4 换轨防回退(comet 子命令
 规格引擎不得复活)、关键文件存在。任何 ❌ 退出码 1。"""
 import ast, contextlib, glob, importlib.util, io, json, os, re, subprocess, sys, tempfile, time, types
 
+# 非 UTF-8 控制台(公司 GBK 机器典型形态)下 ✅/❌ 第一行就会编码崩——
+# dispatch.py 同款 stdout 自愈,发版门必须开箱即跑。
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))

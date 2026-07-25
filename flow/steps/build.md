@@ -2,10 +2,7 @@
 代码事实先查 .mae-flow-work/survey-{单号}.md(勘察笔记),只做增量探索,禁止全量重读代码。
 **中断/上下文重置(/clear)后恢复,先按序重读再动手**:①superpowers 计划文档 ②change.md 实现清单(勾选与备注=进度真相)
 ③change.md 方案节与规格条目(在途旧布局单为 tasks.md/design.md/delta spec) ④git log {基线分支}..HEAD 与最近 diff。禁止只凭本条指令闷头续写。
-随后执行
-这条确定性命令一次写入 branch、executing-plans、direct、standard 等公司固定选择，
-禁止由 Agent 自己记五六个字段，也不要手工编辑流程状态文件。
-按下方内嵌的实现计划与连续执行规则生成计划并实施，不调用外部 Skill。
+按下方内嵌的实现计划与连续执行规则生成计划并实施，不调用外部 Skill；禁止手工编辑流程状态文件。
 计划由主会话**亲自**按内嵌 writing-plans 方法生成——禁止把"制定计划"派给子代理:子代理上下文里
 没有本页能力包文本,产出会丢失 bite-sized/No Placeholders 纪律(下方原文如出现"派发计划子代理"
 字样,以本条为准)。计划的任务步骤**不包含写测试步骤**:测试统一由 verify 阶段 AutoUT 按 EARS
@@ -60,9 +57,9 @@ mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(
 计划文档写到 **.mae-flow-work/plan-{单号}.md**(过程件不入库,git 本地排除已覆盖;禁止写进 docs/ 或 openspec/),生成后执行：
 `python "{MAEFLOW_PATH}" spec set plan ".mae-flow-work/plan-{单号}.md"`
 
-全部完成、任务全勾选且最后一轮 compile-agent 已 OK 后执行
-Mae-Flow 已经用任务清单、提交和编译令牌校验过本阶段，不再让底层 guard 重跑一遍长编译。
-展示任务状态与产物摘要后直接 done(阶段推进由 verify 链的第一步负责,本步不改阶段)。
+全部完成、任务全勾选且最后一轮 compile-agent 已 OK 后:
+展示任务状态与产物摘要，直接 done(状态机以任务清单、提交和编译令牌为证据,不重跑长编译;
+阶段推进由 verify 链的第一步负责,本步不改阶段)。
 状态机会自动校验 tasks 全勾选、最新 commit 带单号和编译令牌，不再让用户为“代码已经写完”签字。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────

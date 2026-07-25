@@ -2,7 +2,7 @@
 
 Mae-Flow 是一套给 CodeAgent 使用的代码交付流程。
 
-当前版本：`2.2.0`。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本：`2.2.1`。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 你给出单号和需求，它会先把需求问清楚，再做设计、编码、编译、CodeCheck、单元测试和推送。中间需要你
 决定的地方会停下来问，不该由 AI 自己决定的事，它不能悄悄替你做。

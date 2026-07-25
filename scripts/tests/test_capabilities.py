@@ -207,6 +207,24 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                 self.assertTrue(checks[name]["ok"], checks[name])
                 self.assertIn(" — ", checks[name]["detail"])
 
+    def test_windows_plugin_path_is_literal_in_embedded_commands(self):
+        windows_script = (
+            r"C:\Users\l00899311\.cac\plugins\cache\aimarket"
+            r"\mae-flow\2.2.1\scripts\mae-flow.py")
+        source = "\n".join((
+            "openspec status",
+            '"$COMET_BASH" "$COMET_STATE" init demo full',
+            '"$COMET_BASH" "$COMET_GUARD" demo open --apply',
+            '"$COMET_BASH" "$COMET_HANDOFF" demo design --write',
+            '"$COMET_BASH" "$COMET_ARCHIVE" demo',
+        ))
+        adapted = capabilities._adapt_embedded_method(source, windows_script)
+        self.assertEqual(5, adapted.count(windows_script))
+        for command in (
+                "openspec", "comet-state", "comet-guard",
+                "comet-handoff", "comet-archive"):
+            self.assertIn("capability %s" % command, adapted)
+
     def test_prepare_accepts_git_worktree_dot_git_file(self):
         with tempfile.TemporaryDirectory(prefix="mae worktree ") as base:
             repository = os.path.join(base, "main")

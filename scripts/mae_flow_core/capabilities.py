@@ -221,7 +221,14 @@ def _adapt_embedded_method(body, maeflow):
             'python "%s" capability comet-archive -- ' % maeflow,
     }
     for pattern, replacement in command_prefixes.items():
-        body = re.sub(pattern, replacement, body)
+        # A Windows plugin path such as ``C:\Users\...`` is not a valid
+        # ``re.sub`` replacement string: the regex engine interprets ``\U``
+        # and backreferences before inserting it. A callable replacement is
+        # returned literally on every platform.
+        body = re.sub(
+            pattern,
+            lambda _match, value=replacement: value,
+            body)
     body = re.sub(
         r"```(?:bash|sh)?\s*\n(?:(?!```).)*?capability\s+comet-"
         r"(?:(?!```).)*?```\s*",

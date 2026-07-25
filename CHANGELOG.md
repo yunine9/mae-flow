@@ -1,7 +1,9 @@
 # 更新记录
 
-## 2.2.0 后续修正
+## 2.2.1
 
+- 修复 Windows 插件路径中的 `\U` 被 `re.sub` 当作转义序列，导致 `envcheck` 和阶段能力加载失败；
+- 路径注入改用回调返回原文，并增加真实 `C:\Users\...` 路径回归测试；
 - `envcheck` 现在显式检查 Python、Git、Node.js 和 Git Bash，输出实际版本与路径；
 - 完整流程初始化复用同一套前检，基础依赖异常时不会创建状态或激活 Hook；
 - Git 仓库识别改为真实执行 `git rev-parse`，支持 `.git` 为文件的 worktree；

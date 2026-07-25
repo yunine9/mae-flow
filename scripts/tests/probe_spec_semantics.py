@@ -54,9 +54,11 @@ def make_repo(base, name, workflow, current="open"):
     root = os.path.join(base, name)
     os.makedirs(root)
     subprocess.run(["git", "init", "-q", root], check=True, capture_output=True)
+    # CHANGE_NAME 留空:真实链路里它由 spec new 自动登记(dogfood 修复),
+    # 探针顺带验证这条登记路径。
     write(root, ".mae-flow.json", json.dumps({
         "current": current,
-        "config": {"CHANGE_NAME": "probe-" + workflow, "单号": "REQ probe"},
+        "config": {"CHANGE_NAME": "", "单号": "REQ probe"},
         "choices": {"workflow": workflow},
         "history": [],
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -101,6 +103,11 @@ def main():
         info = json.loads(r.stdout or "{}") if r.returncode == 0 else {}
         check("hotfix new 成功且 v5", r.returncode == 0 and info.get("layout") == "v5"
               and info.get("tier") == "hotfix", r.stderr)
+        state = json.load(open(os.path.join(root, ".mae-flow.json"),
+                               encoding="utf-8"))
+        check("new 自动登记 CHANGE_NAME(消灭 init 鸡生蛋弯路)",
+              state["config"].get("CHANGE_NAME") == "probe-hotfix",
+              str(state["config"]))
         skeleton = read(root, "openspec/changes/probe-hotfix/change.md")
         check("hotfix 骨架无方案节", "# 方案" not in skeleton)
         check("hotfix 骨架无 .openspec.yaml", not os.path.exists(

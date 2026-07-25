@@ -1,10 +1,10 @@
-先把交付阶段从 build 推进到 verify：
+先把交付阶段推进到 verify。tweak 单不经 design/build 步骤,阶段仍在 open,需逐级推进(阶段与步骤解耦,不可跳跃):
 
-`python "{MAEFLOW_PATH}" spec phase verify`
+`python "{MAEFLOW_PATH}" spec phase design && python "{MAEFLOW_PATH}" spec phase build && python "{MAEFLOW_PATH}" spec phase verify`
 
 然后按下方内嵌方法做一次与“小改”相称的最终核对，不扩大成全仓走读：
 
-1. 逐条对照本 change 的 proposal、tasks 和用户确认过的范围，检查有没有漏做、做偏或顺手增加需求；
+1. 逐条对照本 change 的 change.md（「# 为什么」与「# 实现清单」;在途旧布局单为 proposal/tasks）和用户确认过的范围，检查有没有漏做、做偏或顺手增加需求；
 2. 查看最终 diff，确认异常路径、兼容性和已有行为没有被无意改变；
 3. 把结论写入 `.mae-flow-work/verification-{CHANGE_NAME}.md`；
 4. 登记并完成状态：

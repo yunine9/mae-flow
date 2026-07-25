@@ -1,4 +1,7 @@
-先执行 `python "{MAEFLOW_PATH}" spec phase verify` 把交付阶段推进到验证（build→verify）。
+先把交付阶段推进到 verify:full 单此时在 build,执行
+`python "{MAEFLOW_PATH}" spec phase verify`;
+hotfix 单不经 design 步、阶段仍在 open,需逐级推进(阶段与步骤解耦,不可跳跃):
+`python "{MAEFLOW_PATH}" spec phase design && python "{MAEFLOW_PATH}" spec phase build && python "{MAEFLOW_PATH}" spec phase verify`。
 按下方内嵌的完成前验证、正确性审查和规格符合检查原文生成验证报告，不调用外部 Skill。
 其中「分支处理」一律选**保持分支**——
 合并/MR 由公司流程人工处理,推送在后面的 push 步统一做,禁止在此本地合并或创建 PR。

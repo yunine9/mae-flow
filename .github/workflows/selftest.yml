@@ -30,6 +30,9 @@ jobs:
         # 失败项打成 ::error:: annotations——GitHub 的 job 日志端点要 admin
         # 权限,annotations 走 checks API 公开可读,远程诊断全靠它。
         run: |
+          # GitHub 的 shell: bash 默认 -e -o pipefail:selftest 失败会让脚本
+          # 第一行直接终止,annotation 代码永远到不了——先关掉。
+          set +e +o pipefail
           python scripts/selftest.py 2>&1 | tee selftest.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then

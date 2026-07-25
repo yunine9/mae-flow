@@ -297,6 +297,19 @@ def _adapt_embedded_method(body, maeflow):
         "`%s`" % os.path.join(
             VENDOR_ROOT, "superpowers", "skills", "brainstorming",
             "visual-companion.md"))
+    # 同款问题的其余三处:上游 SKILL 的目录内相对引用在渲染语境不可达,
+    # 评审模板/调试支撑技术会退化成现场即兴。全部改写为 vendored 绝对路径。
+    body = body.replace(
+        "](code-reviewer.md)",
+        "](%s)" % os.path.join(
+            VENDOR_ROOT, "superpowers", "skills", "requesting-code-review",
+            "code-reviewer.md"))
+    for rel in ("root-cause-tracing.md", "defense-in-depth.md",
+                "condition-based-waiting.md"):
+        body = body.replace(
+            "`%s`" % rel,
+            "`%s`" % os.path.join(
+                VENDOR_ROOT, "superpowers", "skills", "systematic-debugging", rel))
     return body
 
 
@@ -556,6 +569,9 @@ def run_comet(script_name, arguments, cwd=None, timeout=180):
         "DO_NOT_TRACK": "1",
         "OPENSPEC_TELEMETRY": "0",
     })
+    # 维护者修复逃生口不能从调用方环境静默继承:带着它,comet-state 的
+    # phase 直写保护(transition 前置校验)会被整体绕过。
+    env.pop("COMET_FORCE_PHASE", None)
     return _run([env["COMET_BASH"], script, *arguments],
                 cwd=cwd, timeout=timeout, env=env)
 

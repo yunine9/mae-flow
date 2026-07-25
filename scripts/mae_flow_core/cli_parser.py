@@ -20,7 +20,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" current\n'
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
-            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|"
+            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|template|"
             "agent-task|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "codecheck-scan|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
@@ -61,6 +61,10 @@ def parse_args(argv=None):
         "agent", help="当前步骤报错中显示的 Agent 名称，如 compile/codecheck/ut")
     risk.add_argument("--reason", required=True)
     risk.add_argument("--ack", required=True)
+    allow = sub.add_parser("allow")
+    allow.add_argument(
+        "block_id", help="gate 三振升级报错中给出的拦截编号(不要自行构造)")
+    allow.add_argument("--ack", required=True)
     moonlight = sub.add_parser("moonlight")
     moonlight.add_argument("action", choices=[
         "on", "continue", "off", "report", "push-failed",

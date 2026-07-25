@@ -46,6 +46,7 @@ from mae_flow_core import (
     find_project_root as core_find_project_root,
     load_action as core_load_action,
     normalize_document,
+    remove_with_retry,
     resolve_runtime,
     safe_read_json,
     save_action as core_save_action,
@@ -374,11 +375,17 @@ def _configured_source_patterns(st):
         return ([x.strip() for x in raw.split(",") if x.strip()]
                 if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
     try:
-        v = json.load(open(DEFAULTS_PATH, encoding="utf-8")).get("源码路径", [])
+        # utf-8-sig:团队手写 defaults 常带 BOM;解析失败必须可见——
+        # 「源码路径」静默失效等于门禁口径悄悄变宽。
+        v = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")).get("源码路径", [])
         if isinstance(v, str):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v if isinstance(v, list) else []
-    except Exception:
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        print("⚠ %s 的「源码路径」解析失败,已忽略(请修复该 JSON): %s" % (DEFAULTS_PATH, e),
+              file=sys.stderr)
         return []
 
 
@@ -387,6 +394,45 @@ def _matches_pattern(path, pattern):
         return bool(re.search(pattern, path, re.I))
     except re.error:
         return False
+
+
+def _repo_rel_for_match(path):
+    """目录类正则只能喂「项目根相对 + 正斜杠」路径。
+
+    Edit gate 收到的是宿主给的绝对路径:直接拿去匹配 `(^|/)src/`,仓库祖先目录
+    恰好叫 src/app/lib 时全仓所有文件都会被误判成源码(禁改步骤整体卡死且无出口);
+    defaults 里 `^ut/` 这类锚定私有正则则反向永不命中。相对路径原样返回(去掉 ./ 前缀);
+    项目根之外的绝对路径返回 None——目录模式对根外路径无意义(插件目录另有专门拦截)。
+    不用 os.path.relpath:跨盘符抛 ValueError(Windows 军规3)。"""
+    p = norm(path).strip().strip('"\'')
+    if not p:
+        return p
+    if not (p.startswith("/") or re.match(r"^[A-Za-z]:/", p)):
+        return re.sub(r"^(\./)+", "", p)
+    # 项目根与传入路径可能是同一位置的不同表示(盘符映射/subst/符号链接;
+    # 宿主给映射盘路径而 cwd 是真实路径,或反之)。原始与 realpath 两种形式都试。
+    cwd = os.getcwd()
+    roots = []
+    for r in (cwd, os.path.realpath(cwd)):
+        r = norm(r).rstrip("/")
+        if r and r.lower() not in {x.lower() for x in roots}:
+            roots.append(r)
+    cands = [p]
+    try:
+        rp = norm(os.path.realpath(p))
+        if rp.lower() != p.lower():
+            cands.append(rp)
+    except OSError:
+        pass
+    for cand in cands:
+        cl = cand.lower()
+        for r in roots:
+            rl = r.lower()
+            if cl == rl:
+                return ""
+            if cl.startswith(rl + "/"):
+                return cand[len(r) + 1:]
+    return None
 
 
 def _is_source_path(path, st=None, flow=None):
@@ -401,8 +447,11 @@ def _is_source_path(path, st=None, flow=None):
     base = os.path.basename(low)
     if low.endswith(SOURCE_EXTS) or base in SOURCE_FILENAMES:
         return True
+    rel = _repo_rel_for_match(p)
+    if rel is None:
+        return False
     rules = list((flow or FLOW or {}).get("source_patterns", [])) + _configured_source_patterns(st)
-    return any(_matches_pattern(p, pat) for pat in rules)
+    return any(_matches_pattern(rel, pat) for pat in rules)
 
 
 def _is_review(st):
@@ -430,7 +479,9 @@ def _ensure_review_base(st):
         review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
         added = sh(f'git log --diff-filter=A -1 --format=%H -- "{review_doc}"')
         if added:
-            base = sh(f"git rev-parse {added}^")
+            # --verify 必带(军规5):root commit 的 {added}^ 不存在时,裸 rev-parse 会把
+            # 参数字面串回显到 stdout,伪 rev 一路传染成空 diff → 质量链静默全过。
+            base = sh(f"git rev-parse --verify --quiet {added}^")
     if not base:
         return "", ("无法自动恢复返工基点。不要用当前 HEAD 代替，否则增量范围会变成空；"
                      "请把日志与原 MR 返工前 commit 交维护人处理")
@@ -509,10 +560,13 @@ def ev_yaml(spec, st):
     txt = open(path, encoding="utf-8", errors="replace").read()
     m = re.search(r"^\s*" + re.escape(spec["field"]) + r":\s*(.*?)\s*$", txt, re.M)
     val = (m.group(1).strip().strip("'\"") if m else "")
-    if spec.get("equals") is not None:
-        if val == spec["equals"]:
+    # 兼容 "value" 作 "equals" 的别名:曾有 flow.json 写成 value 被静默忽略,
+    # 使"验证必须为 pass"退化成"非空即过"(pending/fail 都能过)。
+    expected = spec.get("equals", spec.get("value"))
+    if expected is not None:
+        if val == expected:
             return True, ""
-        return False, (f".comet.yaml 的 {spec['field']}={val or '(空)'},需要 {spec['equals']}"
+        return False, (f".comet.yaml 的 {spec['field']}={val or '(空)'},需要 {expected}"
                        "——先完成本步的 comet 阶段并通过 comet-guard --apply,谎报无效")
     if val in ("", "null", "~"):
         return False, f".comet.yaml 的 {spec['field']} 为空——本步的 comet 产物尚未生成/登记"
@@ -883,6 +937,14 @@ def _run_codecheck(files):
             + "。普通模式请向用户展示风险后使用错误信息给出的恢复通道；"
             "月光宝盒模式记录为未完成质量项后继续。")
     executable = capability.get("path") or None
+    # Windows 路走 shell=True:文件名里的 & ^ % 是 cmd 命令语义(a&b.c 会把 b 当命令跑),
+    # 逗号会破坏 -f 的批次列表。这类文件名先拒绝,比"静默检错文件"或注入安全得多。
+    risky = [f for f in files if re.search(r"[&|^%<>;,]", f)]
+    if risky:
+        return None, (
+            "以下文件名含 cmd 元字符或逗号,无法安全传入 codecheck -f: "
+            + "、".join(risky[:5])
+            + "。请重命名文件或将其移出本次检查范围后重试。")
     total, pairs, commands = 0, [], []
     for batch in _batches(files):
         launch, use_shell, cmd = _codecheck_launch(batch, executable=executable)
@@ -1130,6 +1192,29 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "review_codecheck": ev_review_codecheck}
 
 
+def _evidence_failure_count(sid, success=False):
+    """按步骤统计 done 证据连拒次数;成功推进即清零。与 _ack_failure 同一存储。"""
+    key = "evidence:" + (sid or "")
+    result = [0]
+
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        if success:
+            data.pop(key, None)
+            return data
+        result[0] = int((data.get(key, {}) or {}).get("count", 0)) + 1
+        data[key] = {"count": result[0],
+                     "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        return data
+
+    try:
+        update_json(FAILURE_PATH, mutate, default={}, recover_corrupt=True)
+    except Exception:
+        return 1 if not success else 0
+    return result[0]
+
+
 def _ack_failure(st, reason="", success=False):
     """记录确认通道失败；只停止盲目重试，不制造不可恢复的锁。"""
     sid = (st or {}).get("current", "")
@@ -1201,18 +1286,25 @@ def _trusted_answer_candidates(text):
     return [value for value in candidates if value != raw]
 
 
-def _current_ack_messages(st):
+def _current_ack_messages(st, extra_steps=()):
     try:
         msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
     except Exception:
         return []
     sid = st.get("current", "")
     entered = _step_entered_at(st)
-    return [
-        item for item in msgs
-        if item.get("at", "") >= entered
-        and (not item.get("step") or item.get("step") == sid)
-    ]
+    started = st.get("started", "")
+    out = []
+    for item in msgs:
+        if (item.get("at", "") >= entered
+                and (not item.get("step") or item.get("step") == sid)):
+            out.append(item)
+        elif (extra_steps and item.get("step") in extra_steps
+              and item.get("at", "") >= started):
+            # 一卡合一预答通道:配置确认卡合并收集的选择(交付方式/质询/STORY),
+            # 供随后的选择步直接消费,免逐步重复提问;仍是本单内真实捕获的用户答案。
+            out.append(item)
+    return out
 
 
 def _fresh_askuser(st):
@@ -1271,6 +1363,10 @@ def _implicit_ack_verified(step, st):
 
 def _choice_verified(step, st, choice):
     """Bind --choice to the answer when readable; trust a fresh UI token as fallback."""
+    # 一卡合一:开场三个选择步同时接受配置确认卡期间捕获的真实答案。
+    extra = (("config_confirm",)
+             if st.get("current") in ("workflow_select", "grill_ask", "story_ask")
+             else ())
     alias_rows = []
     for key, values in (step.get("choice_answers") or {}).items():
         for value in [key] + list(values or []):
@@ -1280,12 +1376,21 @@ def _choice_verified(step, st, choice):
                 alias_rows.append((key, normalized.lower()))
 
     readable = []
-    for item in _current_ack_messages(st):
+    for item in _current_ack_messages(st, extra_steps=extra):
         readable.extend(_trusted_answer_candidates(item.get("text", "")))
     for candidate in reversed(readable):
         normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
         normalized = re.sub(r"[（(]推荐[）)]", "", normalized).lower()
-        matches = [(key, alias) for key, alias in alias_rows if alias in normalized]
+        # 全等,或"标签开头+补充说明"(按钮文案常带括号注释)。禁止全文子串搜索:
+        # 「这次不是 hotfix,走完整开发」会命中 hotfix、消息里出现 docs/review/ 路径
+        # 会命中 review——把用户的合法回答误判成 Agent 替用户改选。
+        # 纯 ASCII 代号(full/hotfix/tweak/review)只认全等,防叙述句里的英文词误触。
+        matches = [
+            (key, alias) for key, alias in alias_rows
+            if normalized == alias
+            or (not re.fullmatch(r"[a-z0-9_-]+", alias)
+                and normalized.startswith(alias))
+        ]
         if not matches:
             continue
         longest = max(len(alias) for _, alias in matches)
@@ -1451,9 +1556,16 @@ COMET_PHASE_EXPECT = {
     "build": ("build", "verify"),
     "verify_ponytail": ("verify",), "verify_post_ponytail_compile": ("verify",),
     "verify_recompile": ("verify",), "verify_codecheck": ("verify",),
-    "verify_ut": ("verify",), "verify_comet": ("verify",),
-    "archive_confirm": ("verify",), "archive": ("verify", "archive"),
+    "verify_ut": ("verify",), "verify_comet": ("verify", "archive"),
+    "archive_confirm": ("verify", "archive"), "archive": ("verify", "archive"),
     "design": ("open", "design", "build"),
+    # tweak/hotfix 线补齐哨兵覆盖(此前全裸:guard --apply 中断后整条 tw 链无预警,
+    # 直到 tw_verify 的 transition 硬报错)。哨兵只警不拒,区间宁宽勿漏。
+    "hf_open": ("open", "build"),
+    "tw_open": ("open", "build"),
+    "tw_change": ("build",), "tw_compile": ("build",),
+    "tw_codecheck": ("build",), "tw_ut": ("build",),
+    "tw_verify": ("build", "verify", "archive"),
 }
 
 
@@ -1578,7 +1690,8 @@ def _defaults():
     if not os.path.exists(DEFAULTS_PATH):
         return None, ""
     try:
-        return json.load(open(DEFAULTS_PATH, encoding="utf-8")), ""
+        # utf-8-sig:Windows 编辑器手写的 JSON 常带 BOM,对无 BOM 文件无害
+        return json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")), ""
     except Exception as e:
         return None, f"⚠ {DEFAULTS_PATH} 解析失败,已忽略(修复该 JSON 或删除): {e}"
 
@@ -1720,6 +1833,7 @@ def print_current(flow, st):
 def _state_sidecars():
     return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg",
             STATE_PATH + ".agent-rejections", STATE_PATH + ".agent-evidence",
+            STATE_PATH + ".stop-guard", GATE_STRIKES_PATH, GATE_PERMITS_PATH,
             MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]
 
 
@@ -2078,6 +2192,9 @@ def cmd_action_start(flow, st, args):
     _save_action(action)
     print("[mae-flow] 独立需求质询已开启，不会进入设计或编码。")
     print("先定向阅读需求与相关代码，把八维检查和候选问题写入：%s" % prep)
+    print("备课工作表必须按模板结构填写(hook 会校验章节,自由发挥会被打回):%s"
+          % os.path.abspath(os.path.join(HERE, "..", "skills", "mae-flow",
+                                         "assets", "GRILL-PREP-TEMPLATE.md")))
     print("随后一次只问用户一个问题，每次回答后先检查模糊词、新名词、矛盾和衍生边界，"
           "答案增量写入：%s" % clarification)
     print("备课完成后执行 action critic --stage prep --document \"%s\" 做第一次对抗检查。"
@@ -2142,6 +2259,9 @@ def cmd_action_critic(args):
         die("质询检查材料不存在：" + (args.document or "(空)"), 2)
     action.setdefault("grill", {})["last_critic_document"] = document
     action["grill"]["last_critic_stage"] = args.stage
+    if args.stage == "prep":
+        # 双查承诺的前半:final 会覆盖 last_critic_stage,prep 是否跑过需单独留痕
+        action["grill"]["prep_critic_done"] = True
     if document not in action.setdefault("sources", []):
         action["sources"].append(document)
     return _action_task_card(action, "grill", args.stage)
@@ -2169,6 +2289,10 @@ def cmd_action_finish(args):
             die("独立质询结果不可读：" + err, 2)
         if re.search(r"\{\{[^}]+\}\}|待确认|TODO|TBD", text, re.I):
             die("澄清文档仍有待确认项，不能宣称质询完成。继续追问或把未决项明确列为用户决定暂缓。", 2)
+        if not (action.get("grill", {}) or {}).get("prep_critic_done"):
+            die("备课后的第一轮对抗检查(prep critic)没有执行过——双查是独立质询的质量承诺,"
+                "不能只做收尾那次。先 action critic --stage prep --document <备课文件>,"
+                "补齐它找出的缺口后再收尾。", 2)
         grill_token = (action.get("tokens", {}) or {}).get("GRILL", {})
         if not grill_token or (action.get("agent_tasks", {}).get("GRILL", {}) or {}).get("stage") != "final":
             die("收尾前还没有执行 final 对抗检查。先 action critic --stage final --document <澄清文档>；"
@@ -2296,17 +2420,29 @@ def cmd_requirement_record(st, args):
 
 def _reopen_comet_archive(st):
     cn = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
+    if not cn:
+        return False, "缺 CHANGE_NAME"
+    # 第一路走内嵌运行时:插件承诺不创建 .cac/.claude,纯内嵌项目上只找旧目录
+    # 这个恢复分支必死。旧版项目残留脚本仅作兜底。
+    why = ""
+    try:
+        result = run_comet("state", ["transition", cn, "archive-reopen"], cwd=os.getcwd())
+        if result.returncode == 0:
+            return True, ""
+        why = ((result.stdout or "") + (result.stderr or "")).strip()[-1000:]
+    except Exception as exc:
+        why = str(exc)
     scripts = [os.path.join(base, "skills", "comet", "scripts", "comet-state.sh")
                for base in (".cac", ".claude")]
     script = next((p for p in scripts if os.path.isfile(p)), "")
-    if not cn or not script:
-        return False, "缺 CHANGE_NAME 或 comet-state.sh"
+    if not script:
+        return False, why or "内嵌 comet-state 执行失败,且未发现旧版项目脚本"
     try:
         result = subprocess.run(["bash", script, "transition", cn, "archive-reopen"],
                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 timeout=30)
     except Exception as exc:
-        return False, str(exc)
+        return False, (why + "; 旧版脚本兜底也失败: " + str(exc)).strip("; ")
     if result.returncode != 0:
         return False, ((result.stdout or "") + (result.stderr or "")).strip()[-1000:]
     return True, ""
@@ -2368,6 +2504,13 @@ def _resume_direct_mode(ack=""):
     st.pop("agent_tasks", None)
     st.pop("quality", None)
     st.pop("risk_acceptances", None)
+    # 接回的是普通交互模式:退出快照可能带着月光宝盒标记(夜跑中途 exit)。
+    # 不清掉的话恢复后每次 AskUserQuestion 都被 hook 硬拦,用户毫无提示。
+    # 想继续无人值守应重新明确执行 moonlight on。
+    if (st.get("moonlight") or {}).get("enabled"):
+        st.pop("moonlight", None)
+        print("[mae-flow] 退出前处于月光宝盒模式,已随恢复切回普通交互;"
+              "需要继续无人值守请重新执行 moonlight on。")
     st["current"] = target
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     st.setdefault("history", []).append({"step": old_step, "result": "resumed:" + target,
@@ -2462,7 +2605,26 @@ def cmd_capability(args):
         return
     try:
         if action == "openspec":
-            result = run_openspec(_capability_arguments(args), cwd=os.getcwd())
+            arguments = _capability_arguments(args)
+            sub = next((a for a in arguments if a and not a.startswith("-")), "")
+            # archive 是不可逆动作(delta 合并进真相源+移动 change 目录),必须钉在
+            # archive 步:透传通道曾是真相源写保护之外的第三条未设防写路,
+            # verify 链任意步一条命令即可绕过用户定稿确认。
+            if sub == "archive":
+                st_now = None
+                try:
+                    st_now = load_state()
+                except Exception:
+                    st_now = None
+                if st_now is not None and st_now.get("current") != "archive":
+                    die("规格定稿(archive)只能在 archive 步执行:它把规格合并进真相源并移动"
+                        "变更目录,不可逆;绕过验证链与 archive_confirm 用户确认等于伪造交付状态。"
+                        "当前步骤 %s;先完成验证链并经用户确认定稿。"
+                        % st_now.get("current", "?"), 2)
+            if sub == "init":
+                die("openspec init 由插件统一执行:手动 init 可能生成 AI 工具目录污染仓库。"
+                    "需要重建规格配置时执行 capability prepare。", 2)
+            result = run_openspec(arguments, cwd=os.getcwd())
         else:
             comet_action = action.replace("comet-", "")
             result = run_comet(
@@ -2481,11 +2643,35 @@ def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
     lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-work/"]
-    txt = open(gi, encoding="utf-8").read() if os.path.exists(gi) else ""
+    # errors=replace:用户仓的 .gitignore 可能是 GBK 注释,严格解码会让 init 直接
+    # 崩 traceback(且报错看不出和 .gitignore 有关);替换字符只影响去重判断,无害。
+    txt = (open(gi, encoding="utf-8", errors="replace").read()
+           if os.path.exists(gi) else "")
     add = [l for l in lines if l not in txt]
     if add:
         open(gi, "a", encoding="utf-8").write(
             ("\n" if txt and not txt.endswith("\n") else "") + "\n".join(add) + "\n")
+    _gitattributes()
+
+
+def _gitattributes():
+    """openspec/ 锁 LF:comet 的 bash 侧读 .comet.yaml 不剥 \\r,Windows autocrlf
+    检出会让 comet 读到 "pass\\r" 全线报 Invalid,而 mae-flow 侧证据解析对 \\r 免疫
+    ——症状是「done 说证据满足、comet 命令全报错」的双状态机分裂。"""
+    ga = ".gitattributes"
+    line = "openspec/** text eol=lf"
+    try:
+        txt = (open(ga, encoding="utf-8", errors="replace").read()
+               if os.path.exists(ga) else "")
+        if line in txt:
+            return
+        open(ga, "a", encoding="utf-8", newline="\n").write(
+            ("\n" if txt and not txt.endswith("\n") else "")
+            + "# mae-flow: comet 状态文件必须 LF(CRLF 检出会造成阶段状态读取分裂)\n"
+            + line + "\n")
+    except OSError as exc:
+        print("[mae-flow] ⚠ 无法写 .gitattributes(%s);Windows autocrlf 环境请手动加入: %s"
+              % (exc, line), file=sys.stderr)
 
 
 def _friction_from_log(st):
@@ -2832,7 +3018,23 @@ def cmd_done(flow, st, args):
     fails = check_evidence(step, st)
     if fails:
         save_state(st)
-        die("证据不足,拒绝推进:\n  - " + "\n  - ".join(fails), 2)
+        msg = "证据不足,拒绝推进:\n  - " + "\n  - ".join(fails)
+        # "用户说跳过吧,hook 不听"是最伤信任的体验:用户裁决的整步跳过通道
+        # (goto --force --ack)一直存在,但只写在维护文档里,拒绝消息从不提示。
+        # 与 gate 三振同一哲学:重复拒绝时自动亮出用户出口,平时不广告。
+        count = _evidence_failure_count(sid)
+        if count >= 2 and not _moonlight(st):
+            nxt = step.get("next")
+            target = nxt if isinstance(nxt, str) else "<按 current 显示的下一步>"
+            msg += ("\n⚠ 本步证据已连续 %d 次不满足。机器事实不能由口头确认替代;"
+                    "但若**用户已明确表示**接受现状/跳过本步(如“跳过吧/我认为可以了”),"
+                    "这是用户的风险裁决,执行 python \"%s\" goto %s --force --ack \"用户原话\" "
+                    "整步跳过并留痕审计;缺的是 COMPILE/CODECHECK/UT 等 Agent 令牌时,"
+                    "优先用报错里的 accept-risk(只放当前令牌,其他证据照查)。"
+                    "没有用户原话时 Agent 不得自行跳过。"
+                    % (count, os.path.abspath(sys.argv[0]), target))
+        die(msg, 2)
+    _evidence_failure_count(sid, success=True)
     kind = _moonlight_step_kind(sid)
     if kind:
         _moonlight_resolve_kind(st, kind)
@@ -2975,9 +3177,160 @@ def _business_source_changed_since_step(st, sid):
     return list(dict.fromkeys(out)), ""
 
 
-# Bash 命令里能落盘的动作(cmd/PowerShell/git-bash 常见写法都算)
-WRITEISH = (r"(sed\s+-i|>>?\s*|\btee\s+|\bcp\s+|\bmv\s+|\bcopy\b|\bmove\b|\bdel\b|\brm\s+"
-            r"|Set-Content|Out-File|Add-Content|perl\s+-i|git\s+apply|\bpatch\b)")
+GATE_STRIKES_PATH = STATE_PATH + ".gate-strikes"
+GATE_PERMITS_PATH = STATE_PATH + ".gate-permits"
+GATE_STRIKE_LIMIT = 3
+
+
+def _gate_block_id(rule, subject):
+    return hashlib.sha256((rule + "\n" + norm(subject)).encode(
+        "utf-8", errors="replace")).hexdigest()[:10]
+
+
+def _gate_die(st, sid, rule, subject, msg):
+    """裁决类拦截的统一出口:break-glass 一次性放行令 + 三振熔断。
+
+    gate 的误报不可能降到零(静态文本判断动态行为),兜底纪律是:
+    ①有效放行令 → 消费后放过本条规则,其余规则继续检查;
+    ②同一规则同步骤连拦 ≥GATE_STRIKE_LIMIT 次 → 报错升级,附本次动作的放行令
+      签发指引——出口不提前广告,卡死的那一刻自己出现;
+    ③月光模式改为指向 blocked/defer 留痕(夜里没有用户消息,放行令天然签不出来);
+    ④每次三振与放行都留痕:兜底机制同时是误报采集器(doctor 展示)。
+    绝对类规则(密钥/危险命令/状态文件/伪造通道)不走这里,没有放行令——
+    用户在真实终端手动执行就是它们的逃生口。"""
+    bid = _gate_block_id(rule, subject)
+    try:
+        permits = json.load(open(GATE_PERMITS_PATH, encoding="utf-8"))
+    except Exception:
+        permits = {}
+    rec = permits.get(bid)
+    if rec and not rec.get("used") and rec.get("step") == sid:
+        head = sh("git rev-parse --verify HEAD")
+        if not rec.get("head") or rec.get("head") == head:
+            def consume(data):
+                entry = (data or {}).get(bid) or {}
+                entry["used"] = True
+                entry["used_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                data[bid] = entry
+                return data
+            try:
+                update_json(GATE_PERMITS_PATH, consume, default={}, recover_corrupt=True)
+            except Exception:
+                pass
+            try:
+                st.setdefault("history", []).append({
+                    "step": sid, "result": "gate:allowed-by-user",
+                    "note": rule + " " + bid,
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                save_state(st)
+            except Exception:
+                pass
+            print("[mae-flow] 用户放行令 %s 生效(一次性,已作废):规则 %s 放过此动作,"
+                  "其余规则继续检查。" % (bid, rule), file=sys.stderr)
+            return
+    count = 1
+    try:
+        def bump(data):
+            data = data or {}
+            counts = data.setdefault("counts", {})
+            entry = counts.get(rule) or {}
+            if entry.get("step") != sid:
+                entry = {"step": sid, "count": 0}
+            entry["count"] = int(entry.get("count", 0) or 0) + 1
+            entry["last_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            counts[rule] = entry
+            recent = data.setdefault("recent", {})
+            recent[bid] = {"rule": rule, "step": sid, "sample": subject[:200],
+                           "at": entry["last_at"]}
+            while len(recent) > 20:
+                oldest = min(recent, key=lambda k: recent[k].get("at", ""))
+                recent.pop(oldest, None)
+            return data
+        data = update_json(GATE_STRIKES_PATH, bump, default={}, recover_corrupt=True)
+        count = int(((data or {}).get("counts", {}).get(rule) or {}).get("count", 1) or 1)
+    except Exception:
+        count = 1
+    if count >= GATE_STRIKE_LIMIT:
+        if _moonlight(st or {}):
+            msg += ("\n⚠ 本规则已在本步骤连续拦截 %d 次,可能是误拦。月光宝盒无人值守中"
+                    "不可放行:这属于客观阻塞,按 current 给出的 moonlight blocked"
+                    "(质量步骤用 defer)留痕停止,把拦截编号 %s 写进 reason,早晨由用户裁决。"
+                    % (count, bid))
+        else:
+            msg += ("\n⚠ 本规则已在本步骤连续拦截 %d 次,可能是误拦。停止再试写法变体;"
+                    "若你确认该动作正当且必要:把动作原文和拦截原因展示给用户,用户同意后执行 "
+                    "python \"%s\" allow %s --ack \"用户同意原话\"。"
+                    "放行只对这一个动作生效一次,绑定当前代码版本,用后即废;其余规则不受影响。"
+                    "若动作确属违规,回到 current 指引换正规路径。"
+                    % (count, os.path.abspath(sys.argv[0]), bid))
+    die(msg, 2)
+
+
+def cmd_allow(flow, st, args):
+    """break-glass:为一次被误拦的动作签发单次放行令(用户裁决,强验真)。"""
+    if st is None:
+        die("流程未启用,gate 本来就不拦,无需放行令。", 2)
+    bid = (args.block_id or "").strip()
+    try:
+        recent = (json.load(open(GATE_STRIKES_PATH, encoding="utf-8")) or {}).get("recent", {})
+    except Exception:
+        recent = {}
+    rec = recent.get(bid)
+    if not rec:
+        listing = "\n".join(
+            "  %s  %s  %s" % (k, v.get("rule", "?"), (v.get("sample", "") or "")[:60])
+            for k, v in sorted(recent.items(), key=lambda kv: kv[1].get("at", ""),
+                               reverse=True)[:5])
+        die("未找到拦截编号 %s 的记录。最近的拦截:\n%s\n请使用报错里给出的编号,不要自行构造。"
+            % (bid or "(空)", listing or "  (无)"), 2)
+    if rec.get("step") != st.get("current"):
+        die("拦截编号 %s 属于步骤 %s,当前步骤是 %s;放行令只能在拦截发生的步骤签发。"
+            % (bid, rec.get("step", "?"), st.get("current", "?")), 2)
+    ok, why = _ack_verified(st, args.ack or "", exact=True)
+    if not ok:
+        die("放行令签发验真失败:" + why
+            + "。必须先把动作原文和拦截原因展示给用户,取得用户明确同意的原话。", 2)
+    head = sh("git rev-parse --verify HEAD")
+
+    def issue(data):
+        data = data or {}
+        data[bid] = {"rule": rec.get("rule", ""), "step": st.get("current", ""),
+                     "head": head, "sample": rec.get("sample", ""),
+                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                     "ack": (args.ack or "")[:200], "used": False}
+        return data
+    update_json(GATE_PERMITS_PATH, issue, default={}, recover_corrupt=True)
+    st.setdefault("history", []).append({
+        "step": st.get("current", ""), "result": "gate:allow-issued",
+        "note": rec.get("rule", "") + " " + bid,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    save_state(st)
+    print("[mae-flow] 已签发一次性放行令 %s(规则 %s):仅对该动作生效一次,"
+          "绑定当前代码版本与步骤,用后即废、代码变化即废。请原样重试刚才被拦的那个动作。"
+          % (bid, rec.get("rule", "")))
+
+
+# Bash 命令里能落盘的动作(cmd/PowerShell/git-bash 常见写法都算)。
+# 强证据:动词语义就是"写/删这个文件",命中即按写盘处理。
+WRITEISH_STRONG = (r"(sed\s+-i|perl\s+-i|git\s+apply|Set-Content|Out-File|Add-Content"
+                   r"|\brm\s+|(?<![\w-])del\s+)")
+# 弱启发:cp/mv/tee/patch 的源码参数可能只是"读源码写别处"(cp src/a.c /tmp)。
+# 命中只软提醒不硬拦——bash 写检测定位是软提醒层(MAINTAINERS 3.3),真正门槛在
+# done 证据。历史最高频误报:裸 `>` 把 `2>&1` 只读命令判成写盘、`\bpatch\b`
+# 命中 git format-patch;重定向改为解析真实落盘目标(_redirect_targets)。
+WRITEISH_WEAK = (r"(\btee\s+|\bcp\s+|\bmv\s+|(?<![\w-])copy\s+|(?<![\w-])move\s+"
+                 r"|(?<![\w-])patch\b)")
+
+
+def _redirect_targets(c):
+    """提取 >/>> 的真实落盘目标。fd 复制(2>&1)与空设备不算写文件。"""
+    out = []
+    for m in re.finditer(r"""\d*>{1,2}\s*([^\s;|&<>'"]+)""", c):
+        t = m.group(1)
+        if t.lower() in ("/dev/null", "nul"):
+            continue
+        out.append(t)
+    return out
 
 
 def cmd_gate(flow, st, args):
@@ -2987,37 +3340,52 @@ def cmd_gate(flow, st, args):
         sys.exit(0)
     sid = st["current"] if st else None
     step = flow["steps"].get(sid, {}) if st else {}
+
+    def jdie(rule, msg):
+        # 裁决类规则统一走 break-glass 出口(放行令+三振熔断);绝对类仍用裸 die
+        _gate_die(st, sid, rule, args.arg, msg)
     # NTFS 不区分大小写:所有路径匹配一律 re.I
     if args.what == "edit":
         p = norm(args.arg)
+        # 目录类模式(docs/req、specs 真相源、源码/测试路径)必须用项目根相对路径匹配;
+        # 精确文件名类黑名单在绝对/相对路径上都成立,维持原样。
+        rel = _repo_rel_for_match(p)
+        pm = rel if rel is not None else p
         if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
             die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
         if re.search(r"\.mae-flow\.json(?:\.[\w-]+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
                      r"|(^|/)\.mae-flow-work/moonlight-report\.md$", p, re.I):
             die("流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
                 "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
+        if re.search(r"(^|/)\.mae-flow-defaults\.json$", p, re.I):
+            die("流程运行期间禁止修改 .mae-flow-defaults.json:它决定源码/测试路径的判定口径,"
+                "改它等于改门禁规则。团队预设请在流程外走正常评审提交。", 2)
         if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I):
             die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
-        if sid == "config_confirm" and re.search(r"(^|/)docs/req/", p, re.I):
-            die("配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
-                "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
-                "已有文本用 requirement-record --source。", 2)
+        if sid == "config_confirm" and re.search(r"(^|/)docs/req/", pm, re.I):
+            jdie("edit-docs-req",
+                 "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
+                 "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
+                 "已有文本用 requirement-record --source。")
         plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
         if norm(os.path.abspath(args.arg)).lower().startswith(plugin_root + "/"):
             die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
-        if re.search(flow["specs_truth"], p, re.I) and not step.get("allow_specs_write"):
-            die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。", 2)
+        if re.search(flow["specs_truth"], pm, re.I) and not step.get("allow_specs_write"):
+            jdie("edit-specs",
+                 f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
         if _is_source_path(p, st, flow):
             if not step.get("allow_source_edit"):
-                die(f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。", 2)
+                jdie("edit-source",
+                     f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
             tp = _effective_test_patterns(st) if step.get("tests_only") else []
             ul = (st or {}).get("unlock") or {}
             unlocked = ul.get("scope") == "source" and ul.get("step") == sid
-            if tp and not unlocked and not any(re.search(t, p, re.I) for t in tp):
-                die(f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
-                    "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
-                    "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
-                    "禁止未经用户裁决自行改源码。", 2)
+            if tp and not unlocked and not any(re.search(t, pm, re.I) for t in tp):
+                jdie("edit-tests-only",
+                     f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
+                     "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
+                     "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
+                     "禁止未经用户裁决自行改源码。")
         sys.exit(0)
     if args.what == "bash":
         c = norm(args.arg)
@@ -3040,15 +3408,37 @@ def cmd_gate(flow, st, args):
                       r"|git\s+branch\s+(?:-[mM]\s+\S+\s+)?(?!-)(\S+)\s*$", c)
         if m and st:
             name = m.group(1) or m.group(2) or m.group(3)
+            creating = bool(m.group(1))
+            # 文件恢复与游离检出不是改分支:`git checkout HEAD -- x` / `checkout .` /
+            # `checkout <sha> -- x` 都曾被当分支名误拦,而系统自己的报错(codecheck-scan
+            # "回退越权改动")恰恰会引导模型执行这类命令。-b/-B/-c/-C 创建分支照常校验。
+            if not creating and (
+                    " -- " in c
+                    or name == "."
+                    or re.fullmatch(r"HEAD([~^]\d*)*|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|@",
+                                    name or "", re.I)
+                    or re.fullmatch(r"[0-9a-f]{7,40}", name or "", re.I)):
+                name = ""
             want = st["config"].get("分支名", "")
-            if want and name != want:
-                die(f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。", 2)
+            if name and want and name != want:
+                jdie("bash-branch-name",
+                     f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
         m = re.search(r"git\s+commit\b.*?-m\s+(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
         if m and st:
             msg = m.group(1) or m.group(2) or m.group(3) or ""
             dan = st["config"].get("单号", "")
             if dan and not re.match(r"^\[" + re.escape(dan) + r"\]\[(feat|fix)\]", msg):
-                die(f"commit message「{msg}」不符合 [{dan}][feat|fix]描述 格式。", 2)
+                jdie("bash-commit-format",
+                     f"commit message「{msg}」不符合 [{dan}][feat|fix]描述 格式。")
+            # 分支校验在提交这一刻做——拦截时机 = 错误发生时机。原来只在 done 时查,
+            # 站错分支提交一整步才发现,返工要 cherry-pick;现在错的那一笔就进不去。
+            want = st["config"].get("分支名", "")
+            if want and sid not in ("config_confirm", "workflow_select", "branch_create"):
+                cur_branch = sh("git branch --show-current")
+                if cur_branch and cur_branch != want:
+                    jdie("bash-commit-branch",
+                         f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
+                         f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
         if re.search(r"git\s+push\b.*(--force|-f\b)", c) or re.search(r"git\s+push\b.*\s\+\S+", c):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
@@ -3059,10 +3449,19 @@ def cmd_gate(flow, st, args):
         if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
             die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
                 "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
-        if re.search(r"(mkdir|md|new-item)\b", c, re.I) and hits_path(r"(^|/)openspec/"):
-            die("禁止手动创建 openspec 目录：change 必须由 Mae-Flow 内嵌命令创建，"
-                "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"
-                "先执行 current，并照其中的 `capability openspec` / `capability comet-state` 命令处理。", 2)
+        # 动词必须命令位锚定且只看它自己的参数:旧写法 `(mkdir|md|new-item)\b` 左侧
+        # 不锚定,`git add openspec/changes/x/proposal.md` 里 "proposal.md" 的结尾
+        # 也命中 "md"——提交规格文件被判成"手动创建",而 clean_paths 证据又要求
+        # 必须提交,门禁与证据互锁卡死(实战黑事件)。
+        m_mk = re.search(r"(?:^|[\s;&|(])(?:mkdir|md|new-item)\b"
+                         r"((?:\s+(?:-\S+|\"[^\"]*\"|'[^']*'|[^\s;|&]+))*)", c, re.I)
+        if m_mk and any(re.search(r"(^|/)openspec/", t, re.I)
+                        for t in re.split(r"""[\s;|&()<>'"]+""", m_mk.group(1) or "")
+                        if t and not t.startswith("-")):
+            jdie("bash-mkdir-openspec",
+                 "禁止手动创建 openspec 目录：change 必须由 Mae-Flow 内嵌命令创建，"
+                 "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"
+                 "先执行 current，并照其中的 `capability openspec` / `capability comet-state` 命令处理。")
         if re.search(r"\bcomet\s+init\b", c):
             die("禁止执行全局 comet init：它会初始化无关平台并污染项目。"
                 "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，无需人工初始化。", 2)
@@ -3078,30 +3477,72 @@ def cmd_gate(flow, st, args):
                 if not t.startswith("-") and (tl in nuke or re.match(r"^[a-z]:[\\/]*$", tl)):
                     die(f"危险命令拦截:对「{t}」的递归删除。确需执行请用户手动运行。", 2)
         if st and re.search(r"git\s+worktree\s+add", c):
-            die("本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
-                "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。", 2)
-        writeish = re.search(WRITEISH, c, re.I)
+            jdie("bash-worktree",
+                 "本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
+                 "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。")
+        redirects = _redirect_targets(c)
+        strong_write = bool(re.search(WRITEISH_STRONG, c, re.I))
+        weak_write = bool(re.search(WRITEISH_WEAK, c, re.I))
+        writeish = strong_write or weak_write or bool(redirects)
+        # comet/openspec 状态文件的 Bash 写路必须与 Edit 对称(黑名单#4):
+        # 否则 `echo "verify_result: pass" >> .comet.yaml` 一条命令即可伪造验证证据。
+        if writeish and any(t.lower().endswith((".comet.yaml", ".openspec.yaml"))
+                            for t in toks):
+            die("comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护(黑名单#4),"
+                "直写等同伪造阶段/验证证据。", 2)
+        m_set = re.search(r"comet-state\b[^;|&]*?\bset\b\s+\S+\s+(\S+)", c, re.I)
+        if m_set and m_set.group(1).lower() in ("verify_result", "phase", "archived", "verified_at"):
+            die("禁止用 comet-state set 直写 %s:该字段只能由 transition(带前置校验)产生,"
+                "直写绕过全部退出条件检查等同伪造证据。verification_report/branch_status "
+                "等登记类字段不受限。" % m_set.group(1), 2)
+        if re.search(r"COMET_FORCE_PHASE", c, re.I):
+            die("COMET_FORCE_PHASE 是维护者修复逃生口,Agent 禁止使用:它绕过阶段前置校验直写 phase。"
+                "阶段异常先执行 mae-flow doctor 按哨兵指引处理。", 2)
+        if re.search(r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*\.(sh|mjs|js)\b"
+                     r"|runtime/bin/openspec\b", c, re.I):
+            die("禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec 路由等环境,"
+                "退落到机器全局版本(版本锁失效)。请使用 current 给出的 capability 命令。", 2)
+        if re.search(r"(?:^|[;&|(])\s*openspec\b", c):
+            die("禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,全局版本随"
+                "上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染仓库。"
+                "请使用 current 给出的 capability openspec 命令。", 2)
         if sid == "config_confirm" and writeish and hits_path(r"(^|/)docs/req/"):
-            die("配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
-                "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。", 2)
-        if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl|-need-reload)"
+            jdie("bash-docs-req",
+                 "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
+                 "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。")
+        if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
                                   r"|\.mae-flow-work/moonlight-report\.md"):
-            die("流程状态/历史账本/待重启标记/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
-                "(待重启标记只能靠重启会话清)。", 2)
+            die("流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
+                "(待重启标记只能靠重启会话清;仓库预设决定门禁口径,流程外走正常评审提交)。", 2)
         if writeish and hits_path(flow["specs_truth"]) and not step.get("allow_specs_write"):
-            die(f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。", 2)
+            jdie("bash-specs",
+                 f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。")
         source_toks = [t for t in toks if _is_source_path(t, st, flow)]
-        if writeish and source_toks:
+        redirect_sources = [t for t in redirects if _is_source_path(t, st, flow)]
+        # 硬拦只认高置信写源码:重定向目标本身是源码、或强写动词与源码路径同现。
+        # 弱启发(cp/mv/tee/patch)只软提醒:`git diff -- src/ 2>&1` 这类只读命令
+        # 被硬拦的每一次弹回都是一整轮模型往返,而真正的越权写有 done 证据层兜底。
+        offenders = list(dict.fromkeys(redirect_sources
+                                       + (source_toks if strong_write else [])))
+        if offenders:
             if not step.get("allow_source_edit"):
-                die(f"当前步骤 {sid} 禁止经 Bash 写源码文件。", 2)
+                jdie("bash-source",
+                     f"当前步骤 {sid} 禁止经 Bash 写源码文件(命中: {'、'.join(offenders[:3])});"
+                     "先 mae-flow current 查看该做什么。")
             tp = _effective_test_patterns(st) if step.get("tests_only") else []
             ul = (st or {}).get("unlock") or {}
             if tp and not (ul.get("scope") == "source" and ul.get("step") == sid):
-                bad = [t2 for t2 in source_toks
-                       if not any(re.search(t, t2, re.I) for t in tp)]
+                bad = [t2 for t2 in offenders
+                       if not any(re.search(t, (_repo_rel_for_match(t2) or t2), re.I)
+                                  for t in tp)]
                 if bad:
-                    die(f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
-                        f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。", 2)
+                    jdie("bash-tests-only",
+                         f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
+                         f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。")
+        elif weak_write and source_toks and not step.get("allow_source_edit"):
+            print(f"[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径({source_toks[0]})。"
+                  "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
+                  "启发式不拦截(误报率高),真正校验在 done 证据层。", file=sys.stderr)
         sys.exit(0)
     die("gate 用法: gate edit <路径> | gate bash <命令>")
 
@@ -3184,6 +3625,19 @@ def cmd_agent_task(flow, st, args):
     lines.extend("- " + x for x in changes)
     if not changes:
         lines.append("- （无代码变更）")
+    # compound 沉淀统一在任务卡装载:一处注入,主流程/评审/小改三条质量链全部受益
+    # (原先只有主流程 build/verify 的步骤文引用,rf/tw 的 agent 拿不到踩坑经验)。
+    notes_path = os.path.join("docs", "delivery-notes.md")
+    if os.path.isfile(notes_path):
+        try:
+            note_lines = [l.rstrip() for l in open(
+                notes_path, encoding="utf-8", errors="replace").read().splitlines()
+                if l.strip()][:40]
+        except OSError:
+            note_lines = []
+        if note_lines:
+            lines.append("本仓沉淀经验(按需参考;与本任务卡指令冲突时以任务卡为准):")
+            lines.extend("- " + x.lstrip("- ") for x in note_lines)
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if kind == "CODECHECK":
         lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
@@ -3458,6 +3912,16 @@ def cmd_doctor(flow, st, args):
         print(("✅" if uts else "⚠") + f" UTRUN 令牌(UT 命令真实调起): {uts or '未记录(尚未跑 UT,或 PostToolUse-Bash 未触发)'}")
     except Exception:
         print("⚠ UTRUN 令牌: 无令牌文件")
+    try:
+        strikes = json.load(open(GATE_STRIKES_PATH, encoding="utf-8")) if os.path.exists(GATE_STRIKES_PATH) else {}
+        hot = [(r, e) for r, e in (strikes.get("counts", {}) or {}).items()
+               if int(e.get("count", 0) or 0) >= GATE_STRIKE_LIMIT]
+        for rule, entry in hot:
+            print("⚠ 疑似误拦: 规则 %s 在步骤 %s 连拦 %s 次(最近 %s)。"
+                  "确属正当动作可用报错中的 allow 放行令;反复出现请把本行报给维护者修规则。"
+                  % (rule, entry.get("step", "?"), entry.get("count"), entry.get("last_at", "?")))
+    except Exception:
+        pass
 
 
 def cmd_report(flow, st, args):
@@ -3683,6 +4147,13 @@ def cmd_moonlight(flow, st, args):
             authorized_preinit, why, activation_request = _consume_preinit_moonlight_intent(args.ack)
             if not authorized_preinit:
                 die("月光宝盒授权验真失败:" + why, 2)
+            # 与 init 同一套前检:启动瞬间是无人值守唯一有人在场的时刻。跳过它,
+            # node/git 缺失这类环境炸弹会留到凌晨 open 步才爆,整夜产出为零。
+            try:
+                prepare_project(os.getcwd())
+            except CapabilityError as exc:
+                die("插件运行时预检失败,月光宝盒未开启、未创建流程状态: %s。"
+                    "请现在解决环境问题后重新发起。" % exc, 2)
             st = _new_state()
             save_state(st)
         # 一键入口允许 --ack 取本轮用户消息中的“月光宝盒/moonlight”短语，
@@ -3692,6 +4163,18 @@ def cmd_moonlight(flow, st, args):
             if not ok:
                 die("月光宝盒授权验真失败:" + why, 2)
             activation_request = _moonlight_request_from_messages(st, args.ack)
+        if flow["steps"].get(st.get("current", ""), {}).get("terminal"):
+            # 上一单已交付完成:必须像 init 一样换单滚动。否则月光在终态(安全停点)上
+            # 启用,整夜什么都不发生;授权已在旧状态的消息上验真通过,滚动后直接开新单。
+            _append_history(st)
+            os.replace(STATE_PATH, STATE_PATH + ".last")
+            try:
+                prepare_project(os.getcwd())
+            except CapabilityError as exc:
+                die("插件运行时预检失败,新一单尚未创建: %s" % exc, 2)
+            st = _new_state()
+            save_state(st)
+            print(f"[mae-flow] 上一单已完成,旧状态备份为 {STATE_PATH}.last;月光宝盒在新单上开启。")
         ml = _moonlight_data(st)
         if not ml.get("enabled"):
             st.pop("config_review", None)
@@ -3759,16 +4242,31 @@ def cmd_moonlight(flow, st, args):
         return
     if action == "off":
         if _moonlight(st):
+            # off 是拆掉全部夜间约束(Ask 拦截+Stop 防线)的开关,必须与 on 对称地
+            # 要求用户原话——夜里没有用户消息,Agent 无法自行关闭后收工;
+            # 早晨用户说一句"关闭月光宝盒"即可通过。
+            if not args.ack:
+                die("关闭月光宝盒需要 --ack \"用户要求关闭/恢复交互的原话\"。"
+                    "无人值守运行中不允许 Agent 自行关闭;质量问题走 moonlight defer,"
+                    "客观阻塞走 moonlight blocked。", 2)
+            ok, why = _ack_verified(st, args.ack, exact=False)
+            if not ok:
+                die("月光宝盒关闭授权验真失败:" + why, 2)
             _moonlight_data(st)["enabled"] = False
             _moonlight_data(st)["disabled_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             st.setdefault("history", []).append({
                 "step": st["current"], "result": "moonlight:off", "note": "恢复普通交互模式",
                 "at": time.strftime("%Y-%m-%d %H:%M:%S")})
             save_state(st)
+            _write_moonlight_report(flow, st)
         print("[mae-flow] 月光宝盒已关闭，当前断点保留；后续恢复普通确认和严格门禁。")
         print_current(flow, st)
         return
-    if not _moonlight(st):
+    if action in ("repair", "finalize") and st.get("current") == "moonlight_review":
+        # 晨间入口不依赖 enabled 标记:off 之后 done 在 moonlight_review 仍会指向
+        # repair/finalize,若这里再要求"已开启"就形成互相踢皮球,用户没有出路。
+        pass
+    elif not _moonlight(st):
         die("当前未开启月光宝盒。", 2)
     if action == "blocked":
         sid = st["current"]
@@ -3885,6 +4383,37 @@ def cmd_moonlight(flow, st, args):
             "at": now})
         save_state(st)
         _write_moonlight_report(flow, st)
+        # defer 必须复用 done 的源码回流纪律:UT 步内(经 unlock-source)改过被测源码后
+        # defer,旧写法直达 next——被修改的源码从未重新编译/CodeCheck 就被推送。
+        # 检测到步内源码变更时,遗留照记,去向改为对应质量链回流入口。
+        recheck = flow["steps"].get(sid, {}).get("source_change_recheck")
+        if recheck:
+            _, migrate_err = _ensure_step_entry_head(flow, st, sid)
+            changed, why = ([], migrate_err)
+            if not migrate_err:
+                changed, why = _business_source_changed_since_step(st, sid)
+            if why:
+                die("defer 前无法核对本步是否修改过被测源码:" + why
+                    + "。为避免推送未复验的源码,拒绝直接推进;先解决核对问题或走 moonlight blocked。", 2)
+            if changed:
+                st["history"].append({
+                    "step": sid, "result": "source-recheck:" + recheck,
+                    "note": ("defer 时检测到步内源码变更(unlock=%s):"
+                             % ("有" if (st.get("unlock") or {}).get("step") == sid else "无"))
+                            + "、".join(changed[:10]),
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                st["current"] = recheck
+                st.setdefault("step_heads", {})[recheck] = sh("git rev-parse --verify HEAD")
+                st.pop("unlock", None)
+                for k2 in ("COMPILE", "CODECHECK", "UT"):
+                    (st.get("agent_tasks", {}) or {}).pop(k2, None)
+                (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+                save_state(st)
+                _write_moonlight_report(flow, st)
+                print(f"[mae-flow] 遗留已登记,但本步修改过被测源码,自动回流 {recheck} "
+                      "重新编译/CodeCheck/UT;不重新验证不得推送。")
+                print_current(flow, st)
+                return
         advance(flow, st, sid, flow["steps"][sid], "moonlight-deferred", issue_id)
         return
     if action == "repair":
@@ -4179,17 +4708,27 @@ def cmd_exit(flow, st, args):
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
     save_versioned_json(EXIT_PATH, record, "exit")
     cleanup_errors = []
+    state_removed = True
     for src, _ in copied:
         try:
-            os.remove(src)
+            remove_with_retry(src)
         except OSError as exc:
             cleanup_errors.append("%s: %s" % (src, exc))
+            if os.path.basename(src) == STATE_PATH:
+                state_removed = False
+    if not state_removed:
+        # 运行模式裁决是「完整流程优先于退出标记」:主状态还在=门禁仍然生效。
+        # 此时宣布"退出标记已生效"是谎报,用户会以为退了却继续被拦。
+        die("退出未生效:主状态文件 %s 未能删除(可能被杀软/编辑器占用),完整流程门禁仍在。"
+            "请关闭占用后重新发送 /mae-flow exit;现场已保存到 %s。清理失败明细: %s"
+            % (STATE_PATH, norm(snapshot), "；".join(cleanup_errors)), 2)
 
     print("\n[mae-flow] 已退出流程。代码、提交和文档均已保留；流程现场已保存到 " + norm(snapshot))
     if patched:
         print("已让项目阶段门禁识别直接开发模式：" + "、".join(norm(p) for p in patched))
     if cleanup_errors:
-        print("⚠ 部分旧状态文件未清理，但退出标记已生效：" + "；".join(cleanup_errors), file=sys.stderr)
+        print("⚠ 部分附属状态文件未清理(退出已生效,不影响普通开发)：" + "；".join(cleanup_errors),
+              file=sys.stderr)
     if compat_warnings:
         print("⚠ 退出兼容提示：" + "；".join(compat_warnings), file=sys.stderr)
     print("现在可以直接让 AI 修改代码或补 UT。后续质量检查由用户自行决定。")
@@ -4303,13 +4842,18 @@ def cmd_exit_corrupt_state(args, state_error):
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
     save_versioned_json(EXIT_PATH, record, "exit")
+    leftovers = []
     for src, _ in copied:
         try:
-            os.remove(src)
+            remove_with_retry(src)
         except OSError:
-            pass
+            leftovers.append(src)
     print("[mae-flow] 状态虽已损坏，但逃生成功；坏状态完整保存在 %s。现在按普通开发处理。"
           % norm(snapshot))
+    if leftovers:
+        # 损坏态 Hook 本就 fail-open,残留只影响提示横幅;但必须让用户知道文件还在。
+        print("⚠ 以下坏状态文件被占用未能删除(不拦普通开发,稍后可手动清理): "
+              + "、".join(norm(p) for p in leftovers), file=sys.stderr)
     if patched:
         print("已同步放行项目阶段门禁：" + "、".join(norm(p) for p in patched))
     if errors:
@@ -4408,6 +4952,8 @@ def main():
         return cmd_approve_exemption(flow, st, args)
     if args.cmd == "accept-risk":
         return cmd_accept_risk(flow, st, args)
+    if args.cmd == "allow":
+        return cmd_allow(flow, st, args)
     if args.cmd == "done":
         return cmd_done(flow, st, args)
     if args.cmd == "skip":

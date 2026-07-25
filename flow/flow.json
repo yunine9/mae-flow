@@ -147,8 +147,8 @@
         "no"
       ],
       "choice_answers": {
-        "yes": ["做需求质询"],
-        "no": ["跳过需求质询"]
+        "yes": ["做需求质询", "做质询"],
+        "no": ["跳过需求质询", "跳过"]
       },
       "next": {
         "yes": "grill",
@@ -388,9 +388,8 @@
       "evidence": [
         {
           "type": "yaml_field",
-          "file": "openspec/changes/{CHANGE_NAME}/.comet.yaml",
           "field": "verify_result",
-          "value": "pass"
+          "equals": "pass"
         }
       ],
       "next": "archive_confirm"

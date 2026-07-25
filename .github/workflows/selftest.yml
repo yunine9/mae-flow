@@ -36,11 +36,11 @@ jobs:
           python scripts/selftest.py 2>&1 | tee selftest.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            grep "❌" selftest.log | head -15 | while IFS= read -r line; do
+            grep "❌" selftest.log | head -10 | while IFS= read -r line; do
               echo "::error::${line}"
             done
-            # 无 ❌ 行 = 硬崩(traceback):把日志尾部整体打进一条多行 annotation
-            tail -50 selftest.log | python -c "import sys; body=sys.stdin.read(); print('::error::LOG_TAIL:' + body.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))"
+            # 日志尾部整体打进一条多行 annotation(硬崩 traceback + 子套件失败详情)
+            tail -250 selftest.log | python -c "import sys; body=sys.stdin.read(); print('::error::LOG_TAIL:' + body.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))"
           fi
           exit "$status"
         env:

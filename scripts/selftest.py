@@ -489,9 +489,11 @@ if flow:
           and mf._exemption_text_has_pair("- R.ONE | a/Foo.cpp", "R.ONE", "a/Foo.cpp"))
 
     # 独立能力：不创建主流程状态、支持未提交代码、默认不提交，完成/取消都不留下源码门禁。
-    old_cwd = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as td:
+    # chdir 恢复必须在 with 内(cleanup 之前):Windows 下 CWD 在目录里=目录被占用,
+    # rmtree 必炸 WinError 32(CI 首跑实锤;Mac/Linux 无此锁语义所以从没炸过)。
+    with tempfile.TemporaryDirectory() as td:
+        old_cwd = os.getcwd()
+        try:
             os.chdir(td)
             subprocess.run(["git", "init", "-q"], check=True)
             subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
@@ -710,13 +712,13 @@ if flow:
             check("独立任务真实 CLI 可取消并立即解除控制",
                   cancel.returncode == 0 and not os.path.exists(mf.ACTION_PATH),
                   cancel.stdout)
-    finally:
-        os.chdir(old_cwd)
+        finally:
+            os.chdir(old_cwd)
 
     # 退出必须保留业务现场、归档状态并使直接模式标记立即可见。
-    old_cwd = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td:
+        old_cwd = os.getcwd()
+        try:
             os.chdir(td)
             open("keep.cpp", "w", encoding="utf-8").write("int keep = 1;\n")
             subprocess.run(["git", "init", "-q"], check=True)
@@ -788,13 +790,13 @@ if flow:
                   resumed2.get("current") == "verify_recompile"
                   and "quality" not in resumed2 and "agent_tasks" not in resumed2
                   and not os.path.exists(mf.STATE_PATH + ".tokens"))
-    finally:
-        os.chdir(old_cwd)
+        finally:
+            os.chdir(old_cwd)
 
     # 用户风险放行：只替代当前步骤的 Agent 令牌，必须真实 ack，代码变化/推进后立即失效。
-    old_cwd = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td:
+        old_cwd = os.getcwd()
+        try:
             os.chdir(td)
             os.makedirs("src/test")
             open("src/test/FooTest.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
@@ -860,8 +862,8 @@ if flow:
                 mf.ev_codecheck_clean = old_clean
             check("放行 CodeCheck Agent 令牌仍会执行真实结果复核",
                   not cc_ok and "现场复核仍有 1 条告警" in cc_why)
-    finally:
-        os.chdir(old_cwd)
+        finally:
+            os.chdir(old_cwd)
 
     # 月光宝盒：普通门禁不变；仅显式启用后替代在线确认，质量失败留痕推进，
     # push 后停在晨间检查，并可按报告重新进入完整质量链。

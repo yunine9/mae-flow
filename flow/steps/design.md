@@ -14,7 +14,10 @@
 
 **收尾自查(闪退/中断防线)**:done 前确认 .comet.yaml **phase 已=build**；仍卡在 design 就重跑第 3 条，
 否则下一步写文档会被阶段检查拦住。
-展示设计摘要,结束回复等用户确认方向。确认后 git add openspec/ docs/superpowers/ && git commit -m "[单号][类型]设计文档",再 done --ack。
+展示设计摘要后，若没有尚待用户决定的重大取舍，直接
+git add openspec/ docs/superpowers/ && git commit -m "[单号][类型]设计文档"，再 done。
+只有发现会改变需求边界、外部契约或存在两个明显不同且影响重大的方案时才 AskUserQuestion；
+普通技术实现选择由 Agent 依据现有架构完成，不让用户为“设计阶段结束”签字。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:design}}

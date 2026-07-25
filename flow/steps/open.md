@@ -34,7 +34,8 @@ clarifications 里已是 EARS 的答案直接沿用)——UT 阶段将按这些�
 
 确认状态已进入 design，再 git add openspec/(clarifications 尚在 docs/ 未随迁的,精确补 git add docs/clarifications-{单号}.md;
 **禁止 git add docs/ 或 -A**)&& git commit -m "[单号][类型]提案与规格",
-再 done --ack --set CHANGE_NAME=<change目录名>(校验本 change 的 proposal/delta spec/.comet.yaml 存在)。
+再 done --set CHANGE_NAME=<change目录名>(校验本 change 的 proposal/delta spec/.comet.yaml 存在)。
+需求缺口已经在本步骤逐项让用户裁决，产物齐全后无需再索要一次“确认本阶段完成”。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:open}}

@@ -31,6 +31,12 @@
         "tweak",
         "review"
       ],
+      "choice_answers": {
+        "full": ["完整开发"],
+        "hotfix": ["已定位问题修复"],
+        "tweak": ["局部修改"],
+        "review": ["处理评审意见"]
+      },
       "next": "branch_create"
     },
     "branch_create": {
@@ -50,7 +56,6 @@
     },
     "rf_triage": {
       "title": "处理评审意见 — 意见裁决",
-      "user_ack": true,
       "evidence": [
         {
           "type": "glob",
@@ -82,7 +87,6 @@
     "rf_fix": {
       "title": "处理评审意见 — 修改代码",
       "allow_source_edit": true,
-      "user_ack": true,
       "evidence": [
         {
           "type": "review_fix_committed"
@@ -142,6 +146,10 @@
         "yes",
         "no"
       ],
+      "choice_answers": {
+        "yes": ["做需求质询"],
+        "no": ["跳过需求质询"]
+      },
       "next": {
         "yes": "grill",
         "no": "open"
@@ -149,7 +157,6 @@
     },
     "grill": {
       "title": "需求澄清(逐题拍板)",
-      "user_ack": true,
       "evidence": [
         {
           "type": "glob",
@@ -247,6 +254,10 @@
         "yes",
         "no"
       ],
+      "choice_answers": {
+        "yes": ["生成 STORY"],
+        "no": ["不生成 STORY"]
+      },
       "next": {
         "yes": "story",
         "no": "build"
@@ -291,6 +302,7 @@
     "hf_open": {
       "title": "已定位问题修复 — 确认修改范围",
       "user_ack": true,
+      "confirmation_answers": ["确认范围并继续"],
       "evidence": [
         {
           "type": "glob",
@@ -307,6 +319,7 @@
     "tw_open": {
       "title": "局部修改 — 确认修改范围",
       "user_ack": true,
+      "confirmation_answers": ["确认范围并继续"],
       "evidence": [
         {
           "type": "glob",
@@ -401,8 +414,7 @@
           ]
         }
       ],
-      "next": "verify_ponytail",
-      "user_ack": true
+      "next": "verify_ponytail"
     },
     "verify_ponytail": {
       "title": "验证 1/4 — 代码精简(先删)",
@@ -479,6 +491,7 @@
     "archive_confirm": {
       "title": "规格定稿确认(不可逆)",
       "user_ack": true,
+      "confirmation_answers": ["确认定稿"],
       "evidence": [
         {
           "type": "agent_ran",

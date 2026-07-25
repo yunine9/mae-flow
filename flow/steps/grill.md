@@ -31,5 +31,7 @@ clarifications 文档尾部)——那是 comet-design 阶段方案讨论的领�
 (一句一测,是后面 delta spec Scenario 和 UT 验收对照的原材料;写不成 WHEN/SHALL 的答案多半没问透,回炉再问)。
 收敛:题尽(含衍生题)/ 用户说"其余按推荐答案"(落盘标注未经确认)/ 超15题→告知规模由用户选(用户要继续就继续,不设硬上限)。
 落盘:增量写 docs/clarifications-{单号}.md(Phase 1 后移入 change 目录),该文件是 comet-open 输入。
-结束展示摘要,等用户确认后 git add docs/clarifications-{单号}.md && git commit -m "[单号][类型]需求澄清"
-(**精确路径提交,禁止 git add docs/ 或 -A**——工作表和勘察笔记在 .mae-flow-work/ 过程区,天然不入库),再 done --ack。
+题目全部闭环后展示摘要，直接 git add docs/clarifications-{单号}.md &&
+git commit -m "[单号][类型]需求澄清"
+(**精确路径提交,禁止 git add docs/ 或 -A**——工作表和勘察笔记在 .mae-flow-work/ 过程区,天然不入库),再 done。
+用户已经在逐题过程中完成决策，不要为“阶段结束”额外索要一次确认。

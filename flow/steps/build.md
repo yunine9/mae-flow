@@ -17,7 +17,7 @@
 开工自查(计划评审通过后、写第一行码前,自己过一遍不问用户):tasks.md 逐项能指到 design/delta spec 的出处吗?
 三者有矛盾或遗漏 → 走上面的回流通道,**不带病开工**——现在对齐五分钟,verify 阶段返工半天。
 executing-plans 的**批次检查点不等用户**:每批完成展示简报后直接继续
-(build 结束有 mae-flow 统一确认点,后面还有四道 verify,中途碎片化等待没有价值);
+(build 结束由任务、提交和编译证据自动判断,后面还有四道 verify,中途碎片化等待没有价值);
 仅遇 CRITICAL 问题/编译测试失败/发现需偏离计划时才停下等用户。
 每批 commit 后是**安全的 /clear 点**:会话已明显冗长时主动向用户提议"/clear 后说继续";
 批次交接必须**盘上自足**——本批的结论/偏离/踩坑写进 tasks.md 对应任务的缩进备注行,
@@ -61,8 +61,8 @@ comet 提示工作流升级条件(hotfix→full)时,停手展示原因,等用户
 全部完成、任务全勾选且最后一轮 compile-agent 已 OK 后执行
 `python "{MAEFLOW_PATH}" capability comet-state -- transition "{CHANGE_NAME}" build-complete`。
 Mae-Flow 已经用任务清单、提交和编译令牌校验过本阶段，不再让底层 guard 重跑一遍长编译。
-确认 `.comet.yaml phase` 已为 `verify`，展示任务状态与产物摘要，结束回复等用户确认。
-done --ack "用户原话"(同时自动校验 tasks 全勾选 + 最新 commit 带单号)。
+确认 `.comet.yaml phase` 已为 `verify`，展示任务状态与产物摘要后直接 done。
+状态机会自动校验 tasks 全勾选、最新 commit 带单号和编译令牌，不再让用户为“代码已经写完”签字。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:build}}

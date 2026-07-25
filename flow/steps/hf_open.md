@@ -6,8 +6,8 @@
 1. `python "{MAEFLOW_PATH}" capability comet-state -- init "<英文短名>" hotfix`
 2. `python "{MAEFLOW_PATH}" capability comet-guard -- "<英文短名>" open --apply`
 
-展示提案摘要(问题定位+修复思路)并等用户确认；确认后提交产物，
-再 done --ack --set CHANGE_NAME=<change目录名>。
+展示提案摘要(问题定位+修复思路)，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮。
+用户点选确认后提交产物，再 done --set CHANGE_NAME=<change目录名>；不再要求输入确认句。
 若触发升级条件(3+ 文件/架构变更/DB schema/新 public API)，停手展示原因并等用户确认；
 确认升级后用内嵌 state 命令正规更新 workflow，再进入 design，禁止手写状态。
 

@@ -71,7 +71,11 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 
 ### 确认点预算（人工停顿的取舍原则）
 
-保留有价值的人工关卡：配置确认、工作流选择、grill 逐题、**规格呈审（open，ASKUSER 令牌硬校验：AI 推断/拿不准的条目逐条呈用户拍板，无脑回车机器上过不去——spec 是唯一合同，2026-07-21 治"无脑回车赖工作流"）**、产物确认（design/story）、**计划评审（plan-ready）**、build 终点 ack、REMAINING 裁决（修/正式豁免二选一）、归档确认（不可逆，ASKUSER 令牌硬校验）。
+人工停顿必须有明确决策价值，不能拿来证明“某阶段已经完成”。常规流程只保留：完整配置一次确认、
+工作流选择、是否质询、grill/规格中真正未决的问题、是否生成 STORY、hotfix/tweak 修改范围、不可逆定稿。
+设计、编码、编译、CodeCheck、UT、评审修复和推送是否完成全部由文件、提交、任务卡和执行令牌判断。
+REMAINING 豁免、UT 判断源码缺陷、承担风险、强制回流属于异常高影响决策，继续使用强 ACK。
+普通选择点一次 AskUserQuestion 按钮即可推进，禁止再索要一条“确认××”。
 消灭无价值的碎片等待：build 四项选择（固化）、executing-plans 批次检查点（简报后直行）、TDD 说教（标准回应）、comet 分支/commit 建议（拒绝话术前置）。
 
 ## 二、目录结构
@@ -112,7 +116,8 @@ skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 终态后 `init` 先把本单摘要（耗时/goto/摩擦统计）追加进 `.mae-flow-history.jsonl`
 （gitignored + gate 防篡改；`report --all` 聚合展示，团队度量数据出口），再自动备份为 `.last` 开新档；非终态 `init` 拒绝。
 仓根可提交 `.mae-flow-defaults.json`（团队预设：编译方式/UT生成方式/UT运行命令等恒定项），
-require_sets 步骤的 `current` 会展示预填块；它只是展示层预填，`--set` 逐项确认的硬约束不变。
+require_sets 步骤的 `current` 会展示预填块；它只是候选值，配置阶段统一放进完整确认单一次确认，
+不再逐项要求用户签字。
 **过程区 `.mae-flow-work/`**（gitignored，2026-07-21 治"MR 里 md 泛滥"+STORY 误提交实战）：过程性产物的家——
 grill-prep 工作表、survey 代码勘察笔记、不入库 STORY——物理上不可能被卷进提交。
 **提交白名单**（交付物才 commit）：openspec 全套、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
@@ -142,8 +147,9 @@ flow.json 步骤字段语义：
 |---|---|
 | `next` | 字符串=直连；dict=按 `choice_key` 的选择分流 |
 | `next_by` | 按**历史**选择分流（如 branch_create 按之前 workflow_select 的选择） |
-| `choice_key` / `choices` | 本步需 `done --choice <值>`，存入 st.choices |
-| `user_ack` | 本步必须 `done --ack "用户原话"`；默认与当前步骤捕获到的普通消息或结构化选项精确匹配，局部短词、否定句和询问句均不算确认 |
+| `choice_key` / `choices` / `choice_answers` | 本步需 `done --choice <值>`；按钮文案通过 `choice_answers` 与 choice 对账，防 Agent 把用户点的 A 提交成 B |
+| `user_ack` | 本步存在真实用户决策。正常由 AskUserQuestion 按钮完成，`done` 自动读取选择；宿主不回传按钮结果时才退回一次纯文本选择。它不能用于编译完成、阶段结束等机器事实 |
+| `confirmation_answers` | 无 choice 的确认步骤只接受这里列出的最终按钮文案，避免把本步骤早先一句“可以”误当成范围或定稿确认 |
 | `require_sets` | done 前必须 `--set` 齐的配置键；含"基线分支"时自动派生分支名 |
 | `evidence` | 证据数组，全部通过才推进（见 3.2） |
 | `allow_source_edit` / `allow_specs_write` | 本步的写权限，gate 据此拦截 |
@@ -357,7 +363,10 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 
 - **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
-- **ack 验真按步骤绑定**（done / goto / unlock / 豁免 / CodeCheck 人工恢复共用）：只接受当前步骤进入后捕获到的用户原话；令牌与用户消息都记录 step，不能跨关复用。若公司 harness 没回传 AskUserQuestion 的选项正文，要求用户用普通消息重复确认一次。这里选择“显式多确认一次”而不是 fail-open，因为这些命令会改变流程或放宽约束。
+- **确认按风险分层**：普通流程选择读取当前步骤 AskUserQuestion 的按钮结果，`done` 不再要求重复
+  `--ack`；若宿主只给 ASKUSER 令牌而不回传选项正文，允许信任本步真实交互和 Agent 提交的合法 choice，
+  避免逼用户复读。goto / unlock / 豁免 / CodeCheck 人工恢复 / accept-risk 会改变流程或放宽约束，
+  仍只接受当前步骤捕获到的用户原话，不能跨关复用。
 - **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow exit`：
   用户事件授权、现场快照、项目标记和 Comet Hook 兼容一次完成，代码不回滚；Hook 故障时使用真实 TTY
   `exit --interactive`。禁止重新引入“手删状态文件”的假逃生口，也禁止让 exit 再依赖普通 ack。

@@ -10,7 +10,8 @@
 用法:
   mae-flow.py init                       在当前项目初始化流程
   mae-flow.py current                    打印当前步骤的执行指令
-  mae-flow.py done [--ack 文本] [--set k=v ...] [--choice 值]
+  mae-flow.py done [--set k=v ...] [--choice 值]
+                                         普通按钮选择自动验真；--ack 仅用于高风险裁决
                                          声明完成,校验证据后推进并打印下一步
   mae-flow.py skip --reason 文本         跳过当前步(仅 skippable 步)
   mae-flow.py status [--inject]          查看状态;--inject 输出单行注入用摘要
@@ -1187,6 +1188,19 @@ def _ack_candidates(text):
     return [re.sub(r"\s+", "", v) for v in out if re.sub(r"\s+", "", v)]
 
 
+def _trusted_answer_candidates(text):
+    """Return actual answer values, excluding question/option metadata."""
+    candidates = _ack_candidates(text)
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return candidates
+    if isinstance(parsed, str):
+        return [re.sub(r"\s+", "", parsed)] if parsed.strip() else []
+    raw = re.sub(r"\s+", "", text or "")
+    return [value for value in candidates if value != raw]
+
+
 def _current_ack_messages(st):
     try:
         msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
@@ -1199,6 +1213,102 @@ def _current_ack_messages(st):
         if item.get("at", "") >= entered
         and (not item.get("step") or item.get("step") == sid)
     ]
+
+
+def _fresh_askuser(st):
+    ok, _ = ev_agent_ran({"agent": "ASKUSER"}, st)
+    return ok
+
+
+def _is_positive_confirmation(value):
+    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
+    compact = re.sub(r"[（(]推荐[）)]", "", compact)
+    if not compact or re.search(
+            r"不确认|不同意|不是|不要|不能|没有|没法|拒绝|暂不|取消|"
+            r"需要修改|需要调整|先别|等等|不对|有误|有问题|但是|不过|"
+            r"什么意思|怎么|是否|能否|为什么|[?？]",
+            compact, re.I):
+        return False
+    return (
+        compact.lower() in {
+            "确认", "确认并继续", "确认范围并继续", "确认定稿",
+            "同意", "可以", "没问题", "继续", "按此执行", "以上正确",
+            "无异议", "yes", "y", "ok",
+        }
+        or bool(re.match(
+            r"^(?:确认|同意|可以|没问题|继续|按此|无异议)", compact, re.I))
+    )
+
+
+def _implicit_ack_verified(step, st):
+    """Use a fresh button/plain-text answer directly; no second typed ACK."""
+    expected = {
+        re.sub(r"[\s，。；;：:、!！]+", "", str(value))
+        for value in step.get("confirmation_answers", [])
+        if str(value).strip()
+    }
+    for item in reversed(_current_ack_messages(st)):
+        for candidate in reversed(_trusted_answer_candidates(item.get("text", ""))):
+            normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
+            normalized = re.sub(r"[（(]推荐[）)]", "", normalized)
+            if expected and normalized in expected:
+                _ack_failure(st, success=True)
+                return True, ""
+            if _is_positive_confirmation(candidate):
+                if expected:
+                    continue
+                _ack_failure(st, success=True)
+                return True, ""
+    wanted = " / ".join(step.get("confirmation_answers", []))
+    why = (
+        "尚未捕获到本步骤的%s选择。正常情况下直接使用 AskUserQuestion 让用户点选即可，"
+        "done 会自动读取结果，不要再要求用户补输“确认××”。"
+        "只有宿主确实没有回传按钮结果时，才让用户发送一次页面上的确认选项。"
+    ) % (("「" + wanted + "」") if wanted else "肯定")
+    count = _ack_failure(st, why)
+    return False, why + _ack_retry_guidance(count)
+
+
+def _choice_verified(step, st, choice):
+    """Bind --choice to the answer when readable; trust a fresh UI token as fallback."""
+    alias_rows = []
+    for key, values in (step.get("choice_answers") or {}).items():
+        for value in [key] + list(values or []):
+            normalized = re.sub(r"[\s，。；;：:、!！]+", "", str(value))
+            normalized = re.sub(r"[（(]推荐[）)]", "", normalized)
+            if normalized:
+                alias_rows.append((key, normalized.lower()))
+
+    readable = []
+    for item in _current_ack_messages(st):
+        readable.extend(_trusted_answer_candidates(item.get("text", "")))
+    for candidate in reversed(readable):
+        normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
+        normalized = re.sub(r"[（(]推荐[）)]", "", normalized).lower()
+        matches = [(key, alias) for key, alias in alias_rows if alias in normalized]
+        if not matches:
+            continue
+        longest = max(len(alias) for _, alias in matches)
+        keys = {key for key, alias in matches if len(alias) == longest}
+        if len(keys) == 1:
+            selected = next(iter(keys))
+            if selected == choice:
+                _ack_failure(st, success=True)
+                return True, ""
+            return False, (
+                "用户点选的是「%s」，但 Agent 准备提交 --choice %s。"
+                "请按按钮真实结果执行，禁止替用户改选。" % (candidate, choice)
+            )
+
+    if _fresh_askuser(st):
+        # Some CodeAgent builds emit the interaction token but omit the selected label.
+        # The UI interaction is still stronger evidence than forcing the user to type it again.
+        _ack_failure(st, success=True)
+        return True, ""
+    return False, (
+        "没有检测到本步骤的真实选项回答。请用 AskUserQuestion 展示固定选项；"
+        "用户点选后直接执行 done --choice %s，不需要再输入确认句。" % choice
+    )
 
 
 def _ack_retry_guidance(count):
@@ -1284,8 +1394,10 @@ def _config_ack_verified(st, ack, config_sha, review_id):
     normalized_ack = re.sub(r"\s+", "", ack or "")
     matched = False
     for item in messages:
-        for candidate in _ack_candidates(item.get("text", "")):
-            if normalized_ack == candidate and _is_full_config_confirmation(candidate):
+        for candidate in _trusted_answer_candidates(item.get("text", "")):
+            same_answer = (
+                normalized_ack == candidate if normalized_ack else True)
+            if same_answer and _is_full_config_confirmation(candidate):
                 matched = True
                 break
         if matched:
@@ -1294,7 +1406,7 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         _ack_failure(st, success=True)
         return True, ""
 
-    if not _is_full_config_confirmation(normalized_ack):
+    if normalized_ack and not _is_full_config_confirmation(normalized_ack):
         why = (
             "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
             "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"
@@ -1307,8 +1419,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         )
     else:
         why = (
-            "--ack 与当前配置确认单后的真实用户答案不一致。执行 messages 查看“提取答案”，"
-            "不要拼接或改写多个问题的答案。"
+            "当前配置确认单之后没有肯定的完整配置选择。用户在 AskUserQuestion 点选后可直接 done，"
+            "不需要再手动输入或由 Agent 拼接 --ack。"
         )
     count = _ack_failure(st, why)
     return False, why + _ack_retry_guidance(count)
@@ -1527,8 +1639,9 @@ def print_current(flow, st):
         print("⚠ 本步先收集配置值，再由 config-review 生成完整确认单。"
               "只有确认单后的最终回答能推进；基线分支、单号等局部回答不能代替整单确认。")
     elif step.get("user_ack") and not _moonlight(st):
-        print("⚠ 本步需要用户确认:优先用 AskUserQuestion 等结构化提问工具呈现选项拿用户选择(选完同轮继续);"
-              "该工具不可用才结束回复纯文本等待。done 必须携带 --ack \"用户选择/回复原文\",拿到前禁止推进。")
+        print("⚠ 本步有真实用户决策:用 AskUserQuestion 呈现固定选项，用户点选后同轮直接 done。"
+              "按钮结果由 harness 自动读取，不要再要求用户手动输入“确认××”；"
+              "只有宿主确实不回传按钮结果时才退回一次纯文本选择。")
     elif step.get("user_ack") and _moonlight(st):
         print("🌙 本步原本需要用户确认，现由月光宝盒启动授权代替；禁止调用 AskUserQuestion。"
               "按最保守且不扩大需求的选项继续，并把决定写入阶段产物。")
@@ -1573,7 +1686,7 @@ def print_current(flow, st):
         if show:
             suffix = ("月光模式下须结合用户原话与仓库事实自行核验后 --set，不得询问或编造"
                       if _moonlight(st) else
-                      "预填值;仍须逐项经用户确认后 --set,基线分支/需求文档必须单独确认")
+                      "候选值;缺项时只询问取值，最后随完整配置确认单一次确认")
             print(f"──── 仓库预设({DEFAULTS_PATH},{suffix}) ────")
             for k, v in show.items():
                 print(f"  {k} = {v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)}")
@@ -1583,8 +1696,7 @@ def print_current(flow, st):
         if review.get("sha256"):
             _print_config_review(review, step)
             print("展示上述确认单后只问一次最终确认；不要再拼接前面的单项回答。")
-            print('python "%s" done --ack "%s"' % (
-                os.path.abspath(sys.argv[0]), CONFIG_CONFIRM_ACK))
+            print('python "%s" done' % os.path.abspath(sys.argv[0]))
         else:
             sets = " --set ".join(
                 key + "=<值>" for key in step.get("require_sets", []))
@@ -1597,8 +1709,6 @@ def print_current(flow, st):
         extra += f" --choice <{'|'.join(step['choices'])}>"
     if step.get("require_sets"):
         extra += " --set " + " --set ".join(k + "=<值>" for k in step["require_sets"])
-    if step.get("user_ack") and not _moonlight(st):
-        extra += " --ack \"<用户原话>\""
     # python(非 python3:Windows 无此命令);abspath(非 relpath:跨盘符 relpath 抛 ValueError)
     print(f"python \"{os.path.abspath(sys.argv[0])}\" done{extra}")
     if step.get("skippable"):
@@ -2570,8 +2680,7 @@ def cmd_config_review(flow, st, args):
     print("  - 需要修改")
     print("不要把前面多个单项回答拼成 ack，也不要再次调用 config-review。")
     print("用户选择确认后执行：")
-    print('python "%s" done --ack "%s"' % (
-        os.path.abspath(sys.argv[0]), CONFIG_CONFIRM_ACK))
+    print('python "%s" done' % os.path.abspath(sys.argv[0]))
     print("若 AskUserQuestion 的选择结果未被宿主回传，让用户直接发送同一句普通消息后重试；"
           "无需退出或重新初始化。")
 
@@ -2611,25 +2720,27 @@ def cmd_done(flow, st, args):
                     pending_config, current_requirement_sha) != review.get("sha256"):
                 die("配置或需求文档在呈现后发生变化，旧确认单已自动失效。"
                     "重新执行 config-review 即可恢复，无需退出流程。", 2)
-        if not args.ack:
-            die(
-                '等待用户确认完整配置。AskUserQuestion 只问“上述完整配置是否正确？”，'
-                '确认后执行 done --ack "%s"。' % CONFIG_CONFIRM_ACK, 2)
         ok, why = _config_ack_verified(
-            st, args.ack, review.get("sha256"), review.get("id", ""))
+            st, args.ack or "", review.get("sha256"), review.get("id", ""))
         if not ok:
             die(why, 2)
     else:
         pending_config = _validated_pending_config(step, st, args.set or [])
-        if step.get("user_ack") and not _moonlight(st) and not args.ack:
-            die("本步需要用户确认:必须携带 --ack \"用户确认原话\"。没有拿到用户回复就调用 done = 违规。", 2)
-        if step.get("user_ack") and not _moonlight(st) and args.ack:
-            ok, why = _ack_verified(st, args.ack)
-            if not ok:
-                die(why, 2)
     if step.get("choice_key"):
         if args.choice not in step.get("choices", []):
             die(f"--choice 必须为: {'|'.join(step['choices'])}", 2)
+    if (sid != "config_confirm" and step.get("user_ack")
+            and not _moonlight(st)):
+        if step.get("choice_key"):
+            ok, why = _choice_verified(step, st, args.choice)
+        elif step.get("confirmation_answers"):
+            ok, why = _implicit_ack_verified(step, st)
+        elif args.ack:
+            ok, why = _ack_verified(st, args.ack)
+        else:
+            ok, why = _implicit_ack_verified(step, st)
+        if not ok:
+            die(why, 2)
     # 到这里配置、文档、用户确认和 choice 已全部通过，才提交候选值。
     st["config"] = pending_config
     if sid == "config_confirm":

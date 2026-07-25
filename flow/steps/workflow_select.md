@@ -6,5 +6,6 @@
 - 处理评审意见(review):**仅限已交付单**处理评审/走读/门禁意见(经 /mae-flow review-fix 或用户明说
   "处理评审意见"发起;全新需求禁止选,它跳过设计与定稿、不碰规格)
 (工具不可用才展示后结束回复等文本回答。)
-拿到选择后 done --choice full|hotfix|tweak|review --ack "用户选择原文"。
+拿到按钮选择后直接 done --choice full|hotfix|tweak|review，harness 会核对本步骤真实发生过用户选择；
+不要再让用户补输确认句。
 禁止自主选择;用户内联贴的需求描述再详细也只是输入,不构成跳过流程的理由。

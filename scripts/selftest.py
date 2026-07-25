@@ -91,6 +91,13 @@ if flow:
         got.append(cur)
         cur = steps.get(cur, {}).get("next")
     check("review-fix 质量链分阶段", got == review_chain, str(got))
+    actual_ack_steps = {
+        sid for sid, step in steps.items() if step.get("user_ack")}
+    check("人工确认只保留真实选择和不可逆决策",
+          actual_ack_steps == {
+              "config_confirm", "workflow_select", "grill_ask",
+              "story_ask", "hf_open", "tw_open", "archive_confirm",
+          }, str(sorted(actual_ack_steps)))
     check("review 编译只接受 OK",
           steps.get("rf_compile", {}).get("evidence", [{}])[0].get("statuses") == ["OK"])
     check("review UT 只接受 PASS",
@@ -336,12 +343,69 @@ if flow:
             mf.cmd_done(
                 flow, reviewed,
                 types.SimpleNamespace(
-                    ack=mf.CONFIG_CONFIRM_ACK, choice=None, set=None))
+                    ack=None, choice=None, set=None))
             completed_config = mf.load_state()
-            check("多问题结构化回答以最终确认绑定配置指纹后可推进",
+            check("配置按钮结果绑定指纹后可直接推进且无需再输入 ACK",
                   completed_config.get("current") == "workflow_select"
                   and completed_config.get("config", {}).get("单号") == "REQ1"
                   and not completed_config.get("config_review"))
+
+            decision_at = completed_config.get("history", [])[-1].get("at", now)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps(
+                        {"answers": {"交付方式": "完整开发"}},
+                        ensure_ascii=False),
+                    "step": "workflow_select", "at": decision_at,
+                }], f, ensure_ascii=False)
+            with open(mf.STATE_PATH + ".tokens", "w", encoding="utf-8") as f:
+                json.dump({"ASKUSER": {
+                    "at": decision_at, "step": "workflow_select",
+                    "status": "CONFIRMED",
+                }}, f, ensure_ascii=False)
+            wrong_choice_blocked = False
+            try:
+                mf.cmd_done(
+                    flow, completed_config,
+                    types.SimpleNamespace(
+                        ack=None, choice="hotfix", set=None))
+            except SystemExit as exc:
+                wrong_choice_blocked = exc.code == 2
+            check("按钮选择与 Agent 提交的 choice 不一致时仍会拒绝",
+                  wrong_choice_blocked
+                  and mf.load_state().get("current") == "workflow_select")
+            mf.cmd_done(
+                flow, mf.load_state(),
+                types.SimpleNamespace(
+                    ack=None, choice="full", set=None))
+            check("普通流程选择点一次按钮即可推进",
+                  mf.load_state().get("current") == "branch_create"
+                  and mf.load_state().get("choices", {}).get("workflow") == "full")
+
+            scope_state = {
+                "current": "hf_open", "config": {}, "choices": {},
+                "history": [], "started": now,
+            }
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps(
+                        {"answers": {"英文短名": "可以"}},
+                        ensure_ascii=False),
+                    "step": "hf_open", "at": now,
+                }], f, ensure_ascii=False)
+            early_ok, _ = mf._implicit_ack_verified(
+                flow["steps"]["hf_open"], scope_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps(
+                        {"answers": {"范围确认": "确认范围并继续"}},
+                        ensure_ascii=False),
+                    "step": "hf_open", "at": now,
+                }], f, ensure_ascii=False)
+            final_ok, _ = mf._implicit_ack_verified(
+                flow["steps"]["hf_open"], scope_state)
+            check("范围确认只认最终固定按钮而不误用前面的“可以”",
+                  not early_ok and final_ok)
         finally:
             os.chdir(old_cwd)
     # Plugin-owned runtime is prepared in-process: no project Skill directory,

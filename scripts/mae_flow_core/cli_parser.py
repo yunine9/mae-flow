@@ -18,14 +18,15 @@ class MFParser(argparse.ArgumentParser):
         print(
             "正确用法(高频三条,直接复制):\n"
             '  python "%s" current\n'
-            '  python "%s" done --ack "用户原话" [--choice 值] [--set 键=值]\n'
+            '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|template|"
             "agent-task|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "codecheck-scan|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
-            "done 的 --set 可重复,值含空格要加引号。" % (me, me, me),
+            "done 的 --set 可重复,值含空格要加引号；"
+            "--ack 仅用于报错明确要求的高风险裁决。" % (me, me, me),
             file=sys.stderr)
         sys.exit(2)
 

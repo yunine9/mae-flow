@@ -5,7 +5,8 @@
 1. `python "{MAEFLOW_PATH}" capability comet-state -- init "<英文短名>" tweak`
 2. `python "{MAEFLOW_PATH}" capability comet-guard -- "<英文短名>" open --apply`
 
-展示改动范围，等用户确认后 done --ack --set CHANGE_NAME=<change目录名>。
+展示改动范围，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮；
+用户点选确认后 done --set CHANGE_NAME=<change目录名>，不再要求输入确认句。
 若触发升级条件(5+ 文件/多模块协调/需新 capability/需 delta spec)，停手展示原因并等用户确认；
 确认升级后用内嵌 state 命令正规更新 workflow，再 goto design --force。
 

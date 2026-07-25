@@ -78,7 +78,9 @@ class ProjectStateLock:
 
 
 def read_json(path):
-    with open(path, encoding="utf-8") as stream:
+    # utf-8-sig:团队手写并提交的 JSON(如 .mae-flow-defaults.json)常被
+    # Windows 编辑器存成带 BOM 的 UTF-8;对无 BOM 文件无害。
+    with open(path, encoding="utf-8-sig") as stream:
         return json.load(stream)
 
 
@@ -89,6 +91,33 @@ def safe_read_json(path):
         return read_json(path), None
     except Exception as exc:
         return None, "%s: %s" % (type(exc).__name__, exc)
+
+
+def _replace_with_retry(src, dst, attempts=6, base_delay=0.05):
+    """Windows 杀软/索引器会短暂锁住目标文件,os.replace 抛 PermissionError。
+    指数退避重试(总计 ~1.5s)后仍失败才向上抛;丢写比多等一秒昂贵得多。"""
+    for i in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(base_delay * (2 ** i))
+
+
+def remove_with_retry(path, attempts=6, base_delay=0.05):
+    """删除同样会撞杀软的短锁窗口;不存在视为已完成。"""
+    for i in range(attempts):
+        try:
+            os.remove(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(base_delay * (2 ** i))
 
 
 def atomic_write_json(path, data):
@@ -108,7 +137,7 @@ def atomic_write_text(path, text):
                 os.fsync(stream.fileno())
             except OSError:
                 pass
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     finally:
         try:
             if os.path.exists(tmp):
@@ -182,7 +211,7 @@ def _quarantine_corrupt(path):
     target, suffix = base, 2
     while os.path.exists(target):
         target, suffix = base + "." + str(suffix), suffix + 1
-    os.replace(path, target)
+    _replace_with_retry(path, target)
     return target
 
 

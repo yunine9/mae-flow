@@ -60,10 +60,17 @@ STDIN_SECS = 3
 SUBPROC_SECS = 8
 _T0 = time.time()
 _INPUT_ENCODING = ""
+_STDIN_THREAD = None   # stdin 读线程句柄:超时未归还时,收尾必须绕过解释器 finalization
 
 
 def _log(msg):
     try:
+        try:
+            # 无上限追加会按月涨到几十 MB;超 5MB 滚动一份 .old(单份保留,足够取证)。
+            if os.path.getsize(LOG) > 5 * 1024 * 1024:
+                os.replace(LOG, LOG + ".old")
+        except OSError:
+            pass
         with open(LOG, "a", encoding="utf-8") as f:
             f.write("%s pid=%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), os.getpid(), msg))
     except Exception:
@@ -80,7 +87,14 @@ def _arm_watchdog():
 
 
 def maeflow(*args):
-    """以当前解释器调 mae-flow,stderr 透传,返回退出码。超时视为放行。"""
+    """以当前解释器调 mae-flow,stderr 透传,返回退出码。超时视为放行。
+
+    退出码白名单:只有 0(放行)/2(门禁拦截)是 gate 协议语义。脚本缺失(升级半途/
+    杀软隔离,python 打不开文件恰好也退 2)或自身崩溃(rc=1 traceback)属于插件故障,
+    必须 fail-open——否则在途流程里每次 Edit/Bash 都被拦,用户连自救编辑都做不了。"""
+    if not os.path.isfile(MAEFLOW):
+        _log("maeflow missing at %s — fail-open" % MAEFLOW)
+        return 0
     try:
         r = subprocess.run([sys.executable, MAEFLOW, *args],
                            capture_output=True, text=True,
@@ -93,6 +107,9 @@ def maeflow(*args):
         print(r.stdout, end="")
     if r.stderr:
         print(r.stderr, end="", file=sys.stderr)
+    if r.returncode not in (0, 2):
+        _log("maeflow %s rc=%s — 非门禁语义退出码,按 fail-open 放行" % (args[:2], r.returncode))
+        return 0
     return r.returncode
 
 
@@ -151,9 +168,11 @@ def read_input():
             box["n"] = -1
             box["error"] = str(exc)
 
+    global _STDIN_THREAD
     th = threading.Thread(target=_r, daemon=True)
     th.start()
     th.join(STDIN_SECS)
+    _STDIN_THREAD = th
     if "d" not in box:
         _log("stdin read timeout(%ss) — 按空输入处理" % STDIN_SECS)
         return {}
@@ -161,6 +180,23 @@ def read_input():
         _log("stdin empty/unparsed(n=%s,error=%s) — 按空输入处理"
              % (box.get("n"), box.get("error", "-")))
     return box["d"]
+
+
+def _session_notice_due(tag, d, ev):
+    """DIRECT/CORRUPT 提示每会话注入一次即可:逐条消息重复注入只膨胀上下文、烧 token。
+    sessionstart 恒提示并盖标记;拿不到会话标识时退回旧行为(每条提示,宁噪勿哑)。"""
+    sid = str(d.get("session_id") or d.get("sessionId") or "")
+    if not sid:
+        return True
+    digest = hashlib.sha256(sid.encode("utf-8", errors="replace")).hexdigest()[:16]
+    marker = os.path.join(tempfile.gettempdir(), "mae-flow-note-%s-%s" % (tag, digest))
+    if ev != "sessionstart" and os.path.exists(marker):
+        return False
+    try:
+        open(marker, "w").close()
+    except OSError:
+        pass
+    return True
 
 
 def _chdir_root(d):
@@ -177,9 +213,49 @@ def _chdir_root(d):
         pass
 
 
+def _gate_agent_dispatch(ti):
+    """质量 agent 派发前验任务卡——拦截时机 = 错误发生时机。
+
+    卡缺失/过期若留到 SubagentStop/done 才发现,代价是整只 agent 上百轮白跑;
+    在派发这一刻拦下,损失只有一次工具调用。仅识别 compile/codecheck/UT 三类
+    (story/grill 无任务卡机制),识别不到或状态读不了一律放行(fail-open)。"""
+    try:
+        blob = " ".join(str(ti.get(k, "") or "") for k in
+                        ("subagent_type", "description", "prompt"))
+        kind = next((k for name, k in (("compile-agent", "COMPILE"),
+                                       ("codecheck-fix-agent", "CODECHECK"),
+                                       ("ut-generator-agent", "UT"))
+                     if name in blob), None)
+        if not kind:
+            return
+        st = json.load(open(STATE, encoding="utf-8"))
+        task = (st.get("agent_tasks", {}) or {}).get(kind) or {}
+        me = os.path.abspath(MAEFLOW)
+        if not task:
+            print("[mae-flow] 派发前拦截:%s 尚无本步任务卡。先执行 "
+                  "python \"%s\" agent-task %s 生成并签发任务卡,再按其输出话术派发。"
+                  "现在拦下只损失一次调用;跑完整只 agent 才被契约打回,重做要上百轮。"
+                  % (kind, me, kind.lower()), file=sys.stderr)
+            sys.exit(2)
+        head, cur = task.get("head", ""), _git_head()
+        if head and cur and head != cur:
+            print("[mae-flow] 派发前拦截:%s 任务卡签发于 HEAD %s,当前 HEAD %s——源码已变化,"
+                  "旧卡描述的不是现在的代码,跑完也拿不到令牌。先重新执行 "
+                  "python \"%s\" agent-task %s 再派发。"
+                  % (kind, head[:10], cur[:10], me, kind.lower()), file=sys.stderr)
+            sys.exit(2)
+    except SystemExit:
+        raise
+    except Exception as e:
+        _log("agent dispatch gate EXC(fail-open): %s" % e)
+
+
 def ev_pretooluse(d):
     tool = d.get("tool_name", "")
     ti = d.get("tool_input") or {}
+    if tool == "Task":
+        _gate_agent_dispatch(ti)
+        sys.exit(0)
     if tool == "AskUserQuestion":
         try:
             st = json.load(open(STATE, encoding="utf-8"))
@@ -377,10 +453,21 @@ def ev_subagentstop(d):
     matches = list(re.finditer(
         r"^\s*(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", last, re.M))
     m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", first_line)
+    reject_reason = ""
     if len(matches) > 1:
         kinds = {x.group(1) + "/" + x.group(2) for x in matches}
-        _record_rejection("SUBAGENT", "最终回复包含多个结果标记，无法判断真实结果: " + "、".join(sorted(kinds)))
-        m = None
+        if len(kinds) == 1:
+            # 重答/汇报场景常在正文引用同一结论(如先引格式说明再给结果)。
+            # 同名同值不构成歧义;为一个可判定的回复重跑整只编译/UT agent 才是浪费。
+            m = m or matches[-1]
+            _log("subagentstop: 多个相同结果标记(%s),判定无歧义,接受" % next(iter(kinds)))
+        else:
+            reject_reason = (
+                "最终回复包含互相矛盾的结果标记(%s)，无法判断本轮真实结论。"
+                "重新输出时整个回复只保留一行顶行的 XXX_RESULT: 标记(本轮真实结果)；"
+                "引用历史结论或格式说明时不要顶行书写标记。" % "、".join(sorted(kinds)))
+            _record_rejection("SUBAGENT", reject_reason)
+            m = None
     elif not m and len(matches) == 1:
         m = matches[0]
         _log("subagentstop: 契约标记不在第一行,兼容接受并继续验完整契约")
@@ -408,8 +495,9 @@ def ev_subagentstop(d):
         sys.exit(0)
     if retry:
         _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
-        _record_rejection("SUBAGENT", "重答后仍未找到唯一的 XXX_RESULT 结果标记。")
-        _log("subagentstop: 重答后仍无契约标记,放行防死循环(不发令牌,done 会拦;尸检已留档)")
+        _record_rejection("SUBAGENT", reject_reason
+                          or "重答后仍未找到唯一的 XXX_RESULT 结果标记。")
+        _log("subagentstop: 重答后仍无可判定契约标记,放行防死循环(不发令牌,done 会拦;尸检已留档)")
         sys.exit(0)
     # 无标记:判定是否我方契约 agent——扫 transcript 头部(含 agent 系统提示,必带 agent 名/契约字样),
     # 不依赖任务 prompt 措辞(主模型派"定稿"类子任务时不会写 agent 名——已实际踩过)
@@ -432,8 +520,12 @@ def ev_subagentstop(d):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
     clue = _autopsy(tp, asst)
-    print("[mae-flow] 子 agent 契约违规:最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"
-          "请按你的定义文件顶部「最终回复格式」重新输出完整结果;不确定时用失败/待确认类状态,禁止省略标记。\n"
+    # 打回话术必须与真实拒签原因一致:矛盾标记场景若仍说"第一行必须是标记",
+    # 弱模型会按错误指引改写(第一行明明就是标记)再死一遍,循环重跑昂贵 agent。
+    reason_text = reject_reason or (
+        "最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"
+        "请按你的定义文件顶部「最终回复格式」重新输出完整结果;不确定时用失败/待确认类状态,禁止省略标记。")
+    print("[mae-flow] 子 agent 契约违规:" + reason_text + "\n"
           "尸检线索(" + clue + ")——若死因是工具不可用/持续报错,按契约「带着情报死」条款以 FAIL/BLOCKED 收尾并写明详情;"
           "主 agent 重启新实例时必须把此线索转告它。",
           file=sys.stderr)
@@ -662,13 +754,17 @@ def _capture_direct_prompt(text):
 
 def _maybe_utrun(d):
     """UT 运行命令被真实调起 → UTRUN 事件令牌。当前仅观测(doctor 可见);
-    升级为 verify_ut 硬证据前,须公司机确认子 agent 的 Bash 也触发 PostToolUse。"""
+    升级为 verify_ut 硬证据前,须公司机确认子 agent 的 Bash 也触发 PostToolUse。
+    只在 UT 步骤检测(FIELD-TEST 0.2 待办):这是每条 Bash 都要付的 PostToolUse 开销,
+    其他步骤读状态+比对纯属浪费,令牌也只会在 UT 步骤被消费。"""
     try:
+        if not os.path.exists(STATE):
+            return
+        st = json.load(open(STATE, encoding="utf-8"))
+        if st.get("current") not in ("verify_ut", "rf_ut", "tw_ut"):
+            return
         cmd = re.sub(r"\s+", " ", ((d.get("tool_input") or {}).get("command", "") or ""))
-        ut = ""
-        if os.path.exists(STATE):
-            ut = (json.load(open(STATE, encoding="utf-8")).get("config", {}) or {}).get("UT运行命令", "")
-        ut = re.sub(r"\s+", " ", ut or "").strip()
+        ut = re.sub(r"\s+", " ", (st.get("config", {}) or {}).get("UT运行命令", "") or "").strip()
         if ut and ut in cmd:
             _record_agent_token("UTRUN", "EXECUTED")
     except Exception as e:
@@ -1213,10 +1309,14 @@ def _test_like(path):
     v = _state_config().get("测试路径", [])
     pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
     try:
-        v = json.load(open(".mae-flow-defaults.json", encoding="utf-8")).get("测试路径", [])
+        # utf-8-sig:团队手写 defaults 常带 BOM;strict 失败必须留痕,
+        # 否则「测试路径」静默失效会让 gate 口径变宽而无人知晓。
+        v = json.load(open(".mae-flow-defaults.json", encoding="utf-8-sig")).get("测试路径", [])
         pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
-    except Exception:
+    except FileNotFoundError:
         pass
+    except Exception as e:
+        _log("defaults 测试路径 解析失败(已忽略,请修复该 JSON): %s" % e)
     for pat in pats:
         try:
             if re.search(pat, path, re.I):
@@ -1490,7 +1590,7 @@ def ev_posttooluse(d):
     hit = None
     for pat, tf, label in ((r"docs/story/STORY-.*\.md$", "STORY-TEMPLATE.md", "STORY"),
                            (r"docs/chain/CHAIN-.*\.md$", "CHAIN-TEMPLATE.md", "CHAIN"),
-                           (r"(^|/)\.mae-flow-work/grill-prep-.*\.md$", "GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
+                           (r"(^|/)\.mae-flow-work/(?:\S+/)*grill-prep[^/]*\.md$", "GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
                            (r"docs/review/REVIEW-.*\.md$", "REVIEW-TEMPLATE.md", "REVIEW")):
         if re.search(pat, p, re.I):
             hit = (tf, label)
@@ -1547,8 +1647,36 @@ def ev_stop(d):
     )
     if safe:
         sys.exit(0)
+    # 反收工护栏必须是「无进展计数」而不是「链级一发」:Claude Code 的 stop_hook_active
+    # 在同一延续链里一直为 true,夜里没有用户消息复位它——旧写法第一次打回后,
+    # 后续任何一次自然收尾都被放行,整夜保护恰好等于一段续命(静默白夜)。
+    # 现在:状态 revision 有推进就继续拦(干活的 Agent 拦到安全停点为止);
+    # 连续 3 次零进展才 fail-open(真卡死的 Agent 不会被无限打回)。
+    revision = int(st.get("revision", 0) or 0)
+    guard_path = STATE + ".stop-guard"
+    guard = {}
+    try:
+        guard = json.load(open(guard_path, encoding="utf-8"))
+    except Exception:
+        guard = {}
     if d.get("stop_hook_active"):
-        _log("stop hook recursion guard: allow")
+        if int(guard.get("revision", -1) or -1) == revision:
+            blocks = int(guard.get("blocks", 0) or 0) + 1
+        else:
+            blocks = 1   # 上次打回后状态推进过:重新计数,继续拦
+        if blocks > 3:
+            _log("stop guard: revision=%s 连续 %s 次零进展,fail-open 放行(防死循环)"
+                 % (revision, blocks - 1))
+            sys.exit(0)
+    else:
+        blocks = 1
+    try:
+        atomic_write_json(guard_path, {
+            "revision": revision, "blocks": blocks,
+            "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    except Exception:
+        # 护栏自身写不进时退回旧行为(放行),不能让护栏故障卡死会话
+        _log("stop guard write failed — allow")
         sys.exit(0)
     print("[mae-flow] 月光宝盒仍在执行，当前步骤 %s，禁止提前结束回复或等待用户。"
           "继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，"
@@ -1575,7 +1703,7 @@ def main():
         action_active = runtime.mode == RuntimeMode.STANDALONE
         if runtime.mode == RuntimeMode.CORRUPT:
             _log("runtime corrupt: " + ";".join(runtime.errors))
-            if ev in ("userprompt", "sessionstart"):
+            if ev in ("userprompt", "sessionstart") and _session_notice_due("corrupt", d, ev):
                 if os.path.isfile(STATE):
                     print("[mae-flow] ⚠ 完整流程状态损坏，Hook 已按 fail-open 放行普通开发。"
                           "发送 `/mae-flow exit` 可保存坏现场并解除流程；不要手删状态。")
@@ -1603,8 +1731,9 @@ def main():
             if ev in ("userprompt", "sessionstart"):
                 if ev == "userprompt":
                     _capture_direct_prompt(d.get("prompt") or "")
-                print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
-                      "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
+                if _session_notice_due("direct", d, ev):
+                    print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
+                          "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
             _log("direct mode: bypass " + ev)
             rc = 0
         elif runtime.mode == RuntimeMode.INACTIVE and ev in (
@@ -1633,6 +1762,17 @@ def main():
         _log("EXC %s: %s" % (type(e).__name__, e))
         rc = 0   # fail-open:hook 自身异常不阻塞正常工作
     _log("end %s rc=%s %dms" % (ev, rc, int((time.time() - _T0) * 1000)))
+    if _STDIN_THREAD is not None and _STDIN_THREAD.is_alive():
+        # stdin 读线程仍阻塞在 BufferedReader 上并持有其锁:正常 sys.exit 的解释器
+        # 收尾去 flush/close 标准流会争锁失败,触发 "Fatal Python error" 并以 134 退出
+        # (逻辑 rc 被吞、stderr 喷 abort、看门狗此时已失效)。flush 后直接 os._exit,
+        # 保住真实退出码——这正是"宿主不关 stdin"兜底场景自身的兜底。
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(rc if isinstance(rc, int) else 0)
     sys.exit(rc)
 
 

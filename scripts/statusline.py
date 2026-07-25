@@ -7,7 +7,7 @@
 读 stdin 的会话 JSON(取 cwd),向上定位 .mae-flow.json 或退出标记。
 状态栏高频刷新:必须快——纯文件读,零子进程,任何异常都降级输出而不是报错。
 """
-import json, os, sys
+import json, os, sys, threading
 
 from mae_flow_core import RuntimeMode, find_project_root, resolve_runtime
 
@@ -16,11 +16,31 @@ try:
 except Exception:
     pass
 
+_STDIN_THREAD = None
+
+
+def _read_stdin(timeout=2.0):
+    """守护线程读 stdin,同 dispatch.py 的兜底:宿主不关管道时不能让状态栏挂死。"""
+    global _STDIN_THREAD
+    box = {}
+
+    def _r():
+        try:
+            stream = getattr(sys.stdin, "buffer", sys.stdin)
+            box["raw"] = stream.read()
+        except Exception:
+            box["raw"] = b""
+
+    th = threading.Thread(target=_r, daemon=True)
+    th.start()
+    th.join(timeout)
+    _STDIN_THREAD = th
+    return box.get("raw", b"")
+
 
 def main():
     try:
-        stream = getattr(sys.stdin, "buffer", sys.stdin)
-        raw = stream.read()
+        raw = _read_stdin()
         if isinstance(raw, bytes):
             text = None
             for enc in ("utf-8-sig", "gb18030"):
@@ -95,3 +115,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+    if _STDIN_THREAD is not None and _STDIN_THREAD.is_alive():
+        # 读线程仍持有 stdin 缓冲锁:正常解释器收尾会与其争锁触发 Fatal Python error。
+        # 输出已经打印完,直接跳过 finalization 干净退出。
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(0)

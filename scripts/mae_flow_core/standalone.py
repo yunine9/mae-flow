@@ -15,6 +15,7 @@ from .state_store import (
     StateConflictError,
     atomic_write_json,
     normalize_document,
+    remove_with_retry,
     safe_read_json,
     save_versioned_json,
     update_versioned_json,
@@ -92,7 +93,7 @@ def archive_action(action, outcome, note="", root=None):
         work = action_work_dir(final, project)
         os.makedirs(work, exist_ok=True)
         atomic_write_json(os.path.join(work, "action.json"), final)
-        os.remove(pointer)
+        remove_with_retry(pointer)
         if isinstance(action, dict):
             action.clear()
             action.update(copy.deepcopy(final))
@@ -117,5 +118,5 @@ def archive_corrupt_action(root=None):
         work = candidate
         os.makedirs(work, exist_ok=False)
         shutil.copy2(pointer, os.path.join(work, "standalone-action.json.bad"))
-        os.remove(pointer)
+        remove_with_retry(pointer)
         return work

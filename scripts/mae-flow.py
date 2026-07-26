@@ -2846,58 +2846,6 @@ def _append_history(st, outcome="completed"):
         print(f"[mae-flow] 历史账本写入失败(不影响流程): {e}", file=sys.stderr)
 
 
-# 可由仓库预设裁剪的环节(白名单——质量门禁步骤永不开放):
-# 用户话术 → (步骤 id, choice 步的代选分支 或 None=线性跳过)
-SKIPPABLE_STEPS = {
-    "grill_ask": ("需求质询", "no"),
-    "story_ask": ("STORY", "no"),
-    "verify_ponytail": ("代码精简", None),
-}
-SKIPPABLE_LABELS = sorted({label for label, _ in SKIPPABLE_STEPS.values()})
-
-
-def _configured_step_skips():
-    """仓库预设「跳过环节」(用户话术数组)。非法值可见地忽略,不静默。"""
-    data, _err = _defaults()
-    raw = (data or {}).get("跳过环节") or []
-    if not isinstance(raw, list):
-        return set()
-    valid, bad = set(), []
-    for item in raw:
-        label = str(item).strip()
-        if label in SKIPPABLE_LABELS:
-            valid.add(label)
-        else:
-            bad.append(label)
-    if bad:
-        print("[mae-flow] ⚠ .mae-flow-defaults.json「跳过环节」含不可裁剪值,"
-              "已忽略: %s;可裁剪环节仅限: %s(质量门禁不开放裁剪)"
-              % ("、".join(bad), "、".join(SKIPPABLE_LABELS)), file=sys.stderr)
-    return valid
-
-
-def _auto_skip_configured(flow, st, nxt):
-    """推进落点若是预设裁剪的可选环节,机器代跳并逐步留痕。"""
-    skips = _configured_step_skips()
-    if not skips:
-        return nxt
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    while nxt in SKIPPABLE_STEPS:
-        label, branch = SKIPPABLE_STEPS[nxt]
-        if label not in skips:
-            break
-        step = flow["steps"][nxt]
-        st["history"].append({"step": nxt, "result": "skipped-by-defaults",
-                              "note": "仓库预设跳过:" + label, "at": now})
-        if branch:
-            st.setdefault("choices", {})[step["choice_key"]] = branch
-            nxt = step["next"][branch]
-        else:
-            nxt = step.get("next")
-        print("[mae-flow] 环节「%s」按仓库预设跳过(已留痕)。" % label)
-    return nxt
-
-
 def advance(flow, st, sid, step, tag, note=""):
     # review 的增量边界由 harness 在进入裁决前冻结，后面任何模型都不能拿当前 HEAD 偷换基点。
     if sid == "branch_create" and st.get("choices", {}).get("workflow") == "review":
@@ -2930,7 +2878,6 @@ def advance(flow, st, sid, step, tag, note=""):
         ml["pushed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         ml["pushed_head"] = sh("git rev-parse --verify HEAD")
         nxt = "moonlight_review"
-    nxt = _auto_skip_configured(flow, st, nxt)
     st["current"] = nxt
     if nxt:
         st.setdefault("step_heads", {})[nxt] = sh("git rev-parse --verify HEAD")
@@ -3327,20 +3274,18 @@ def cmd_steps(flow, st, args):
     透明化诉求:用户选档/裁剪前先看得见全貌;质量门禁步骤不在可裁白名单。"""
     current = st.get("current") if st else None
     active_wf = (st.get("choices", {}) or {}).get("workflow") if st else None
-    skips = _configured_step_skips()
-    ask_steps = {"grill_ask": "需求质询", "story_ask": "STORY"}
+    ask_labels = {"grill_ask": "需求质询", "grill": "需求质询",
+                  "story_ask": "STORY", "story": "STORY"}
     for wf in ("full", "hotfix", "tweak", "review"):
         marker = "(本单)" if wf == active_wf else ""
         print("\n═══ %s(%s)%s ═══" % (WORKFLOW_LABELS[wf], wf, marker))
         for sid in _workflow_chain(flow, wf):
             step = flow["steps"][sid]
             tags = []
-            if sid in SKIPPABLE_STEPS:
-                label = SKIPPABLE_STEPS[sid][0]
-                tags.append("可裁:" + label
-                            + ("(预设已跳过)" if label in skips else ""))
+            if sid in ("grill_ask", "story_ask"):
+                tags.append("可选环节:%s(流程内询问决定)" % ask_labels[sid])
             elif sid in ("grill", "story"):
-                tags.append("随「%s」环节可选" % ask_steps.get(sid + "_ask", "?"))
+                tags.append("随「%s」询问可选" % ask_labels[sid])
             if step.get("user_ack"):
                 tags.append("用户确认")
             evidence = sorted({e.get("type", "?")
@@ -3350,11 +3295,8 @@ def cmd_steps(flow, st, args):
                 here, sid + " " + step.get("title", ""),
                 ("[" + "、".join(tags) + "] ") if tags else "",
                 ("证据:" + ",".join(evidence)) if evidence else "(无硬证据)"))
-    print("\n可裁剪环节(白名单,质量门禁不开放): %s" % "、".join(SKIPPABLE_LABELS))
-    print("裁剪方式:在仓根 .mae-flow-defaults.json 加 \"跳过环节\": [\"STORY\", …]"
-          "(提交进仓,团队生效;推进到这些环节时机器代跳并留痕)。")
-    if skips:
-        print("本仓当前预设跳过: " + "、".join(sorted(skips)))
+    print("\n可选环节(需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性"
+          "的一部分,不提供配置级裁剪。")
 
 
 def cmd_status(flow, st, args):

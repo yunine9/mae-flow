@@ -25,6 +25,8 @@ superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_o
 按计划迭代,每完成一个任务:实现 → 规格条目同步检查(有偏差立即修) → 勾选实现清单 →
 git commit -m "[单号][类型]描述"(拒绝方法原文建议的 fix:/tweak:/设计意图式 message;
 **先 commit 后编译**是定死的顺序:任务代码可以带着编译错误入库,compile-agent 的修复另行 commit)。
+提交候选先收窄到你通过 Edit/Write 实际改过的文件，再逐个看 diff 决定是否提交；
+“改过”不等于“必须提交”，编译/格式化/生成命令顺带产生的文件默认不纳入。
 **积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 先执行
 `python "{MAEFLOW_PATH}" agent-task compile --scope "<本批模块/任务>"`，把输出的唯一启动话术原样交给 compile-agent**
 (任务卡由 harness 带齐单号、编译方式和本批范围):OK → 继续下一批;BLOCKED(含 SUSPECTED_ISSUES

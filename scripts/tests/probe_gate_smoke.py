@@ -124,6 +124,61 @@ def main():
         ok = (r.returncode == 0) == expect_ok
         check("提交链: " + name, ok, (r.stdout + r.stderr)[-150:])
 
+    # ---------- 1c. 提交候选约束（Agent 实际写过 ≠ 必须交，没写过默认可疑） ----------
+    root = make_repo(base, "artifact-strong", "build")
+    write(root, "build/CMakeFiles/Foo.dir/Foo.cpp.o", "binary-ish")
+    subprocess.run(
+        ["git", "add", "build/CMakeFiles/Foo.dir/Foo.cpp.o"],
+        cwd=root, check=True, capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]编译修复"')
+    check("提交产物:新增 .o/CMakeFiles 高置信产物被拦",
+          r.returncode != 0 and "临时编译产物" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
+    root = make_repo(base, "artifact-compound", "build")
+    write(root, "module/cache/Foo.obj", "binary-ish")
+    r = gate_bash(
+        root,
+        'git add module/cache/Foo.obj && git commit -m "[REQ probe][fix]编译修复"')
+    check("提交产物:同一 Bash 内 add+commit 仍能提前拦截",
+          r.returncode != 0 and "Foo.obj" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
+    root = make_repo(base, "artifact-direct-write", "build")
+    write(root, "build/CMakeFiles/Foo.dir/Foo.cpp.o", "intentional-fixture")
+    write(root, ".mae-flow.json.agent-writes", json.dumps({
+        "paths": {
+            "build/CMakeFiles/Foo.dir/Foo.cpp.o": {
+                "at": "2026-07-26 12:00:00", "tool": "file-write",
+            },
+        },
+    }, ensure_ascii=False))
+    subprocess.run(
+        ["git", "add", "build/CMakeFiles/Foo.dir/Foo.cpp.o"],
+        cwd=root, check=True, capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]测试夹具"')
+    check("提交候选:Agent 明确写过的产物不硬拦但仍提示复核",
+          r.returncode == 0 and "不代表必须提交" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
+    root = make_repo(base, "artifact-ambiguous", "build")
+    write(root, "dist/app.js", "console.log('release');\n")
+    subprocess.run(
+        ["git", "add", "dist/app.js"], cwd=root, check=True, capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]发布产物"')
+    check("提交产物:dist 等歧义项只提示不阻断",
+          r.returncode == 0 and "不阻断" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
+    root = make_repo(base, "artifact-source", "build")
+    write(root, "src/Foo.cpp", "int foo() { return 1; }\n")
+    subprocess.run(
+        ["git", "add", "src/Foo.cpp"], cwd=root, check=True, capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]正常源码"')
+    check("提交候选:未记录的正常源码只提示、不漏提交",
+          r.returncode == 0 and "实际改写的候选范围" in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
     # ---------- 2. 证据全路径（importlib 直调，selftest 同款） ----------
     spec_mod = importlib.util.spec_from_file_location("mf", MAE)
     mf = importlib.util.module_from_spec(spec_mod)

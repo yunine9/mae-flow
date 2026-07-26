@@ -53,6 +53,7 @@ MOONLIGHT_INTENT = STATE + ".moonlight-intent"
 EXIT_INTENT = STATE + ".exit-intent"
 REJECTION_STATE = STATE + ".agent-rejections"
 EVIDENCE_STATE = STATE + ".agent-evidence"
+AGENT_WRITES_STATE = STATE + ".agent-writes"
 ACTION_STATE = ACTION_FILE
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
@@ -655,6 +656,46 @@ def _text_of(v):
         return json.dumps(v, ensure_ascii=False) if v else ""
     except Exception:
         return ""
+
+
+def _record_agent_write(path):
+    """Record a successful direct Agent file edit as a commit candidate.
+
+    The ledger narrows review scope only. It never means every recorded file
+    must be staged, and command-generated files intentionally receive no entry.
+    """
+    try:
+        # macOS 的 tempfile 常给 /var/...，而 cwd 会解析成 /private/var/...；
+        # realpath 后再判边界，避免同一文件因系统软链接被误当仓库外路径。
+        root = os.path.realpath(os.path.abspath(os.getcwd()))
+        absolute = os.path.realpath(os.path.abspath(path))
+        if os.path.commonpath([root, absolute]) != root:
+            return
+        relative = os.path.relpath(absolute, root).replace("\\", "/")
+        if relative in ("", ".") or relative.startswith("../"):
+            return
+
+        def update_writes(data):
+            paths = data.setdefault("paths", {})
+            paths[relative] = {
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "tool": "file-write",
+            }
+            # A flow should rarely touch this many files. Bound stale/corrupt
+            # growth without changing the provenance semantics.
+            if len(paths) > 2000:
+                keep = sorted(
+                    paths.items(),
+                    key=lambda item: str((item[1] or {}).get("at", "")),
+                    reverse=True)[:2000]
+                data["paths"] = dict(keep)
+            return data
+
+        update_json(
+            AGENT_WRITES_STATE, update_writes, default={"paths": {}},
+            recover_corrupt=True)
+    except Exception as exc:
+        _log("agent write ledger EXC: %s" % exc)
 
 
 def _capture_usermsg(text):
@@ -2189,13 +2230,19 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
 
 
 def ev_posttooluse(d):
+    tool = d.get("tool_name")
+    if tool in ("Write", "Edit", "MultiEdit"):
+        ti = d.get("tool_input") or {}
+        p = ti.get("file_path", "") or ti.get("path", "") or ""
+        if p:
+            _record_agent_write(p)
     # 真实用户问答的事件令牌:AskUserQuestion 工具真被调用过才有——
     # "确认发生过"从此是 harness 签发的事实,不是模型可书写的文本
-    if d.get("tool_name") == "AskUserQuestion":
+    if tool == "AskUserQuestion":
         _capture_usermsg(_text_of(d.get("tool_response")))   # 应答原文进 ack 验真存储
         _record_agent_token("ASKUSER", "CONFIRMED")
         sys.exit(0)
-    if d.get("tool_name") == "Bash":
+    if tool == "Bash":
         _maybe_utrun(d)
         sys.exit(0)
     p = ((d.get("tool_input") or {}).get("file_path", "") or "").replace("\\", "/")

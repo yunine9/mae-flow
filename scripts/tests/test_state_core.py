@@ -109,6 +109,37 @@ class RuntimeAndStateTests(unittest.TestCase):
             ]
             self.assertEqual(1, len(quarantined))
 
+    def test_posttooluse_records_direct_agent_write_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = os.path.join(td, "src", "feature.cpp")
+            os.makedirs(os.path.dirname(source), exist_ok=True)
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int feature() { return 1; }\n")
+            save_versioned_json(
+                os.path.join(td, ".mae-flow.json"),
+                {"current": "build", "config": {}, "choices": {},
+                 "history": [], "started": "2026-07-26 12:00:00"},
+                "flow", project_root=td)
+            payload = json.dumps({
+                "cwd": td,
+                "tool_name": "Edit",
+                "tool_input": {"file_path": source},
+                "tool_response": {"ok": True},
+            }, ensure_ascii=False) + "\n"
+            env = dict(os.environ)
+            env["PYTHONPYCACHEPREFIX"] = os.path.join(td, "pycache")
+            hook = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "hooks", "dispatch.py"), "posttooluse"],
+                cwd=td, input=payload, text=True, capture_output=True,
+                env=env, timeout=15)
+            self.assertEqual(0, hook.returncode, hook.stderr)
+            with open(
+                    os.path.join(td, ".mae-flow.json.agent-writes"),
+                    encoding="utf-8") as stream:
+                ledger = json.load(stream)
+            self.assertIn("src/feature.cpp", ledger["paths"])
+
     def test_concurrent_read_modify_write_does_not_lose_updates(self):
         with tempfile.TemporaryDirectory() as td:
             counter = os.path.join(td, "counter.json")

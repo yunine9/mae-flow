@@ -31,7 +31,7 @@
                                          保留现场并退出流程,之后按普通开发处理
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
-import glob as globmod, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time
+import glob as globmod, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
 from mae_flow_core import (
@@ -88,6 +88,7 @@ FLOW_PATH = os.path.join(HERE, "..", "flow", "flow.json")
 STEPS_DIR = os.path.join(HERE, "..", "flow", "steps")
 STATE_PATH = ".mae-flow.json"   # 相对项目根;启动时 find_project_root() 自动 chdir,不赌调用方 cwd
 EXIT_PATH = ".mae-flow.json.exited"
+AGENT_WRITES_PATH = STATE_PATH + ".agent-writes"
 
 
 def _clear_broken_exit_marker():
@@ -135,6 +136,176 @@ SOURCE_FILENAMES = {
     "gradle.properties", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
     "cargo.toml", "cargo.lock", "go.mod", "go.sum", "meson.build", "build.ninja",
 }
+
+# 只把“几乎不可能是源码/交付物”的中间文件做提交硬拦。build/dist/out/target
+# 与 jar/dll/so 等可能是项目约定的发布件，只提示不阻断，避免为了防误提交反而漏交付。
+BUILD_ARTIFACT_STRONG_SUFFIXES = (
+    ".o", ".obj", ".pyc", ".pyo", ".class", ".gcda", ".gcno",
+    ".profraw", ".profdata", ".ilk", ".tlog", ".lastbuildstate",
+    ".ninja_deps", ".ninja_log",
+)
+BUILD_ARTIFACT_STRONG_NAMES = {
+    "cmakecache.txt", "cmake_install.cmake",
+}
+BUILD_ARTIFACT_STRONG_DIRS = {
+    "cmakefiles", "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", ".gradle", "node_modules", "coverage", "htmlcov",
+}
+BUILD_ARTIFACT_AMBIGUOUS_SUFFIXES = (
+    ".a", ".lib", ".so", ".dll", ".dylib", ".exe", ".pdb",
+    ".jar", ".war", ".ear",
+)
+BUILD_ARTIFACT_AMBIGUOUS_DIRS = {
+    "build", "dist", "out", "target", "bin", "obj", "debug", "release",
+    ".next", ".nuxt", ".svelte-kit", ".vite", ".turbo", ".parcel-cache",
+}
+
+
+def _build_artifact_confidence(path):
+    """Return strong/ambiguous/empty for a repository-relative path.
+
+    This deliberately classifies paths, not build commands. Only newly staged
+    files are checked by the caller, so already tracked generated assets keep
+    following the repository's existing contract.
+    """
+    p = re.sub(r"^(?:\./)+", "", norm(path).strip().strip("\"'"))
+    if not p:
+        return ""
+    low = p.lower()
+    parts = [item for item in low.split("/") if item]
+    base = parts[-1] if parts else low
+    if (base in BUILD_ARTIFACT_STRONG_NAMES
+            or low.endswith(BUILD_ARTIFACT_STRONG_SUFFIXES)
+            or any(item in BUILD_ARTIFACT_STRONG_DIRS for item in parts)
+            or any(item.startswith("cmake-build-") for item in parts)
+            or any(item.endswith(".dsym") for item in parts)):
+        return "strong"
+    if (low.endswith(BUILD_ARTIFACT_AMBIGUOUS_SUFFIXES)
+            or any(item in BUILD_ARTIFACT_AMBIGUOUS_DIRS for item in parts)):
+        return "ambiguous"
+    return ""
+
+
+def _git_status_paths(pathspecs, include_ignored=False):
+    """List changed/untracked paths under explicit git-add pathspecs."""
+    if not pathspecs:
+        return []
+    args = [
+        "git", "-c", "core.quotepath=false", "status", "--porcelain",
+        "--untracked-files=all",
+    ]
+    if include_ignored:
+        args.append("--ignored=matching")
+    out = argv_out([*args, "--", *pathspecs])
+    paths = []
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        status, path = parts
+        if status == "!!" and not include_ignored:
+            continue
+        paths.append(norm(path.split(" -> ")[-1].strip().strip('"')))
+    return list(dict.fromkeys(paths))
+
+
+def _git_add_pathspecs(command):
+    """Extract explicit pathspecs from git-add segments in a compound command."""
+    paths, force = [], False
+    for segment in re.split(r"&&|\|\||[;\n]", command):
+        match = re.search(r"(?:^|\s)git\s+add\b(.*)$", segment, re.I)
+        if not match:
+            continue
+        try:
+            tokens = shlex.split(match.group(1), posix=True)
+        except ValueError:
+            continue
+        after_double_dash = False
+        for token in tokens:
+            if token == "--":
+                after_double_dash = True
+                continue
+            if not after_double_dash and token in ("-f", "--force"):
+                force = True
+                continue
+            if not after_double_dash and token.startswith("-"):
+                continue
+            paths.append(norm(token))
+    return list(dict.fromkeys(paths)), force
+
+
+def _agent_written_paths():
+    """Return paths successfully changed through Agent file-writing tools.
+
+    This is deliberately a candidate set, not a commit allowlist: a file being
+    touched by the Agent does not mean it belongs in the commit.
+    """
+    raw, err = safe_read_json(AGENT_WRITES_PATH)
+    if err or not isinstance(raw, dict):
+        return set()
+    entries = raw.get("paths", raw)
+    if not isinstance(entries, dict):
+        return set()
+    return {
+        re.sub(r"^(?:\./)+", "", norm(path)) for path in entries
+        if isinstance(path, str) and re.sub(r"^(?:\./)+", "", norm(path))
+    }
+
+
+def _trusted_harness_commit_path(path):
+    """Paths Mae-Flow/Comet may create or move without an Edit/Write event."""
+    p = re.sub(r"^(?:\./)+", "", norm(path))
+    return (
+        p in {".gitignore", ".gitattributes"}
+        or p.startswith("openspec/")
+        or p.startswith("docs/req/")
+    )
+
+
+def _pending_commit_files(command=""):
+    """Inspect files that a commit is about to include.
+
+    Staged paths are authoritative. For `git add ... && git commit ...` in one
+    Bash call, explicit pathspecs are also inspected before either command has
+    run. A missing Write/Edit provenance is warning-only unless the path is also
+    a newly added, high-confidence temporary build artifact.
+    """
+    staged_all = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--cached",
+        "--name-only", "--no-renames", "--",
+    ]).splitlines()
+    staged_new = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--cached",
+        "--name-only", "--diff-filter=A", "--no-renames", "--",
+    ]).splitlines()
+    candidates = [norm(path) for path in staged_all if path]
+    new_candidates = [norm(path) for path in staged_new if path]
+    pathspecs, force = _git_add_pathspecs(command)
+    if pathspecs:
+        pending = _git_status_paths(pathspecs, include_ignored=force)
+        candidates.extend(pending)
+        # Compound commands are inspected before git add runs. Only untracked
+        # paths are considered newly added for the high-confidence hard block.
+        new_candidates.extend(
+            path for path in pending
+            if not argv_out(["git", "ls-files", "--error-unmatch", "--", path]))
+    candidates = list(dict.fromkeys(candidates))
+    new_candidates = set(new_candidates)
+    written = _agent_written_paths()
+
+    def has_provenance(path):
+        return path in written or _trusted_harness_commit_path(path)
+
+    unproven = [path for path in candidates if not has_provenance(path)]
+    strong_unproven = [
+        path for path in unproven
+        if path in new_candidates and _build_artifact_confidence(path) == "strong"
+    ]
+    artifact_hints = [
+        path for path in candidates
+        if path not in strong_unproven and _build_artifact_confidence(path)
+    ]
+    return strong_unproven, unproven, artifact_hints
 
 
 def find_project_root(start=None):
@@ -2222,6 +2393,7 @@ def print_current(flow, st):
 def _state_sidecars():
     return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg",
             STATE_PATH + ".agent-rejections", STATE_PATH + ".agent-evidence",
+            AGENT_WRITES_PATH,
             STATE_PATH + ".stop-guard", GATE_STRIKES_PATH, GATE_PERMITS_PATH,
             MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]
 
@@ -2956,6 +3128,7 @@ def cmd_init(flow, args):
           "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),
           "initial_dirty": dirty,
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
+    atomic_write_json(AGENT_WRITES_PATH, {"paths": {}})
     save_state(st)
     print("[mae-flow] 流程已初始化；内嵌运行时已就绪"
           "（OpenSpec %s，未创建项目级 Skill）。" % prepared.get("openspec", "?"))
@@ -4220,6 +4393,34 @@ def cmd_gate(flow, st, args):
                     jdie("bash-commit-branch",
                          f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
                          f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
+        if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
+            strong_artifacts, unproven_paths, artifact_hints = _pending_commit_files(c)
+            if strong_artifacts:
+                shown = "、".join(strong_artifacts[:8])
+                more = "…" if len(strong_artifacts) > 8 else ""
+                jdie(
+                    "bash-build-artifacts",
+                    "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时编译产物: "
+                    + shown + more
+                    + "。这些文件通常不应进入 MR。若已暂存，执行 "
+                      "git restore --staged -- <上述路径>（只移出暂存区，不删除本地文件），"
+                      "并把对应规则加入项目 .gitignore 后再提交；若命令是 git add && git commit，"
+                      "从 git add 清单中移除这些路径。")
+            if unproven_paths:
+                print(
+                    "[mae-flow] ⚠ 提交提示:以下文件不在 Agent 通过 Write/Edit/MultiEdit "
+                    "实际改写的候选范围内，可能是编译、格式化或生成命令的副作用；"
+                    "也可能是必要的移动/删除，因此本次不阻断。请逐个确认: "
+                    + "、".join(unproven_paths[:8])
+                    + ("…" if len(unproven_paths) > 8 else ""),
+                    file=sys.stderr)
+            if artifact_hints:
+                print(
+                    "[mae-flow] ⚠ 产物提示:以下候选位于常见输出目录或具有编译产物特征；"
+                    "即使 Agent 直接写过，也不代表必须提交，请结合 git diff 确认: "
+                    + "、".join(artifact_hints[:8])
+                    + ("…" if len(artifact_hints) > 8 else ""),
+                    file=sys.stderr)
         if re.search(r"git\s+push\b.*(--force|-f\b)", c) or re.search(r"git\s+push\b.*\s\+\S+", c):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
@@ -4935,6 +5136,7 @@ def _moonlight_latest_rejection(kind):
 def _new_state():
     _gitignore()
     dirty = _dirty_paths()
+    atomic_write_json(AGENT_WRITES_PATH, {"paths": {}})
     return {
         "current": FLOW["start"], "config": {}, "choices": {},
         "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),

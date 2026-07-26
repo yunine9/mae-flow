@@ -124,6 +124,9 @@ grill-prep 工作表、survey 代码勘察笔记、不入库 STORY，v5 起再�
 **提交白名单**（交付物才 commit）：openspec 全套、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
 REVIEW（返工台账）、delivery-notes（团队沉淀）、STORY（仅用户选入库时）。
 git add 一律精确路径，gate 硬拦 `-A/--all/.`（宽 add 是 STORY 误提交的凶手）。
+Hook 另记本流程中 Agent 通过 Write/Edit/MultiEdit 成功改写的路径，作为“可能需要提交”的候选集，
+不是“都要提交”的白名单。提交时未命中候选集只提示逐文件确认；若同时是新增的高置信临时编译
+产物才硬拦。Mae-Flow/Comet 自己创建或移动的 openspec、docs/req 与初始化文件走 harness 可信例外。
 
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
@@ -202,6 +205,9 @@ flow.json 步骤字段语义：
 - `.env` 类密钥文件禁写；危险命令 denylist（管道执行远程脚本、`git clean -x`、对 `/`~`*`.`盘根 的递归删除——普通目录的 rm -r 不拦）。注：PreToolUse 硬拦在权限跳过模式下依然生效（hook 跑在 shell 里，提示词注入绕不过）
 - 全局 `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）。现在无需用户手动初始化，`prepare_project()` 只以 `--tools none` 创建规格配置；拦截消息直接指向内嵌能力，不再给人工安装话术。
 - `git add -A / --all / .` 全禁（宽提交会把无关文件与不入库产物卷进交付分支——STORY 误提交实战；提交必须精确到文件/明确产物目录）
+- `git commit` 前按 `.mae-flow.json.agent-writes` 缩小候选范围：未由 Agent 文件工具直接改写的路径
+  默认视为命令副作用并提示；只有“未直接改写 + 新增 + 高置信临时编译产物”硬拦，避免对移动、
+  删除、生成源码和项目约定二进制误杀。候选集只表示“有可能提交”，不能替代逐文件 `git diff`。
 - verify_ut/rf_ut 的测试路径收紧（`tests_only`）：仓库配置优先，缺失时放弃旧的 fail-open，改用内置保守测试路径规则；Edit/Bash 双路都拦非测试源码。**这不是死禁**——非标准目录补 `.mae-flow-defaults.json`，真源码缺陷走 unlock 裁决通道。
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步骤，历史留痕 `unlock:source`。done 检测到被测源码变化后不消费旧 UT 证据，而是自动回流完整质量链：review 回 rf_compile；主流程进入 verify_recompile，再走 Ponytail/CodeCheck/UT，不重做实现计划。无 unlock 却改了被测源码则判越权，不允许通过补验证洗白。
 

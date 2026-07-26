@@ -1662,10 +1662,17 @@ with _TmpDir() as td:
     found2, patched2, errors2 = ensure_direct_mode_compat(td)
     os.makedirs(os.path.join(td, "src", "nested"))
     open(os.path.join(td, ".mae-flow.json.exited"), "w", encoding="utf-8").write("{}\n")
-    direct = subprocess.run(["bash", guard], cwd=os.path.join(td, "src", "nested"),
+    # 用产品同款 Git Bash 发现(CI 实锤:裸 "bash" 在 Windows 撞 System32 的
+    # WSL 桩,打 wsl --install 提示退非零,测试自身的宿主假设被戳穿)
+    from mae_flow_core.capabilities import _bash as _find_bash
+    try:
+        bash_exe = _find_bash()
+    except Exception:
+        bash_exe = "bash"
+    direct = subprocess.run([bash_exe, guard], cwd=os.path.join(td, "src", "nested"),
                             capture_output=True, text=True)
     os.remove(os.path.join(td, ".mae-flow.json.exited"))
-    managed = subprocess.run(["bash", guard], cwd=td, capture_output=True, text=True)
+    managed = subprocess.run([bash_exe, guard], cwd=td, capture_output=True, text=True)
     guard_text = open(guard, encoding="utf-8").read()
     check("Comet Hook 退出兼容幂等且可从子目录识别",
           len(found1) == 1 and len(patched1) == 1 and not errors1

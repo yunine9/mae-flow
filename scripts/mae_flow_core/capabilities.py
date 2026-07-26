@@ -531,10 +531,14 @@ def _node(windows=None):
 
 
 def _bash(windows=None):
-    bash = shutil.which("bash") or shutil.which("bash.exe")
-    if bash:
-        return bash
     use_windows = os.name == "nt" if windows is None else bool(windows)
+    bash = shutil.which("bash") or shutil.which("bash.exe")
+    if bash and not (use_windows
+                     and "system32" in os.path.abspath(bash).lower()):
+        return bash
+    # Windows 的 System32\bash.exe 是 WSL 桩(CI 实锤:无发行版时打
+    # "wsl.exe --install" 提示并退非零)——它不是 Git Bash,PATH 命中也要跳过,
+    # 继续走 Git Bash 候选链。
     if use_windows:
         candidates = []
         try:

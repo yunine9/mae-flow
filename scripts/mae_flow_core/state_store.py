@@ -67,6 +67,15 @@ class ProjectStateLock:
                     raise StateLockTimeout(
                         "等待 Mae-Flow 状态锁超时；另一 Hook/命令可能仍在写状态")
                 time.sleep(0.01)
+            except PermissionError:
+                # Windows 删除语义(CI 实锤):并发释放锁的 rmdir 让目录进入
+                # "删除挂起",此窗口内 mkdir 同名报 WinError 5 而非
+                # FileExistsError——语义上就是"锁被占",按占用重试,
+                # 绝不能让锁自身崩溃(多 hook 并发写状态的生产核心路径)。
+                if time.monotonic() >= deadline:
+                    raise StateLockTimeout(
+                        "等待 Mae-Flow 状态锁超时；另一 Hook/命令可能仍在写状态")
+                time.sleep(0.01)
 
     def __exit__(self, exc_type, exc, tb):
         if self.acquired:

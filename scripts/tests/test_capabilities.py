@@ -490,9 +490,12 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                 return None
             return real_which(name, *args, **kwargs)
 
+        # ProgramFiles/LOCALAPPDATA 也是 _node() 的 Windows 兜底候选——
+        # CI 的 windows runner 真有 ProgramFiles\nodejs,不清空隔离就漏
         windows_hints = {
             key: "" for key in
-            ("CODEAGENT_NODE_PATH", "NODE_EXE", "NVM_SYMLINK")}
+            ("CODEAGENT_NODE_PATH", "NODE_EXE", "NVM_SYMLINK",
+             "ProgramFiles", "LOCALAPPDATA")}
         with tempfile.TemporaryDirectory(prefix="mae flow 无 node ") as root:
             subprocess.run(
                 ["git", "init", "-q", root],
@@ -649,13 +652,23 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                 result = capabilities.ensure_codecheck(install=True)
             self.assertTrue(result["available"])
             command = runner.call_args.args[0]
-            self.assertEqual(
-                ["C:\\npm\\npm.cmd", "install", "-g",
-                 "@baize/codecheckcli"],
-                command[:4])
-            self.assertTrue(
-                any(item.startswith("--registry=") for item in command))
-            self.assertNotIn("config", command)
+            # Windows 真机走 shell=True 字符串命令行(cmd 语义),其余平台列表
+            # ——断言按形态分支,两种都必须是同一条一次性安装命令
+            if isinstance(command, str):
+                self.assertIn("npm", command)
+                self.assertIn("install", command)
+                self.assertIn("-g", command)
+                self.assertIn("@baize/codecheckcli", command)
+                self.assertIn("--registry=", command)
+                self.assertNotIn(" config ", command)
+            else:
+                self.assertEqual(
+                    ["C:\\npm\\npm.cmd", "install", "-g",
+                     "@baize/codecheckcli"],
+                    command[:4])
+                self.assertTrue(
+                    any(item.startswith("--registry=") for item in command))
+                self.assertNotIn("config", command)
 
             write(
                 state_path,

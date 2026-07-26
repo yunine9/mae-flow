@@ -1,5 +1,49 @@
 # 更新记录
 
+## 2026-07-26：松紧校准第一批——五层横向扫描 26 条实锤,先修 12 条 small
+
+五个机制层(gate 规则/证据链/确认点/agent 契约/新鲜度)横向实测扫描,按
+"该严的严、该松的松"校准。第一批 12 条:
+
+### 该严(质量洞,tighten)
+
+- **引号重定向绕过写盘硬拦**:`echo x > "src/a.c"` 曾整体逃逸 _redirect_targets
+  捕获,源码保护与 specs 真相源双拦全部短路(Windows 习惯写法一个引号打穿
+  高置信车道)——正则补引号目标形态;
+- **git reset --hard / checkout -- . 入裁决类拦截**:未提交工作区是磁盘上唯一
+  现场,一条命令不可逆蒸发,而系统报错话术恰在诱导"回退改动";jdie 带放行令
+  出口,精确到文件的回退照常放行;
+- **verify-pass 空产物闸**:0 字节验证报告+零任务实现清单曾可满足"三重硬校验"
+  ——补 getsize>0 与至少一条任务条目;
+- **构建脚本失效盲区**:.sh/.mk/.gn/.bat 等改动曾不触发任何证据失效,旧编译
+  证据背新构建配置的书——SOURCE_EXTS 补构建脚本扩展。
+
+### 该松(效率洞,loosen)
+
+- **ASKUSER 令牌被流程自己杀死**(每个 full 单必踩):ev_agent_ran 用 history[-1]
+  当"本步进入时间",而 spec phase/set/accept-risk 都会 append history——open 步
+  按法定顺序(问完用户再 spec phase design)必然把刚签的令牌判成"本步之前",
+  逼用户重新拍板。改用 _step_entered_at 真实转移时间(同修 accept-risk 误杀
+  同根因),并补认 source-recheck:/resumed: 两类回流转移防旧令牌复活;
+- **rm 毁灭目标误读复合命令**:`rm -rf build && cmake ..` 的「..」曾被算到 rm
+  头上绝对拦且无出路(重建编译最高频惯用法)——扫描收窄到 rm 自己的命令段,
+  真毁灭目标拦截力零损失;
+- **仓外临时脚本放行**:/tmp/helper.py 曾按扩展名被当交付源码拦(零保护价值)
+  ——项目根归属先判;同修 src/ 下 .md 文档被目录 pattern 判成源码触发整条
+  质量链重跑(CMakeLists.txt 的 .txt 后缀已防误放);
+- **.env.example/sample/template 模板放行**(提交进仓的无密钥模板,真密钥
+  文件拦截口径不变);
+- **compile 诚实 BLOCKED 打回死锁**:"最后一次编译失败"正是 BLOCKED 的定义
+  而非反证,成功性检查曾把诚实弃权结构性打回形成重派死循环——BLOCKED 豁免
+  成功性检查但仍须证明真跑过编译,零 error 矛盾对账不动;
+- **codecheck 诚实 FAIL 排序**:FAIL 早退移到字段对账之前(与其余四契约一致
+  ——CLI 不可用时旧排序逼诚实者编造 EXECUTED_COMMAND);
+- **AC_COVERAGE 否定式误伤**:「无未覆盖场景」「缺口: 0」曾被子串误命中打回
+  ——否定/零值形态先洗白,门禁不逼诚实措辞改口。
+
+第二批(medium 5 条+契约/确认点其余)待续:codecheck 零告警缓存、存量 dirty
+封流程、存量 DISABLED 测试、UT 空跑闸门、end 沉淀 multiSelect 等。
+
 ## 2026-07-26：Windows CI 双矩阵首次全绿——八轮诊断循环收官
 
 唯一生产目标(Windows)历史上第一次在真机跑通完整发版门(selftest 全套:5 套

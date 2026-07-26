@@ -1363,10 +1363,12 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
     _enforce_agent_scope("CODECHECK", task, bail)
     # 先记真实编译调用：后续哪怕只因报告字段写法被打回，也无需把十几分钟编译重跑一遍。
     _record_codecheck_build_receipt(task, tool_calls)
-    if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
-        bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
+    # FAIL 早退必须先于字段对账(与 compile/grill/UT 契约排序一致——校准实锤:
+    # CLI 不可用时 agent 写不出真实 fullcheck 命令,旧排序逼诚实者编造字段)。
     if status == "FAIL":
         return   # FAIL 是诚实上报,不再苛求对账字段
+    if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
+        bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
     _require_bash_success(tool_calls, "codecheck fullcheck", bail, "CodeCheck")
     nums = {}
     for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
@@ -1472,8 +1474,14 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     coverage = _flex_field(report, "AC_COVERAGE")
     if coverage is None or not coverage.strip() or _empty_section(coverage):
         bail("PASS 报告缺少有效的 AC_COVERAGE 验收场景对照。")
-    if re.search(r"缺口|未覆盖|无对应", coverage):
-        bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS。")
+    # 否定/零值形态先洗白(校准实锤:诚实的「无未覆盖场景」「缺口: 0」曾被
+    # 子串误命中打回——门禁不能逼诚实措辞改口;同 disabled/skipped 的既有模式)
+    cleaned = re.sub(r"无\s*(?:未覆盖|缺口|无对应)(?:场景|项)?"
+                     r"|(?:缺口|未覆盖|无对应)\s*[:：]?\s*(?:0|无|零)\b",
+                     "", coverage)
+    if re.search(r"缺口|未覆盖|无对应", cleaned):
+        bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS(若只是措辞请改写为"
+             "正向表述;若为事实缺口按契约用 NEEDS_INPUT/缺口标注上报)。")
     nums = {}
     for name in ("TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED"):
         value = _number_field(report, name)
@@ -1556,11 +1564,21 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
         call = _skill_call(tool_calls, need)
         if not call:
             bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
-        if _call_failed(call):
+        # BLOCKED 的定义就是"修复上限内仍编译不过"——最后一次调用失败正是
+        # BLOCKED 的证明而非反证。校准实锤:成功性检查曾把诚实 BLOCKED 结构性
+        # 打回,形成重派整只 agent 的死循环。BLOCKED+零 error 的矛盾由下方
+        # BUILD_ERRORS 对账兜住,此豁免不放宽任何造假面。
+        if status != "BLOCKED" and _call_failed(call):
             bail(f"{need} Skill 的工具结果明确失败，不能报告编译成功。")
     else:
         expected = _embedded_build_command(build_cfg) or build_cfg
-        _require_bash_success(tool_calls, expected, bail, "编译")
+        if status != "BLOCKED":
+            _require_bash_success(tool_calls, expected, bail, "编译")
+        else:
+            # BLOCKED 仍须证明真跑过编译(防空口弃权),只豁免"必须成功"
+            if not _bash_call(tool_calls, expected):
+                bail("标记 BLOCKED 但 transcript 中没有配置编译命令的真实调用"
+                     "——弃权也必须先真实尝试过编译。")
     m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
     if not m:
         bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")

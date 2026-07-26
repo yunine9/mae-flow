@@ -106,6 +106,9 @@ SOURCE_EXTS = (
     ".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".pyi", ".go", ".rs", ".cs",
     ".js", ".jsx", ".ts", ".tsx", ".vue", ".swift", ".m", ".mm", ".proto", ".sql",
     ".s", ".asm", ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
+    # 构建脚本(校准实锤:.sh/.mk/.gn 改动曾不触发任何证据失效,旧编译证据
+    # 背新构建配置的书)
+    ".sh", ".bash", ".bat", ".cmd", ".ps1", ".mk", ".gn", ".gni", ".bzl",
 )
 SOURCE_FILENAMES = {
     "cmakelists.txt", "makefile", "gnumakefile", "pom.xml", "build.gradle", "settings.gradle",
@@ -266,10 +269,17 @@ def _path_fingerprint(path):
 
 
 def _step_entered_at(st):
-    """当前步骤的进入时间；旧状态没有精确记录时沿用 started。"""
+    """当前步骤的进入时间；旧状态没有精确记录时沿用 started。
+
+    除正常推进(next 解析)与 goto 外,回流转移(source-recheck:)与恢复转移
+    (resumed:)同样是"进入本步"——漏认会取到过早时间,令旧轮令牌复活。"""
     sid = st.get("current", "")
     for h in reversed(st.get("history", [])):
-        if _resolved_next(FLOW or {}, st, h.get("step", "")) == sid or str(h.get("result", "")) == "goto:" + sid:
+        result = str(h.get("result", ""))
+        if (_resolved_next(FLOW or {}, st, h.get("step", "")) == sid
+                or result == "goto:" + sid
+                or result == "source-recheck:" + sid
+                or result == "resumed:" + sid):
             return h.get("at", st.get("started", ""))
     return st.get("started", "")
 
@@ -444,9 +454,18 @@ def _is_source_path(path, st=None, flow=None):
         p = p[:-len("(未提交)")]
     low = p.lower()
     base = os.path.basename(low)
-    if low.endswith(SOURCE_EXTS) or base in SOURCE_FILENAMES:
-        return True
+    # 项目根归属先判(校准实锤):仓外临时脚本(/tmp/helper.py)动不了交付分支,
+    # 按扩展名先拦=零保护价值的高频误拦;仓外一律放行,done 的 dirty 证据兜仓内。
     rel = _repo_rel_for_match(p)
+    if rel is None and os.path.isabs(p):
+        return False
+    # 已知源码/构建文件名单先判(CMakeLists.txt 以 .txt 结尾,不能被文档排除
+    # 误放);再排除文档——src/ 目录 pattern 曾把 README.md 一行改动判成源码,
+    # 触发整条质量链重跑(校准实锤)。
+    if base in SOURCE_FILENAMES or low.endswith(SOURCE_EXTS):
+        return True
+    if low.endswith((".md", ".rst", ".adoc", ".txt")):
+        return False
     if rel is None:
         return False
     rules = list((flow or FLOW or {}).get("source_patterns", [])) + _configured_source_patterns(st)
@@ -742,7 +761,12 @@ def ev_agent_ran(spec, st):
         # 月光宝盒开启时，启动指令本身是本轮统一授权。内容证据仍照常检查；
         # 这里只替代必须在线点选的交互令牌，不替代文档和代码结果。
         return True, ""
-    entered = st["history"][-1]["at"] if st["history"] else st["started"]
+    # 校准实锤:history[-1] 不是"本步进入时间"——spec 登记/phase/accept-risk/
+    # gate 放行都会 append history,open 步按法定顺序(问完用户再 spec phase
+    # design)必然把刚签的 ASKUSER 令牌判成"本步之前",逼用户重新拍板。
+    # 与 _risk_acceptance 同源用真实步骤转移时间;跨步复用由 token_step 拦、
+    # 跨轮复用由令牌绑 HEAD 拦,收敛 entered 不开任何造假通道。
+    entered = _step_entered_at(st)
     accepted, accept_why = _risk_acceptance(kind, st)
     if accepted:
         return True, ""
@@ -3685,6 +3709,21 @@ def cmd_spec(flow, st, args):
             die("verify-pass 要求先登记真实存在的验证报告:"
                 "mae-flow spec set verification_report \"<路径>\"。"
                 "验证结论不能凭口头产生。", 2)
+        # 校准实锤:0 字节报告与零任务清单曾可满足"三重硬校验"——空产物
+        # 不能证明任何事。
+        try:
+            if os.path.getsize(report) == 0:
+                die("验证报告 %s 是空文件——空报告不能证明验证发生过;"
+                    "写入真实验证结论后重试。" % report, 2)
+        except OSError:
+            pass
+        try:
+            _label, tasks_txt = specengine.tasks_source(os.getcwd(), cn)
+        except specengine.SpecEngineError as exc:
+            die("实现清单无法读取:" + str(exc), 2)
+        if not re.search(r"^\s*[-*]\s*\[[ xX]\]", tasks_txt or "", re.M):
+            die("实现清单没有任何任务条目(空清单不能证明实现完成):"
+                "至少列出本单真实完成的任务并勾选后重试。", 2)
         ok, why = ev_tasks_checked({}, st)
         if not ok:
             die("verify-pass 前实现清单仍有未完成项:" + why, 2)
@@ -3757,11 +3796,15 @@ WRITEISH_WEAK = (r"(\btee\s+|\bcp\s+|\bmv\s+|(?<![\w-])copy\s+|(?<![\w-])move\s+
 
 
 def _redirect_targets(c):
-    """提取 >/>> 的真实落盘目标。fd 复制(2>&1)与空设备不算写文件。"""
+    """提取 >/>> 的真实落盘目标。fd 复制(2>&1)与空设备不算写文件。
+
+    校准实锤:目标带引号(`> "src/a.c"`,Windows 习惯写法)曾整体逃逸捕获,
+    源码保护与 specs 真相源双拦全部短路——引号形态必须同样捕获。"""
     out = []
-    for m in re.finditer(r"""\d*>{1,2}\s*([^\s;|&<>'"]+)""", c):
-        t = m.group(1)
-        if t.lower() in ("/dev/null", "nul"):
+    for m in re.finditer(
+            r"""\d*>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;|&<>'"]+))""", c):
+        t = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        if not t or t.lower() in ("/dev/null", "nul"):
             continue
         out.append(t)
     return out
@@ -3794,7 +3837,10 @@ def cmd_gate(flow, st, args):
         if re.search(r"(^|/)\.mae-flow-defaults\.json$", p, re.I):
             die("流程运行期间禁止修改 .mae-flow-defaults.json:它决定源码/测试路径的判定口径,"
                 "改它等于改门禁规则。团队预设请在流程外走正常评审提交。", 2)
-        if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I):
+        if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I) and not re.search(
+                r"\.env\.(example|sample|template|dist|defaults)$", p, re.I):
+            # 公认模板后缀放行(校准实锤:.env.example 是提交进仓的无密钥模板,
+            # 新配置项都要同步它,按真密钥绝对拦=每次打断用户且零保护价值)
             die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
         if sid == "config_confirm" and re.search(r"(^|/)docs/req/", pm, re.I):
             jdie("edit-docs-req",
@@ -3905,11 +3951,28 @@ def cmd_gate(flow, st, args):
             die("危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。", 2)
         if re.search(r"git\s+clean\s+-\S*[xX]", c):
             die("危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。", 2)
-        if re.search(r"\brm\s+-\S*r", c, re.I) or re.search(r"\b(rd|rmdir)\s+/s", c, re.I):
+        # 全树不可逆清除(校准实锤:未提交工作区也是磁盘上唯一的现场,一条
+        # reset --hard 蒸发;而系统报错话术恰在诱导"回退改动"类命令)。
+        # 裁决类 jdie:精确到文件的回退照常放行,全树清除三振后有放行令出口。
+        if st and (re.search(r"git\s+reset\s+(-\S+\s+)*--hard\b", c)
+                   or re.search(r"git\s+(checkout|restore)\s+(--\s+)?"
+                                r"(\.|:/)(\s|$)", c)):
+            jdie("bash-wipe-worktree",
+                 "全树不可逆清除拦截(git reset --hard / checkout -- .):未提交的"
+                 "工作区改动会全部蒸发。回退越权改动请精确到文件:"
+                 "git checkout HEAD -- <文件>;确需全树清除,把风险展示给用户裁决。")
+        # 毁灭目标只查 rm/rd 自己的命令段(校准实锤:整条命令 token 混查会把
+        # `rm -rf build && cmake -S . -B build` 的「.」算到 rm 头上——重建编译
+        # 的最高频惯用法被绝对拦且无出路;真阳性的毁灭 token 天然在 rm 段内)。
+        for seg in re.split(r"&&|\|\||[;\n]", c):
+            if not (re.search(r"\brm\s+-\S*r", seg, re.I)
+                    or re.search(r"\b(rd|rmdir)\s+/s", seg, re.I)):
+                continue
             nuke = {"/", "~", "*", ".", "..", "$home", "%userprofile%"}
-            for t in toks[1:]:
+            for t in re.split(r"""[\s'"]+""", seg):
                 tl = t.lower()
-                if not t.startswith("-") and (tl in nuke or re.match(r"^[a-z]:[\\/]*$", tl)):
+                if t and not t.startswith("-") and (
+                        tl in nuke or re.match(r"^[a-z]:[\\/]*$", tl)):
                     die(f"危险命令拦截:对「{t}」的递归删除。确需执行请用户手动运行。", 2)
         if st and re.search(r"git\s+worktree\s+add", c):
             jdie("bash-worktree",

@@ -1,5 +1,17 @@
 # 更新记录
 
+## 2026-07-26：Windows CI 双矩阵首次全绿——八轮诊断循环收官
+
+唯一生产目标(Windows)历史上第一次在真机跑通完整发版门(selftest 全套:5 套
+测试+2 探针+13 差分对拍)。八轮循环累计抓出并修复 8 类 Mac 上不可见的平台
+差异,其中两个产品级:**状态锁在删除挂起窗口的并发崩溃**(多 hook 并发写状态
+的核心路径)与 **bash 发现误认 System32 WSL 桩**(有 WSL 无 Git Bash in PATH
+的机器必踩)。其余六类:bash 脚本 CRLF、workflow shell 默认 -e/pipefail、
+CWD 在临时目录内的锁语义、npm 命令 shell 形态断言、node 发现的
+ProgramFiles/LOCALAPPDATA 兜底隔离、instructions 对拍的路径分隔符刻意差异
+豁免。诊断方法论沉淀在 workflow(失败项 annotations+逐套单跑+日志尾注入),
+后续任何 Windows 回归每次 push 自动可见。
+
 ## 2026-07-26：工作流透明化——steps 全景、升级阈值机器化(环节裁剪已回退)
 
 - **`mae-flow steps`**:四条交付方式的完整步骤链全景(每步标题/硬证据/可选性/

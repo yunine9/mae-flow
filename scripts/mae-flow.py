@@ -87,7 +87,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FLOW_PATH = os.path.join(HERE, "..", "flow", "flow.json")
 STEPS_DIR = os.path.join(HERE, "..", "flow", "steps")
 STATE_PATH = ".mae-flow.json"   # 相对项目根;启动时 find_project_root() 自动 chdir,不赌调用方 cwd
-EXIT_PATH = ".mae-flow.json.exited"  # 复用既有 .mae-flow.json* ignore;存在时 Hook 不再接管普通开发
+EXIT_PATH = ".mae-flow.json.exited"
+
+
+def _clear_broken_exit_marker():
+    """写退出标记前收殓坏旧标记(实测死角:坏标记的 CAS 校验曾让三条退出
+    路径全部 crash——退出标记的唯一写方就是"正在退出",旧标记本该被覆盖,
+    坏了更该被收殓而不是挡路)。"""
+    from mae_flow_core.state_store import safe_read_json as _srj
+    if not os.path.exists(EXIT_PATH):
+        return
+    _raw, err = _srj(EXIT_PATH)
+    if not err:
+        return
+    try:
+        os.replace(EXIT_PATH,
+                   EXIT_PATH + ".corrupt." + time.strftime("%Y%m%d-%H%M%S"))
+    except OSError:
+        try:
+            os.remove(EXIT_PATH)
+        except OSError:
+            pass  # 复用既有 .mae-flow.json* ignore;存在时 Hook 不再接管普通开发
 MOONLIGHT_INTENT_PATH = STATE_PATH + ".moonlight-intent"
 EXIT_INTENT_PATH = STATE_PATH + ".exit-intent"
 FAILURE_PATH = STATE_PATH + ".failures"
@@ -231,7 +251,7 @@ def sh(cmd):
 def _dirty_paths():
     """返回当前工作区脏路径。状态文件与过程目录由流程自己维护，不算交付改动。"""
     out = []
-    for line in sh("git -c core.quotepath=false status --porcelain").splitlines():
+    for line in sh("git -c core.quotepath=false status --porcelain --untracked-files=all").splitlines():
         parts = line.split(None, 1)
         if len(parts) != 2:
             continue
@@ -616,12 +636,14 @@ def ev_tier_scope(spec, st):
     accepted, _why = _risk_acceptance("TIER_SCOPE", st)
     if accepted:
         return True, ""
+    invalidated = ("已有 tier_scope 放行已失效(%s)。" % _why) if _why else ""
     files, err = _biz_changed_files(st)
     if err:
         return False, err
     if len(files) <= limit:
         return True, ""
     return False, (
+        invalidated +
         "本单已改 %d 个业务文件,超过 %s 档升级阈值(%d):%s%s。这是步骤文档里的"
         "升级条件,现在由机器亲数。两条出路呈用户裁决:①升级工作流(展示原因,"
         "确认后按步骤指引正规升级/goto design --force);②确属轻量修改(如批量"
@@ -695,7 +717,7 @@ def _source_changed_since(head, st=None):
         # core.quotepath=false:否则非 ASCII 文件名被引号+八进制转义,pattern 匹配不到 = 漏检
         out = sh(f"git -c core.quotepath=false diff --name-only {head} {cur}")
         changed += [f for f in out.splitlines() if f and _is_source_path(f, st)]
-    for line in sh("git -c core.quotepath=false status --porcelain").splitlines():
+    for line in sh("git -c core.quotepath=false status --porcelain --untracked-files=all").splitlines():
         # 按空白切"状态 路径",不用列偏移:sh() 会 strip 首行前导空格(' M' → 'M'),偏移取路径会错位
         parts = line.split(None, 1)
         if len(parts) != 2:
@@ -3415,11 +3437,28 @@ def _gate_die(st, sid, rule, subject, msg):
     bid = _gate_block_id(rule, subject)
     try:
         permits = json.load(open(GATE_PERMITS_PATH, encoding="utf-8"))
-    except Exception:
+    except FileNotFoundError:
         permits = {}
+    except Exception:
+        # 实测:放行令存储损坏是唯一"用户说了不算"的场景,且曾全静默——
+        # 当场隔离坏文件并明示,重新 allow 一步即恢复(同意原话仍可验真)。
+        permits = {}
+        try:
+            os.replace(GATE_PERMITS_PATH, GATE_PERMITS_PATH + ".corrupt."
+                       + time.strftime("%Y%m%d-%H%M%S"))
+            print("[mae-flow] ⚠ 放行令存储损坏,已隔离;若刚签发过放行令,"
+                  "重新执行同一条 allow 命令即可重签。", file=sys.stderr)
+        except OSError:
+            pass
     rec = permits.get(bid)
     if rec and not rec.get("used") and rec.get("step") == sid:
         head = sh("git rev-parse --verify HEAD")
+        if rec.get("head") and rec.get("head") != head:
+            # 实测:HEAD 变化后放行令静默作废,拦截消息与普通三振无差别,
+            # Agent 会误判"放行没生效"盲目循环——显式说明作废原因与恢复路。
+            msg = ("已有放行令 %s 因代码版本变化作废(签发于 %s)。需重新征得"
+                   "用户同意后 allow 重签。" % (bid, rec.get("head", "")[:8])
+                   ) + msg
         if not rec.get("head") or rec.get("head") == head:
             def consume(data):
                 entry = (data or {}).get(bid) or {}
@@ -5253,6 +5292,7 @@ def cmd_exit(flow, st, args):
         "compat_warnings": compat_warnings,
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
+    _clear_broken_exit_marker()
     save_versioned_json(EXIT_PATH, record, "exit")
     cleanup_errors = []
     state_removed = True
@@ -5333,6 +5373,7 @@ def cmd_runtime_doctor(runtime, args, state_error=""):
             "snapshot": "",
             "recovered_bad_marker": norm(bad),
         }
+        _clear_broken_exit_marker()
         save_versioned_json(EXIT_PATH, record, "exit")
         print("[mae-flow] 损坏退出标记已保存到 %s，并重建普通开发模式标记。" % norm(bad))
         return
@@ -5388,6 +5429,7 @@ def cmd_exit_corrupt_state(args, state_error):
         "comet_guard_paths": [norm(p) for p in found], "compat_warnings": errors,
     }
     _write_json_atomic(os.path.join(snapshot, "exit-record.json"), record)
+    _clear_broken_exit_marker()
     save_versioned_json(EXIT_PATH, record, "exit")
     leftovers = []
     for src, _ in copied:

@@ -322,12 +322,19 @@ def ev_inject(d, session_start=False):
         exit_intent = _capture_exit_intent(prompt)
         if exit_intent:
             rc = maeflow("exit", "--intent", exit_intent)
-            if rc == 0:
+            # 实测死角修复:宣布"已退出"前必须核实事实(STATE 确已消失)。
+            # 旧逻辑按 rc==0 宣布,而 maeflow() 的 fail-open 会把 CLI crash/
+            # 脚本缺失翻译成 0——按谎话放行,用户以为退了、门禁还在,
+            # 脚本恢复后旧流程还会复活反咬。
+            if rc == 0 and not os.path.exists(STATE):
                 print("[mae-flow] 用户已明确退出，本条消息开始按普通开发请求处理；"
                       "不要再运行 current/done。")
                 sys.exit(0)
-            print("[mae-flow] 自动退出未完成。不要重复要求用户确认；请执行 doctor 查看原因，"
-                  "用户始终可在真实终端运行 `mae-flow exit --interactive`。", file=sys.stderr)
+            print("[mae-flow] 自动退出未完成(流程状态仍在)。不要重复要求用户确认；"
+                  "请执行 doctor 查看原因，用户始终可在真实终端运行 "
+                  "`mae-flow exit --interactive`；若插件脚本本身不可用,恢复插件后"
+                  "重试,或(确认放弃流程时)由用户手动删除项目根的 .mae-flow.json* "
+                  "文件。", file=sys.stderr)
     me = os.path.abspath(MAEFLOW)
     readme = os.path.abspath(os.path.join(HERE, "..", "README.md"))
     if os.path.exists(STATE):
@@ -691,8 +698,15 @@ def _capture_exit_intent(text):
         text = (text or "").strip()
         if not text or not os.path.isfile(STATE) or not _explicit_exit_prompt(text):
             return ""
+        # 实测死角修复:签发与消费必须同一把尺——旧逻辑用裸 json.load,
+        # JSON 可解析但 schema 非法(revision 被改坏等)时记真实步骤,而 CLI
+        # load_state 严格校验判损坏,intent 对不上,主逃生口永久失效循环。
         try:
-            step = json.load(open(STATE, encoding="utf-8")).get("current", "")
+            raw, err = safe_read_json(STATE)
+            if err or not isinstance(raw, dict):
+                step = "__corrupt_state__"
+            else:
+                step = str(normalize_document(raw, "flow").get("current", ""))
         except Exception:
             step = "__corrupt_state__"
         nonce = hashlib.sha256(

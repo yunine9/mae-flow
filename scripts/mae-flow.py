@@ -3130,8 +3130,7 @@ def cmd_init(flow, args):
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
     atomic_write_json(AGENT_WRITES_PATH, {"paths": {}})
     save_state(st)
-    print("[mae-flow] 流程已初始化；内嵌运行时已就绪"
-          "（OpenSpec %s，未创建项目级 Skill）。" % prepared.get("openspec", "?"))
+    print("[mae-flow] 流程已初始化；内置规格引擎已就绪，未创建项目级 Skill。")
     print_current(flow, st)
 
 
@@ -4441,9 +4440,9 @@ def cmd_gate(flow, st, args):
                         for t in re.split(r"""[\s;|&()<>'"]+""", m_mk.group(1) or "")
                         if t and not t.startswith("-")):
             jdie("bash-mkdir-openspec",
-                 "禁止手动创建 openspec 目录：change 必须由 Mae-Flow 内嵌命令创建，"
-                 "它建目录的同时登记 .comet.yaml 状态——手搓的空壳目录没有状态登记,后续 guard/证据校验必然踩空(2026-07-20 实战)。"
-                 "先执行 current，并照其中的 `capability openspec` / `capability comet-state` 命令处理。")
+                 "禁止手动创建 openspec 目录：change 必须由 `mae-flow spec new` 创建，"
+                 "它会在建目录的同时登记当前单与阶段；手搓空目录没有状态登记，"
+                 "后续证据校验会失败。先执行 current，并照本步骤给出的 spec 命令处理。")
         if re.search(r"\bcomet\s+init\b", c):
             die("禁止执行全局 comet init：它会初始化无关平台并污染项目。"
                 "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，无需人工初始化。", 2)

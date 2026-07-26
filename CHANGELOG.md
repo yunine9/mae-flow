@@ -1,5 +1,13 @@
 # 更新记录
 
+## 2026-07-27：内嵌源码安全裁剪
+
+- 删除 Comet vendored 总入口与未被能力包加载的参考文档；保留当前步骤真实读取的阶段 Skill；
+- OpenSpec schema/模板/方法文本、兼容 CLI，Comet 兼容脚本与旧项目退出 Hook 兼容链仍有明确调用方，
+  不按“主流程不用”误删，避免清理破坏功能；
+- 修正初始化时错误显示 `OpenSpec ?`，以及手建 change 目录仍引导旧 capability 命令的过期提示；
+- 更新 vendored 组件树哈希，并增加“运行时、兼容面、测试面均无引用才可删除”的维护约束。
+
 ## 2026-07-26：提交候选按 Agent 实际改写收口
 
 - PostToolUse 记录 Agent 通过 Write/Edit/MultiEdit 成功改写的文件，只把它们视为“可能需要提交”

@@ -51,8 +51,8 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 思想源 | 在流程中的位置 | 融入方式与红线 |
 |---|---|---|
 | **grill-me**（mattpocock/skills 的 grilling） | grill 步（open 之前） | 五铁律原文级还原（追问至共识/决策树逐支/每题带推荐/一次一题/事实自查决策问人），工程化增强：8 维备课（模板化工作表 grill-prep，hook 校验章节 + done 拦「待填」残留）、题目四要素、阻塞性排序、收敛条件。**高度红线：只问需求层（WHAT），技术分歧记入「留给设计阶段」清单，禁止下钻** |
-| **Comet 0.3.9** | open/design/build/verify/archive 全链 | 官方中文 Skill 的阶段规则按标题从固定源码直接编入对应步骤；官方 state/guard/handoff/archive 脚本直接执行。入口、外部 Skill 查找和自动跳阶段由适配器移除，节奏只归 Mae-Flow |
-| **OpenSpec 1.6.0** | 提案、规格、验证、归档 | 官方 CLI 打成自包含 ESM，schema、模板、官方 Skill 同包；所有命令通过 `capability openspec`，禁止调用机器全局版本 |
+| **Comet 0.3.9** | open/design/build/verify/archive 的方法来源 | 只保留被 `CAPABILITY_PACKS` 直接读取的阶段 Skill；主入口与未加载参考文档已删除。state/guard/handoff/archive 脚本仅供显式兼容命令，不参与主流程状态机 |
+| **OpenSpec 1.6.0** | 规格格式与方法来源 | schema、模板和选定 Skill 是内置规格引擎的运行时输入；自包含 ESM 仅供显式兼容命令与开发期差分测试，不参与主流程 |
 | **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT AC_COVERAGE | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
 | **Ponytail** | build 全程 + verify 4.1 | 固定 commit 的官方 Skill 原文双用：build 写码时 full 档常驻预防（the ladder）+ verify 对 diff 做 review。**两条红线：YAGNI 不得砍 delta spec 要求的行为；禁 ultra 档** |
@@ -87,7 +87,7 @@ flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里
 scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
 scripts/mae_flow_core/      CLI/Hook 共用内核：运行模式裁决、带锁状态存储、独立任务生命周期、月光策略
 scripts/mae_flow_core/capabilities.py  固定能力包加载、内嵌 CLI/脚本路由、CodeCheck 首用安装
-runtime/vendor/             固定版本的 Comet/OpenSpec/Superpowers/Ponytail 源码与许可证
+runtime/vendor/             流程实际读取的固定方法/schema/模板，以及仍对外承诺的兼容执行器与许可证
 runtime/bin/openspec        Comet 归档脚本调用内嵌 OpenSpec 的稳定入口
 scripts/comet_compat.py     只兼容旧项目残留的 Comet Hook；新项目不会创建项目级 Hook
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
@@ -246,7 +246,7 @@ CodeCheck 的现场扫描、clean_paths、提交、分支和归档等证据继�
 所有 Hook 仍处于 inactive 旁路，绝不能出现“初始化失败但普通开发也被锁住”。
 
 `runtime/vendor/manifest.json` 是开源组件版本真相源；`runtime/THIRD_PARTY_NOTICES.md` 和每个组件的
-LICENSE 必须随包。OpenSpec CLI 是自包含 ESM；打包时只能保留一个 `runCli()` 入口，重复入口会让 archive
+LICENSE 必须随包。OpenSpec CLI 是兼容/差分测试用的自包含 ESM；打包时只能保留一个 `runCli()` 入口，重复入口会让 archive
 第一次已移动目录、第二次再移动时报错。`scripts/tests/test_capabilities.py` 用中文+空格路径覆盖完整生命周期，
 任何组件升级都必须让此测试先红后绿。
 
@@ -311,6 +311,8 @@ v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability
 **升级内嵌组件 checklist**：更新 `runtime/vendor/manifest.json` 与许可证 → 重新生成 OpenSpec 单入口 bundle →
 核对 Comet state/guard 字段和事件 → 核对 `CAPABILITY_PACKS` 选中的上游标题仍存在 → 跑 capability 生命周期、
 selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:*`、外部 Skill 加载或用户目录路径。
+vendor 裁剪只允许删除同时满足三项的文件：不在 `CAPABILITY_PACKS`、不被规格引擎读取、也不属于公开
+compatibility 子命令或旧项目退出兼容链；删除后必须重算组件树哈希并跑完整自检。
 
 ## 五、常见维护任务
 

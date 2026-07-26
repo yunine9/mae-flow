@@ -371,6 +371,9 @@
       "allow_source_edit": true,
       "evidence": [
         {
+          "type": "tier_scope"
+        },
+        {
           "type": "commit_tagged_after_entry"
         }
       ],
@@ -432,6 +435,9 @@
       "clear_hint": true,
       "allow_source_edit": true,
       "evidence": [
+        {
+          "type": "tier_scope"
+        },
         {
           "type": "tasks_checked"
         },

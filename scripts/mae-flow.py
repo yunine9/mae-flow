@@ -579,6 +579,39 @@ def ev_spec_field(spec, st):
     return True, ""
 
 
+# 轻量档的文件数升级阈值(与 hf_open/tw_open 步骤文档的升级条件一致)。
+# 此前升级条件是纯提示词约束零机器锚点——模型不自查就静默滑过(审计定性)。
+TIER_FILE_LIMITS = {"tweak": 5, "hotfix": 3}
+
+
+def ev_tier_scope(spec, st):
+    """轻量档范围硬校验:改动业务文件数超档位阈值时拒绝推进,呈用户裁决。
+
+    出口两条(禁令必配出口):①升级工作流(hotfix 正规升级/goto design --force);
+    ②用户确认确属轻量档 → accept-risk tier_scope(绑 HEAD,再改文件即失效)。
+    full/review 不限。"""
+    wf = (st.get("choices", {}) or {}).get("workflow", "")
+    limit = TIER_FILE_LIMITS.get(wf)
+    if not limit:
+        return True, ""
+    accepted, _why = _risk_acceptance("TIER_SCOPE", st)
+    if accepted:
+        return True, ""
+    files, err = _biz_changed_files(st)
+    if err:
+        return False, err
+    if len(files) <= limit:
+        return True, ""
+    return False, (
+        "本单已改 %d 个业务文件,超过 %s 档升级阈值(%d):%s%s。这是步骤文档里的"
+        "升级条件,现在由机器亲数。两条出路呈用户裁决:①升级工作流(展示原因,"
+        "确认后按步骤指引正规升级/goto design --force);②确属轻量修改(如批量"
+        "重命名)则 accept-risk tier_scope --reason --ack \"用户原话\" 继续,"
+        "代码再变化即失效"
+        % (len(files), wf, limit, "、".join(files[:6]),
+           "…" if len(files) > 6 else ""))
+
+
 def ev_spec_validate(spec, st):
     """规格结构校验作硬证据:调内置引擎对本 change 跑 validate。
 
@@ -663,6 +696,7 @@ RISK_AGENT_LABELS = {
     "GRILL": "需求追问 Agent 没有合法收尾，需求边界可能仍有遗漏",
     "ASKUSER": "宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话",
     "UTRUN": "没有观测到 UT 命令真实调起",
+    "TIER_SCOPE": "本单改动文件数超过所选交付档的升级阈值，继续按轻量档走会绕过设计与规格环节",
 }
 
 
@@ -1325,7 +1359,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
             "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
-            "spec_validate": ev_spec_validate,
+            "spec_validate": ev_spec_validate, "tier_scope": ev_tier_scope,
             "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
             "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
@@ -2812,6 +2846,58 @@ def _append_history(st, outcome="completed"):
         print(f"[mae-flow] 历史账本写入失败(不影响流程): {e}", file=sys.stderr)
 
 
+# 可由仓库预设裁剪的环节(白名单——质量门禁步骤永不开放):
+# 用户话术 → (步骤 id, choice 步的代选分支 或 None=线性跳过)
+SKIPPABLE_STEPS = {
+    "grill_ask": ("需求质询", "no"),
+    "story_ask": ("STORY", "no"),
+    "verify_ponytail": ("代码精简", None),
+}
+SKIPPABLE_LABELS = sorted({label for label, _ in SKIPPABLE_STEPS.values()})
+
+
+def _configured_step_skips():
+    """仓库预设「跳过环节」(用户话术数组)。非法值可见地忽略,不静默。"""
+    data, _err = _defaults()
+    raw = (data or {}).get("跳过环节") or []
+    if not isinstance(raw, list):
+        return set()
+    valid, bad = set(), []
+    for item in raw:
+        label = str(item).strip()
+        if label in SKIPPABLE_LABELS:
+            valid.add(label)
+        else:
+            bad.append(label)
+    if bad:
+        print("[mae-flow] ⚠ .mae-flow-defaults.json「跳过环节」含不可裁剪值,"
+              "已忽略: %s;可裁剪环节仅限: %s(质量门禁不开放裁剪)"
+              % ("、".join(bad), "、".join(SKIPPABLE_LABELS)), file=sys.stderr)
+    return valid
+
+
+def _auto_skip_configured(flow, st, nxt):
+    """推进落点若是预设裁剪的可选环节,机器代跳并逐步留痕。"""
+    skips = _configured_step_skips()
+    if not skips:
+        return nxt
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    while nxt in SKIPPABLE_STEPS:
+        label, branch = SKIPPABLE_STEPS[nxt]
+        if label not in skips:
+            break
+        step = flow["steps"][nxt]
+        st["history"].append({"step": nxt, "result": "skipped-by-defaults",
+                              "note": "仓库预设跳过:" + label, "at": now})
+        if branch:
+            st.setdefault("choices", {})[step["choice_key"]] = branch
+            nxt = step["next"][branch]
+        else:
+            nxt = step.get("next")
+        print("[mae-flow] 环节「%s」按仓库预设跳过(已留痕)。" % label)
+    return nxt
+
+
 def advance(flow, st, sid, step, tag, note=""):
     # review 的增量边界由 harness 在进入裁决前冻结，后面任何模型都不能拿当前 HEAD 偷换基点。
     if sid == "branch_create" and st.get("choices", {}).get("workflow") == "review":
@@ -2844,6 +2930,7 @@ def advance(flow, st, sid, step, tag, note=""):
         ml["pushed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         ml["pushed_head"] = sh("git rev-parse --verify HEAD")
         nxt = "moonlight_review"
+    nxt = _auto_skip_configured(flow, st, nxt)
     st["current"] = nxt
     if nxt:
         st.setdefault("step_heads", {})[nxt] = sh("git rev-parse --verify HEAD")
@@ -3181,7 +3268,13 @@ def cmd_accept_risk(flow, st, args):
     step = flow["steps"][sid]
     kind = args.agent.upper()
     required = _step_agent_kinds(step)
-    if kind not in required:
+    # TIER_SCOPE 不是 Agent 令牌:它放行的是本步的档位范围硬校验(升级阈值),
+    # 仅在挂了 tier_scope 证据的步骤可用。
+    if kind == "TIER_SCOPE":
+        if not any(e.get("type") == "tier_scope"
+                   for e in step.get("evidence", [])):
+            die(f"当前步骤 {sid} 没有档位范围校验,不需要 tier_scope 放行。", 2)
+    elif kind not in required:
         die(f"当前步骤 {sid} 不需要 {kind} 令牌，不能预先或跨步骤放行。"
             + ("本步可放行: " + "、".join(sorted(required)) if required else "本步没有可风险放行的 Agent 令牌。"), 2)
     if not args.reason:
@@ -3206,6 +3299,62 @@ def cmd_accept_risk(flow, st, args):
     print(f"[mae-flow] 用户已确认承担 {kind} 令牌缺失风险；仅放行当前步骤 {sid}、当前代码版本。")
     print("风险: " + args.reason)
     print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，本次放行自动失效。现在重新执行 done。")
+
+
+WORKFLOW_LABELS = {"full": "完整开发", "hotfix": "已定位问题修复",
+                   "tweak": "局部修改", "review": "处理评审意见"}
+
+
+def _workflow_chain(flow, wf):
+    """按交付方式线性展开步骤链(可选询问步取"做"分支展示完整形态)。"""
+    chain, sid, seen = [], flow["start"], set()
+    while sid and sid not in seen:
+        seen.add(sid)
+        chain.append(sid)
+        step = flow["steps"][sid]
+        nxt = step.get("next")
+        if step.get("next_by"):
+            nxt = nxt.get(wf) if isinstance(nxt, dict) else nxt
+        elif isinstance(nxt, dict):
+            nxt = nxt.get("yes") or next(iter(nxt.values()))
+        sid = nxt
+    return chain
+
+
+def cmd_steps(flow, st, args):
+    """工作流全景:每条交付方式背后的完整步骤链、每步卡什么、哪些环节可裁。
+
+    透明化诉求:用户选档/裁剪前先看得见全貌;质量门禁步骤不在可裁白名单。"""
+    current = st.get("current") if st else None
+    active_wf = (st.get("choices", {}) or {}).get("workflow") if st else None
+    skips = _configured_step_skips()
+    ask_steps = {"grill_ask": "需求质询", "story_ask": "STORY"}
+    for wf in ("full", "hotfix", "tweak", "review"):
+        marker = "(本单)" if wf == active_wf else ""
+        print("\n═══ %s(%s)%s ═══" % (WORKFLOW_LABELS[wf], wf, marker))
+        for sid in _workflow_chain(flow, wf):
+            step = flow["steps"][sid]
+            tags = []
+            if sid in SKIPPABLE_STEPS:
+                label = SKIPPABLE_STEPS[sid][0]
+                tags.append("可裁:" + label
+                            + ("(预设已跳过)" if label in skips else ""))
+            elif sid in ("grill", "story"):
+                tags.append("随「%s」环节可选" % ask_steps.get(sid + "_ask", "?"))
+            if step.get("user_ack"):
+                tags.append("用户确认")
+            evidence = sorted({e.get("type", "?")
+                               for e in step.get("evidence", [])})
+            here = "▶" if (wf == active_wf and sid == current) else " "
+            print(" %s %-28s %s%s" % (
+                here, sid + " " + step.get("title", ""),
+                ("[" + "、".join(tags) + "] ") if tags else "",
+                ("证据:" + ",".join(evidence)) if evidence else "(无硬证据)"))
+    print("\n可裁剪环节(白名单,质量门禁不开放): %s" % "、".join(SKIPPABLE_LABELS))
+    print("裁剪方式:在仓根 .mae-flow-defaults.json 加 \"跳过环节\": [\"STORY\", …]"
+          "(提交进仓,团队生效;推进到这些环节时机器代跳并留痕)。")
+    if skips:
+        print("本仓当前预设跳过: " + "、".join(sorted(skips)))
 
 
 def cmd_status(flow, st, args):
@@ -5272,6 +5421,8 @@ def main():
             "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
     if args.cmd == "envcheck":
         return cmd_envcheck(flow, args)
+    if args.cmd == "steps":
+        return cmd_steps(flow, st, args)
     if args.cmd == "capability":
         return cmd_capability(args)
     if args.cmd == "template":

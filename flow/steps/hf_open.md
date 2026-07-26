@@ -9,7 +9,7 @@
 展示提案摘要(问题定位+修复思路)，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮。
 用户点选确认后提交产物，再 done --set CHANGE_NAME=<change目录名>；不再要求输入确认句
 (done 硬校验:写了规格条目则格式必须过、占位不得残留)。
-若触发升级条件(3+ 文件/架构变更/DB schema/新 public API)，停手展示原因并等用户确认；
+若触发升级条件(3+ 文件/架构变更/DB schema/新 public API)，停手展示原因并等用户确认(文件数这一条由 done 的 tier_scope 证据机器亲数,超限硬拦并给升级/accept-risk 两条出路)；
 确认升级后用内嵌 state 命令正规更新 workflow，再进入 design，禁止手写状态。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────

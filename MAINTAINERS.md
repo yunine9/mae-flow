@@ -169,6 +169,7 @@ flow.json 步骤字段语义：
 | `branch_ok` | 当前 git 分支 == 配置的分支名（实测） |
 | `env_ok` | 环境检查全绿（实测，带 24h 缓存，见 3.5） |
 | `tasks_checked` | 本 change 的实现清单无未勾选项（v5 = change.md 的「# 实现清单」节；旧布局在途单 = tasks.md，来源由引擎 `tasks_source` 统一裁决） |
+| `tier_scope` | 轻量档范围硬校验:改动业务文件数超升级阈值(tweak>5/hotfix>3,与步骤文档升级条件一致)即拒,出路=升级工作流或 accept-risk tier_scope(绑 HEAD)。此前升级条件是纯提示词零机器锚点 |
 | `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `spec_field` | 读 `.mae-flow.json` spec 段字段（v3 起阶段/产物指针的单一真相源）：`equals` 精确匹配或非空即过；指针字段登记时校验文件真实存在 + 现场复核（`yaml_field` 保留为在途兼容别名，指向同一实现） |

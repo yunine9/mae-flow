@@ -138,6 +138,7 @@ def parse_args(argv=None):
         "--repair-state", action="store_true",
         help="仅修复损坏的辅助状态；绝不覆盖完整流程断点")
     sub.add_parser("envcheck")
+    sub.add_parser("steps")  # 工作流全景:各交付方式的步骤链与可裁环节
     capability = sub.add_parser("capability")
     capabilities = capability.add_subparsers(
         dest="capability_action", required=True)

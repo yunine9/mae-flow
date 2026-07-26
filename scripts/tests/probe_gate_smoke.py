@@ -244,6 +244,46 @@ def main():
     check("范围口径: 明细缺行号保守全算(不静默漏报)",
           filtered["total"] == 2 and stock is None, str((filtered, stock)))
 
+    # ---------- 4. 升级阈值机器化 + 环节裁剪 ----------
+    ok, why = mf.ev_tier_scope({}, {"config": {"基线分支": "main"},
+                                    "choices": {"workflow": "tweak"}})
+    check("tier_scope: 限内(1 文件)放行", ok, why)
+    for i in range(6):
+        with open(os.path.join(src, "f%d.c" % i), "w", encoding="utf-8",
+                  newline="\n") as fh:
+            fh.write("int v%d = %d;\n" % (i, i))
+    subprocess.run(gitc + ["add", "-A"], check=True, capture_output=True)
+    subprocess.run(gitc + ["commit", "-qm", "more files"], check=True,
+                   capture_output=True)
+    st_tw = {"config": {"基线分支": "main"}, "choices": {"workflow": "tweak"}}
+    ok, why = mf.ev_tier_scope({}, st_tw)
+    check("tier_scope: tweak 超 5 文件拒且报出路",
+          not ok and "升级阈值" in why and "accept-risk" in why, why)
+    ok, why = mf.ev_tier_scope({}, {"config": {"基线分支": "main"},
+                                    "choices": {"workflow": "full"}})
+    check("tier_scope: full 档不限", ok, why)
+
+    # 环节裁剪:defaults 配置后 advance 落点自动代跳并留痕
+    flow = mf.load_flow()
+    with open(os.path.join(root, ".mae-flow-defaults.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump({"跳过环节": ["STORY", "代码精简", "非法环节UT"]}, fh,
+                  ensure_ascii=False)
+    st_skip = {"choices": {"workflow": "full"}, "history": [],
+               "config": {}}
+    nxt = mf._auto_skip_configured(flow, st_skip, "story_ask")
+    check("环节裁剪: story_ask 代跳到 build 并代选 no",
+          nxt == "build" and st_skip["choices"].get("story") == "no"
+          and any(h.get("result") == "skipped-by-defaults"
+                  for h in st_skip["history"]), str((nxt, st_skip)))
+    nxt = mf._auto_skip_configured(flow, st_skip, "verify_ponytail")
+    check("环节裁剪: verify_ponytail 线性代跳", nxt == "verify_codecheck", nxt)
+    nxt = mf._auto_skip_configured(flow, st_skip, "grill_ask")
+    check("环节裁剪: 未配置的环节不跳(白名单外值被忽略)",
+          nxt == "grill_ask", nxt)
+    nxt = mf._auto_skip_configured(flow, st_skip, "verify_codecheck")
+    check("环节裁剪: 质量门禁步骤永不代跳", nxt == "verify_codecheck", nxt)
+
     os.chdir(os.path.expanduser("~"))
     base_ctx.cleanup()
     print("\n探针①通过 %d 项, 失败 %d 项" % (PASS, len(FAIL)))

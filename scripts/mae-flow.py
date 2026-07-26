@@ -912,7 +912,12 @@ def ev_commit_tagged(spec, st):
         return False, "无法读取最新 commit"
     if re.match(r"^\[" + re.escape(dan) + r"\]\[(feat|fix)\]", msg):
         return True, ""
-    return False, f"最新 commit「{msg}」不符合 [{dan}][feat|fix]描述 格式"
+    # 晚拦截必须自带修复路径(核心哲学:错时机的拦截若不告诉怎么改,危害比
+    # 不拦更大)。此兜底只在提交绕过了实时格式检查(-F/长参形态/子 agent
+    # hook 未触发)时才会触发,修复=一条 amend,不动改动内容。
+    return False, (f"最新 commit「{msg}」不符合 [{dan}][feat|fix]描述 格式。"
+                   f"修复只需一条命令(不动已提交的改动内容):"
+                   f"git commit --amend -m \"[{dan}][fix|feat]<原描述>\"")
 
 
 def ev_commit_tagged_after_entry(spec, st):
@@ -3852,7 +3857,8 @@ def cmd_gate(flow, st, args):
             if name and want and name != want:
                 jdie("bash-branch-name",
                      f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
-        m = re.search(r"git\s+commit\b.*?-m\s+(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
+        m = re.search(r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
+                      r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
         if m and st:
             msg = m.group(1) or m.group(2) or m.group(3) or ""
             dan = st["config"].get("单号", "")

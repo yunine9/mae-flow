@@ -96,6 +96,34 @@ def main():
     r = gate(root, "edit", "openspec/specs/dom/spec.md")
     check("定稿步写真相源放行", r.returncode == 0, r.stdout + r.stderr)
 
+    # ---------- 1b. 提交链拦截时机(用户实战黑事件回归) ----------
+    # 黑事件:git add openspec/.../proposal.md 的 "md" 曾误命中 mkdir 的 cmd
+    # 别名,被拦"手动创建",而 clean_paths 证据又要求必须提交——门禁与证据
+    # 互锁卡死。v5 的 change.md 同形态必须同样安全。
+    def gate_bash(root, cmd):
+        return subprocess.run([sys.executable, MAE, "gate", "bash", cmd],
+                              cwd=root, text=True, capture_output=True,
+                              timeout=120)
+    root = make_repo(base, "gb", "archive")
+    for cmd, expect_ok, name in (
+            ("git add openspec/changes/probe-x/proposal.md", True,
+             "黑事件原型:提交 proposal.md 放行"),
+            ("git add openspec/changes/probe-x/change.md", True,
+             "v5 同形态:提交 change.md 放行"),
+            ('git add openspec/ && git commit -m "[REQ probe][fix]归档"', True,
+             "归档标准提交组合放行"),
+            ("mkdir openspec/changes/fake", False,
+             "真手动创建 openspec 仍拦"),
+            ('git commit -m "错误格式"', False,
+             "错误格式在提交那一刻拦(不是 done 才发现)"),
+            ('git commit --message="错误格式"', False,
+             "--message= 长参数形态同样实时拦"),
+            ('git commit -m "[REQ probe][fix]合规提交"', True,
+             "合规提交放行")):
+        r = gate_bash(root, cmd)
+        ok = (r.returncode == 0) == expect_ok
+        check("提交链: " + name, ok, (r.stdout + r.stderr)[-150:])
+
     # ---------- 2. 证据全路径（importlib 直调，selftest 同款） ----------
     spec_mod = importlib.util.spec_from_file_location("mf", MAE)
     mf = importlib.util.module_from_spec(spec_mod)

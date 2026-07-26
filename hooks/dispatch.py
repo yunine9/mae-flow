@@ -242,6 +242,26 @@ def _gate_agent_dispatch(ti):
                   "现在拦下只损失一次调用;跑完整只 agent 才被契约打回,重做要上百轮。"
                   % (kind, remedy), file=sys.stderr)
             sys.exit(2)
+        if task.get("step") != st.get("current"):
+            print("[mae-flow] 派发前拦截:%s 任务卡属于旧步骤 %s，当前步骤为 %s。"
+                  "先按 current/action status 生成当前步骤的新任务卡，再派发。"
+                  % (kind, task.get("step", "?"), st.get("current", "?")),
+                  file=sys.stderr)
+            sys.exit(2)
+        try:
+            txt = open(task.get("path", ""), encoding="utf-8").read()
+            body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
+            actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        except Exception as exc:
+            print("[mae-flow] 派发前拦截:%s 任务卡不可读(%s)。"
+                  "先重新生成任务卡，避免整只 agent 跑完才发现输入失效。"
+                  % (kind, exc), file=sys.stderr)
+            sys.exit(2)
+        if actual != task.get("sha256"):
+            print("[mae-flow] 派发前拦截:%s 任务卡内容已变化。"
+                  "先重新生成任务卡；旧卡不能代表当前任务。"
+                  % kind, file=sys.stderr)
+            sys.exit(2)
         head, cur = task.get("head", ""), _git_head()
         if head and cur and head != cur:
             remedy = (
@@ -252,6 +272,21 @@ def _gate_agent_dispatch(ti):
                   "旧卡描述的不是现在的代码,跑完也拿不到令牌。先重新执行 %s 再派发。"
                   % (kind, head[:10], cur[:10], remedy), file=sys.stderr)
             sys.exit(2)
+        # 完整流程签卡前已强制工作区源码干净（启动前遗留且指纹未变者除外）。
+        # 因此同 HEAD 下出现新的未提交源码变化，必然发生在签卡后；现在拦比
+        # SubagentStop 才拒签便宜得多。独立任务允许带脏工作区执行，仍由其
+        # initial_source_fingerprints 在收尾契约中审计，不能在这里误伤恢复。
+        if not task.get("standalone") and head:
+            changed, err = _source_changed_since_receipt(head, st)
+            if err:
+                print("[mae-flow] 派发前拦截:%s 无法核对任务卡新鲜度(%s)。"
+                      "先重新生成任务卡。" % (kind, err), file=sys.stderr)
+                sys.exit(2)
+            if changed:
+                print("[mae-flow] 派发前拦截:%s 签卡后源码又发生未提交变化: %s。"
+                      "先提交本单改动并重新生成任务卡；现在拦下可避免整只 agent 白跑。"
+                      % (kind, "、".join(changed[:5])), file=sys.stderr)
+                sys.exit(2)
     except SystemExit:
         raise
     except Exception as e:
@@ -1048,6 +1083,81 @@ def _record_codecheck_build_receipt(task, tool_calls):
     return rec
 
 
+def _record_codecheck_fullcheck_receipt(
+        task, command_count, raw_counts, scan, expected_raw=None,
+        result_hashes=None):
+    """保存最终分批的执行事实，供“只修报告”跨 agent 复用。
+
+    精确计数可解析时同时保存机器对账；未知成功输出只保存执行凭证，并把
+    CodeCheck 结论视为建议项。源码、任务卡或首检口径任一变化都会让凭证失效。
+    """
+    counts_complete = (
+        len(raw_counts) == int(command_count)
+        and all(isinstance(x, int) and x >= 0 for x in raw_counts))
+    rec = {
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "step": task.get("step", ""),
+        "task_sha256": task.get("sha256", ""),
+        "head": _git_head(),
+        "command_count": int(command_count),
+        "raw_counts": list(raw_counts),
+        "raw_total": int(sum(raw_counts)),
+        "machine_counts_complete": counts_complete,
+        "expected_raw": int(expected_raw) if expected_raw is not None else None,
+        "result_hashes": list(result_hashes or []),
+        "scan_count": scan.get("count"),
+        "stock_excluded": scan.get("stock_excluded"),
+    }
+    if task.get("standalone"):
+        rec["source_snapshot"] = _source_snapshot(task.get("head", ""))
+    try:
+        data = _evidence_data()
+        data["CODECHECK_FULLCHECK"] = rec
+        _save_evidence(data)
+        _log("CODECHECK fullcheck 凭证: %s 批/%s @%s"
+             % (command_count,
+                (str(rec["raw_total"]) + " 条" if counts_complete else "计数格式未知"),
+                rec["head"][:9]))
+    except Exception as exc:
+        _log("codecheck fullcheck receipt EXC: " + str(exc))
+        return None
+    return rec
+
+
+def _codecheck_counts_from_text(text):
+    """提取 CodeCheck CLI 已公开的机器计数格式；不依赖进程退出码。
+
+    公司 CLI 在“检查成功但发现告警”时可能返回非零码。只要 result 完整且
+    含可信计数锚点，非零码不是执行失败；未知格式仍不猜数。
+    """
+    text = str(text or "")
+    counts = [int(x) for x in re.findall(r"共有\s*(\d+)\s*条告警", text)]
+    if counts:
+        return counts
+    counts = [int(x) for x in re.findall(
+        r"\|\s*\*{0,2}总计\*{0,2}\s*\|\s*\*{0,2}(\d+)\*{0,2}\s*\|",
+        text)]
+    if counts:
+        return counts
+    details = re.findall(
+        r"^###\s+\d+\.\s+\[(?:Critical|Major|Minor|Suggestion|"
+        r"致命级|严重级|一般级|提示级)\]",
+        text, re.M | re.I)
+    if details:
+        return [len(details)]
+    completed = (
+        "代码检查完成" in text or "CodeCheck 检查报告" in text
+        or "检查结果汇总" in text)
+    zero_patterns = (
+        r"未发现(?:任何)?(?:代码)?告警",
+        r"没有发现(?:任何)?(?:代码)?告警",
+        r"(?:告警|问题)(?:总数)?\s*[:：]?\s*0\b",
+        r"0\s*条告警",
+    )
+    return [0] if completed and any(
+        re.search(pattern, text, re.I) for pattern in zero_patterns) else []
+
+
 _UT_NONRUN_PAT = re.compile(
     r"\b(?:disabled|excluded|deselected|skipped)\b|禁用|排除|跳过", re.I)
 _UT_HARD_RISK_PAT = re.compile(
@@ -1062,11 +1172,13 @@ _UT_FILTER_ARG_PAT = re.compile(
 
 
 def _ut_filter_args(command):
-    return [
+    # 过滤参数的排列顺序不改变测试集合；统一排序后再比较，避免等价命令
+    # 仅因 -R/-E 换位被误判为缩小范围。
+    return sorted([
         (m.group("flag").lower(), re.sub(
             r"\s+", " ", (m.group("value") or "").strip().strip("\"'")).lower())
         for m in _UT_FILTER_ARG_PAT.finditer(command or "")
-    ]
+    ])
 
 
 def _command_swallows_failure(command):
@@ -1181,7 +1293,11 @@ def _matching_ut_runs(tool_calls, reported):
 
 
 def _ut_observed_counts(text):
-    """从常见 Windows/C++/Java/Python 测试器真实输出提取末次总数与失败数。"""
+    """从常见 Windows/C++/Java/Python 测试器真实输出提取末次总数与失败数。
+
+    这里只是已知格式的额外加固，不是跨语言真相源。识别不到时由真实工具
+    成功状态 + 专项 Agent 的统一报告合同兜底，禁止因未知框架格式误阻断。
+    """
     text = str(text or "")
     candidates = []
     for m in re.finditer(
@@ -1225,6 +1341,17 @@ def _ut_observed_counts(text):
     return max(candidates, key=lambda item: item[0])[1] if candidates else {}
 
 
+def _ut_report_counts(report):
+    return {
+        key: _number_field(report, field)
+        for key, field in (
+            ("total", "TESTS_TOTAL"),
+            ("passed", "TESTS_PASSED"),
+            ("failed", "TESTS_FAILED"),
+        )
+    }
+
+
 def _bash_mutates_before_ut_baseline(call):
     """基线前只允许明确的只读探查；未知 Bash 倒向阻断，防 sed/python 偷改测试。"""
     name = str((call or {}).get("name", "")).lower()
@@ -1264,10 +1391,17 @@ def _ut_execution_risk(report, run_call, expected, tool_calls=None, require_base
         return ("测试器真实输出显示 %d 个失败，但报告声称 PASS；"
                 "必须按 NEEDS_INPUT/FAIL 如实收尾。" % observed["failed"])
     report_total = _number_field(report, "TESTS_TOTAL")
-    if observed.get("total") is not None and report_total is not None \
-            and observed["total"] != report_total:
-        return ("TESTS_TOTAL(%d)与测试器真实末次汇总(%d)不一致；"
-                "数字必须取自真实执行输出。" % (report_total, observed["total"]))
+    if observed.get("total") is not None and report_total is not None:
+        # 各框架对 total 是否包含 skipped 的定义不同。保留机器对账，但接受
+        # “框架总数”与“实际执行数(passed+failed)”这两种已知合法口径；
+        # 识别不到的格式不猜，由 Skill/Agent 的统一报告合同负责归一。
+        legitimate = {observed["total"]}
+        if observed.get("passed") is not None and observed.get("failed") is not None:
+            legitimate.add(observed["passed"] + observed["failed"])
+        if report_total not in legitimate:
+            return ("TESTS_TOTAL(%d)与测试器真实末次汇总口径(%s)不一致；"
+                    "数字必须取自真实执行输出。"
+                    % (report_total, "/".join(str(x) for x in sorted(legitimate))))
     risk_text = summary + "\n" + result
     # 常见测试框架会正常打印“0 skipped/0 disabled”，这是全绿统计，不得误伤。
     risk_text = re.sub(r"\b(?:0|no)\s+(?:tests?\s+)?(?:disabled|excluded|skipped)\b", "",
@@ -1290,42 +1424,30 @@ def _ut_execution_risk(report, run_call, expected, tool_calls=None, require_base
         final_index = next(i for i, call in enumerate(calls) if call is run_call)
     except StopIteration:
         final_index = len(calls)
-    # 测试文件发生变化时，无论终跑是否打印 disabled，都必须先有同口径首跑。
-    # 基线本身可以失败，所以这里只要求真实 result，不要求成功退出码。
+    # 同口径首跑不再是每单必跑：正常路径只跑一次最终 UT。只有终跑明确报告
+    # 非零 disabled/skipped/excluded，且 Agent 要把它认定为存量时，才使用
+    # 可选首跑基线做增量对账。这样不让所有语言为极少数异常天然付双倍成本。
     earlier = [(i, call) for i, call in enumerate(calls[:final_index])
                if str(call.get("name", "")).lower() == "bash"
                and _reported_bash_segment(call, summary)
                and call.get("result_seen")]
-    if require_baseline and not earlier:
-        return ("任务卡后测试文件发生了变化，但修改前没有同口径 UT 首跑基线；"
-                "无法证明终跑没有靠删除/缩减测试取得 PASS。")
-    if earlier:
-        baseline_index, baseline_call = earlier[0]
-        if any(_bash_mutates_before_ut_baseline(call)
-               for call in calls[:baseline_index]):
-            return ("UT 首跑基线发生在写测试、生成 Skill 或未知写盘命令之后；"
-                    "基线必须是任务卡后的第一项测试动作。")
-        baseline_observed = _ut_observed_counts(
-            str(baseline_call.get("result", "") or ""))
-        if baseline_observed.get("total") is not None \
-                and observed.get("total") is not None \
-                and observed["total"] < baseline_observed["total"]:
-            return ("终跑测试总数从基线 %d 降为 %d；不能通过删除/缩减既有测试取得 PASS。"
-                    % (baseline_observed["total"], observed["total"]))
-    if _UT_NONRUN_PAT.search(risk_text):
-        final_counts = _ut_nonrunning_counts(result)
-        risk_kinds = _ut_nonrunning_kinds(risk_text)
-        if not final_counts or not risk_kinds.issubset(set(final_counts)):
-            return ("测试输出存在 disabled/skipped/excluded，但无法从终跑真实输出"
-                    "解析对应精确计数；不能凭『历史问题』口头放行，需按非 PASS 收尾。")
+    final_counts = {
+        kind: count for kind, count in _ut_nonrunning_counts(result).items()
+        if count > 0
+    }
+    if final_counts:
         if not earlier:
             return ("终跑存在 disabled/skipped/excluded，但修改测试前没有同口径首跑基线；"
                     "不能区分存量项与本单新增项，需按非 PASS 收尾。")
         baseline_index, baseline_call = earlier[0]
+        if any(_bash_mutates_before_ut_baseline(call)
+               for call in calls[:baseline_index]):
+            return ("用于认领存量 disabled/skipped/excluded 的 UT 首跑发生在"
+                    "写测试、生成 Skill 或未知写盘命令之后，不能作为存量基线。")
         baseline_counts = _ut_nonrunning_counts(
             str(baseline_call.get("result", "") or ""))
-        missing = [kind for kind in risk_kinds if kind not in baseline_counts]
-        increased = [kind for kind in risk_kinds
+        missing = [kind for kind in final_counts if kind not in baseline_counts]
+        increased = [kind for kind in final_counts
                      if kind in baseline_counts
                      and final_counts.get(kind, 0) > baseline_counts[kind]]
         if missing or increased:
@@ -1334,6 +1456,14 @@ def _ut_execution_risk(report, run_call, expected, tool_calls=None, require_base
                 for kind in sorted(set(missing + increased)))
             return ("本轮新增 disabled/skipped/excluded，必须进入 KNOWN_FAILURES/"
                     f"SUSPECTED_BUGS，不能 PASS（{detail}）。")
+        baseline_observed = _ut_observed_counts(
+            str(baseline_call.get("result", "") or ""))
+        if baseline_observed.get("total") is not None \
+                and observed.get("total") is not None \
+                and observed["total"] < baseline_observed["total"]:
+            return ("终跑测试总数从存量基线 %d 降为 %d；不能通过删除/缩减"
+                    "既有测试取得 PASS。"
+                    % (baseline_observed["total"], observed["total"]))
     return ""
 
 
@@ -1351,10 +1481,16 @@ def _record_ut_receipts(task, report, tool_calls, require_baseline=False):
         common["source_snapshot"] = _source_snapshot(task.get("head", ""))
     if generator and not _call_failed(generator):
         records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
-    if run and not _call_failed(run) and not _ut_execution_risk(
+    reported_counts = _ut_report_counts(report)
+    counts_complete = all(v is not None for v in reported_counts.values())
+    if run and counts_complete and not _call_failed(run) and not _ut_execution_risk(
             report, run, cfg.get("UT运行命令", ""), tool_calls, require_baseline):
         actual = _reported_bash_segment(run, executed) or executed
-        records["UT_RUN"] = dict(common, value=actual)
+        records["UT_RUN"] = dict(
+            common, value=actual, reported_counts=reported_counts,
+            result_sha256=hashlib.sha256(
+                str(run.get("result", "") or "").encode(
+                    "utf-8", errors="replace")).hexdigest())
     if not records:
         return
     try:
@@ -1396,6 +1532,33 @@ def _reusable_codecheck_build_receipt(task):
     return rec if not err and not changed else None
 
 
+def _reusable_codecheck_fullcheck_receipt(task, command_count, scan):
+    rec = _evidence_data().get("CODECHECK_FULLCHECK", {})
+    if not rec or rec.get("step") != task.get("step") \
+            or rec.get("task_sha256") != task.get("sha256") \
+            or rec.get("command_count") != int(command_count) \
+            or rec.get("scan_count") != scan.get("count") \
+            or rec.get("stock_excluded") != scan.get("stock_excluded"):
+        return None
+    counts = rec.get("raw_counts")
+    if not isinstance(counts, list) \
+            or not all(isinstance(x, int) and x >= 0 for x in counts) \
+            or sum(counts) != rec.get("raw_total"):
+        return None
+    if rec.get("machine_counts_complete"):
+        if len(counts) != int(command_count):
+            return None
+    else:
+        if counts or not rec.get("result_hashes"):
+            return None
+    if task.get("standalone"):
+        return rec if rec.get("source_snapshot") == _source_snapshot(
+            task.get("head", "")) else None
+    changed, err = _source_changed_since_receipt(
+        rec.get("head", ""), _contract_state())
+    return rec if not err and not changed else None
+
+
 def _source_changed_since_receipt(head, st):
     """dispatch 侧的轻量源码新鲜度检查，语义与 mae-flow 令牌检查一致。"""
     current = _git_head()
@@ -1419,15 +1582,31 @@ def _call_failed(call):
         return True
     if call.get("is_error"):
         return True
+    # Skill 的 tool_result 是插件自定义协议：不同语言/不同版本可能返回
+    # 自然语言、JSON 或摘要，其中出现 failed/error 并不等于宿主调用失败。
+    # 这里只对 Bash 的进程语义做兜底识别；Skill 是否完成业务目标由
+    # Agent 的统一结构化 Return format 判断。
+    if str(call.get("name", "")).lower() != "bash":
+        return False
     text = call.get("result", "") or ""
-    return bool(re.search(r"(?:exit(?:ed)?\s*(?:code|status)?|return\s*code)\s*[:= ]\s*[1-9]\d*|"
-                          r"command failed|tool[_ ]?error", text, re.I))
+    return bool(re.search(
+        r"(?:^|\n)\s*(?:(?:process|command)\s+)?exited?\s+with\s+(?:exit\s+)?code"
+        r"\s*[:= ]\s*[1-9]\d*|"
+        r"(?:^|\n)\s*(?:exit[_ ]code|return[_ ]?code|errorlevel)"
+        r"\s*[:= ]\s*[1-9]\d*|"
+        r"(?:^|\n)\s*(?:process|command)\s+failed\s+with\s+(?:exit\s+)?code"
+        r"\s*[:= ]\s*[1-9]\d*|"
+        r"returned\s+non-zero\s+exit\s+status\s+[1-9]\d*|"
+        r"(?:exit(?:ed)?\s*(?:code|status)?|return\s*code)\s*[:= ]\s*[1-9]\d*",
+        text, re.I))
 
 
 def _skill_call(tool_calls, wanted):
     if not wanted:
         return None
-    for x in tool_calls or []:
+    # 编译/生成 Skill 允许多轮修复；最终证据必须看最后一次匹配调用，
+    # 与 Bash 证据一致。取首轮会把“先失败后成功”误拒，也可能忽略最终失败。
+    for x in reversed(tool_calls or []):
         if str(x.get("name", "")).lower() != "skill":
             continue
         try:
@@ -1675,7 +1854,6 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         return   # FAIL 是诚实上报,不再苛求对账字段
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
-    _require_bash_success(tool_calls, "codecheck fullcheck", bail, "CodeCheck")
     nums = {}
     for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
         mm = re.search(r"^\s*" + k + r":\s*(\d+)\s*$", report, re.M)
@@ -1700,31 +1878,54 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
     # “本单遗留 + 已识别存量”对拍，不能只看最后一批或拿 raw 对 scoped。
     command_count = len(scan.get("commands") or []) if scan.get("step") == st.get("current") else 1
     command_count = max(1, command_count)
+    all_fullcheck_calls = _bash_calls(tool_calls, "codecheck fullcheck")
     selected, invocations = [], 0
-    for call, count in reversed(_bash_calls(tool_calls, "codecheck fullcheck")):
-        selected.append((call, count))
-        invocations += count
-        if invocations >= command_count:
-            break
-    if invocations < command_count:
-        bail(f"最终一轮 CodeCheck 只找到 {invocations}/{command_count} 个 fullcheck 分批调用；"
-             "不能跳过前面批次后只拿最后一批收尾。")
+    receipt = None
     real_counts = []
-    for call, count in reversed(selected):
-        inp = call.get("input", {}) or {}
-        raw_command = inp.get("command", "") if isinstance(inp, dict) else str(inp)
-        if _command_swallows_failure(raw_command):
-            bail("CodeCheck 命令使用了 || true / ; exit 0 等方式吞掉失败退出码。")
-        if not call.get("result_seen") or _call_failed(call):
-            bail("最终一轮 CodeCheck 分批调用存在缺失或失败的 tool_result，不能报告成功。")
-        hits = [int(x) for x in re.findall(
-            r"共有\s*(\d+)\s*条告警", str(call.get("result") or ""))]
-        real_counts.extend(hits[-count:])
-    if task.get("standalone") and len(real_counts) < command_count:
-        bail("独立 CodeCheck 没有 done 现场复核，最终每个 fullcheck 分批都必须在 tool_result "
-             "中提供「共有 N 条告警」锚点；当前真实输出无法完成对账。")
+    result_hashes = []
+    if all_fullcheck_calls:
+        for call, count in reversed(all_fullcheck_calls):
+            selected.append((call, count))
+            invocations += count
+            if invocations >= command_count:
+                break
+        if invocations < command_count:
+            bail(f"最终一轮 CodeCheck 只找到 {invocations}/{command_count} 个 fullcheck 分批调用；"
+                 "不能跳过前面批次后只拿最后一批收尾。")
+        for call, count in reversed(selected):
+            inp = call.get("input", {}) or {}
+            raw_command = inp.get("command", "") if isinstance(inp, dict) else str(inp)
+            if _command_swallows_failure(raw_command):
+                bail("CodeCheck 命令使用了 || true / ; exit 0 等方式吞掉失败退出码。")
+            if not call.get("result_seen"):
+                bail("最终一轮 CodeCheck 分批调用缺少 tool_result，不能报告成功。")
+            hits = _codecheck_counts_from_text(call.get("result"))
+            # CodeCheckCLI 发现告警时可能返回非零码；可信机器计数比通用 Bash
+            # 退出状态更能表达该工具是否完成。没有计数时仍按失败状态阻断。
+            if _call_failed(call) and not hits:
+                bail("最终一轮 CodeCheck 分批调用失败，且 tool_result 没有可验证的"
+                     "告警计数，不能报告成功。")
+            result_hashes.append(hashlib.sha256(
+                str(call.get("result") or "").encode(
+                    "utf-8", errors="replace")).hexdigest())
+            real_counts.extend(hits[-count:])
+        if len(real_counts) < command_count:
+            _record_codecheck_fullcheck_receipt(
+                task, command_count, [], scan,
+                result_hashes=result_hashes)
+    elif soft:
+        receipt = _reusable_codecheck_fullcheck_receipt(
+            task, command_count, scan)
+        if receipt:
+            real_counts = list(receipt.get("raw_counts") or [])
+            _log("CODECHECK 重答复用完整 fullcheck 凭证 @"
+                 + receipt.get("head", "")[:9])
+    if not all_fullcheck_calls and not receipt:
+        bail("transcript 中没有完整执行本轮 CodeCheck fullcheck，且没有同任务卡、"
+             "同源码版本、同分批口径的可复用机器凭证。")
     if len(real_counts) >= command_count:
-        real_raw = sum(real_counts[-command_count:])
+        real_counts = real_counts[-command_count:]
+        real_raw = sum(real_counts)
         stock = scan.get("stock_excluded")
         expected_raw = nums["REMAINING_COUNT"] + stock if isinstance(stock, int) \
             else nums["REMAINING_COUNT"]
@@ -1734,6 +1935,10 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
                  + (f"+存量过滤({stock})={expected_raw}" if isinstance(stock, int)
                     else f"={expected_raw}")
                  + "；复验摘录不能自说自话，修完或如实上报后重答。")
+        if all_fullcheck_calls:
+            _record_codecheck_fullcheck_receipt(
+                task, command_count, real_counts, scan, expected_raw,
+                result_hashes=result_hashes)
     if nums["FIXED"] > 0:
         build = _field(report, "EXECUTED_BUILD")
         build_cfg = _state_config().get("编译方式", "")
@@ -1817,6 +2022,14 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
             report, run, configured_ut, tool_calls, require_baseline)
         if risk:
             bail(risk)
+    elif reused_run:
+        # 报告重答可以免跑长 UT，但不能借复用凭证改写数字。凭证记录的是
+        # 首次真实输出已校验过的三数，并绑定任务卡、步骤和源码版本。
+        bound = reused_run.get("reported_counts", {}) or {}
+        current = _ut_report_counts(report)
+        if bound and current != bound:
+            bail("报告重答的 TESTS_TOTAL/PASSED/FAILED 与已绑定的真实执行凭证不一致；"
+                 "只修格式不得改写测试事实。")
     if run and _call_failed(run):
         bail("UT运行命令的工具结果明确失败，不能报告 PASS。")
     if not run and not reused_run:
@@ -1876,7 +2089,7 @@ def _grill_contract(status, report, tool_calls=None, soft=False):
     # agent 与认真审查者在门禁眼中无差别。要求至少一次成功的只读检索;transcript
     # 完全无 tool_use 块的老宿主场景沿用既有话术(展示风险+accept-risk),不新增死锁。
     calls = tool_calls or []
-    read_ok = any(c.get("name") in ("Read", "Grep", "Glob")
+    read_ok = any(str(c.get("name", "")).lower() in ("read", "grep", "glob")
                   and c.get("result_seen") and not c.get("is_error")
                   for c in calls)
     if not read_ok:

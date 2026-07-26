@@ -63,9 +63,9 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 维度 | 谁管 | 何时 | 为什么在这个位置 |
 |---|---|---|---|
 | 复杂度 | Ponytail | build 预防 + verify 4.1 | 先删：不给将死代码修规范/补测 |
-| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+真实 fullcheck 整轮分批求和防吞告警，raw 数需加回 harness 已识别的存量告警后再与 scoped 遗留对账；**done 的 codecheck_clean 由 harness 亲数遗留（agent 报数不作数）**，机器首检 0 或同 HEAD/文件清单的 done 复核可复用受保护缓存，代码一变立即失效；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
+| 规范 | CodeCheck | verify 4.2 | 再改：CodeCheck 是建议型工具。每个源码版本真实首检一次；有告警时只派一轮修复 Agent，Hook 核对任务卡、真实 fullcheck、范围和三数；CLEAN/REMAINING 都如实留痕，工具 FAIL 且未留下源码变化也可继续。done 不再第三次重跑，工具不可用/输出未知保存诊断后继续；只查业务代码不查测试 |
 | 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
-| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。PASS 至少真实运行 1 条测试并逐条给 AC_COVERAGE；任务卡后任何写测试动作前先跑同口径基线，disabled/skipped 只允许与该基线一致的存量计数；真实失败、吞退出码、缩窄范围、删测试或终跑总数下降均阻断。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
+| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。C++ AutoUT 每任务卡只调用一轮，正常路径只跑一次最终全量 UT；仅在要认领非零 disabled/skipped 为存量时才选做修改前基线。PASS 至少真实运行 1 条测试并逐条给 AC_COVERAGE；明确失败、吞退出码、缩窄范围、删测试或存量基线下总数下降仍阻断。未知 runner 输出由 Skill/Agent 归一，Hook 不强套其他框架文案 |
 | 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘实现清单备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
 
@@ -182,9 +182,9 @@ flow.json 步骤字段语义：
 **CodeCheck/UT 覆盖口径（2026-07-26 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐（用户确认线上同为增量，本地过滤不会造成 MR 被存量告警打回）。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 告警按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口过滤（scan 与 done 复核同源同口径，存量数如实展示；明细缺行号时保守全算并明示）；UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口外扩是"改动所在函数"的近似——函数级规则（超长/圈复杂度）告警常报在签名行。
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
 | `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
-| `codecheck_clean` | **done 现场重跑 `codecheck fullcheck -f <业务代码>` 亲数遗留**。告警数按控制台「共有 N」→报告汇总表「总计」→问题明细标题→JSON 结果→明确零告警文案多路解析，不依赖 CLI 退出码。解析失败不等于有告警：保存完整现场，让用户核对后走绑定式恢复。遗留除豁免文件外还必须有 `approve-exemption` 写入的用户审批账；手写文件不算授权（review 基点前已有的历史豁免继续承认） |
+| `codecheck_clean` | 保留作旧在途流程兼容，不再由 `review_codecheck` 正常路径调用。新路径以首检或 Agent 最终 fullcheck 的绑定凭证收口，避免 done 第三次长跑 |
 | `agent_or_no_source` | 本轮没有源码、测试或构建文件改动时自动过；只要有改动就强制指定 agent 的成功状态。适用于主流程、小改和评审返工，不再只认 C++/Java |
-| `review_codecheck` | 三条流程统一先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警才允许派 CODECHECK agent，首检 0 后源码变化会令扫描过期；最后再走 codecheck_clean 现场复核。输出格式无法解析时保存完整诊断，并允许用户核对后用 `codecheck-record` 登记数量；记录绑定步骤、HEAD、文件清单和诊断哈希，不是无条件放行 |
+| `review_codecheck` | 三条流程统一先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警才允许派一轮 CODECHECK agent，首检 0 后源码变化会令扫描过期。CLEAN/REMAINING/无源码改动的工具 FAIL 均留痕收口，不再调用 `codecheck_clean` 重跑；输出无法解析时保存绑定 HEAD 的诊断并继续，源码变化后重新尝试 |
 
 **新增证据类型**：在 mae-flow.py 写 `ev_xxx(spec, st) -> (bool, 失败原因)`，注册进 `EVIDENCE` 字典，flow.json 里引用。失败原因要写"怎么补救"，它会原样回传给模型。
 
@@ -223,8 +223,10 @@ SubagentStop 契约校验：最终回复必须有且只有一个 `XXX_RESULT: <�
 `EXECUTED_COMMAND` 含 fullcheck、三数对账 `FOUND = FIXED + REMAINING_COUNT`（吞告警最常见形态是马虎遗漏，算术不平当场打回）、
 CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛求对账）。真实编译调用会留下绑定任务卡、步骤和源码版本的临时凭证；仅因报告格式重答时，同一源码版本可复用，不重复跑长编译，源码一变立即失效。`stop_hook_active` 时仍以 0 退出防打回死循环，但拒签原因写入受保护 sidecar，`done/doctor` 会展示真实原因，不再误报成“首行没标记”。
 UT 同样把真实 AutoUT/java-autout Skill 调用和 UT 命令分别记为临时凭证：报告重答可复用，源码或测试变化立即失效。
-机器字段解析兼容 Markdown bullet/同行字段，真实工具调用高于 `GENERATOR_USED/EXECUTED_UT` 的文字摘要；但实际命令额外追加
-filter/exclude/disable，或输出出现非零 disabled/skipped、segfault 时不得 PASS，必须走问题呈报与用户裁决。
+机器字段解析兼容 Markdown bullet/同行字段，真实工具调用高于 `GENERATOR_USED/EXECUTED_UT` 的文字摘要。
+UT 已知输出解析只做额外加固：未知 C++ runner 不因文案不匹配被拒；实际命令额外追加
+filter/exclude/disable、明确失败/segfault，或可机器确认的新增 disabled/skipped 时仍不得 PASS。
+CodeCheck 完整成功输出会保存计数凭证；未知成功输出保存执行哈希，报告重答不重复 fullcheck。
 所有 `agent_ran` 门禁都有统一人工出口 `accept-risk`，但它刻意不是“跳过步骤”：命令先确认当前步骤确实需要该 Agent，
 再用 `_ack_verified(exact=True)` 核对用户当前步骤原话，拒绝脏源码，记录风险/step/task SHA/HEAD；`ev_agent_ran` 只把这一项视为通过。
 CodeCheck 的现场扫描、clean_paths、提交、分支和归档等证据继续执行。新任务卡、源码变化、goto、推进和退出恢复都会废弃放行。
@@ -376,7 +378,8 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 
 - **verify_ponytail 零证据**——跳过无人知；兜底：复杂度维度有 build 期 ponytail 常驻 + codecheck + comet review 三重冗余。
 - **end 沉淀纪律零机器锚点**——逐条用户确认/只记仓库事实/30 条上限全是提示词约束（end 为终态步无证据）；兜底：装载侧把条目直接喂进 agent 任务提示，污染可在 report/复盘发现；机制化（拆出终态+ASKUSER 令牌+content_free 行数校验）留待实际出现污染再加。
-- **codecheck REMAINING 的用户决策语义仍不可完全验真**——但 `approve-exemption` 已要求本步 ASKUSER 令牌、用户原话验真并写状态审批账；手写豁免文件不能放行。
+- **CodeCheck 是建议型工具**——REMAINING/工具故障不阻断插件内交付，最终流水线可能仍有自己的独立门禁；
+  本地必须保留首检、Agent 报告或工具诊断，源码变化会让它们失效。`approve-exemption` 仅保留给旧在途流程兼容。
 - **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。配置确认是特殊强类型通道：`config-review` 先冻结完整配置、需求文档 SHA 与一次性收据 ID，用户最终回答必须绑定该收据；多问题的局部回答不能代替整单确认。连续失败只停止同命令自动重试，不形成永久锁，也不要求 exit/init。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
@@ -384,7 +387,7 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 - **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
 - **确认按风险分层**：普通流程选择读取当前步骤 AskUserQuestion 的按钮结果，`done` 不再要求重复
   `--ack`；若宿主只给 ASKUSER 令牌而不回传选项正文，允许信任本步真实交互和 Agent 提交的合法 choice，
-  避免逼用户复读。goto / unlock / 豁免 / CodeCheck 人工恢复 / accept-risk 会改变流程或放宽约束，
+  避免逼用户复读。goto / unlock / 豁免 / accept-risk 会改变流程或放宽约束，
   仍只接受当前步骤捕获到的用户原话，不能跨关复用。
 - **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow exit`：
   用户事件授权、现场快照、项目标记和 Comet Hook 兼容一次完成，代码不回滚；Hook 故障时使用真实 TTY

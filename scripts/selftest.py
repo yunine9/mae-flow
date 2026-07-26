@@ -273,6 +273,23 @@ if flow:
             check("CodeCheck 机器首检零告警且源码未变时 done 直接复用",
                   zero_ok and calls["count"] == 0)
 
+            advisory_state = {
+                "current": "verify_codecheck",
+                "config": {"单号": "REQ1", "基线分支": base},
+                "quality": {"codecheck_scan": {
+                    "step": "verify_codecheck", "head": head, "count": None,
+                    "status": "TOOL_ERROR", "files": ["src/Foo.cpp"],
+                    "error": "未知输出格式"}},
+            }
+            tool_issue_ok, _ = mf.ev_review_codecheck({}, advisory_state)
+            open("src/Foo.cpp", "a", encoding="utf-8").write(
+                "int changed_after_tool_issue = 4;\n")
+            stale_tool_issue_ok, _ = mf.ev_review_codecheck({}, advisory_state)
+            open("src/Foo.cpp", "w", encoding="utf-8").write(
+                "int value = 1;\nint changed = 2;\n")
+            check("CodeCheck 工具故障留痕可继续但源码变化会使其失效",
+                  tool_issue_ok and not stale_tool_issue_ok)
+
             state["quality"]["codecheck_scan"]["count"] = 1
             first_ok, _ = mf.ev_codecheck_clean({}, state)
             second_ok, _ = mf.ev_codecheck_clean({}, state)
@@ -1129,7 +1146,8 @@ if flow:
             check("进入下一步后用户风险放行不再保留",
                   "risk_acceptances" not in mf.load_state())
 
-            # CodeCheck 的风险放行只替代 Agent 令牌，不得跳过最后的机器复核。
+            # CodeCheck 是建议型工具：真实尝试/令牌有留痕即可，不因工具自身
+            # 结果不稳定在 done 再跑第三遍。
             cc_ack = "确认承担CodeCheck修复Agent令牌缺失风险并继续"
             cc_state = {"current": "rf_codecheck", "config": {},
                         "choices": {"workflow": "review"}, "history": [], "started": now,
@@ -1147,8 +1165,8 @@ if flow:
                 cc_ok, cc_why = mf.ev_review_codecheck({}, cc_state)
             finally:
                 mf.ev_codecheck_clean = old_clean
-            check("放行 CodeCheck Agent 令牌仍会执行真实结果复核",
-                  not cc_ok and "现场复核仍有 1 条告警" in cc_why)
+            check("CodeCheck 已留痕后不在 done 重复现场长跑",
+                  cc_ok and not cc_why)
         finally:
             os.chdir(old_cwd)
 
@@ -1505,11 +1523,44 @@ check("缺失 tool_result 不再被当作工具执行成功",
       and not dispatch._call_failed({
           "name": "Bash", "input": {"command": "ctest"},
           "result_seen": True, "is_error": False, "result": "100% tests passed"}))
+skill_attempts = [
+    {"name": "Skill", "input": {"skill": "build-fix"},
+     "result_seen": True, "is_error": True, "result": "first failed"},
+    {"name": "Skill", "input": {"skill": "build-fix"},
+     "result_seen": True, "is_error": False, "result": "second passed"},
+]
+check("Skill 证据使用最后一次匹配调用而非过期首轮",
+      dispatch._skill_call(skill_attempts, "build-fix") is skill_attempts[-1])
+check("Skill 自定义返回文案不被误当作宿主调用失败",
+      not dispatch._call_failed({
+          "name": "Skill", "input": {"skill": "build-fix"},
+          "result_seen": True, "is_error": False,
+          "result": "build failed cases found: 3; fixed: 3",
+      }))
+check("Windows/宿主常见非零退出格式不会被误判成功",
+      all(dispatch._call_failed({
+          "name": "Bash", "input": {"command": "ctest"},
+          "result_seen": True, "is_error": False, "result": text,
+      }) for text in (
+          "Process exited with code 1",
+          "exit_code: 1",
+          "returned non-zero exit status 1",
+          "ERRORLEVEL 1",
+      )))
+check("测试日志中的普通 failed 文案不冒充宿主退出状态",
+      not dispatch._call_failed({
+          "name": "Bash", "input": {"command": "custom-test"},
+          "result_seen": True, "is_error": False,
+          "result": "negative case: command failed as expected\nsuite completed",
+      }))
 check("UT 过滤范围不仅识别开关还核对具体取值",
       dispatch._ut_filter_args("ctest.exe -R Smoke")
       == dispatch._ut_filter_args("ctest.exe --test-dir build -R Smoke")
       and dispatch._ut_filter_args("ctest.exe -R Smoke")
       != dispatch._ut_filter_args("ctest.exe -R Other"))
+check("UT 相同过滤集合仅换参数顺序不会触发无效返工",
+      dispatch._ut_filter_args("ctest.exe -R Smoke -E Flaky")
+      == dispatch._ut_filter_args("ctest.exe -E Flaky -R Smoke"))
 classifier_cases = [
     "build.sh", "setup.cmd", "tools/build.mk", "package-lock.json",
     "Cargo.lock", "go.sum", "build.ninja", "src/generated/no_extension",
@@ -1549,6 +1600,20 @@ try:
                    "initial_dirty_fingerprints": {
                        "biz.cpp": dispatch._path_fingerprint("biz.cpp")}},
                   open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        dispatch_gate_clean = True
+        try:
+            dispatch._gate_agent_dispatch({"prompt": "启动 codecheck-fix-agent"})
+        except SystemExit:
+            dispatch_gate_clean = False
+        open("biz.cpp", "a", encoding="utf-8").write("int changed_after_card = 3;\n")
+        dispatch_gate_stale = False
+        try:
+            dispatch._gate_agent_dispatch({"prompt": "启动 codecheck-fix-agent"})
+        except SystemExit as exc:
+            dispatch_gate_stale = exc.code == 2
+        open("biz.cpp", "w", encoding="utf-8").write(preexisting_text)
+        check("派发前即拦任务卡签发后的未提交源码变化",
+              dispatch_gate_clean and dispatch_gate_stale)
         build_calls = [{"name": "Skill", "input": {"skill": "build-fix"},
                         "result_seen": True, "is_error": False, "result": "BUILD_ERRORS: 0"}]
         receipt = dispatch._record_codecheck_build_receipt(task, build_calls)
@@ -1577,6 +1642,26 @@ try:
         except SystemExit:
             retry_ok = False
         check("CodeCheck 格式重答无需重复长编译", retry_ok)
+        receipt_retry_ok = True
+        try:
+            dispatch._codecheck_contract("CLEAN", retry_report, [], soft=True)
+        except SystemExit:
+            receipt_retry_ok = False
+        check("CodeCheck 仅改报告可复用同任务卡同源码的完整分批机器结果",
+              receipt_retry_ok)
+        unknown_output_retry_ok = True
+        try:
+            dispatch._codecheck_contract(
+                "CLEAN", retry_report, [build_calls[0], dict(
+                    retry_calls[0],
+                    result="CodeCheck completed; detailed report saved by plugin",
+                )], soft=False)
+            dispatch._codecheck_contract(
+                "CLEAN", retry_report, [], soft=True)
+        except SystemExit:
+            unknown_output_retry_ok = False
+        check("CodeCheck 未知成功输出也保留执行凭证且报告重答不重跑",
+              unknown_output_retry_ok)
         liar_calls = [dict(
             retry_calls[0], result="复验完成：共有 3 条告警")]
         liar_blocked = False
@@ -1587,6 +1672,19 @@ try:
             liar_blocked = exc.code == 2
         check("CodeCheck 报告遗留数必须与真实 fullcheck 输出对账",
               liar_blocked)
+        nonzero_with_count_ok = True
+        try:
+            dispatch._codecheck_contract(
+                "CLEAN", retry_report, [build_calls[0], dict(
+                    retry_calls[0],
+                    is_error=True,
+                    result="Process exited with code 1\n"
+                           "代码检查完成\n| 总计 | 0 |",
+                )], soft=False)
+        except SystemExit:
+            nonzero_with_count_ok = False
+        check("CodeCheck 发现告警型非零退出不覆盖可信机器计数",
+              nonzero_with_count_ok)
 
         stock_report = "\n".join([
             "CODECHECK_RESULT: REMAINING",
@@ -1767,6 +1865,16 @@ try:
         except SystemExit:
             ut_retry_ok = False
         check("UT 报告重答复用同版本生成和测试凭证", ut_retry_ok)
+        tampered_retry = ut_report.replace(
+            "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "TESTS_TOTAL: 78, TESTS_PASSED: 78, TESTS_FAILED: 0")
+        tampered_retry_blocked = False
+        try:
+            dispatch._ut_contract("PASS", tampered_retry, [], soft=True)
+        except SystemExit:
+            tampered_retry_blocked = True
+        check("UT 报告重答数字仍须匹配已绑定的真实执行汇总",
+              tampered_retry_blocked)
         open("biz_test.cpp", "a", encoding="utf-8").write("int changed_test = 2;\n")
         check("源码或测试变化后 UT 执行凭证立即失效",
               dispatch._reusable_ut_receipt("UT_GENERATOR", ut_task, "mae-flow:AutoUT Skill") is None
@@ -1854,6 +1962,21 @@ try:
             filter_blocked = exc.code == 2
         check("任务卡外追加测试过滤参数不能冒充全量 PASS", filter_blocked)
 
+        unknown_runner_ok = True
+        try:
+            dispatch._ut_contract(
+                "PASS", ut_report, [
+                    ut_calls[0],
+                    {"name": "Bash",
+                     "input": {"command": "cd build && mcde test --ut"},
+                     "result_seen": True, "is_error": False,
+                     "result": "CUSTOM_CPP_RUNNER_OK session=abc123"},
+                ], soft=False)
+        except SystemExit:
+            unknown_runner_ok = False
+        check("未知 C++ 测试器成功输出不因 Hook 不识别格式被打回",
+              unknown_runner_ok)
+
         json.dump({"current": "rf_ut",
                    "config": {
                        "UT生成方式": "mae-flow:AutoUT Skill",
@@ -1926,13 +2049,14 @@ try:
             ut_calls[0],
             ut_calls[1],
         ]
-        late_baseline_blocked = False
+        normal_single_run_ok = True
         try:
             dispatch._ut_contract(
                 "PASS", ut_report, late_baseline_calls, soft=False)
-        except SystemExit as exc:
-            late_baseline_blocked = exc.code == 2
-        check("UT 基线必须早于 Bash/Skill 写测试动作", late_baseline_blocked)
+        except SystemExit:
+            normal_single_run_ok = False
+        check("普通 UT 修改不再强制先跑一遍全量基线",
+              normal_single_run_ok)
 
         shrinking_calls = [
             {"name": "Bash", "input": {"command": "mcde test --ut"},
@@ -1940,7 +2064,8 @@ try:
              "result": "77 passed\nYOU HAVE 2 DISABLED TESTS"},
             ut_calls[0],
             {"name": "Bash", "input": {"command": "mcde test --ut"},
-             "result_seen": True, "is_error": False, "result": "76 passed"},
+             "result_seen": True, "is_error": False,
+             "result": "76 passed\nYOU HAVE 2 DISABLED TESTS"},
         ]
         shrinking_report = ut_report.replace(
             "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
@@ -1951,7 +2076,7 @@ try:
                 "PASS", shrinking_report, shrinking_calls, soft=False)
         except SystemExit as exc:
             shrinking_blocked = exc.code == 2
-        check("终跑移除 DISABLED 横幅但测试总数下降仍不能 PASS",
+        check("认领存量 DISABLED 时终跑测试总数下降仍不能 PASS",
               shrinking_blocked)
         open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
 
@@ -2036,6 +2161,52 @@ try:
         check("独立 UT 契约允许原有未提交源码但只接受测试改动",
               standalone_ok and saved_action.get("tokens", {}).get("UT", {}).get("status") == "PASS"
               and not os.path.exists(dispatch.STATE))
+        codecheck_body = "# STANDALONE CODECHECK TASK\n"
+        codecheck_digest = __import__("hashlib").sha256(
+            codecheck_body.encode("utf-8")).hexdigest()
+        codecheck_task_path = os.path.join(work, "codecheck-task.md")
+        open(codecheck_task_path, "w", encoding="utf-8").write(
+            codecheck_body + "TASK_CARD_SHA256: " + codecheck_digest + "\n")
+        codecheck_task = {
+            "step": "standalone_codecheck", "sha256": codecheck_digest,
+            "path": codecheck_task_path, "head": head, "standalone": True,
+            "allowed_files": ["biz.cpp"],
+            "initial_source_fingerprints": {
+                "biz.cpp": dispatch._path_fingerprint("biz.cpp"),
+                "biz_test.cpp": dispatch._path_fingerprint("biz_test.cpp"),
+            },
+        }
+        action.update({
+            "kind": "codecheck", "config": {"编译方式": "build-fix skill"},
+            "quality": {"codecheck_scan": {
+                "step": "standalone_codecheck", "count": 1,
+                "files": ["biz.cpp"],
+                "commands": ["codecheck fullcheck -f biz.cpp"],
+            }},
+            "agent_tasks": {"CODECHECK": codecheck_task},
+            "tokens": {}, "rejections": {},
+        })
+        json.dump(action, open(dispatch.ACTION_STATE, "w", encoding="utf-8"),
+                  ensure_ascii=False)
+        codecheck_report = "\n".join([
+            "CODECHECK_RESULT: REMAINING",
+            "TASK_CARD_SHA256: " + codecheck_digest,
+            "EXECUTED_COMMAND: codecheck fullcheck -f biz.cpp",
+            "FOUND: 1", "FIXED: 0", "REMAINING_COUNT: 1",
+        ])
+        codecheck_unknown_ok = True
+        try:
+            dispatch._codecheck_contract(
+                "REMAINING", codecheck_report, [{
+                    "name": "Bash",
+                    "input": {"command": "codecheck fullcheck -f biz.cpp"},
+                    "result_seen": True, "is_error": False,
+                    "result": "plugin finished; see proprietary report artifact",
+                }], soft=False)
+        except SystemExit:
+            codecheck_unknown_ok = False
+        check("独立 CodeCheck 的未知成功输出也按建议项接受，不逼重跑",
+              codecheck_unknown_ok)
         grill_body = "# STANDALONE GRILL TASK\n"
         grill_digest = __import__("hashlib").sha256(grill_body.encode("utf-8")).hexdigest()
         grill_task_path = os.path.join(work, "grill-final-task.md")

@@ -795,7 +795,7 @@ def _source_changed_since(head, st=None):
 
 RISK_AGENT_LABELS = {
     "COMPILE": "没有可验证的编译成功证据，代码可能无法构建",
-    "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；现场复核仍会执行，真实遗留告警不会被放过",
+    "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；本次将只保留首检结果，缺少专项修复结论",
     "CODECHECK_TOOL": "CodeCheck CLI 自动安装或执行失败，本次将缺少代码规范检查结果",
     "UT": "没有可验证的 UT 生成/运行通过证据，回归问题可能进入后续阶段",
     "STORY": "没有可验证的 STORY 专项 Agent 收尾证据",
@@ -1532,7 +1532,7 @@ def ev_codecheck_clean(spec, st):
 
 
 def ev_review_codecheck(spec, st):
-    """统一规范检查协议：机器先扫；有告警才派修复 agent；最后机器复核。"""
+    """统一规范检查协议：真实尝试一次；结果透明，但工具自身不成为硬阻塞源。"""
     accepted, _ = _risk_acceptance("CODECHECK_TOOL", st)
     if accepted:
         # CodeCheck is the one optional company CLI. A real user may explicitly
@@ -1542,6 +1542,14 @@ def ev_review_codecheck(spec, st):
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if scan.get("step") != st.get("current"):
         return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
+    if scan.get("status") == "TOOL_ERROR":
+        changed, err = _source_changed_since(scan.get("head", ""), st)
+        if err:
+            return False, "CodeCheck 诊断基点失效:" + err + "；重新执行 codecheck-scan"
+        if changed:
+            return False, ("CodeCheck 工具诊断后源码发生变化: " + "、".join(changed[:5])
+                           + "。对新代码重新尝试一次 codecheck-scan")
+        return True, ""
     if scan.get("count", 0) == 0:
         changed, err = _source_changed_since(scan.get("head", ""), st)
         if err:
@@ -1550,10 +1558,28 @@ def ev_review_codecheck(spec, st):
             return False, ("CodeCheck 首检为 0 后源码又发生变化: " + "、".join(changed[:5])
                            + "。旧首检不背新代码的书,重新执行 codecheck-scan")
     else:
-        ok, why = ev_agent_ran({"agent": "CODECHECK", "statuses": ["CLEAN", "REMAINING"]}, st)
+        ok, why = ev_agent_ran(
+            {"agent": "CODECHECK", "statuses": ["CLEAN", "REMAINING", "FAIL"]}, st)
         if not ok:
             return False, why
-    return ev_codecheck_clean(spec, st)
+        try:
+            token = json.load(open(
+                STATE_PATH + ".tokens", encoding="utf-8")).get("CODECHECK", {})
+        except Exception:
+            token = {}
+        if isinstance(token, dict) and token.get("status") == "FAIL":
+            task = (st.get("agent_tasks", {}) or {}).get("CODECHECK", {})
+            changed, err = _source_changed_since(task.get("head", ""), st)
+            if err:
+                return False, "CodeCheck FAIL 后无法核对源码状态:" + err
+            if changed:
+                return False, ("CodeCheck Agent 以 FAIL 收尾但留下了源码变化: "
+                               + "、".join(changed[:5])
+                               + "。先回退未验证改动，或完成编译并以 REMAINING/CLEAN 收尾。")
+        # Agent 的最后一轮 fullcheck 已由 SubagentStop 绑定任务卡、源码和真实调用。
+        # 不在 done 再跑第三遍；REMAINING/工具 FAIL 作为建议项进入交付报告。
+        return True, ""
+    return True, ""
 
 
 def run_env_checks(force_all=False):
@@ -2586,8 +2612,31 @@ def cmd_action_confirm_scope(flow, args):
     if action["kind"] == "codecheck":
         result, err = _run_codecheck(files)
         if err:
-            work = _archive_action(action, "failed", err)
-            die(err + "。原始诊断已保留在 " + norm(work), 2)
+            # 独立模式也遵循建议型语义：工具版本/协议不可识别不等于代码失败。
+            # 保存真实诊断后正常结束，避免同一不可靠插件把用户拖进重跑循环。
+            report = os.path.join(_action_dir(action), "codecheck-report.md")
+            atomic_write_text(
+                report,
+                "# 独立 CodeCheck 结果\n\n"
+                "状态：工具不可用或输出无法解析（建议项，不代表代码失败）\n\n"
+                "检查文件：\n%s\n\n"
+                "原始诊断：\n```\n%s\n```\n"
+                % ("\n".join("- `" + x + "`" for x in files), err))
+            action["quality"]["codecheck_scan"] = {
+                "step": "standalone_codecheck", "head": action["base_head"],
+                "count": None, "status": "TOOL_ERROR", "files": files,
+                "pairs": [], "commands": [], "error": err,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            _save_action(action)
+            work = _archive_action(
+                action, "tool-error",
+                "CodeCheck 已真实尝试；工具不可用或输出无法解析，按建议项结束")
+            print("[mae-flow] ⚠ 独立 CodeCheck 已真实尝试，但工具不可用或输出无法解析。")
+            print("诊断已保留在 %s；本任务按建议项结束，不派修复 Agent，也不要求重跑。"
+                  % norm(os.path.join(work, "codecheck-report.md")))
+            print("未启动完整流程，也没有修改或提交代码。")
+            return
         scan = {
             "step": "standalone_codecheck", "head": action["base_head"],
             "count": result["total"], "files": files, "pairs": result["pairs"],
@@ -4340,6 +4389,9 @@ def cmd_agent_task(flow, st, args):
         scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
         if scan.get("step") != sid:
             die("先执行 codecheck-scan 冻结首检结果，再生成 CODECHECK 任务卡。", 2)
+        if scan.get("status") == "TOOL_ERROR":
+            die("CodeCheck 工具本轮已真实尝试但不可用/不可解析；这是建议项留痕，"
+                "不派修复 Agent，直接 done。", 2)
         if scan.get("count", 0) == 0:
             die("机器首检为 0 告警，不应派 codecheck-fix-agent；直接 done。", 2)
         changed, why = _source_changed_since(scan.get("head", ""), st)
@@ -4482,9 +4534,25 @@ def cmd_codecheck_scan(flow, st, args):
         die(err, 2)
     result, err = _run_codecheck(files) if files else ({"total": 0, "pairs": [], "commands": []}, "")
     if err:
-        if _moonlight(st):
-            die(err + "；月光宝盒请按提示执行 moonlight defer 留痕继续。", 2)
-        die(err + "；" + _risk_option("CODECHECK_TOOL"), 2)
+        # CodeCheck 是辅助规范工具，不是编译器或测试器。它的版本、输出协议和
+        # 可用性都不稳定；真实尝试一次后把诊断绑定当前源码即可，不让工具故障
+        # 把交付流程永久封死，也不要求用户为同一工具问题反复确认。
+        head = sh("git rev-parse --verify HEAD")
+        st.setdefault("quality", {})["codecheck_scan"] = {
+            "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "head": head, "count": None, "status": "TOOL_ERROR",
+            "files": files, "pairs": [], "commands": [], "error": err,
+        }
+        st["quality"].pop("codecheck_verify", None)
+        _drop_agent_token("CODECHECK")
+        (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
+        save_state(st)
+        print("[mae-flow] ⚠ CodeCheck 已真实尝试但工具不可用或输出无法解析；"
+              "诊断已绑定当前 HEAD，本轮按建议项留痕，不派修复 Agent，也不重复长跑。",
+              file=sys.stderr)
+        print(err, file=sys.stderr)
+        print("直接 done；源码若变化，当前诊断会失效并要求重新尝试。")
+        return
     # 覆盖口径:只算本次修改范围内的告警,文件里的存量告警不背(用户拍板)
     stock = None
     if files:

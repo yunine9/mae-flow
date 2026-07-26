@@ -76,6 +76,11 @@ def tree_snapshot(root):
     return snapshot
 
 
+def norm_slash(text):
+    """对拍前的路径归一:引擎强制正斜杠是刻意差异,不算不一致。"""
+    return text.replace("\\", "/")
+
+
 def git_init(path):
     """语料放进临时 git 目录（git 不可用时静默跳过——OpenSpec 不依赖 git）。"""
     if not GIT:
@@ -454,8 +459,11 @@ class DifferentialTests(unittest.TestCase):
                 cli_out = self._run_cli(
                     cli_root, "instructions", artifact, "--change", "wf-change")
                 self.assertEqual(0, cli_out.returncode)
+                # 路径归一后比较:引擎按 Windows 军规强制正斜杠(模块级
+                # 刻意差异),CLI 的 path.join 在 Windows 产反斜杠
                 self.assertEqual(
-                    cli_out.stdout, instructions(cli_root, artifact, "wf-change"),
+                    norm_slash(cli_out.stdout),
+                    norm_slash(instructions(cli_root, artifact, "wf-change")),
                     "instructions(%s) 文本与 CLI 不一致" % artifact)
 
             # 写齐四类制品后归档（两侧同字节输入）
@@ -473,7 +481,8 @@ class DifferentialTests(unittest.TestCase):
             cli_out = self._run_cli(
                 cli_root, "instructions", "specs", "--change", "wf-change")
             self.assertEqual(
-                cli_out.stdout, instructions(cli_root, "specs", "wf-change"),
+                norm_slash(cli_out.stdout),
+                norm_slash(instructions(cli_root, "specs", "wf-change")),
                 "依赖齐备后的 instructions(specs) 与 CLI 不一致")
 
             cli_archive = self._run_cli(cli_root, "archive", "wf-change", "--yes")
@@ -514,7 +523,8 @@ class DifferentialTests(unittest.TestCase):
                 cli_root, "instructions", artifact, "--change", "ctx-change")
             self.assertEqual(0, cli_out.returncode)
             self.assertEqual(
-                cli_out.stdout, instructions(cli_root, artifact, "ctx-change"),
+                norm_slash(cli_out.stdout),
+                norm_slash(instructions(cli_root, artifact, "ctx-change")),
                 "带 context/rules 的 instructions(%s) 与 CLI 不一致" % artifact)
 
 

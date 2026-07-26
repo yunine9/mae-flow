@@ -4,7 +4,7 @@
 检查:语法、JSON、流程图连通性、证据类型注册、占位符合法性、步骤文档齐全、
 agent 契约与 dispatch 识别名同步、v3/v4 换轨防回退(comet 子命令与外部 Node
 规格引擎不得复活)、关键文件存在。任何 ❌ 退出码 1。"""
-import ast, contextlib, glob, importlib.util, io, json, os, re, subprocess, sys, tempfile, time, types
+import ast, contextlib, glob, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile, time, types
 
 # 非 UTF-8 控制台(公司 GBK 机器典型形态)下 ✅/❌ 第一行就会编码崩——
 # dispatch.py 同款 stdout 自愈,发版门必须开箱即跑。
@@ -13,6 +13,25 @@ for _s in (sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+class _TmpDir:
+    """清理容错的临时目录(CI 实锤:Windows 上子进程退出后句柄短暂占用目录,
+    TemporaryDirectory.cleanup 直接崩掉整个 selftest)。小步重试,最终失败
+    仅遗留 tmp 不判死——发版门的死因必须是检查失败,不能是清理失败。"""
+    def __init__(self, **kw):
+        self.name = tempfile.mkdtemp(**kw)
+    def __enter__(self):
+        return self.name
+    def __exit__(self, *exc):
+        for attempt in range(5):
+            try:
+                shutil.rmtree(self.name)
+                return False
+            except OSError:
+                time.sleep(0.2 * (attempt + 1))
+        shutil.rmtree(self.name, ignore_errors=True)
+        return False
+
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -221,7 +240,7 @@ if flow:
           mf._allowed_set_keys(steps["config_confirm"]) >= {"基线分支", "分支名", "编译方式"}
           and not mf._allowed_set_keys(steps["verify_codecheck"]))
     good_req = "# 需求\n\n支持中文输入。\n"
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         good_path = os.path.join(td, "req.md")
         bad_path = os.path.join(td, "bad.md")
         open(good_path, "w", encoding="utf-8").write(good_req)
@@ -450,7 +469,7 @@ if flow:
     # global npm mutation, setup script or reload marker.
     # v4 换轨：规格目录由内置纯 Python 引擎创建（不再自检外部 openspec 版本号），
     # 交付阶段收归 .mae-flow.json，因此 .comet/config.yaml 从"必须存在"变成"必须不存在"。
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         subprocess.run(["git", "init", "-q", td], check=True)
         prepared = mf.prepare_project(td)
         check("安装后项目能力可直接准备且不生成 .cac/.claude/.comet",
@@ -491,7 +510,7 @@ if flow:
     # 独立能力：不创建主流程状态、支持未提交代码、默认不提交，完成/取消都不留下源码门禁。
     # chdir 恢复必须在 with 内(cleanup 之前):Windows 下 CWD 在目录里=目录被占用,
     # rmtree 必炸 WinError 32(CI 首跑实锤;Mac/Linux 无此锁语义所以从没炸过)。
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         old_cwd = os.getcwd()
         try:
             os.chdir(td)
@@ -716,7 +735,7 @@ if flow:
             os.chdir(old_cwd)
 
     # 退出必须保留业务现场、归档状态并使直接模式标记立即可见。
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         old_cwd = os.getcwd()
         try:
             os.chdir(td)
@@ -794,7 +813,7 @@ if flow:
             os.chdir(old_cwd)
 
     # 用户风险放行：只替代当前步骤的 Agent 令牌，必须真实 ack，代码变化/推进后立即失效。
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         old_cwd = os.getcwd()
         try:
             os.chdir(td)
@@ -871,7 +890,7 @@ if flow:
     try:
         # 全新项目没有 .mae-flow.json：UserPromptSubmit 先留下十分钟内的一次性授权，
         # 脚本消费后再创建状态，保证“一句话开启”不是鸡生蛋。
-        with tempfile.TemporaryDirectory() as td:
+        with _TmpDir() as td:
             subprocess.run(["git", "init", "-q", td], check=True)
             subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], cwd=td, check=True)
             subprocess.run(["git", "config", "user.name", "MAE Flow Test"], cwd=td, check=True)
@@ -1006,7 +1025,7 @@ if flow:
                   and bool((partial.get("moonlight") or {}).get("hard_blocked")))
 
         # 已明确退出的项目也可切到月光宝盒；恢复旧断点但清空旧质量凭证。
-        with tempfile.TemporaryDirectory() as td:
+        with _TmpDir() as td:
             os.chdir(td)
             subprocess.run(["git", "init", "-q"], check=True)
             subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
@@ -1039,7 +1058,7 @@ if flow:
                   and "切换月光宝盒继续做" in (resumed.get("moonlight") or {}).get("request", "")
                   and "agent_tasks" not in resumed and not os.path.exists(mf.EXIT_PATH))
 
-        with tempfile.TemporaryDirectory() as td:
+        with _TmpDir() as td:
             os.chdir(td)
             subprocess.run(["git", "init", "-q"], check=True)
             subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
@@ -1215,7 +1234,7 @@ check("Bash 证据不接受 echo 冒充",
 old_cwd = os.getcwd()
 old_dispatch_paths = (dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE)
 try:
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         os.chdir(td)
         subprocess.run(["git", "init", "-q"], check=True)
         subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
@@ -1379,7 +1398,7 @@ finally:
 
 old_cwd = os.getcwd()
 try:
-    with tempfile.TemporaryDirectory() as td:
+    with _TmpDir() as td:
         os.chdir(td)
         subprocess.run(["git", "init", "-q"], check=True)
         subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
@@ -1479,7 +1498,7 @@ check("明确自然语言退出会触发、询问退出不会误触发",
       and not dispatch._explicit_exit_prompt("这个工作流能不能退出？"))
 
 # 插件全局安装不得接管未 init 的普通项目；Windows 控制台代码页也不得污染 Hook 的 UTF-8 JSON。
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     subprocess.run(["git", "init", "-q", td], check=True)
     payload = json.dumps({
         "cwd": td,
@@ -1536,7 +1555,7 @@ with tempfile.TemporaryDirectory() as td:
           and messages[-1].get("config_review_id") == review_id
           and mf.CONFIG_CONFIRM_ACK in messages[-1].get("text", ""))
 
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     subprocess.run(["git", "init", "-q", td], check=True)
     action_dir = os.path.join(td, ".mae-flow-work", "standalone", "test-action")
     os.makedirs(action_dir)
@@ -1574,7 +1593,7 @@ with tempfile.TemporaryDirectory() as td:
           and "当前有独立 UT 任务 test-action" in injected.stdout
           and "不要运行 current/done" not in injected.stdout)
 
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     # 父目录的旧状态不能越过最近 .git 边界接管一个独立子仓。
     with open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8") as f:
         json.dump({"current": "verify_ut", "config": {}, "choices": {},
@@ -1595,7 +1614,7 @@ with tempfile.TemporaryDirectory() as td:
     check("父目录陈旧状态不会越过独立仓边界误接管",
           root == nested and not has_state and isolated.returncode == 0)
 
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     subprocess.run(["git", "init", "-q", td], check=True)
     subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], cwd=td, check=True)
     subprocess.run(["git", "config", "user.name", "MAE Flow Test"], cwd=td, check=True)
@@ -1617,7 +1636,7 @@ with tempfile.TemporaryDirectory() as td:
           and not os.path.exists(os.path.join(td, ".mae-flow.json"))
           and exit_record.get("authorization") == "userprompt-hook")
 
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     subprocess.run(["git", "init", "-q", td], check=True)
     open(os.path.join(td, ".mae-flow.json"), "w", encoding="utf-8").write('{"current":')
     exit_payload = json.dumps({"cwd": td, "prompt": "/mae-flow exit"},
@@ -1633,7 +1652,7 @@ with tempfile.TemporaryDirectory() as td:
           and os.path.isfile(saved_bad))
 
 # 6.1 Comet 阶段门禁只增加一个幂等标记检查；从子目录调用也能找到项目根退出标记。
-with tempfile.TemporaryDirectory() as td:
+with _TmpDir() as td:
     guard = os.path.join(td, ".cac", "skills", "comet", "scripts", "comet-hook-guard.sh")
     os.makedirs(os.path.dirname(guard), exist_ok=True)
     # bash 脚本必须钉 LF:Windows 文本模式会把 \n 写成 \r\n,#!/bin/bash\r 直接崩

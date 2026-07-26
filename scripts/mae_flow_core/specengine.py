@@ -427,7 +427,9 @@ def _load_template(schema, template_name):
     path = os.path.join(schema["dir"], "templates", template_name)
     if not os.path.isfile(path):
         raise SpecEngineError("schema 模板缺失：" + _posix(path))
-    return _read_text(path)
+    # 行尾归一(CI 实锤):Windows CRLF checkout 下模板带 \r\n,引擎输出与
+    # CLI(stdout 经 universal newlines 归一)不一致;引擎行为不能赌 checkout 配置。
+    return _norm_newlines(_read_text(path))
 
 
 def _config_path(root):

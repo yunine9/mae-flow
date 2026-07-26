@@ -16,10 +16,12 @@ NEEDS_CONFIRM→待确认项是**用户的决策,禁止以"判定合理/我认�
 **禁止把"消除待确认"转包给 agent**(agent 问不了用户,只会洗掉标记=伪造确认)。
 **文档里残留"待确认"字样 = 本步没做完**;反之,零残留但你没走过 AskUserQuestion = 造假,更糟。
 完成后同样展示路径与概览。
-定稿后用 AskUserQuestion 询问用户 STORY 是否入库(一般不入库,仅本地交付给测试):
-要 → git add docs/story/STORY-{单号}.md && git commit -m "[单号][类型]STORY文档"(精确路径,禁止宽 add);
-不要 → 不要手动移动，也不要 `git add`；直接执行 done --set STORY入库=<用户选择原文>。
+STORY 入库方式已经由开场配置卡 Q4 决定并由 story_ask 带入本步,禁止定稿后再问一次:
+入库 → git add docs/story/STORY-{单号}.md && git commit -m "[单号][类型]STORY文档"(精确路径,禁止宽 add);
+不入库 → 不要手动移动，也不要 `git add`；直接执行 done。
 证据通过后 harness 会自动把文件移入 `.mae-flow-work/story/`，该区已 gitignore，随后把新路径告知用户交给测试。
+用户在本步主动改口时以新决定为准:先用 AskUserQuestion 取得明确选择,再用
+`done --set STORY入库=<用户新选择原文>` 覆盖旧预答；不得由 Agent 自行改写。
 如果文件已经被误加入 Git，done 会明确拒绝并给出精确移出方法；推送前还会再检查一次。
 done 的硬校验(骗不过去):文档零"待确认"残留、每个"不涉及"必须写作"不涉及(已确认)"
 (裸"不涉及"=未经用户确认的非法状态)、STORY入库 必填——三者共同保证确认闭环真实发生过。

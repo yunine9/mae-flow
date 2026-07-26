@@ -272,19 +272,37 @@
       "user_ack": true,
       "choice_key": "story",
       "choices": [
-        "yes",
+        "commit",
+        "local",
         "no"
       ],
       "choice_answers": {
-        "yes": [
-          "生成 STORY"
+        "commit": [
+          "生成并入库",
+          "生成 STORY 并入库"
+        ],
+        "local": [
+          "生成但不入库",
+          "生成 STORY 但不入库",
+          "生成（不入库，本地交测）",
+          "生成(不入库,本地交测)"
         ],
         "no": [
-          "不生成 STORY"
+          "不生成 STORY",
+          "不生成"
         ]
       },
+      "choice_sets": {
+        "commit": {
+          "STORY入库": "生成并入库"
+        },
+        "local": {
+          "STORY入库": "生成但不入库（本地交测）"
+        }
+      },
       "next": {
-        "yes": "story",
+        "commit": "story",
+        "local": "story",
         "no": "build"
       }
     },

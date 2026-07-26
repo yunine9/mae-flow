@@ -217,32 +217,40 @@ def _gate_agent_dispatch(ti):
     """质量 agent 派发前验任务卡——拦截时机 = 错误发生时机。
 
     卡缺失/过期若留到 SubagentStop/done 才发现,代价是整只 agent 上百轮白跑;
-    在派发这一刻拦下,损失只有一次工具调用。仅识别 compile/codecheck/UT 三类
-    (story/grill 无任务卡机制),识别不到或状态读不了一律放行(fail-open)。"""
+    在派发这一刻拦下,损失只有一次工具调用。完整流程与独立任务统一从
+    _contract_state 取任务卡；识别不到或状态读不了一律放行(fail-open)。"""
     try:
         blob = " ".join(str(ti.get(k, "") or "") for k in
                         ("subagent_type", "description", "prompt"))
         kind = next((k for name, k in (("compile-agent", "COMPILE"),
                                        ("codecheck-fix-agent", "CODECHECK"),
-                                       ("ut-generator-agent", "UT"))
+                                       ("ut-generator-agent", "UT"),
+                                       ("grill-critic-agent", "GRILL"))
                      if name in blob), None)
         if not kind:
             return
-        st = json.load(open(STATE, encoding="utf-8"))
+        st = _contract_state()
         task = (st.get("agent_tasks", {}) or {}).get(kind) or {}
         me = os.path.abspath(MAEFLOW)
         if not task:
+            remedy = (
+                f'python "{me}" action status，并按输出执行 action critic 生成 GRILL 任务卡'
+                if kind == "GRILL"
+                else f'python "{me}" agent-task {kind.lower()} 生成并签发任务卡')
             print("[mae-flow] 派发前拦截:%s 尚无本步任务卡。先执行 "
-                  "python \"%s\" agent-task %s 生成并签发任务卡,再按其输出话术派发。"
+                  "%s,再按其输出话术派发。"
                   "现在拦下只损失一次调用;跑完整只 agent 才被契约打回,重做要上百轮。"
-                  % (kind, me, kind.lower()), file=sys.stderr)
+                  % (kind, remedy), file=sys.stderr)
             sys.exit(2)
         head, cur = task.get("head", ""), _git_head()
         if head and cur and head != cur:
+            remedy = (
+                f'python "{me}" action status，并重新执行当前 action critic'
+                if kind == "GRILL"
+                else f'python "{me}" agent-task {kind.lower()}')
             print("[mae-flow] 派发前拦截:%s 任务卡签发于 HEAD %s,当前 HEAD %s——源码已变化,"
-                  "旧卡描述的不是现在的代码,跑完也拿不到令牌。先重新执行 "
-                  "python \"%s\" agent-task %s 再派发。"
-                  % (kind, head[:10], cur[:10], me, kind.lower()), file=sys.stderr)
+                  "旧卡描述的不是现在的代码,跑完也拿不到令牌。先重新执行 %s 再派发。"
+                  % (kind, head[:10], cur[:10], remedy), file=sys.stderr)
             sys.exit(2)
     except SystemExit:
         raise
@@ -283,6 +291,9 @@ def ev_action_pretooluse(d):
     """独立任务只保护自己的控制文件；普通源码、命令和用户开发行为一律不接管。"""
     tool = d.get("tool_name", "")
     ti = d.get("tool_input") or {}
+    if tool == "Task":
+        _gate_agent_dispatch(ti)
+        sys.exit(0)
 
     def protected(value):
         path = str(value or "").replace("\\", "/").lower()
@@ -1037,9 +1048,11 @@ def _record_codecheck_build_receipt(task, tool_calls):
     return rec
 
 
-_UT_RISK_PAT = re.compile(
-    r"\b(?:disabled|excluded|skipped|pre-existing\s+(?:failure|segfault)|segmentation\s+fault|segfault)\b|"
-    r"禁用|排除|跳过|段错误|绕过失败|屏蔽失败", re.I)
+_UT_NONRUN_PAT = re.compile(
+    r"\b(?:disabled|excluded|deselected|skipped)\b|禁用|排除|跳过", re.I)
+_UT_HARD_RISK_PAT = re.compile(
+    r"\b(?:pre-existing\s+(?:failure|segfault)|segmentation\s+fault|segfault)\b|"
+    r"段错误|绕过失败|屏蔽失败", re.I)
 _UT_FILTER_PAT = re.compile(r"gtest_filter|--?exclude|--?skip|--?disable|--filter|-E(?:\s|=)", re.I)
 
 
@@ -1102,7 +1115,52 @@ def _reported_bash_segment(call, reported):
     return ""
 
 
-def _ut_execution_risk(report, run_call, expected):
+def _ut_nonrunning_counts(text):
+    """提取测试框架末次汇总中的 disabled/skipped/excluded 精确计数。"""
+    patterns = {
+        "disabled": (
+            r"\b(\d+)\s+(?:tests?\s+)?disabled\b",
+            r"\bdisabled(?:\s+tests?)?\s*[:=]\s*(\d+)\b",
+        ),
+        "skipped": (
+            r"\b(\d+)\s+(?:tests?\s+)?skipped\b",
+            r"\bskipped(?:\s+tests?)?\s*[:=]\s*(\d+)\b",
+        ),
+        "excluded": (
+            r"\b(\d+)\s+(?:tests?\s+)?(?:excluded|deselected)\b",
+            r"\b(?:excluded|deselected)(?:\s+tests?)?\s*[:=]\s*(\d+)\b",
+        ),
+    }
+    out = {}
+    for kind, regexes in patterns.items():
+        hits = []
+        for regex in regexes:
+            hits.extend((m.start(), int(m.group(1)))
+                        for m in re.finditer(regex, text or "", re.I))
+        if hits:
+            out[kind] = max(hits, key=lambda item: item[0])[1]
+    return out
+
+
+def _ut_nonrunning_kinds(text):
+    kinds = set()
+    if re.search(r"\bdisabled\b|禁用", text or "", re.I):
+        kinds.add("disabled")
+    if re.search(r"\bskipped\b|跳过", text or "", re.I):
+        kinds.add("skipped")
+    if re.search(r"\b(?:excluded|deselected)\b|排除", text or "", re.I):
+        kinds.add("excluded")
+    return kinds
+
+
+def _matching_ut_runs(tool_calls, reported):
+    return [call for call in (tool_calls or [])
+            if str(call.get("name", "")).lower() == "bash"
+            and _reported_bash_segment(call, reported)
+            and call.get("result_seen") and not _call_failed(call)]
+
+
+def _ut_execution_risk(report, run_call, expected, tool_calls=None):
     """PASS 不得靠临时禁用/过滤失败测试取得；配置本身带过滤时视为用户已明确授权。"""
     configured = re.sub(r"\s+", " ", expected or "").strip()
     summary = _flex_field(report, "EXECUTED_UT") or ""
@@ -1117,12 +1175,47 @@ def _ut_execution_risk(report, run_call, expected):
     risk_text = re.sub(r"\bno\s+tests?\s+(?:were\s+)?(?:disabled|excluded|skipped)\b", "",
                        risk_text, flags=re.I)
     risk_text = re.sub(r"(?:跳过|禁用|排除)\s*[:：]?\s*0\s*(?:个|项|条|例)?", "", risk_text)
-    text_risk = _UT_RISK_PAT.search(risk_text)
     filter_risk = _UT_FILTER_PAT.search(segment) and not _UT_FILTER_PAT.search(configured)
-    if text_risk:
-        return "测试报告或执行输出显示存在禁用、跳过或段错误；必须进入 KNOWN_FAILURES/SUSPECTED_BUGS 并用 NEEDS_INPUT，不能 PASS。"
     if filter_risk:
         return "实际 UT 命令在任务卡配置之外追加了过滤/排除参数；未经用户确认不能缩小测试范围后报告 PASS。"
+    if _UT_HARD_RISK_PAT.search(risk_text):
+        return ("测试报告或执行输出显示段错误、绕过失败或其他硬失败；"
+                "必须进入 KNOWN_FAILURES/SUSPECTED_BUGS，不能 PASS。")
+    if _UT_NONRUN_PAT.search(risk_text):
+        final_counts = _ut_nonrunning_counts(result)
+        risk_kinds = _ut_nonrunning_kinds(risk_text)
+        if not final_counts or not risk_kinds.issubset(set(final_counts)):
+            return ("测试输出存在 disabled/skipped/excluded，但无法从终跑真实输出"
+                    "解析对应精确计数；不能凭『历史问题』口头放行，需按非 PASS 收尾。")
+        calls = list(tool_calls or [])
+        try:
+            final_index = next(i for i, call in enumerate(calls) if call is run_call)
+        except StopIteration:
+            final_index = len(calls)
+        matched = _matching_ut_runs(calls[:final_index], summary)
+        earlier = [(i, call) for i, call in enumerate(calls[:final_index])
+                   if any(call is candidate for candidate in matched)]
+        if not earlier:
+            return ("终跑存在 disabled/skipped/excluded，但修改测试前没有同口径首跑基线；"
+                    "不能区分存量项与本单新增项，需按非 PASS 收尾。")
+        baseline_index, baseline_call = earlier[0]
+        if any(str(call.get("name", "")).lower() in
+               ("write", "edit", "multiedit", "skill")
+               for call in calls[:baseline_index]):
+            return ("disabled/skipped 首跑发生在写测试或生成 Skill 之后，不能作为存量基线；"
+                    "需重新从干净任务卡建立基线或按非 PASS 收尾。")
+        baseline_counts = _ut_nonrunning_counts(
+            str(baseline_call.get("result", "") or ""))
+        missing = [kind for kind in risk_kinds if kind not in baseline_counts]
+        increased = [kind for kind in risk_kinds
+                     if kind in baseline_counts
+                     and final_counts.get(kind, 0) > baseline_counts[kind]]
+        if missing or increased:
+            detail = "、".join(
+                f"{kind}:{baseline_counts.get(kind, '无基线')}→{final_counts.get(kind, 0)}"
+                for kind in sorted(set(missing + increased)))
+            return ("本轮新增 disabled/skipped/excluded，必须进入 KNOWN_FAILURES/"
+                    f"SUSPECTED_BUGS，不能 PASS（{detail}）。")
     return ""
 
 
@@ -1140,7 +1233,8 @@ def _record_ut_receipts(task, report, tool_calls):
         common["source_snapshot"] = _source_snapshot(task.get("head", ""))
     if generator and not _call_failed(generator):
         records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
-    if run and not _call_failed(run) and not _ut_execution_risk(report, run, cfg.get("UT运行命令", "")):
+    if run and not _call_failed(run) and not _ut_execution_risk(
+            report, run, cfg.get("UT运行命令", ""), tool_calls):
         actual = _reported_bash_segment(run, executed) or executed
         records["UT_RUN"] = dict(common, value=actual)
     if not records:
@@ -1162,7 +1256,8 @@ def _reusable_ut_receipt(key, task, expected=None):
         return None
     if task.get("standalone"):
         return rec if rec.get("source_snapshot") == _source_snapshot(task.get("head", "")) else None
-    changed, err = _source_changed_since_receipt(rec.get("head", ""), {})
+    changed, err = _source_changed_since_receipt(
+        rec.get("head", ""), _contract_state())
     return rec if not err and not changed else None
 
 
@@ -1192,7 +1287,8 @@ def _source_changed_since_receipt(head, st):
         return [], "编译凭证 HEAD 不可解析"
     paths = [] if current == head else [p for p in _git_out(
         f"git -c core.quotepath=false diff --name-only {head} {current}").splitlines() if p.strip()]
-    paths += [p for p in _changed_paths_since(current) if p]
+    paths += [p for p in _changed_paths_since(current)
+              if p and not _unchanged_initial_dirty(p, st)]
     return [p for p in dict.fromkeys(paths) if _SOURCE_PAT.search(p)], ""
 
 
@@ -1299,6 +1395,13 @@ def _path_fingerprint(path):
     return h.hexdigest()
 
 
+def _unchanged_initial_dirty(path, st):
+    rel = str(path or "").replace("\\", "/").strip().strip('"')
+    initial = set((st or {}).get("initial_dirty", []) or [])
+    fingerprints = (st or {}).get("initial_dirty_fingerprints", {}) or {}
+    return bool(rel in initial and fingerprints.get(rel) == _path_fingerprint(rel))
+
+
 def _source_snapshot(head):
     return {
         p: _path_fingerprint(p)
@@ -1346,6 +1449,11 @@ def _enforce_agent_scope(kind, task, bail):
         initial = task.get("initial_source_fingerprints", {}) or {}
         # 独立任务允许用户带着未提交代码开始；只审计任务启动后真正发生变化的路径。
         changed = [p for p in changed if initial.get(p) != _path_fingerprint(p)]
+    else:
+        # 完整流程同样可能在 init 前已有未提交源码。它不属于本任务，且只在
+        # 指纹仍与初始快照一致时豁免；本轮再次改动仍会进入越权审计。
+        st = _contract_state()
+        changed = [p for p in changed if not _unchanged_initial_dirty(p, st)]
     if kind == "COMPILE":
         bad = [p for p in changed if _test_like(p)]
         if bad:
@@ -1383,7 +1491,18 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         return   # FAIL 是诚实上报,不再苛求对账字段
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
-    _require_bash_success(tool_calls, "codecheck fullcheck", bail, "CodeCheck")
+    fullcheck_call = _require_bash_success(
+        tool_calls, "codecheck fullcheck", bail, "CodeCheck")
+    # 校准实锤:真实 fullcheck 输出未参与对账,agent 自述"共有 0 条告警"而
+    # transcript 里 CLI 明明报 3 条也放行(standalone 无 done 兜底=完全裸奔)。
+    # 从真实 tool result 取末次告警数,与 REMAINING_COUNT 对拍;解析不到锚点
+    # 才倒向放行(完整流程仍有 done 现场重跑兜底)。
+    real_hits = None
+    if isinstance(fullcheck_call, dict):
+        result_txt = str(fullcheck_call.get("result") or "")
+        found = re.findall(r"共有\s*(\d+)\s*条告警", result_txt)
+        if found:
+            real_hits = int(found[-1])
     nums = {}
     for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
         mm = re.search(r"^\s*" + k + r":\s*(\d+)\s*$", report, re.M)
@@ -1403,6 +1522,10 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         bail(f"标记 CLEAN 但 REMAINING_COUNT={nums['REMAINING_COUNT']},自相矛盾。")
     if status == "REMAINING" and nums["REMAINING_COUNT"] == 0:
         bail("标记 REMAINING 但 REMAINING_COUNT=0,自相矛盾。")
+    if real_hits is not None and real_hits != nums["REMAINING_COUNT"]:
+        bail(f"真实 fullcheck 输出报「共有 {real_hits} 条告警」,与 "
+             f"REMAINING_COUNT({nums['REMAINING_COUNT']}) 不符——复验摘录不能"
+             "自说自话,遗留数以 CLI 真实末次输出为准,修完或如实上报后重答。")
     if nums["FIXED"] > 0:
         build = _field(report, "EXECUTED_BUILD")
         build_cfg = _state_config().get("编译方式", "")
@@ -1469,10 +1592,12 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     if not executed_ut:
         bail("PASS 报告缺少 EXECUTED_UT: <实际执行的 UT 命令>。")
     run = _reported_bash_call(tool_calls, executed_ut)
-    risk = _ut_execution_risk(report, run, configured_ut)
-    if risk:
-        bail(risk)
     reused_run = _reusable_ut_receipt("UT_RUN", task) if soft and not run else None
+    if run:
+        risk = _ut_execution_risk(
+            report, run, configured_ut, tool_calls)
+        if risk:
+            bail(risk)
     if run and _call_failed(run):
         bail("UT运行命令的工具结果明确失败，不能报告 PASS。")
     if not run and not reused_run:
@@ -1496,6 +1621,11 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     if re.search(r"缺口|未覆盖|无对应", cleaned):
         bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS(若只是措辞请改写为"
              "正向表述;若为事实缺口按契约用 NEEDS_INPUT/缺口标注上报)。")
+    # 校准实锤:AC_COVERAGE 需至少一行"条目 → 用例名"映射,纯声明式单行
+    # (「全部已覆盖」)不算对照——UT agent 的存在目的是逐条映射,不是背书。
+    if not re.search(r"(->|→|=>)", coverage):
+        bail("AC_COVERAGE 必须是「EARS 条目 → 对应测试用例名」的逐行映射"
+             "(至少一行含 → 分隔),而非一句『全部已覆盖』的声明。")
     nums = {}
     for name in ("TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED"):
         value = _number_field(report, name)
@@ -1504,6 +1634,11 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
         nums[name] = value
     if nums["TESTS_FAILED"] != 0 or nums["TESTS_TOTAL"] != nums["TESTS_PASSED"]:
         bail("UT 数字对账不通过：PASS 必须 TESTS_FAILED=0 且 TOTAL=PASSED。")
+    # 校准实锤:0 条测试的空跑不是 PASS——UT agent 跑出零用例还报通过违反
+    # 其存在目的(ctest "No tests were found" + 0/0/0 恒等式曾放行)。
+    if nums["TESTS_TOTAL"] < 1:
+        bail("UT PASS 要求至少运行 1 个测试(TESTS_TOTAL>=1);0 条=空跑,"
+             "不能证明任何回归保证。收口批跑全量,真实仓库恒成立。")
 
 
 def _grill_contract(status, report, tool_calls=None, soft=False):
@@ -1517,6 +1652,19 @@ def _grill_contract(status, report, tool_calls=None, soft=False):
         bail("未知结果状态 " + status + "；只能是 CLEAR/GAPS/FAIL。")
     if status == "FAIL":
         return
+    # 校准实锤:grill 的唯一价值是"真读过材料后说没遗漏",而 CLEAR/GAPS 令牌
+    # 曾零阅读即发(tool_calls 传入却完全没用)——一个一轮未读、直接输出样板的
+    # agent 与认真审查者在门禁眼中无差别。要求至少一次成功的只读检索;transcript
+    # 完全无 tool_use 块的老宿主场景沿用既有话术(展示风险+accept-risk),不新增死锁。
+    calls = tool_calls or []
+    read_ok = any(c.get("name") in ("Read", "Grep", "Glob")
+                  and c.get("result_seen") and not c.get("is_error")
+                  for c in calls)
+    if not read_ok:
+        bail("grill critic 报 %s 但 transcript 无任何成功的 Read/Grep/Glob "
+             "调用——'没有遗漏'的结论必须建立在真读过需求/代码材料之上,"
+             "而非样板输出。若宿主确未暴露子会话工具调用,主会话展示风险后"
+             "用 accept-risk grill。" % status)
     stage = _flex_field(report, "STAGE") or ""
     if stage.lower() != str(task.get("stage", "")).lower():
         bail("STAGE 与任务卡的质询检查阶段不一致。")

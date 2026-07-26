@@ -56,23 +56,23 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT AC_COVERAGE | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
 | **Ponytail** | build 全程 + verify 4.1 | 固定 commit 的官方 Skill 原文双用：build 写码时 full 档常驻预防（the ladder）+ verify 对 diff 做 review。**两条红线：YAGNI 不得砍 delta spec 要求的行为；禁 ultra 档** |
-| **compound-engineering**（EveryInc） | end 沉淀 → build/verify 装载 | 每单教训经用户逐条确认后沉淀进 docs/delivery-notes.md，下单 build/codecheck/UT 开工前装载。**红线：只沉淀仓库事实（构建陷阱/告警高发点/mock 策略），禁流程规则——防与插件双源打架；上限 30 条，超限删最旧** |
+| **compound-engineering**（EveryInc） | end 沉淀 → build/verify 装载 | 每单教训先集中展示，再由用户用 multiSelect 勾选后沉淀进 docs/delivery-notes.md（每卡最多 4 条），下单 build/codecheck/UT 开工前装载。**红线：只沉淀仓库事实（构建陷阱/告警高发点/mock 策略），禁流程规则——防与插件双源打架；上限 30 条，超限删最旧** |
 
 ### 质量五维（一维一主，verify 顺序即理由：删 → 改 → 测 → 验）
 
 | 维度 | 谁管 | 何时 | 为什么在这个位置 |
 |---|---|---|---|
 | 复杂度 | Ponytail | build 预防 + verify 4.1 | 先删：不给将死代码修规范/补测 |
-| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+复验摘录一致性防吞告警；**done 的 codecheck_clean 现场重跑 CLI 亲数遗留（agent 报数不作数）**；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
+| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+真实末次 fullcheck 输出一致性防吞告警；**done 的 codecheck_clean 由 harness 亲数遗留（agent 报数不作数）**，机器首检 0 或同 HEAD/文件清单的 done 复核可复用受保护缓存，代码一变立即失效；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
 | 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
-| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
+| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。PASS 至少真实运行 1 条测试并逐条给 AC_COVERAGE；disabled/skipped 只允许与修改测试前同口径首跑基线一致的存量计数，新增或无基线仍阻断。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
 | 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘实现清单备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
 
 ### 确认点预算（人工停顿的取舍原则）
 
 人工停顿必须有明确决策价值，不能拿来证明“某阶段已经完成”。常规流程只保留：完整配置一次确认、
-工作流选择、是否质询、grill/规格中真正未决的问题、是否生成 STORY、hotfix/tweak 修改范围、不可逆定稿。
+工作流选择、是否质询、grill/规格中真正未决的问题、STORY 是否生成及入库方式、hotfix/tweak 修改范围、不可逆定稿。
 设计、编码、编译、CodeCheck、UT、评审修复和推送是否完成全部由文件、提交、任务卡和执行令牌判断。
 REMAINING 豁免、UT 判断源码缺陷、承担风险、强制回流属于异常高影响决策，继续使用强 ACK。
 普通选择点一次 AskUserQuestion 按钮即可推进，禁止再索要一条“确认××”。
@@ -128,6 +128,8 @@ git add 一律精确路径，gate 硬拦 `-A/--all/.`（宽 add 是 STORY 误提
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
 SHA-256；SubagentStop 要求报告回传同一指纹并复算文件内容。主模型漏传配置、旧卡复用、手改任务卡均拿不到令牌。
+独立 Grill 的 prep/final 任务卡由 `action critic` 同样签名；PreToolUse 在 Task 派发时通过统一
+`_contract_state()` 先验任务卡，缺卡当场拦，不把错误拖到整只 agent 跑完。
 对配置声明为 AutoUT/java-autout/build-fix 的任务，SubagentStop 还从子会话 transcript 验真实 Skill 工具调用；
 UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报告里写“执行过”不算证据。
 

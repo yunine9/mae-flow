@@ -1,5 +1,42 @@
 # 更新记录
 
+## 2026-07-26：松紧校准第二批——14 个契约、缓存与确认点闭环
+
+继续完成五层横向扫描的第二批。目标仍是同一条：机器事实严到不能伪造，
+用户停顿只留真实决策价值。
+
+### 该严（契约洞）
+
+- CodeCheck 最终报告的 `REMAINING_COUNT` 与 transcript 里真实末次
+  `fullcheck` 输出对账，独立模式不再能靠自述 CLEAN 直接结束；
+- UT PASS 拒绝 `0/0/0` 空跑，`AC_COVERAGE` 至少包含一条
+  “EARS 条目 → 用例名”映射；
+- 独立任务派发前也统一校验任务卡，识别范围补齐 Grill critic；
+- Grill critic 的 CLEAR/GAPS 必须有成功 Read/Grep/Glob，空 transcript
+  走可观测的 accept-risk 出口，不能靠样板发令牌；
+- rf_fix 若把已确认“修复”改成“转规格轮次”，机器对比 rf_triage
+  收尾快照；新增终态必须有本步真实 AskUserQuestion。
+
+### 该松（存量债与重复执行）
+
+- CodeCheck 首检 0 告警且 HEAD/文件清单未变时 done 直接复用；修复后的
+  现场复核也缓存绑定结果，豁免台账失败重试不再重复跑全量 CLI；
+- 流程启动前已脏且指纹未变的源码不再封死任务卡、accept-risk、令牌凭证
+  和月光遗留出口；本轮再次改动仍硬拦，任务卡与风险账保留可见清单；
+- disabled/skipped 改为精确基线：UT agent 修改测试前同口径首跑，终跑
+  计数不高于基线的存量项如实记录但不阻断；新增、无基线或不可解析仍拒绝 PASS。
+
+### 确认点收敛
+
+- STORY 的“生成并入库 / 生成但不入库 / 不生成”并入开场 Q4，story 定稿后
+  不再追加一停；用户主动改口仍可覆盖；
+- end 沉淀候选改为 multiSelect（每卡最多 4 条），rf_triage 独立意见同样
+  每卡最多 4 条，耦合意见保持逐条；
+- open 与 grill 的零待决分支各补一张有内容的摘要抽查卡，不再逼模型临场
+  发明问题或制造 accept-risk 噪音；
+- Spec 漂移裁决统一使用 AskUserQuestion 固定去向；
+- rf_fix 翻案明确要求先展示代码证据与影响，再由用户裁决。
+
 ## 2026-07-26：逃生通道端到端实测——37 项判定,主链全"可开+立即生效",修 2 高 3 中
 
 五通道(exit/allow/accept-risk/goto+unlock/损坏与编码故障态)真实 CLI 构造故障态

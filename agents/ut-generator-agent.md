@@ -93,6 +93,10 @@ UT_RESULT: FAIL
    - 异常场景:SPEC 中约束的错误处理逻辑
 5. 按配置的 UT 运行命令运行全量 UT。禁止临时追加 filter/exclude/disable 参数，禁止屏蔽失败用例后报告 PASS；
    如果配置命令本身包含过滤范围，则按任务卡原样执行（视为用户已确认的范围）
+   - **存量 disabled/skipped 基线**:修改或生成测试前先按任务卡运行一次同口径 UT,把真实输出留在
+     transcript；修改完成后再跑同一口径。终跑的 disabled/skipped 精确计数不高于首跑基线时,
+     如实记为存量项但不阻断 PASS；计数增加、首跑缺失、两次口径不同或无法解析计数时仍进
+     `KNOWN_FAILURES`/`SUSPECTED_BUGS`。这是基线比对,不是允许新增禁用/跳过。
 6. UT 引入编译问题则按**配置的编译方式**修复(配置是 build-fix → 用 Skill 工具调用插件自带能力；
    是命令 → 执行该命令；
    长编译后台执行+**长间隔轮询**(单次调用内 sleep 后看日志);**禁止自行另猜编译命令**),修完重新跑 UT
@@ -117,8 +121,9 @@ UT_RESULT: FAIL
 - 禁止删除或注释既有 UT 来"消灭"失败。**例外仅一种**:既有用例与本单规格条目冲突(规格演进,旧用例
   测的是旧行为)——这不是你能拍板的,同样记入 `SUSPECTED_BUGS`(标注"疑似规格演进",附新旧行为对照与
   spec 依据)等用户裁决;第二轮启动时主 agent 转达"经用户确认,按新 spec 修订用例 X"的,仅对点名用例解除本禁令
-- 测试输出出现 disabled/excluded/skipped/segfault 等异常时必须如实进入 `KNOWN_FAILURES` 或 `SUSPECTED_BUGS`，
-  使用 NEEDS_INPUT/FAIL 收尾。"它是历史问题"不是你自行过滤它并报告 PASS 的授权
+- 新增的 disabled/excluded/skipped 或 segfault 必须如实进入 `KNOWN_FAILURES` 或 `SUSPECTED_BUGS`，
+  使用 NEEDS_INPUT/FAIL 收尾。与任务卡后、修改测试前同口径首跑基线一致的存量 disabled/skipped
+  如实记录但不阻断 PASS；"它是历史问题"只有真实基线对账一致才成立,不能靠口头声明
 - 禁止绕过配置的编译方式手动调编译命令
 
 ## Return format(与顶部「最终回复格式」配套)

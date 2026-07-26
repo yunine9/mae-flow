@@ -703,6 +703,26 @@ def ev_spec_validate(spec, st):
     return True, ""
 
 
+def _unchanged_initial_dirty(path, st):
+    """流程启动前已脏且指纹未变的文件不是本单变化，仍保留在状态中可审计。"""
+    rel = norm(path).strip().strip('"')
+    initial = set((st or {}).get("initial_dirty", []) or [])
+    fingerprints = (st or {}).get("initial_dirty_fingerprints", {}) or {}
+    return bool(rel in initial and fingerprints.get(rel) == _path_fingerprint(rel))
+
+
+def _blocking_dirty_source_paths(st, flow=None):
+    return [p for p in _dirty_paths()
+            if _is_source_path(p, st, flow or FLOW)
+            and not _unchanged_initial_dirty(p, st)]
+
+
+def _unchanged_initial_dirty_source_paths(st, flow=None):
+    return [p for p in _dirty_paths()
+            if _is_source_path(p, st, flow or FLOW)
+            and _unchanged_initial_dirty(p, st)]
+
+
 def _source_changed_since(head, st=None):
     """令牌签发时 HEAD 之后,源码是否变化:已提交 diff + 工作区未提交改动。
     返回 (变更清单, 错误);基点不可解析(amend/rebase/GC)属错误,由调用方判拒——重签令牌即可恢复。"""
@@ -717,14 +737,20 @@ def _source_changed_since(head, st=None):
         # core.quotepath=false:否则非 ASCII 文件名被引号+八进制转义,pattern 匹配不到 = 漏检
         out = sh(f"git -c core.quotepath=false diff --name-only {head} {cur}")
         changed += [f for f in out.splitlines() if f and _is_source_path(f, st)]
+    # 校准实锤:令牌签发前就存在、内容此后未变的存量脏文件曾被算作"签发后
+    # 变化",连锁封死任务卡/accept-risk/令牌复用(连裁决出口一起封)。init 已
+    # 记 initial_dirty + 指纹,据此豁免:仅当该文件本单真动过(指纹变了)才算变化。
     for line in sh("git -c core.quotepath=false status --porcelain --untracked-files=all").splitlines():
         # 按空白切"状态 路径",不用列偏移:sh() 会 strip 首行前导空格(' M' → 'M'),偏移取路径会错位
         parts = line.split(None, 1)
         if len(parts) != 2:
             continue
         f = parts[1].split(" -> ")[-1].strip().strip('"')
-        if f and _is_source_path(f, st):
-            changed.append(f + "(未提交)")
+        if not f or not _is_source_path(f, st):
+            continue
+        if _unchanged_initial_dirty(f, st):
+            continue  # 存量脏文件,本单未动,不算签发后变化
+        changed.append(f + "(未提交)")
     return changed, ""
 
 
@@ -978,19 +1004,24 @@ def ev_commit_tagged_after_entry(spec, st):
     return ev_commit_tagged(spec, st)
 
 
-def _review_has_confirmed_fix(txt):
-    """只认评审意见表中的正式裁决，不把模板说明文字当真实数据。"""
+def _review_status_count(txt, status):
+    """只统计评审意见表的数据行，不把模板说明中的合法值当真实裁决。"""
     # 只看意见清单的数据行。模板说明本身也会列出“修复(已确认)”这个合法值，
     # 全文搜关键词会把空模板误判成已有修复，导致没有代码可改时也被永久卡住。
+    count = 0
     for line in txt.splitlines():
         if not line.lstrip().startswith("|"):
             continue
         cells = [x.strip().strip("*`") for x in line.strip().strip("|").split("|")]
         if len(cells) < 4 or cells[0] == "#" or set(cells[0]) <= {"-", ":"}:
             continue
-        if cells[-1] == "修复(已确认)":
-            return True
-    return False
+        if cells[-1] == status:
+            count += 1
+    return count
+
+
+def _review_has_confirmed_fix(txt):
+    return _review_status_count(txt, "修复(已确认)") > 0
 
 
 def ev_review_fix_committed(spec, st):
@@ -1000,6 +1031,19 @@ def ev_review_fix_committed(spec, st):
         txt = open(p, encoding="utf-8", errors="replace").read()
     except OSError:
         return False, "评审裁决文档不存在: " + p
+    # rf_triage 收尾时冻结「转规格轮次」数量。rf_fix 若把用户已经确认的
+    # 「修复」翻案为「转规格轮次(已确认)」，必须在本步骤重新取得用户裁决，
+    # 不能靠改文档里的终态文字单方面伪造“已确认”。旧版在途状态无快照时
+    # fail-open，避免升级把已经进行中的评审轮永久卡死。
+    baseline = st.get("review_triage_transfer_count")
+    transfers = _review_status_count(txt, "转规格轮次(已确认)")
+    if isinstance(baseline, int) and transfers > baseline:
+        ok, why = ev_agent_ran({"agent": "ASKUSER"}, st)
+        if not ok:
+            return False, (
+                f"rf_fix 新增了 {transfers - baseline} 条「转规格轮次(已确认)」，"
+                "但本步没有真实 AskUserQuestion 用户裁决。修复中改变既有裁决"
+                "必须先向用户展示代码证据与行为影响，再由用户确认；" + why)
     if not _review_has_confirmed_fix(txt):
         return True, ""
     return ev_commit_tagged_after_entry(spec, st)
@@ -1327,29 +1371,62 @@ def ev_codecheck_clean(spec, st):
         return False, err
     if not files:
         return True, ""
-    result, err = _run_codecheck(files)
-    if err:
-        manual = (st.get("quality", {}) or {}).get("codecheck_manual", {})
-        same_files = manual.get("files") == files
-        same_head = manual.get("head") == sh("git rev-parse --verify HEAD")
-        diag = manual.get("diagnostic", "")
-        try:
-            same_diag = (os.path.isfile(diag)
-                         and hashlib.sha256(open(diag, "rb").read()).hexdigest()
-                         == manual.get("diagnostic_sha256"))
-        except OSError:
-            same_diag = False
-        if (manual.get("step") == st.get("current") and same_files and same_head
-                and same_diag and manual.get("count") == 0):
+    # 校准实锤:零告警正常路上 fullcheck 必然跑两遍(scan 一遍+done 复核一遍,
+    # 每次 done 重试再+1)。scan 是 harness 亲跑的真实动作、记录绑 HEAD+文件清单
+    # 存于 gate 保护的状态文件——与 codecheck-record 同一信任模型。命中缓存
+    # (同步骤∧首检 0 条∧文件清单一致∧源码零变化)直接判过,把 scan 已算出的
+    # 结论真正用起来;agent 修复路径(scan.count>0)保持全量重跑,哲学不动。
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    if (scan.get("step") == st.get("current") and scan.get("count") == 0
+            and not scan.get("manual")
+            and scan.get("files") == files and scan.get("head")):
+        changed, cerr = _source_changed_since(scan.get("head"), st)
+        if not cerr and not changed:
             return True, ""
-        return False, err + ("；若你已人工看过诊断文件并确认告警数，可使用 current 中给出的 "
-                             "codecheck-record 恢复命令，记录会绑定当前 HEAD 和文件清单，代码一变即失效")
-    # 与 codecheck-scan 同源同口径:复核也只数本次修改范围内的告警
-    result, _stock = _scope_filter_codecheck(result, st, files)
-    total, pairs = result["total"], result["pairs"]
+    ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
+    # 豁免文件未提交是纯本地廉价事实，先报再跑昂贵 CLI；提交后复用下面绑定
+    # HEAD+文件清单的复核缓存，不会因为一个台账问题反复 fullcheck。
+    if os.path.exists(ex):
+        dirty = sh(f'git status --porcelain -- "{ex}"')
+        if dirty:
+            return False, f"豁免记录 {ex} 尚未提交；本地文件不能替远端 MR 背书，请精确提交后重试"
+
+    verified = (st.get("quality", {}) or {}).get("codecheck_verify", {})
+    use_verified = False
+    if (verified.get("step") == st.get("current")
+            and verified.get("files") == files and verified.get("head")):
+        changed, verr = _source_changed_since(verified.get("head"), st)
+        use_verified = not verr and not changed
+    if use_verified:
+        total = int(verified.get("count", 0))
+        pairs = verified.get("pairs", []) or []
+    else:
+        result, err = _run_codecheck(files)
+        if err:
+            manual = (st.get("quality", {}) or {}).get("codecheck_manual", {})
+            same_files = manual.get("files") == files
+            same_head = manual.get("head") == sh("git rev-parse --verify HEAD")
+            diag = manual.get("diagnostic", "")
+            try:
+                same_diag = (os.path.isfile(diag)
+                             and hashlib.sha256(open(diag, "rb").read()).hexdigest()
+                             == manual.get("diagnostic_sha256"))
+            except OSError:
+                same_diag = False
+            if (manual.get("step") == st.get("current") and same_files and same_head
+                    and same_diag and manual.get("count") == 0):
+                return True, ""
+            return False, err + ("；若你已人工看过诊断文件并确认告警数，可使用 current 中给出的 "
+                                 "codecheck-record 恢复命令，记录会绑定当前 HEAD 和文件清单，代码一变即失效")
+        # 与 codecheck-scan 同源同口径:复核也只数本次修改范围内的告警
+        result, _stock = _scope_filter_codecheck(result, st, files)
+        total, pairs = result["total"], result["pairs"]
+        st.setdefault("quality", {})["codecheck_verify"] = {
+            "step": st.get("current"), "head": sh("git rev-parse --verify HEAD"),
+            "files": files, "count": total, "pairs": pairs,
+            "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     if total == 0:
         return True, ""
-    ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
     if not os.path.exists(ex):
         return False, (f"harness 现场复核实测遗留 {total} 条告警,且无豁免清单({ex})。"
                        "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),把「规则ID + 文件 + 用户原话」"
@@ -1368,9 +1445,6 @@ def ev_codecheck_clean(spec, st):
         return False, ("豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: " + "、".join(unauthorized[:5])
                        + "。逐项 AskUserQuestion 后执行 mae-flow approve-exemption --rule <规则ID> "
                        "--file <文件> --reason <理由> --ack \"用户原话\"；手写豁免文件不再算授权")
-    dirty = sh(f'git status --porcelain -- "{ex}"')
-    if dirty:
-        return False, f"豁免记录 {ex} 尚未提交；本地文件不能替远端 MR 背书，请精确提交后重试"
     return True, ""
 
 
@@ -2022,7 +2096,12 @@ def print_current(flow, st):
     if step.get("choice_key"):
         extra += f" --choice <{'|'.join(step['choices'])}>"
     if step.get("require_sets"):
-        extra += " --set " + " --set ".join(k + "=<值>" for k in step["require_sets"])
+        missing_sets = [
+            k for k in step["require_sets"]
+            if not (st.get("config", {}) or {}).get(k)
+        ]
+        if missing_sets:
+            extra += " --set " + " --set ".join(k + "=<值>" for k in missing_sets)
     # python(非 python3:Windows 无此命令);abspath(非 relpath:跨盘符 relpath 抛 ValueError)
     print(f"python \"{os.path.abspath(sys.argv[0])}\" done{extra}")
     if step.get("skippable"):
@@ -2909,6 +2988,14 @@ def advance(flow, st, sid, step, tag, note=""):
         _, err = _ensure_review_base(st)
         if err:
             die(err, 2)
+    if sid == "rf_triage":
+        review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
+        try:
+            review_text = open(review_doc, encoding="utf-8", errors="replace").read()
+        except OSError as exc:
+            die("无法冻结评审裁决快照:" + str(exc), 2)
+        st["review_triage_transfer_count"] = _review_status_count(
+            review_text, "转规格轮次(已确认)")
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
     st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
@@ -3107,6 +3194,14 @@ def cmd_done(flow, st, args):
         if not ok:
             die(why, 2)
     # 到这里配置、文档、用户确认和 choice 已全部通过，才提交候选值。
+    if step.get("choice_key"):
+        choice_sets = (step.get("choice_sets") or {}).get(args.choice, {}) or {}
+        for key, value in choice_sets.items():
+            bad = _validate_config_value(key, str(value))
+            if bad:
+                die(f"流程定义为选择 {args.choice} 配置的 {key}「{value}」不合法:{bad}。"
+                    "请维护人修正 flow.json，拒绝写入半套状态。", 2)
+            pending_config[key] = str(value)
     st["config"] = pending_config
     if sid == "config_confirm":
         st.pop("config_review", None)
@@ -3146,6 +3241,7 @@ def cmd_done(flow, st, args):
             for kind in ("COMPILE", "CODECHECK", "UT"):
                 (st.get("agent_tasks", {}) or {}).pop(kind, None)
             (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+            (st.get("quality", {}) or {}).pop("codecheck_verify", None)
             save_state(st)
             print(f"[mae-flow] {sid} 修改了源码，自动进入 {source_next} 重新编译；主会话不要自行编译。\n")
             print_current(flow, st)
@@ -3189,6 +3285,7 @@ def cmd_done(flow, st, args):
             for kind in ("COMPILE", "CODECHECK", "UT"):
                 (st.get("agent_tasks", {}) or {}).pop(kind, None)
             (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+            (st.get("quality", {}) or {}).pop("codecheck_verify", None)
             save_state(st)
             print(f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
                   "必须重新经过编译、CodeCheck 与 UT；禁止直接推送。\n")
@@ -3282,20 +3379,25 @@ def cmd_accept_risk(flow, st, args):
     ok, why = _ack_verified(st, args.ack, exact=True)
     if not ok:
         die("accept-risk 授权验真失败:" + why, 2)
-    dirty = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
+    dirty = _blocking_dirty_source_paths(st, flow)
     if dirty:
         die("风险确认必须绑定稳定代码版本，但仍有未提交源码/测试/构建文件: " + "、".join(dirty[:8])
             + "。先按本单规范提交，再向用户展示风险并重新确认。", 2)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
+    inherited_dirty = _unchanged_initial_dirty_source_paths(st, flow)
     task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     rec = {"step": sid, "head": sh("git rev-parse --verify HEAD"), "at": now,
-           "task_sha256": task.get("sha256", ""), "reason": args.reason, "ack": args.ack}
+           "task_sha256": task.get("sha256", ""), "reason": args.reason, "ack": args.ack,
+           "unchanged_initial_dirty": inherited_dirty}
     st.setdefault("risk_acceptances", {})[kind] = rec
     st.setdefault("history", []).append(
         {"step": sid, "result": "accept-risk:" + kind, "note": args.reason, "at": now})
     save_state(st)
     print(f"[mae-flow] 用户已确认承担 {kind} 令牌缺失风险；仅放行当前步骤 {sid}、当前代码版本。")
     print("风险: " + args.reason)
+    if inherited_dirty:
+        print("审计:以下流程启动前已脏文件指纹未变，不算本单变化: "
+              + "、".join(inherited_dirty[:8]))
     print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，本次放行自动失效。现在重新执行 done。")
 
 
@@ -4118,7 +4220,8 @@ def cmd_agent_task(flow, st, args):
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if sid not in expected_steps[kind]:
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
-    dirty_source = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
+    dirty_source = _blocking_dirty_source_paths(st, flow)
+    inherited_dirty = _unchanged_initial_dirty_source_paths(st, flow)
     if dirty_source:
         die("生成任务卡前仍有未提交源码/测试/构建文件: " + "、".join(dirty_source[:8])
             + "。任务卡只信 Git 可追踪范围；先按单号格式精确提交，或回退不属于本单的改动。", 2)
@@ -4155,6 +4258,9 @@ def cmd_agent_task(flow, st, args):
         f"UT运行命令: {cfg.get('UT运行命令', '')}",
         "需求/规格依据:",
     ]
+    if inherited_dirty:
+        lines.append("流程启动前已脏但指纹未变(不属于本任务,保持可见): "
+                     + "、".join(inherited_dirty))
     sources = _requirement_sources(st)
     lines.extend("- " + x for x in sources)
     if not sources:
@@ -4227,6 +4333,7 @@ def cmd_agent_task(flow, st, args):
         "step": sid, "path": path, "sha256": digest,
         "head": task_head, "scope": args.scope or "",
         "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
+        "unchanged_initial_dirty": inherited_dirty,
         "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     save_state(st)
     print(f"[mae-flow] {kind} 任务卡已生成: {path}")
@@ -4270,6 +4377,7 @@ def cmd_codecheck_scan(flow, st, args):
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
         "files": files, "pairs": result["pairs"], "commands": result["commands"],
         "stock_excluded": stock}
+    st["quality"].pop("codecheck_verify", None)
     if stock:
         print("[mae-flow] 范围过滤:另有 %d 条告警在变更文件内但不属于本次修改"
               "(存量债,不计入本单;线上流水线同为增量口径不拦存量,确需治理另立单)。"
@@ -4319,6 +4427,7 @@ def cmd_codecheck_record(flow, st, args):
     st["quality"]["codecheck_scan"] = {"step": st["current"], "head": head,
         "files": files, "pairs": [], "commands": ["人工核对诊断文件:" + diag],
         "count": args.count, "at": rec["at"], "manual": True}
+    st["quality"].pop("codecheck_verify", None)
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
@@ -4945,7 +5054,7 @@ def cmd_moonlight(flow, st, args):
                 if not ok:
                     die("build 尚未达到“实现完成、仅编译遗留”的边界，不能 defer: " + why
                         + "。继续完成实现；若需求/权限/外部依赖客观缺失，改用 moonlight blocked 留痕停止。", 2)
-        dirty = [p for p in _dirty_paths() if _is_source_path(p, st, flow)]
+        dirty = _blocking_dirty_source_paths(st, flow)
         if dirty:
             die("带遗留推进前必须先提交当前有效源码/测试/构建改动，否则 push 会漏文件: "
                 + "、".join(dirty[:8]), 2)
@@ -4994,6 +5103,7 @@ def cmd_moonlight(flow, st, args):
                 for k2 in ("COMPILE", "CODECHECK", "UT"):
                     (st.get("agent_tasks", {}) or {}).pop(k2, None)
                 (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+                (st.get("quality", {}) or {}).pop("codecheck_verify", None)
                 save_state(st)
                 _write_moonlight_report(flow, st)
                 print(f"[mae-flow] 遗留已登记,但本步修改过被测源码,自动回流 {recheck} "

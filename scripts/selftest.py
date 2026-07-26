@@ -147,6 +147,23 @@ if flow:
               "config_confirm", "workflow_select", "grill_ask",
               "story_ask", "hf_open", "tw_open", "archive_confirm",
           }, str(sorted(actual_ack_steps)))
+    story_ask = steps.get("story_ask", {})
+    check("STORY 入库决定并入开场卡且不在 story 步追加停顿",
+          story_ask.get("choices") == ["commit", "local", "no"]
+          and story_ask.get("next", {}).get("commit") == "story"
+          and story_ask.get("next", {}).get("local") == "story"
+          and story_ask.get("next", {}).get("no") == "build"
+          and story_ask.get("choice_sets", {}).get("commit", {}).get("STORY入库")
+          and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库"))
+    step_text = lambda name: open(
+        os.path.join(ROOT, "flow", "steps", name + ".md"),
+        encoding="utf-8").read()
+    check("批量确认与零待决分支都有明确步骤话术",
+          "multiSelect" in step_text("end")
+          and "每卡最多 4 条" in step_text("rf_triage")
+          and "②③类恰好为 0" in step_text("open")
+          and "候选题为 0" in step_text("grill")
+          and "AskUserQuestion" in step_text("verify_comet"))
     check("review 编译只接受 OK",
           steps.get("rf_compile", {}).get("evidence", [{}])[0].get("statuses") == ["OK"])
     check("review UT 只接受 PASS",
@@ -216,6 +233,70 @@ if flow:
         os.unlink(codecheck_json)
 
     mf.FLOW = flow
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        old_run_codecheck = mf._run_codecheck
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            os.makedirs("src", exist_ok=True)
+            open("src/Foo.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "src/Foo.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], check=True)
+            base = mf.sh("git rev-parse HEAD")
+            open("src/Foo.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
+            subprocess.run(["git", "add", "src/Foo.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "change"], check=True)
+            head = mf.sh("git rev-parse HEAD")
+            state = {
+                "current": "verify_codecheck",
+                "config": {"单号": "REQ1", "基线分支": base},
+                "quality": {"codecheck_scan": {
+                    "step": "verify_codecheck", "head": head, "count": 0,
+                    "files": ["src/Foo.cpp"], "pairs": [], "commands": ["fullcheck"]}},
+            }
+            calls = {"count": 0}
+
+            def fake_codecheck(_files):
+                calls["count"] += 1
+                return ({
+                    "total": 1,
+                    "pairs": [("R.ONE", "src/Foo.cpp", None)],
+                    "commands": ["codecheck fullcheck -f src/Foo.cpp"],
+                }, "")
+
+            mf._run_codecheck = fake_codecheck
+            zero_ok, _ = mf.ev_codecheck_clean({}, state)
+            check("CodeCheck 机器首检零告警且源码未变时 done 直接复用",
+                  zero_ok and calls["count"] == 0)
+
+            state["quality"]["codecheck_scan"]["count"] = 1
+            first_ok, _ = mf.ev_codecheck_clean({}, state)
+            second_ok, _ = mf.ev_codecheck_clean({}, state)
+            check("CodeCheck done 复核结果绑定 HEAD 缓存避免失败重试再跑",
+                  not first_ok and not second_ok and calls["count"] == 1
+                  and state.get("quality", {}).get("codecheck_verify", {}).get("count") == 1)
+
+            open("src/Foo.cpp", "a", encoding="utf-8").write("int dirty_after_verify = 3;\n")
+            changed_ok, _ = mf.ev_codecheck_clean({}, state)
+            check("CodeCheck done 复核缓存遇源码变化立即失效",
+                  not changed_ok and calls["count"] == 2)
+            open("src/Foo.cpp", "w", encoding="utf-8").write(
+                "int value = 1;\nint changed = 2;\n")
+            state["quality"].pop("codecheck_verify", None)
+            state["quality"]["codecheck_scan"].update({"count": 0, "manual": True})
+            mf._run_codecheck = lambda _files: (
+                calls.__setitem__("count", calls["count"] + 1)
+                or {"total": 0, "pairs": [], "commands": ["fullcheck"]}, "")
+            manual_ok, _ = mf.ev_codecheck_clean({}, state)
+            check("人工登记零告警不会冒充机器首检缓存",
+                  manual_ok and calls["count"] == 3)
+        finally:
+            mf._run_codecheck = old_run_codecheck
+            os.chdir(old_cwd)
+
     source_cases = {
         "include/Foo.hpp": True,
         "lib/core.cpp": True,
@@ -236,6 +317,12 @@ if flow:
     check("评审空模板不会误判为待修代码",
           not mf._review_has_confirmed_fix("合法值: 修复(已确认)\n| # | 意见 | 定性 | 裁决 |\n|---|---|---|---|")
           and mf._review_has_confirmed_fix("| 1 | 空指针 | 属实 | 修复(已确认) |"))
+    check("评审裁决计数只认表格数据行",
+          mf._review_status_count(
+              "合法值: 转规格轮次(已确认)\n"
+              "| # | 意见 | 定性 | 裁决 |\n|---|---|---|---|\n"
+              "| 1 | 行为变化 | 属实 | 转规格轮次(已确认) |",
+              "转规格轮次(已确认)") == 1)
     check("配置只能在声明步骤写入",
           mf._allowed_set_keys(steps["config_confirm"]) >= {"基线分支", "分支名", "编译方式"}
           and not mf._allowed_set_keys(steps["verify_codecheck"]))
@@ -463,6 +550,82 @@ if flow:
                 flow["steps"]["hf_open"], scope_state)
             check("范围确认只认最终固定按钮而不误用前面的“可以”",
                   not early_ok and final_ok)
+        finally:
+            os.chdir(old_cwd)
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            story_state = {
+                "current": "story_ask", "config": {}, "choices": {},
+                "history": [], "started": now,
+            }
+            mf.save_state(story_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps(
+                        {"answers": {"STORY 如何交付": "生成但不入库（本地交测）"}},
+                        ensure_ascii=False),
+                    "step": "config_confirm", "at": now,
+                }], f, ensure_ascii=False)
+            mf.cmd_done(
+                flow, story_state,
+                types.SimpleNamespace(ack=None, choice="local", set=[]))
+            selected_story = mf.load_state()
+            check("STORY 开场预答直接写入入库配置且不二次询问",
+                  selected_story.get("current") == "story"
+                  and "不入库" in selected_story.get("config", {}).get("STORY入库", ""))
+            story_current = io.StringIO()
+            with contextlib.redirect_stdout(story_current):
+                mf.print_current(flow, selected_story)
+            check("STORY 完成命令不重复要求已预答的入库配置",
+                  "--set STORY入库=<值>" not in story_current.getvalue())
+
+            os.makedirs("docs/review", exist_ok=True)
+            open("docs/review/REVIEW-REQ1.md", "w", encoding="utf-8").write(
+                "| # | 意见 | 定性 | 裁决 |\n"
+                "|---|---|---|---|\n"
+                "| 1 | 行为变化 | 属实 | 转规格轮次(已确认) |\n")
+            rf_state = {
+                "current": "rf_fix", "config": {"单号": "REQ1"},
+                "choices": {"workflow": "review"}, "history": [], "started": now,
+                "review_triage_transfer_count": 0,
+            }
+            rf_ok, rf_why = mf.ev_review_fix_committed({}, rf_state)
+            check("rf_fix 单方面新增转规格终态会被 ASKUSER 闸拦截",
+                  not rf_ok and "AskUserQuestion" in rf_why)
+        finally:
+            os.chdir(old_cwd)
+
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            os.makedirs("src", exist_ok=True)
+            open("src/preexisting.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "src/preexisting.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            head = mf.sh("git rev-parse HEAD")
+            open("src/preexisting.cpp", "a", encoding="utf-8").write("int local = 2;\n")
+            dirty_state = {
+                "initial_dirty": ["src/preexisting.cpp"],
+                "initial_dirty_fingerprints": {
+                    "src/preexisting.cpp": mf._path_fingerprint("src/preexisting.cpp")},
+            }
+            unchanged, unchanged_err = mf._source_changed_since(head, dirty_state)
+            check("流程启动前未变化的脏源码不封任务卡与令牌",
+                  not unchanged_err and unchanged == []
+                  and mf._blocking_dirty_source_paths(dirty_state, flow) == [])
+            open("src/preexisting.cpp", "a", encoding="utf-8").write("int changed_now = 3;\n")
+            changed, changed_err = mf._source_changed_since(head, dirty_state)
+            check("存量脏源码在本轮再次变化仍会硬拦",
+                  not changed_err and any("src/preexisting.cpp" in item for item in changed)
+                  and mf._blocking_dirty_source_paths(dirty_state, flow)
+                  == ["src/preexisting.cpp"])
         finally:
             os.chdir(old_cwd)
     # Plugin-owned runtime is prepared in-process: no project Skill directory,
@@ -1250,21 +1413,26 @@ try:
         open("task.md", "w", encoding="utf-8").write(body + "TASK_CARD_SHA256: " + digest + "\n")
         head = subprocess.run(["git", "rev-parse", "HEAD"], check=True,
                               capture_output=True, text=True).stdout.strip()
+        preexisting_text = "int value = 1;\nint preexisting_dirty = 2;\n"
+        open("biz.cpp", "w", encoding="utf-8").write(preexisting_text)
         task = {"step": "rf_codecheck", "sha256": digest, "path": os.path.abspath("task.md"),
                 "head": head, "allowed_files": ["biz.cpp"]}
         json.dump({"current": "rf_codecheck", "config": {"编译方式": "build-fix skill"},
                    "agent_tasks": {"CODECHECK": task},
-                   "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}}},
+                   "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}},
+                   "initial_dirty": ["biz.cpp"],
+                   "initial_dirty_fingerprints": {
+                       "biz.cpp": dispatch._path_fingerprint("biz.cpp")}},
                   open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
         build_calls = [{"name": "Skill", "input": {"skill": "build-fix"},
                         "result_seen": True, "is_error": False, "result": "BUILD_ERRORS: 0"}]
         receipt = dispatch._record_codecheck_build_receipt(task, build_calls)
-        check("CodeCheck 报告重答可复用同版本真实编译凭证",
+        check("CodeCheck 报告重答可复用同版本真实编译凭证并忽略未变化存量脏文件",
               bool(receipt) and bool(dispatch._reusable_codecheck_build_receipt(task)))
         open("biz.cpp", "a", encoding="utf-8").write("int changed = 2;\n")
         check("源码变化后 CodeCheck 编译凭证立即失效",
               dispatch._reusable_codecheck_build_receipt(task) is None)
-        open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+        open("biz.cpp", "w", encoding="utf-8").write(preexisting_text)
         check("CodeCheck 编译凭证不能跨任务卡复用",
               dispatch._reusable_codecheck_build_receipt(
                   {"step": "rf_codecheck", "sha256": "b" * 64}) is None)
@@ -1284,6 +1452,16 @@ try:
         except SystemExit:
             retry_ok = False
         check("CodeCheck 格式重答无需重复长编译", retry_ok)
+        liar_calls = [dict(
+            retry_calls[0], result="复验完成：共有 3 条告警")]
+        liar_blocked = False
+        try:
+            dispatch._codecheck_contract(
+                "CLEAN", retry_report, liar_calls, soft=False)
+        except SystemExit as exc:
+            liar_blocked = exc.code == 2
+        check("CodeCheck 报告遗留数必须与真实 fullcheck 输出对账",
+              liar_blocked)
         dispatch._record_rejection("CODECHECK", "缺少真实编译证据（测试原因）")
         rejected_ok, rejected_why = mf.ev_agent_ran(
             {"agent": "CODECHECK", "statuses": ["CLEAN"]},
@@ -1304,9 +1482,14 @@ try:
                                  capture_output=True, text=True).stdout.strip()
         ut_task = {"step": "rf_ut", "sha256": ut_digest, "path": os.path.abspath("ut-task.md"),
                    "head": ut_head}
+        inherited_dirty_state = {
+            "initial_dirty": ["biz.cpp"],
+            "initial_dirty_fingerprints": {
+                "biz.cpp": dispatch._path_fingerprint("biz.cpp")},
+        }
         json.dump({"current": "rf_ut",
                    "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "mcde test --ut"},
-                   "agent_tasks": {"UT": ut_task}},
+                   "agent_tasks": {"UT": ut_task}, **inherited_dirty_state},
                   open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
         ut_report = "\n".join([
             "UT_RESULT: PASS",
@@ -1331,7 +1514,7 @@ try:
         # “随 AutoUT 生成”是运行策略，不是要与真实命令逐字相同的字符串。
         json.dump({"current": "rf_ut",
                    "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "随AutoUT生成"},
-                   "agent_tasks": {"UT": ut_task}},
+                   "agent_tasks": {"UT": ut_task}, **inherited_dirty_state},
                   open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
         dynamic_ut_ok = True
         try:
@@ -1351,7 +1534,7 @@ try:
 
         json.dump({"current": "rf_ut",
                    "config": {"UT生成方式": "mae-flow:AutoUT Skill", "UT运行命令": "mcde test --ut"},
-                   "agent_tasks": {"UT": ut_task}},
+                   "agent_tasks": {"UT": ut_task}, **inherited_dirty_state},
                   open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
         ut_retry_ok = True
         try:
@@ -1364,6 +1547,65 @@ try:
               dispatch._reusable_ut_receipt("UT_GENERATOR", ut_task, "mae-flow:AutoUT Skill") is None
               and dispatch._reusable_ut_receipt("UT_RUN", ut_task, "mcde test --ut") is None)
         open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+
+        zero_report = ut_report.replace(
+            "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "TESTS_TOTAL: 0, TESTS_PASSED: 0, TESTS_FAILED: 0")
+        zero_blocked = False
+        try:
+            dispatch._ut_contract("PASS", zero_report, ut_calls, soft=False)
+        except SystemExit as exc:
+            zero_blocked = exc.code == 2
+        check("UT 0/0/0 空跑不能冒充 PASS", zero_blocked)
+
+        flat_coverage = ut_report.replace(
+            "- 场景A -> TestA\n- 场景B -> TestB",
+            "全部 EARS 条目均已覆盖（见测试设计）")
+        flat_blocked = False
+        try:
+            dispatch._ut_contract("PASS", flat_coverage, ut_calls, soft=False)
+        except SystemExit as exc:
+            flat_blocked = exc.code == 2
+        check("UT AC_COVERAGE 必须逐条映射而非一句背书", flat_blocked)
+
+        baseline_disabled_calls = [
+            {"name": "Bash", "input": {"command": "cd build && mcde test --ut"},
+             "result_seen": True, "is_error": False,
+             "result": "77 passed\nYOU HAVE 2 DISABLED TESTS"},
+            ut_calls[0],
+            {"name": "Bash", "input": {"command": "cd build && mcde test --ut"},
+             "result_seen": True, "is_error": False,
+             "result": "79 passed\nYOU HAVE 2 DISABLED TESTS"},
+        ]
+        baseline_disabled_ok = True
+        try:
+            dispatch._ut_contract(
+                "PASS", ut_report, baseline_disabled_calls, soft=False)
+        except SystemExit:
+            baseline_disabled_ok = False
+        check("存量 DISABLED 计数与修改前基线一致时不阻断 PASS",
+              baseline_disabled_ok)
+
+        increased_disabled_calls = baseline_disabled_calls[:-1] + [dict(
+            baseline_disabled_calls[-1],
+            result="79 passed\nYOU HAVE 3 DISABLED TESTS")]
+        increased_disabled_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", ut_report, increased_disabled_calls, soft=False)
+        except SystemExit as exc:
+            increased_disabled_blocked = exc.code == 2
+        check("本轮新增 DISABLED 仍会阻断 PASS",
+              increased_disabled_blocked)
+
+        no_baseline_disabled_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", ut_report, baseline_disabled_calls[1:], soft=False)
+        except SystemExit as exc:
+            no_baseline_disabled_blocked = exc.code == 2
+        check("没有修改前首跑基线不能口头认领存量 DISABLED",
+              no_baseline_disabled_blocked)
 
         risky_report = ut_report.replace(
             "EXECUTED_UT: mcde test --ut",
@@ -1475,12 +1717,48 @@ try:
             "GRILL_RESULT: CLEAR", "TASK_CARD_SHA256: " + grill_digest,
             "STAGE: final", "GAPS_FOUND: 0", "MISSING_BRANCHES: 无",
         ])
-        grill_ok = True
+        grill_empty_blocked = False
         try:
             dispatch._grill_contract("CLEAR", grill_report, [], soft=False)
+        except SystemExit as exc:
+            grill_empty_blocked = exc.code == 2
+        check("Grill critic 零阅读样板不能签发 CLEAR",
+              grill_empty_blocked)
+
+        grill_read_calls = [{
+            "name": "Read", "input": {"file_path": task_path},
+            "result_seen": True, "is_error": False, "result": "# requirement",
+        }]
+        grill_ok = True
+        try:
+            dispatch._grill_contract(
+                "CLEAR", grill_report, grill_read_calls, soft=False)
         except SystemExit:
             grill_ok = False
-        check("独立 Grill critic 契约接受 CLEAR 并核对阶段与缺口数", grill_ok)
+        check("独立 Grill critic 真阅读后接受 CLEAR 并核对阶段与缺口数",
+              grill_ok)
+
+        dispatch_ok = False
+        try:
+            dispatch.ev_action_pretooluse({
+                "tool_name": "Task",
+                "tool_input": {"prompt": "启动 grill-critic-agent"},
+            })
+        except SystemExit as exc:
+            dispatch_ok = exc.code == 0
+        action["agent_tasks"] = {}
+        json.dump(action, open(dispatch.ACTION_STATE, "w", encoding="utf-8"),
+                  ensure_ascii=False)
+        dispatch_missing_blocked = False
+        try:
+            dispatch.ev_action_pretooluse({
+                "tool_name": "Task",
+                "tool_input": {"prompt": "启动 grill-critic-agent"},
+            })
+        except SystemExit as exc:
+            dispatch_missing_blocked = exc.code == 2
+        check("独立任务派发前统一校验 Grill 任务卡",
+              dispatch_ok and dispatch_missing_blocked)
 finally:
     os.chdir(old_cwd)
 

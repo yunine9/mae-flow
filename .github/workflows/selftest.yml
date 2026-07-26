@@ -39,8 +39,16 @@ jobs:
             grep "❌" selftest.log | head -10 | while IFS= read -r line; do
               echo "::error::${line}"
             done
-            # 日志尾部整体打进一条多行 annotation(硬崩 traceback + 子套件失败详情)
-            tail -250 selftest.log | python -c "import sys; body=sys.stdin.read(); print('::error::LOG_TAIL:' + body.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))"
+            # 日志尾部(硬崩 traceback)
+            tail -60 selftest.log | python -c "import sys; body=sys.stdin.read(); print('::error::LOG_TAIL:' + body.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))"
+            # 子套件失败详情:逐套单跑,各自尾部打独立 annotation(selftest 聚合
+            # 输出里子套件 detail 会被正常回显淹没,远程诊断拿不到具体断言)
+            for t in scripts/tests/test_state_core.py scripts/tests/test_specengine.py scripts/tests/test_capabilities.py scripts/tests/probe_gate_smoke.py scripts/tests/probe_spec_semantics.py; do
+              if ! python "$t" > sub.log 2>&1; then
+                name=$(basename "$t")
+                tail -40 sub.log | python -c "import sys; body=sys.stdin.read(); print('::error::' + '$name' + ':' + body.replace('%','%25').replace('\r','%0D').replace('\n','%0A'))"
+              fi
+            done
           fi
           exit "$status"
         env:

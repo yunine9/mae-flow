@@ -63,9 +63,9 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | 维度 | 谁管 | 何时 | 为什么在这个位置 |
 |---|---|---|---|
 | 复杂度 | Ponytail | build 预防 + verify 4.1 | 先删：不给将死代码修规范/补测 |
-| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+真实末次 fullcheck 输出一致性防吞告警；**done 的 codecheck_clean 由 harness 亲数遗留（agent 报数不作数）**，机器首检 0 或同 HEAD/文件清单的 done 复核可复用受保护缓存，代码一变立即失效；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
+| 规范 | CodeCheck | verify 4.2 | 再改：拆大函数等重构在此定稿；hook 三数对账+真实 fullcheck 整轮分批求和防吞告警，raw 数需加回 harness 已识别的存量告警后再与 scoped 遗留对账；**done 的 codecheck_clean 由 harness 亲数遗留（agent 报数不作数）**，机器首检 0 或同 HEAD/文件清单的 done 复核可复用受保护缓存，代码一变立即失效；只查业务代码不查测试；流水线门禁必拦 → 流程无"忽略"选项 |
 | 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
-| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。PASS 至少真实运行 1 条测试并逐条给 AC_COVERAGE；disabled/skipped 只允许与修改测试前同口径首跑基线一致的存量计数，新增或无基线仍阻断。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
+| 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。PASS 至少真实运行 1 条测试并逐条给 AC_COVERAGE；任务卡后任何写测试动作前先跑同口径基线，disabled/skipped 只允许与该基线一致的存量计数；真实失败、吞退出码、缩窄范围、删测试或终跑总数下降均阻断。TDD 已弃用（与事后补测互斥，其设计压力由 spec+design 阶段替代提供） |
 | 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘实现清单备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
 
@@ -336,6 +336,8 @@ selftest 和 tweak/full 冒烟 → 确认渲染结果没有 `/comet-*`、`/opsx:
 7. hook 命令用 **shell form**（`python "${VAR}/dispatch.py" 事件`，Git Bash 展开变量、路径带引号）。公司 codeagent 实测**不支持 exec form 的 args 数组**——只执行 command 本体，hook payload 落进 python stdin 被当脚本解析，JSON 的 `false` 炸 NameError（2026-07-20 实战，症状：`<stdin> line 1 name 'false' is not defined`）
 8. 时间戳一律显式 `%Y-%m-%d %H:%M:%S`，禁用 `%F`/`%T` 简写（依赖 UCRT 的 C99 支持，老运行时抛 ValueError；时间戳是证据比对/账本/令牌的命脉，不赌运行时）
 9. 解析 git 输出中的文件路径时加 `-c core.quotepath=false`（否则非 ASCII 文件名被引号+八进制转义，pattern 匹配漏检）；且勿依赖 porcelain 输出的列偏移（`sh()` 会 strip 首行前导空格），按空白切分
+10. Git 文件名、用户配置值或 ref 进入子进程时必须使用 argv + `shell=False`；禁止把它们插进
+    shell 字符串。Hook 的宿主启动命令仍按军规 7 使用 shell form，两者场景不同
 
 ## 七、排障手册
 

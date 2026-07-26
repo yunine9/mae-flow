@@ -248,6 +248,17 @@ def sh(cmd):
         return ""
 
 
+def argv_out(args, timeout=15):
+    """无需 shell 的命令输出；文件名、ref 等外部值只能走参数数组，跨平台防注入。"""
+    try:
+        return subprocess.run(
+            list(args), shell=False, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        ).stdout.strip()
+    except Exception:
+        return ""
+
+
 def _dirty_paths():
     """返回当前工作区脏路径。状态文件与过程目录由流程自己维护，不算交付改动。"""
     out = []
@@ -321,8 +332,19 @@ def _validate_config_value(key, value):
         return "单号必须以 REQ 或 DTS 开头"
     if key in ("工号", "基线分支", "分支名") and re.search(r"[\\\s~^:?*\[\];&|`$<>()\"']", value):
         return "包含 git/shell 不安全字符"
-    if key == "CHANGE_NAME" and not re.fullmatch(r"[A-Za-z0-9._-]+", value):
-        return "change 名只允许字母、数字、点、下划线和短横线"
+    if key in ("基线分支", "分支名"):
+        try:
+            checked = subprocess.run(
+                ["git", "check-ref-format", "--branch", value],
+                shell=False, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=10,
+            )
+        except Exception as exc:
+            return "无法调用 git check-ref-format 校验分支名: " + str(exc)
+        if checked.returncode != 0 or checked.stdout.strip() != value:
+            return "不是合法且无隐式展开的 Git 分支名"
+    if key == "CHANGE_NAME" and not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return "change 名只允许字母、数字、下划线和短横线"
     return ""
 
 
@@ -505,21 +527,22 @@ def _ensure_review_base(st):
     if not _is_review(st):
         return "", "当前不是评审意见处理流程"
     old = st.get("review_base_head", "")
-    if old and sh(f"git cat-file -t {old}") == "commit":
+    if old and argv_out(["git", "cat-file", "-t", old]) == "commit":
         return old, ""
     at = ""
     for h in st.get("history", []):
         if h.get("step") == "branch_create":
             at = h.get("at", "")
             break
-    base = sh(f'git rev-list -1 --before="{at}" HEAD') if at else ""
+    base = argv_out(["git", "rev-list", "-1", "--before=" + at, "HEAD"]) if at else ""
     if not base:
         review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
-        added = sh(f'git log --diff-filter=A -1 --format=%H -- "{review_doc}"')
+        added = argv_out([
+            "git", "log", "--diff-filter=A", "-1", "--format=%H", "--", review_doc])
         if added:
             # --verify 必带(军规5):root commit 的 {added}^ 不存在时,裸 rev-parse 会把
             # 参数字面串回显到 stdout,伪 rev 一路传染成空 diff → 质量链静默全过。
-            base = sh(f"git rev-parse --verify --quiet {added}^")
+            base = argv_out(["git", "rev-parse", "--verify", "--quiet", added + "^"])
     if not base:
         return "", ("无法自动恢复返工基点。不要用当前 HEAD 代替，否则增量范围会变成空；"
                      "请把日志与原 MR 返工前 commit 交维护人处理")
@@ -535,7 +558,7 @@ def _scope_base(st):
     base = st.get("config", {}).get("基线分支", "")
     if not base:
         return "", "缺基线分支配置"
-    if not sh(f"git rev-parse --verify {base}"):
+    if not argv_out(["git", "rev-parse", "--verify", base]):
         return "", f"基线分支「{base}」无法解析(不存在/拼写错),diff 无从算起——先修配置"
     return base, ""
 
@@ -568,12 +591,25 @@ def ev_glob(spec, st):
 
 def ev_branch_ok(spec, st):
     want = st["config"].get("分支名", "")
+    base = st["config"].get("基线分支", "")
     cur = sh("git branch --show-current")
     if not want:
         return False, "配置中无分支名(config_confirm 未 --set 分支名?)"
-    if cur == want:
-        return True, ""
-    return False, f"当前分支 {cur or '未知'} != 约定分支 {want}。请 git checkout -b {want}(已存在则 checkout;错误命名分支用 git branch -m 重命名)"
+    if cur != want:
+        return False, f"当前分支 {cur or '未知'} != 约定分支 {want}。请 git checkout -b {want}(已存在则 checkout;错误命名分支用 git branch -m 重命名)"
+    if not base:
+        return False, "配置中无基线分支，无法证明工作分支从正确位置切出"
+    base_head = argv_out(["git", "rev-parse", "--verify", base + "^{commit}"])
+    head = argv_out(["git", "rev-parse", "--verify", "HEAD"])
+    if not base_head:
+        return False, f"基线分支 {base} 不可解析；先 fetch/checkout 确认基线存在"
+    if not head or head != base_head:
+        return False, (
+            f"工作分支 {want} 的起点 {head[:10] if head else '未知'} != "
+            f"基线 {base} 当前 HEAD {base_head[:10]}。branch_create 尚未开始实现，"
+            "不能带入其他分支的提交；请回到基线重新切分支，已有工作需先让用户决定如何迁移。"
+        )
+    return True, ""
 
 
 def ev_tasks_checked(spec, st):
@@ -732,10 +768,13 @@ def _source_changed_since(head, st=None):
     changed = []
     if cur and cur != head:
         # cat-file 探基点存在性(不用 rev-parse ^{commit}:^ 在 Windows cmd 是转义符)
-        if sh(f"git cat-file -t {head}") != "commit":
+        if argv_out(["git", "cat-file", "-t", head]) != "commit":
             return None, "令牌基点 commit 不可解析(经历过 amend/rebase?)"
         # core.quotepath=false:否则非 ASCII 文件名被引号+八进制转义,pattern 匹配不到 = 漏检
-        out = sh(f"git -c core.quotepath=false diff --name-only {head} {cur}")
+        out = argv_out([
+            "git", "-c", "core.quotepath=false",
+            "diff", "--name-only", head, cur,
+        ])
         changed += [f for f in out.splitlines() if f and _is_source_path(f, st)]
     # 校准实锤:令牌签发前就存在、内容此后未变的存量脏文件曾被算作"签发后
     # 变化",连锁封死任务卡/accept-risk/令牌复用(连裁决出口一起封)。init 已
@@ -872,7 +911,8 @@ def _changed_source_files(st, include_tests=True):
     diff, err = _scope_diff(st)
     if err:
         return None, err
-    out = sh(f"git -c core.quotepath=false diff --name-only {diff}")
+    out = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-only", diff])
     files = [f for f in out.splitlines() if f and _is_source_path(f, st)]
     if not include_tests:
         files = [f for f in files if not _is_test_file(f, st)]
@@ -929,7 +969,7 @@ def ev_clean_paths(spec, st):
         p = subst(p, st)
         if "{" in p and "}" in p:
             return False, "证据 pattern 含未解析占位符: " + p
-        out = sh(f'git status --porcelain -- "{p}"')
+        out = argv_out(["git", "status", "--porcelain", "--", p])
         if out:
             dirty.append(f"{p}({out.splitlines()[0][:2].strip()})")
     if not dirty:
@@ -965,9 +1005,10 @@ def ev_pushed(spec, st):
             p for p in current if _is_source_path(p, st)
             or p.startswith(("openspec/", "docs/review/", "docs/req/", "docs/codecheck-exempt-"))}
     story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
-    if any(x in story_mode for x in ("不入库", "不提交", "no", "false")):
+    if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
         story = "docs/story/STORY-" + st.get("config", {}).get("单号", "") + ".md"
-        tracked = sh(f'git ls-tree -r --name-only HEAD -- "{story}"')
+        tracked = argv_out([
+            "git", "ls-tree", "-r", "--name-only", "HEAD", "--", story])
         if tracked:
             return False, (f"STORY 已确认不入库，但 {story} 仍在当前提交中。"
                            "用 git rm --cached 精确移出索引并按单号提交修正；本地文件可以保留。")
@@ -996,9 +1037,9 @@ def ev_commit_tagged_after_entry(spec, st):
     """不仅看最新提交格式，还要求提交确实发生在当前步骤之后。"""
     sid = st.get("current", "")
     base = (st.get("step_heads", {}) or {}).get(sid, "")
-    if not base or sh(f"git cat-file -t {base}") != "commit":
+    if not base or argv_out(["git", "cat-file", "-t", base]) != "commit":
         return False, f"缺少 {sid} 的入口 HEAD，无法证明本步真的产生过提交"
-    commits = sh(f"git log --format=%H {base}..HEAD").splitlines()
+    commits = argv_out(["git", "log", "--format=%H", base + "..HEAD"]).splitlines()
     if not commits:
         return False, "当前步骤之后没有新提交，不能拿上一步的提交冒充本步产出"
     return ev_commit_tagged(spec, st)
@@ -1020,6 +1061,30 @@ def _review_status_count(txt, status):
     return count
 
 
+def _review_statuses(txt):
+    """评审轮次/行号/意见原文 → 裁决；用于识别数量不变但意见身份被偷换。"""
+    out = {}
+    section = "未分节"
+    for line in txt.splitlines():
+        heading = re.match(r"^\s*##\s+(.+?)\s*$", line)
+        if heading:
+            section = re.sub(r"\s+", " ", heading.group(1)).strip()
+            continue
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = [x.strip().strip("*`") for x in line.strip().strip("|").split("|")]
+        if len(cells) < 4 or cells[0] == "#" or set(cells[0]) <= {"-", ":"}:
+            continue
+        base_identity = "%s / #%s / %s" % (
+            section, cells[0], re.sub(r"\s+", " ", cells[1])[:40])
+        identity, duplicate = base_identity, 2
+        while identity in out:
+            identity = "%s / 重复%d" % (base_identity, duplicate)
+            duplicate += 1
+        out[identity] = cells[-1]
+    return out
+
+
 def _review_has_confirmed_fix(txt):
     return _review_status_count(txt, "修复(已确认)") > 0
 
@@ -1035,13 +1100,27 @@ def ev_review_fix_committed(spec, st):
     # 「修复」翻案为「转规格轮次(已确认)」，必须在本步骤重新取得用户裁决，
     # 不能靠改文档里的终态文字单方面伪造“已确认”。旧版在途状态无快照时
     # fail-open，避免升级把已经进行中的评审轮永久卡死。
-    baseline = st.get("review_triage_transfer_count")
-    transfers = _review_status_count(txt, "转规格轮次(已确认)")
-    if isinstance(baseline, int) and transfers > baseline:
+    baseline_rows = st.get("review_triage_statuses")
+    current_rows = _review_statuses(txt)
+    newly_transferred = []
+    if isinstance(baseline_rows, dict):
+        newly_transferred = [
+            row_id for row_id, status in current_rows.items()
+            if status == "转规格轮次(已确认)"
+            and baseline_rows.get(row_id) != "转规格轮次(已确认)"
+        ]
+    else:
+        # 旧状态只有计数快照，保留原有兼容语义。
+        baseline = st.get("review_triage_transfer_count")
+        transfers = _review_status_count(txt, "转规格轮次(已确认)")
+        if isinstance(baseline, int) and transfers > baseline:
+            newly_transferred = ["旧状态新增%d条" % (transfers - baseline)]
+    if newly_transferred:
         ok, why = ev_agent_ran({"agent": "ASKUSER"}, st)
         if not ok:
             return False, (
-                f"rf_fix 新增了 {transfers - baseline} 条「转规格轮次(已确认)」，"
+                "rf_fix 把以下意见新改成了「转规格轮次(已确认)」: "
+                + "、".join(newly_transferred[:8]) + "；"
                 "但本步没有真实 AskUserQuestion 用户裁决。修复中改变既有裁决"
                 "必须先向用户展示代码证据与行为影响，再由用户确认；" + why)
     if not _review_has_confirmed_fix(txt):
@@ -1071,7 +1150,8 @@ def _biz_changed_files(st):
     diff, err = _scope_diff(st)
     if err:
         return None, err
-    out = sh(f"git -c core.quotepath=false diff --name-only {diff}")
+    out = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-only", diff])
     files = [f for f in out.splitlines()
              if f and f.lower().endswith(CODE_EXTS) and os.path.exists(f) and not _is_test_file(f, st)]
     return files, ""
@@ -1091,7 +1171,10 @@ def _changed_lines(st, files):
         return None, err
     result = {}
     for f in files:
-        out = sh(f'git -c core.quotepath=false diff -U0 {diff} -- "{f}"')
+        out = argv_out([
+            "git", "-c", "core.quotepath=false",
+            "diff", "-U0", diff, "--", f,
+        ])
         lines = set()
         for m in re.finditer(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", out, re.M):
             start = int(m.group(1))
@@ -1387,7 +1470,7 @@ def ev_codecheck_clean(spec, st):
     # 豁免文件未提交是纯本地廉价事实，先报再跑昂贵 CLI；提交后复用下面绑定
     # HEAD+文件清单的复核缓存，不会因为一个台账问题反复 fullcheck。
     if os.path.exists(ex):
-        dirty = sh(f'git status --porcelain -- "{ex}"')
+        dirty = argv_out(["git", "status", "--porcelain", "--", ex])
         if dirty:
             return False, f"豁免记录 {ex} 尚未提交；本地文件不能替远端 MR 背书，请精确提交后重试"
 
@@ -1915,7 +1998,7 @@ def _ensure_step_entry_head(flow, st, sid):
     绝不以当前 HEAD 兜底，因为当前 HEAD 可能已经包含 UT 阶段偷偷修改的源码。
     """
     old = (st.get("step_heads", {}) or {}).get(sid, "")
-    if old and sh(f"git cat-file -t {old}") == "commit":
+    if old and argv_out(["git", "cat-file", "-t", old]) == "commit":
         return old, ""
     entered_at = ""
     for h in reversed(st.get("history", [])):
@@ -1925,8 +2008,8 @@ def _ensure_step_entry_head(flow, st, sid):
             break
     if not entered_at:
         return "", f"历史中找不到进入 {sid} 的转换记录"
-    base = sh(f'git rev-list -1 --before="{entered_at}" HEAD')
-    if not base or sh(f"git cat-file -t {base}") != "commit":
+    base = argv_out(["git", "rev-list", "-1", "--before=" + entered_at, "HEAD"])
+    if not base or argv_out(["git", "cat-file", "-t", base]) != "commit":
         return "", f"无法按进入时间 {entered_at} 解析安全基点"
     st.setdefault("step_heads", {})[sid] = base
     st.setdefault("migrations", []).append({
@@ -2219,7 +2302,7 @@ def _standalone_config():
         except Exception:
             pass
     try:
-        defaults = json.load(open(DEFAULTS_PATH, encoding="utf-8")) if os.path.isfile(DEFAULTS_PATH) else {}
+        defaults = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")) if os.path.isfile(DEFAULTS_PATH) else {}
         for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
             if defaults.get(key):
                 merged[key] = defaults[key]
@@ -2994,6 +3077,7 @@ def advance(flow, st, sid, step, tag, note=""):
             review_text = open(review_doc, encoding="utf-8", errors="replace").read()
         except OSError as exc:
             die("无法冻结评审裁决快照:" + str(exc), 2)
+        st["review_triage_statuses"] = _review_statuses(review_text)
         st["review_triage_transfer_count"] = _review_status_count(
             review_text, "转规格轮次(已确认)")
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
@@ -3069,6 +3153,11 @@ def _validated_pending_config(step, st, set_values):
             die("配置缺失,禁止推进: " + "、".join(missing) + "(" + remedy + ")", 2)
         if "基线分支" in step["require_sets"]:
             derived_branch = "{基线分支}_{工号}_{单号}".format(**pending_config)
+            bad = _validate_config_value("分支名", derived_branch)
+            if bad:
+                die("脚本按基线分支、工号和单号生成的分支名「%s」不合法:%s。"
+                    "请修正组成字段后重新确认，不能带着非法 ref 进入后续步骤。"
+                    % (derived_branch, bad), 2)
             supplied_branch = pending_config.get("分支名", "")
             if supplied_branch and supplied_branch != derived_branch:
                 die(
@@ -3316,9 +3405,9 @@ def cmd_done(flow, st, args):
         _moonlight_resolve_kind(st, kind)
     if sid == "story":
         story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
-        if any(x in story_mode for x in ("不入库", "不提交", "no", "false")):
+        if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
             src = "docs/story/STORY-" + st.get("config", {}).get("单号", "") + ".md"
-            tracked = sh(f'git ls-files -- "{src}"')
+            tracked = argv_out(["git", "ls-files", "--", src])
             if tracked:
                 save_state(st)
                 die(f"用户选择 STORY 不入库，但 {src} 已被加入 Git。先用 git rm --cached 精确移出，"
@@ -3481,12 +3570,28 @@ def _test_patterns(st):
     未配置返回 []，调用方使用 DEFAULT_TEST_PATS 保守兜底，不再 fail-open。"""
     raw = ((st or {}).get("config", {}) or {}).get("测试路径", "")
     if raw:
-        return [x.strip() for x in raw.split(",") if x.strip()]
-    try:
-        v = json.load(open(DEFAULTS_PATH, encoding="utf-8")).get("测试路径", [])
-        return v if isinstance(v, list) else []
-    except Exception:
-        return []
+        values = ([x.strip() for x in raw.split(",") if x.strip()]
+                  if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
+    else:
+        try:
+            raw = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")).get("测试路径", [])
+            values = ([x.strip() for x in raw.split(",") if x.strip()]
+                      if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
+        except Exception:
+            values = []
+    valid = []
+    for value in values:
+        pattern = str(value).strip()
+        if not pattern:
+            continue
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            print("⚠ 测试路径正则「%s」无效，已按 fail-closed 忽略并保留内置测试边界: %s"
+                  % (pattern, exc), file=sys.stderr)
+            continue
+        valid.append(pattern)
+    return valid
 
 
 def _effective_test_patterns(st):
@@ -4041,7 +4146,12 @@ def cmd_gate(flow, st, args):
                     or re.fullmatch(r"[0-9a-f]{7,40}", name or "", re.I)):
                 name = ""
             want = st["config"].get("分支名", "")
-            if name and want and name != want:
+            base = st["config"].get("基线分支", "")
+            # branch_create 的第一步就是从基线切出约定分支；此时 checkout/switch
+            # 基线必须放行，创建出来后仍只允许约定分支。其他步骤保持原有严格口径。
+            baseline_checkout = (
+                sid == "branch_create" and not creating and base and name == base)
+            if name and want and name != want and not baseline_checkout:
                 jdie("bash-branch-name",
                      f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
         m = re.search(r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
@@ -4185,7 +4295,8 @@ def _task_scope(st):
     diff, err = _scope_diff(st)
     if err:
         return "", [], err
-    out = sh(f"git -c core.quotepath=false diff --name-status {diff}")
+    out = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-status", diff])
     return diff, [x for x in out.splitlines() if x.strip()], ""
 
 
@@ -4285,6 +4396,12 @@ def cmd_agent_task(flow, st, args):
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if kind == "CODECHECK":
         lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
+                  "Harness已识别范围外存量告警数: "
+                  + (str(scan.get("stock_excluded"))
+                     if isinstance(scan.get("stock_excluded"), int)
+                     else "无法区分（本轮按 raw 全量计入）"),
+                  "Harness首检分批数: %d（复验保持相同文件分批，禁止漏批或只跑最后一批）"
+                  % max(1, len(scan.get("commands") or [])),
                   "Harness首检文件: " + "、".join(scan.get("files", [])),
                   "Harness首检告警(规则|文件): " + _render_warning_pairs(scan.get("pairs", [])),
                   "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]

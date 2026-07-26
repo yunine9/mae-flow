@@ -154,7 +154,8 @@ if flow:
           and story_ask.get("next", {}).get("local") == "story"
           and story_ask.get("next", {}).get("no") == "build"
           and story_ask.get("choice_sets", {}).get("commit", {}).get("STORY入库")
-          and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库"))
+          and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库")
+          and story_ask.get("choice_sets", {}).get("no", {}).get("STORY入库") == "不生成")
     step_text = lambda name: open(
         os.path.join(ROOT, "flow", "steps", name + ".md"),
         encoding="utf-8").read()
@@ -303,6 +304,9 @@ if flow:
         "app/generated/no_extension": True,
         "CMakeLists.txt": True,
         "pom.xml": True,
+        "build.sh": True,
+        "tools/build.mk": True,
+        "package-lock.json": True,
         "docs/readme.md": False,
     }
     check("跨仓源码识别不依赖 service/src",
@@ -326,6 +330,39 @@ if flow:
     check("配置只能在声明步骤写入",
           mf._allowed_set_keys(steps["config_confirm"]) >= {"基线分支", "分支名", "编译方式"}
           and not mf._allowed_set_keys(steps["verify_codecheck"]))
+    check("Git 分支与 change 名使用原生 ref 规则严格校验",
+          not mf._validate_config_value("基线分支", "main")
+          and not mf._validate_config_value("基线分支", "origin/main")
+          and mf._validate_config_value("基线分支", "main..bad")
+          and mf._validate_config_value("分支名", "-main")
+          and mf._validate_config_value("CHANGE_NAME", ".."))
+    pattern_stderr = io.StringIO()
+    with contextlib.redirect_stderr(pattern_stderr):
+        configured_patterns = mf._test_patterns(
+            {"config": {"测试路径": [r"(^|/)qa/", "["]}})
+    check("测试路径支持数组且坏正则 fail-closed 不使 Hook 崩溃",
+          configured_patterns == [r"(^|/)qa/"]
+          and "fail-closed" in pattern_stderr.getvalue())
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            defaults = {
+                "编译方式": "build.cmd",
+                "UT生成方式": "AutoUT",
+                "UT运行命令": "ctest.exe --test-dir build",
+                "测试路径": [r"(^|/)qa/"],
+            }
+            with open(mf.DEFAULTS_PATH, "wb") as f:
+                f.write(b"\xef\xbb\xbf" + json.dumps(
+                    defaults, ensure_ascii=False).encode("utf-8"))
+            bom_config = mf._standalone_config()
+            bom_patterns = mf._test_patterns({})
+            check("Windows 常见 UTF-8 BOM defaults 在主流程与独立模式同样生效",
+                  bom_config.get("UT运行命令") == defaults["UT运行命令"]
+                  and bom_patterns == defaults["测试路径"])
+        finally:
+            os.chdir(old_cwd)
     good_req = "# 需求\n\n支持中文输入。\n"
     with _TmpDir() as td:
         good_path = os.path.join(td, "req.md")
@@ -581,20 +618,47 @@ if flow:
                 mf.print_current(flow, selected_story)
             check("STORY 完成命令不重复要求已预答的入库配置",
                   "--set STORY入库=<值>" not in story_current.getvalue())
+            revisit = {
+                "current": "story_ask",
+                "config": {"STORY入库": "生成并入库"},
+                "choices": {"story": "commit"},
+                "history": [], "started": now,
+            }
+            mf.save_state(revisit)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps(
+                        {"answers": {"STORY 如何交付": "不生成"}},
+                        ensure_ascii=False),
+                    "step": "config_confirm", "at": now,
+                }], f, ensure_ascii=False)
+            mf.cmd_done(
+                flow, revisit,
+                types.SimpleNamespace(ack=None, choice="no", set=[]))
+            no_story = mf.load_state()
+            check("STORY 返工改选不生成会覆盖旧入库状态",
+                  no_story.get("current") == "build"
+                  and no_story.get("config", {}).get("STORY入库") == "不生成")
 
             os.makedirs("docs/review", exist_ok=True)
             open("docs/review/REVIEW-REQ1.md", "w", encoding="utf-8").write(
                 "| # | 意见 | 定性 | 裁决 |\n"
                 "|---|---|---|---|\n"
-                "| 1 | 行为变化 | 属实 | 转规格轮次(已确认) |\n")
+                "| 1 | 空指针 | 属实 | 转规格轮次(已确认) |\n"
+                "| 2 | 行为变化 | 属实 | 修复(已确认) |\n")
             rf_state = {
                 "current": "rf_fix", "config": {"单号": "REQ1"},
                 "choices": {"workflow": "review"}, "history": [], "started": now,
-                "review_triage_transfer_count": 0,
+                "review_triage_transfer_count": 1,
+                "review_triage_statuses": mf._review_statuses(
+                    "| # | 意见 | 定性 | 裁决 |\n"
+                    "|---|---|---|---|\n"
+                    "| 1 | 空指针 | 属实 | 修复(已确认) |\n"
+                    "| 2 | 行为变化 | 属实 | 转规格轮次(已确认) |\n"),
             }
             rf_ok, rf_why = mf.ev_review_fix_committed({}, rf_state)
-            check("rf_fix 单方面新增转规格终态会被 ASKUSER 闸拦截",
-                  not rf_ok and "AskUserQuestion" in rf_why)
+            check("rf_fix 交换意见身份但总数不变仍会被 ASKUSER 闸拦截",
+                  not rf_ok and "1" in rf_why and "AskUserQuestion" in rf_why)
         finally:
             os.chdir(old_cwd)
 
@@ -609,6 +673,7 @@ if flow:
             open("src/preexisting.cpp", "w", encoding="utf-8").write("int value = 1;\n")
             subprocess.run(["git", "add", "src/preexisting.cpp"], check=True)
             subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            subprocess.run(["git", "branch", "-M", "main"], check=True)
             head = mf.sh("git rev-parse HEAD")
             open("src/preexisting.cpp", "a", encoding="utf-8").write("int local = 2;\n")
             dirty_state = {
@@ -626,6 +691,46 @@ if flow:
                   not changed_err and any("src/preexisting.cpp" in item for item in changed)
                   and mf._blocking_dirty_source_paths(dirty_state, flow)
                   == ["src/preexisting.cpp"])
+
+            hostile = "src/$(touch${IFS}MAE_FLOW_FILENAME_EXEC).cpp"
+            open(hostile, "w", encoding="utf-8").write("int hostile = 1;\n")
+            marker = "MAE_FLOW_FILENAME_EXEC"
+            changed_lines, changed_lines_err = mf._changed_lines(
+                {"config": {"基线分支": "main"}}, [hostile])
+            check("Git 文件名只经 argv 传递且不能触发 shell 命令替换",
+                  not changed_lines_err and hostile in changed_lines
+                  and not os.path.exists(marker))
+
+            branch_state = {
+                "current": "branch_create",
+                "config": {
+                    "基线分支": "main",
+                    "分支名": "main_u1_REQ1",
+                },
+                "history": [], "started": "2026-01-01 00:00:00",
+            }
+            baseline_allowed = True
+            try:
+                mf.cmd_gate(flow, branch_state, types.SimpleNamespace(
+                    what="bash", arg="git checkout main"))
+            except SystemExit as exc:
+                baseline_allowed = exc.code == 0
+            wrong_blocked = False
+            try:
+                mf.cmd_gate(flow, branch_state, types.SimpleNamespace(
+                    what="bash", arg="git checkout feature/other"))
+            except SystemExit as exc:
+                wrong_blocked = exc.code == 2
+            check("branch_create 放行基线 checkout 但仍拒绝无关分支",
+                  baseline_allowed and wrong_blocked)
+
+            subprocess.run(["git", "checkout", "-qb", "main_u1_REQ1"], check=True)
+            branch_ok, _ = mf.ev_branch_ok({}, branch_state)
+            subprocess.run(["git", "add", hostile], check=True)
+            subprocess.run(["git", "commit", "-qm", "wrong parent fixture"], check=True)
+            wrong_parent_ok, wrong_parent_why = mf.ev_branch_ok({}, branch_state)
+            check("工作分支不仅校验名称还校验从基线 HEAD 切出",
+                  branch_ok and not wrong_parent_ok and "起点" in wrong_parent_why)
         finally:
             os.chdir(old_cwd)
     # Plugin-owned runtime is prepared in-process: no project Skill directory,
@@ -1394,6 +1499,26 @@ check("Bash 证据不接受 echo 冒充",
                           "codecheck fullcheck") is None
       and dispatch._bash_call([{"name": "Bash", "input": {"command": "codecheck fullcheck -f a.cpp"}}],
                               "codecheck fullcheck") is not None)
+check("缺失 tool_result 不再被当作工具执行成功",
+      dispatch._call_failed({
+          "name": "Bash", "input": {"command": "ctest"}, "result_seen": False})
+      and not dispatch._call_failed({
+          "name": "Bash", "input": {"command": "ctest"},
+          "result_seen": True, "is_error": False, "result": "100% tests passed"}))
+check("UT 过滤范围不仅识别开关还核对具体取值",
+      dispatch._ut_filter_args("ctest.exe -R Smoke")
+      == dispatch._ut_filter_args("ctest.exe --test-dir build -R Smoke")
+      and dispatch._ut_filter_args("ctest.exe -R Smoke")
+      != dispatch._ut_filter_args("ctest.exe -R Other"))
+classifier_cases = [
+    "build.sh", "setup.cmd", "tools/build.mk", "package-lock.json",
+    "Cargo.lock", "go.sum", "build.ninja", "src/generated/no_extension",
+    "src/README.md", "docs/readme.md",
+]
+check("主状态机与 dispatch 的源码范围不再漏掉 Windows/构建入口",
+      all(mf._is_source_path(path, {}, flow)
+          == dispatch._source_like(path)
+          for path in classifier_cases))
 old_cwd = os.getcwd()
 old_dispatch_paths = (dispatch.STATE, dispatch.REJECTION_STATE, dispatch.EVIDENCE_STATE)
 try:
@@ -1462,6 +1587,106 @@ try:
             liar_blocked = exc.code == 2
         check("CodeCheck 报告遗留数必须与真实 fullcheck 输出对账",
               liar_blocked)
+
+        stock_report = "\n".join([
+            "CODECHECK_RESULT: REMAINING",
+            "TASK_CARD_SHA256: " + digest,
+            "EXECUTED_COMMAND: codecheck fullcheck -f biz.cpp",
+            "FOUND: 1", "FIXED: 0", "REMAINING_COUNT: 1",
+            "复验锚点: 共有 6 条告警",
+        ])
+        json.dump({
+            "current": "rf_codecheck",
+            "config": {"编译方式": "build-fix skill"},
+            "agent_tasks": {"CODECHECK": task},
+            "quality": {"codecheck_scan": {
+                "step": "rf_codecheck", "count": 1,
+                "stock_excluded": 5, "commands": ["codecheck fullcheck -f biz.cpp"],
+            }},
+            "initial_dirty": ["biz.cpp"],
+            "initial_dirty_fingerprints": {
+                "biz.cpp": dispatch._path_fingerprint("biz.cpp")},
+        }, open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        stock_ok = True
+        try:
+            dispatch._codecheck_contract(
+                "REMAINING", stock_report, [{
+                    "name": "Bash",
+                    "input": {"command": "codecheck fullcheck -f biz.cpp"},
+                    "result_seen": True, "is_error": False,
+                    "result": "共有 6 条告警",
+                }], soft=False)
+        except SystemExit:
+            stock_ok = False
+        check("CodeCheck 真实 raw 告警数会加回已识别存量后再与 scoped 遗留对账",
+              stock_ok)
+
+        batch_report = stock_report.replace(
+            "FOUND: 1", "FOUND: 3").replace(
+            "REMAINING_COUNT: 1", "REMAINING_COUNT: 3").replace(
+            "共有 6 条告警", "共有 3 条告警")
+        json.dump({
+            "current": "rf_codecheck",
+            "config": {"编译方式": "build-fix skill"},
+            "agent_tasks": {"CODECHECK": task},
+            "quality": {"codecheck_scan": {
+                "step": "rf_codecheck", "count": 3, "stock_excluded": 0,
+                "commands": [
+                    "codecheck fullcheck -f a.cpp",
+                    "codecheck fullcheck -f b.cpp",
+                ],
+            }},
+            "initial_dirty": ["biz.cpp"],
+            "initial_dirty_fingerprints": {
+                "biz.cpp": dispatch._path_fingerprint("biz.cpp")},
+        }, open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        batch_ok = True
+        try:
+            dispatch._codecheck_contract(
+                "REMAINING", batch_report, [
+                    {"name": "Bash",
+                     "input": {"command": "codecheck fullcheck -f a.cpp"},
+                     "result_seen": True, "is_error": False,
+                     "result": "共有 2 条告警"},
+                    {"name": "Bash",
+                     "input": {"command": "codecheck fullcheck -f b.cpp"},
+                     "result_seen": True, "is_error": False,
+                     "result": "共有 1 条告警"},
+                ], soft=False)
+        except SystemExit:
+            batch_ok = False
+        check("CodeCheck Windows 长命令分批复验按最终整轮求和而非只看最后一批",
+              batch_ok)
+        missing_batch_blocked = False
+        try:
+            dispatch._codecheck_contract(
+                "REMAINING", batch_report, [{
+                    "name": "Bash",
+                    "input": {"command": "codecheck fullcheck -f b.cpp"},
+                    "result_seen": True, "is_error": False,
+                    "result": "共有 1 条告警",
+                }], soft=False)
+        except SystemExit as exc:
+            missing_batch_blocked = exc.code == 2
+        check("CodeCheck 多批复验缺任一批都不能签发令牌",
+              missing_batch_blocked)
+        swallowed_codecheck_blocked = False
+        try:
+            dispatch._codecheck_contract(
+                "REMAINING", batch_report, [
+                    {"name": "Bash",
+                     "input": {"command": "codecheck fullcheck -f a.cpp"},
+                     "result_seen": True, "is_error": False,
+                     "result": "共有 2 条告警"},
+                    {"name": "Bash",
+                     "input": {"command": "codecheck fullcheck -f b.cpp || true"},
+                     "result_seen": True, "is_error": False,
+                     "result": "共有 1 条告警"},
+                ], soft=False)
+        except SystemExit as exc:
+            swallowed_codecheck_blocked = exc.code == 2
+        check("CodeCheck 不能用 shell 成功尾巴吞掉 CLI 失败",
+              swallowed_codecheck_blocked)
         dispatch._record_rejection("CODECHECK", "缺少真实编译证据（测试原因）")
         rejected_ok, rejected_why = mf.ev_agent_ran(
             {"agent": "CODECHECK", "statuses": ["CLEAN"]},
@@ -1577,10 +1802,13 @@ try:
              "result_seen": True, "is_error": False,
              "result": "79 passed\nYOU HAVE 2 DISABLED TESTS"},
         ]
+        baseline_disabled_report = ut_report.replace(
+            "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "TESTS_TOTAL: 79, TESTS_PASSED: 79, TESTS_FAILED: 0")
         baseline_disabled_ok = True
         try:
             dispatch._ut_contract(
-                "PASS", ut_report, baseline_disabled_calls, soft=False)
+                "PASS", baseline_disabled_report, baseline_disabled_calls, soft=False)
         except SystemExit:
             baseline_disabled_ok = False
         check("存量 DISABLED 计数与修改前基线一致时不阻断 PASS",
@@ -1592,7 +1820,7 @@ try:
         increased_disabled_blocked = False
         try:
             dispatch._ut_contract(
-                "PASS", ut_report, increased_disabled_calls, soft=False)
+                "PASS", baseline_disabled_report, increased_disabled_calls, soft=False)
         except SystemExit as exc:
             increased_disabled_blocked = exc.code == 2
         check("本轮新增 DISABLED 仍会阻断 PASS",
@@ -1601,7 +1829,7 @@ try:
         no_baseline_disabled_blocked = False
         try:
             dispatch._ut_contract(
-                "PASS", ut_report, baseline_disabled_calls[1:], soft=False)
+                "PASS", baseline_disabled_report, baseline_disabled_calls[1:], soft=False)
         except SystemExit as exc:
             no_baseline_disabled_blocked = exc.code == 2
         check("没有修改前首跑基线不能口头认领存量 DISABLED",
@@ -1625,6 +1853,117 @@ try:
         except SystemExit as exc:
             filter_blocked = exc.code == 2
         check("任务卡外追加测试过滤参数不能冒充全量 PASS", filter_blocked)
+
+        json.dump({"current": "rf_ut",
+                   "config": {
+                       "UT生成方式": "mae-flow:AutoUT Skill",
+                       "UT运行命令": "ctest.exe",
+                   },
+                   "agent_tasks": {"UT": ut_task}, **inherited_dirty_state},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        ctest_report = ut_report.replace(
+            "EXECUTED_UT: mcde test --ut", "EXECUTED_UT: ctest.exe").replace(
+            "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "TESTS_TOTAL: 10, TESTS_PASSED: 10, TESTS_FAILED: 0")
+        failed_output_calls = [
+            ut_calls[0],
+            {"name": "Bash", "input": {"command": "ctest.exe"},
+             "result_seen": True, "is_error": False,
+             "result": "80% tests passed, 2 tests failed out of 10"},
+        ]
+        failed_output_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", ctest_report, failed_output_calls, soft=False)
+        except SystemExit as exc:
+            failed_output_blocked = exc.code == 2
+        check("UT 不能忽略测试器真实失败汇总后伪报全绿", failed_output_blocked)
+
+        swallowed_calls = [
+            ut_calls[0],
+            {"name": "Bash", "input": {"command": "ctest.exe || true"},
+             "result_seen": True, "is_error": False,
+             "result": "80% tests passed, 2 tests failed out of 10"},
+        ]
+        swallowed_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", ctest_report, swallowed_calls, soft=False)
+        except SystemExit as exc:
+            swallowed_blocked = exc.code == 2
+        check("UT 命令不能用 shell 成功尾巴吞掉失败退出码", swallowed_blocked)
+
+        narrowed_report = ctest_report.replace(
+            "EXECUTED_UT: ctest.exe", "EXECUTED_UT: ctest.exe -R Smoke")
+        narrowed_calls = [
+            ut_calls[0],
+            {"name": "Bash", "input": {"command": "ctest.exe -R Smoke"},
+             "result_seen": True, "is_error": False,
+             "result": "100% tests passed, 0 tests failed out of 10"},
+        ]
+        narrowed_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", narrowed_report, narrowed_calls, soft=False)
+        except SystemExit as exc:
+            narrowed_blocked = exc.code == 2
+        check("Windows CTest -R 缩小范围会被识别并阻断 PASS", narrowed_blocked)
+
+        json.dump({"current": "rf_ut",
+                   "config": {
+                       "UT生成方式": "mae-flow:AutoUT Skill",
+                       "UT运行命令": "mcde test --ut",
+                   },
+                   "agent_tasks": {"UT": ut_task}, **inherited_dirty_state},
+                  open(dispatch.STATE, "w", encoding="utf-8"), ensure_ascii=False)
+        open("biz_test.cpp", "a", encoding="utf-8").write("int generated = 2;\n")
+        late_baseline_calls = [
+            {"name": "Bash",
+             "input": {"command": "python -c \"open('biz_test.cpp','a').write('x')\""},
+             "result_seen": True, "is_error": False, "result": "updated"},
+            {"name": "Bash", "input": {"command": "mcde test --ut"},
+             "result_seen": True, "is_error": False, "result": "77 passed"},
+            ut_calls[0],
+            ut_calls[1],
+        ]
+        late_baseline_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", ut_report, late_baseline_calls, soft=False)
+        except SystemExit as exc:
+            late_baseline_blocked = exc.code == 2
+        check("UT 基线必须早于 Bash/Skill 写测试动作", late_baseline_blocked)
+
+        shrinking_calls = [
+            {"name": "Bash", "input": {"command": "mcde test --ut"},
+             "result_seen": True, "is_error": False,
+             "result": "77 passed\nYOU HAVE 2 DISABLED TESTS"},
+            ut_calls[0],
+            {"name": "Bash", "input": {"command": "mcde test --ut"},
+             "result_seen": True, "is_error": False, "result": "76 passed"},
+        ]
+        shrinking_report = ut_report.replace(
+            "TESTS_TOTAL: 77, TESTS_PASSED: 77, TESTS_FAILED: 0",
+            "TESTS_TOTAL: 76, TESTS_PASSED: 76, TESTS_FAILED: 0")
+        shrinking_blocked = False
+        try:
+            dispatch._ut_contract(
+                "PASS", shrinking_report, shrinking_calls, soft=False)
+        except SystemExit as exc:
+            shrinking_blocked = exc.code == 2
+        check("终跑移除 DISABLED 横幅但测试总数下降仍不能 PASS",
+              shrinking_blocked)
+        open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
+
+        os.remove("biz_test.cpp")
+        deleted_test_blocked = False
+        try:
+            dispatch._ut_contract("PASS", ut_report, ut_calls, soft=False)
+        except SystemExit as exc:
+            deleted_test_blocked = exc.code == 2
+        check("UT agent 删除既有测试文件会在契约入口被阻断",
+              deleted_test_blocked)
+        open("biz_test.cpp", "w", encoding="utf-8").write("int test_value = 1;\n")
 
         no_skill_blocked = False
         try:
@@ -1680,6 +2019,8 @@ try:
             "PENDING_QUESTIONS: 无", "KNOWN_FAILURES: 无", "SUSPECTED_BUGS: 无",
         ])
         calls = [
+            {"name": "Bash", "input": {"command": "mcde test --ut"},
+             "result_seen": True, "is_error": False, "result": "1 passed"},
             {"name": "Skill", "input": {"skill": "AutoUT"},
              "result_seen": True, "is_error": False, "result": "generated"},
             {"name": "Bash", "input": {"command": "mcde test --ut"},
@@ -1983,7 +2324,8 @@ check("Bash 任意解释器不能直碰流程状态文件",
       "禁止经 Bash 直接访问" in mf_src and "mae-flow status/current/doctor" in mf_src)
 check("带短横线的一次性退出凭据也在状态黑名单内",
       r"(?:\.[\w-]+)*" in mf_src and "EXIT_INTENT_PATH" in mf_src)
-check("STORY 不入库会在推送前检查提交树", "git ls-tree -r --name-only HEAD" in mf_src)
+check("STORY 不入库会在推送前检查提交树",
+      '"git", "ls-tree", "-r", "--name-only", "HEAD"' in mf_src)
 check("STORY 不入库由 done 自动移入过程区",
       'if sid == "story"' in mf_src and 'os.path.join(".mae-flow-work", "story")' in mf_src)
 

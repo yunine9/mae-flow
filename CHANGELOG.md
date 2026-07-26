@@ -1,5 +1,19 @@
 # 更新记录
 
+## 2026-07-26：Windows 契约深校准——命令注入、分支起点与真实质量输出
+
+- Git 文件名改用无 shell 的 argv 调用，`$()`、`&`、空格等合法/异常文件名不再能改变命令语义；
+  分支和 change 名使用 Git 原生 ref 规则校验，branch_create 同时核对名称与基线起点；
+- 主状态机与 Hook 统一识别 `.cmd/.ps1/.mk/.gn`、lockfile、`build.ninja` 等构建源码，
+  defaults 支持 Windows 常见 UTF-8 BOM，测试路径支持字符串/数组并对坏正则 fail-closed；
+- CodeCheck 最终复验按 Windows 命令行分批整轮求和，并把已识别存量告警加回 raw 口径，
+  不再因“只看最后一批”或 raw/scoped 混算永久阻断；
+- UT PASS 直接核对 CTest/gtest/pytest/Maven 的真实失败与总数，识别 `ctest -R` 等缩窄范围、
+  `|| true` 等吞退出码、基线后写测试、删测试和终跑总数下降；
+- 缺失 `tool_result` 不再视为成功；旧宿主无法提供完整 transcript 时保留现有
+  `accept-risk` 用户裁决出口；
+- rf_fix 的裁决快照从“只记数量”升级为逐意见身份，STORY 改选“不生成”会覆盖旧入库状态。
+
 ## 2026-07-26：松紧校准第二批——14 个契约、缓存与确认点闭环
 
 继续完成五层横向扫描的第二批。目标仍是同一条：机器事实严到不能伪造，

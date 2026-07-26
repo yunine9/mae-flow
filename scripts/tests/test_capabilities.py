@@ -248,8 +248,8 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             # v5 单文件承诺:不再产 .openspec.yaml(它会让"每单一个文件"变两个)
             self.assertFalse(os.path.exists(
                 os.path.join(change, ".openspec.yaml")))
-            skeleton = open(os.path.join(change, "change.md"),
-                            encoding="utf-8").read()
+            with open(os.path.join(change, "change.md"), encoding="utf-8") as stream:
+                skeleton = stream.read()
             self.assertIn("# 为什么", skeleton)
             self.assertIn("# 方案", skeleton)      # full 档才有方案节
             self.assertIn("# 实现清单", skeleton)
@@ -425,9 +425,10 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                          ".openspec.yaml"):
                 self.assertTrue(os.path.isfile(
                     os.path.join(archived_dirs[0], name)), name)
-            merged = open(os.path.join(
-                root, "openspec", "specs", "runtime", "spec.md"),
-                encoding="utf-8").read()
+            with open(os.path.join(
+                    root, "openspec", "specs", "runtime", "spec.md"),
+                    encoding="utf-8") as stream:
+                merged = stream.read()
             self.assertIn("### Requirement: Embedded runtime", merged)
             self.assertNotIn("## ADDED Requirements", merged)
 

@@ -1671,7 +1671,13 @@ with _TmpDir() as td:
           len(found1) == 1 and len(patched1) == 1 and not errors1
           and len(found2) == 1 and not patched2 and not errors2
           and guard_text.count(COMET_COMPAT_BEGIN) == 1
-          and direct.returncode == 0 and managed.returncode == 2)
+          and direct.returncode == 0 and managed.returncode == 2,
+          "found1=%s patched1=%s errors1=%s found2=%s patched2=%s errors2=%s "
+          "begin=%d direct=%s(%r/%r) managed=%s(%r)" % (
+              len(found1), len(patched1), errors1, len(found2), patched2,
+              errors2, guard_text.count(COMET_COMPAT_BEGIN),
+              direct.returncode, direct.stdout[-200:], direct.stderr[-200:],
+              managed.returncode, managed.stderr[-200:]))
 
 mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
 check("tests_only 缺配置时仍有默认硬边界",

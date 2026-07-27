@@ -311,6 +311,82 @@ if flow:
             check("CodeCheck 工具故障留痕可继续但源码变化会使其失效",
                   tool_issue_ok and not stale_tool_issue_ok)
 
+            classified, candidates = mf._scope_classify_codecheck({
+                "total": 2,
+                "pairs": [
+                    ("R.NEAR", "src/Foo.cpp", 2),
+                    ("R.FAR", "src/Foo.cpp", 100),
+                ],
+                "commands": ["codecheck fullcheck -f src/Foo.cpp"],
+            }, state, ["src/Foo.cpp"])
+            check("CodeCheck 行窗口只做预分类而不再静默丢弃候选",
+                  classified["total"] == 1
+                  and classified["pairs"][0][0] == "R.NEAR"
+                  and candidates == [("R.FAR", "src/Foo.cpp", 100)])
+
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            scope_state = {
+                "current": "verify_codecheck", "started": now, "history": [],
+                "config": {"单号": "REQ1", "基线分支": base},
+                "quality": {"codecheck_scan": {
+                    "step": "verify_codecheck", "head": head,
+                    "count": 1, "raw_count": 2,
+                    "files": ["src/Foo.cpp"],
+                    "pairs": [("R.NEAR", "src/Foo.cpp", 2)],
+                    "commands": ["codecheck fullcheck -f src/Foo.cpp"],
+                    "scope_candidates": [{
+                        "id": "W1", "rule": "R.FAR",
+                        "file": "src/Foo.cpp", "line": 100,
+                    }],
+                    "scope_pending": True, "stock_excluded": 0,
+                }},
+            }
+            pending_ok, pending_why = mf.ev_review_codecheck({}, scope_state)
+            pending_task_blocked = False
+            try:
+                mf.cmd_agent_task(flow, scope_state, types.SimpleNamespace(
+                    kind="codecheck", scope=None))
+            except SystemExit as exc:
+                pending_task_blocked = exc.code == 2
+            mf.save_state(scope_state)
+            scope_ack = "W1 涉及本次修改"
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": scope_ack, "step": "verify_codecheck", "at": now}],
+                          f, ensure_ascii=False)
+            mf.cmd_codecheck_scope(flow, scope_state, types.SimpleNamespace(
+                include="W1", none=False, ack=scope_ack))
+            reviewed = mf.load_state()["quality"]["codecheck_scan"]
+            check("疑似范围外告警未经用户确认不能推进或派修复",
+                  not pending_ok and "尚未经用户确认" in pending_why
+                  and pending_task_blocked)
+            check("用户确认涉及后候选会进入修复范围并绑定原话",
+                  reviewed["count"] == 2 and reviewed["stock_excluded"] == 0
+                  and not reviewed["scope_pending"]
+                  and reviewed["scope_review"]["included"] == ["W1"]
+                  and reviewed["scope_review"]["ack"] == scope_ack)
+
+            moon_scope_state = {
+                "current": "verify_codecheck", "started": now, "history": [],
+                "config": {"单号": "REQ1", "基线分支": base},
+                "moonlight": {"enabled": True},
+            }
+            mf._run_codecheck = lambda _files: ({
+                "total": 2,
+                "pairs": [
+                    ("R.NEAR", "src/Foo.cpp", 2),
+                    ("R.FAR", "src/Foo.cpp", 100),
+                ],
+                "commands": ["codecheck fullcheck -f src/Foo.cpp"],
+            }, "")
+            mf.cmd_codecheck_scan(
+                flow, moon_scope_state, types.SimpleNamespace())
+            moon_scan = mf.load_state()["quality"]["codecheck_scan"]
+            check("月光模式将疑似范围外告警保守全量计入而不等待用户",
+                  moon_scan["count"] == 2 and moon_scan["stock_excluded"] == 0
+                  and not moon_scan["scope_pending"]
+                  and not moon_scan["scope_candidates"])
+
+            mf._run_codecheck = fake_codecheck
             state["quality"]["codecheck_scan"]["count"] = 1
             first_ok, _ = mf.ev_codecheck_clean({}, state)
             second_ok, _ = mf.ev_codecheck_clean({}, state)

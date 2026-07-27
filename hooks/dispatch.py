@@ -1914,9 +1914,9 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         bail(f"标记 CLEAN 但 REMAINING_COUNT={nums['REMAINING_COUNT']},自相矛盾。")
     if status == "REMAINING" and nums["REMAINING_COUNT"] == 0:
         bail("标记 REMAINING 但 REMAINING_COUNT=0,自相矛盾。")
-    # 复验可能因 Windows 命令行长度限制拆成多批，且 harness 的首检会过滤
-    # 本次修改行之外的存量告警。真实 CLI 原始数应为各批次之和，并与
-    # “本单遗留 + 已识别存量”对拍，不能只看最后一批或拿 raw 对 scoped。
+    # 复验可能因 Windows 命令行长度限制拆成多批；首检窗口外告警只有经
+    # 用户确认不涉及本次修改后才能排除。真实 CLI 原始数应为各批次之和，
+    # 并与“本单遗留 + 用户确认不涉及”对拍，不能只看最后一批或拿 raw 对 scoped。
     command_count = len(scan.get("commands") or []) if scan.get("step") == st.get("current") else 1
     command_count = max(1, command_count)
     all_fullcheck_calls = _bash_calls(tool_calls, "codecheck fullcheck")
@@ -1973,7 +1973,7 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         if real_raw != expected_raw:
             bail(f"真实 fullcheck 最终 {command_count} 批合计 {real_raw} 条告警，"
                  f"但本单遗留({nums['REMAINING_COUNT']})"
-                 + (f"+存量过滤({stock})={expected_raw}" if isinstance(stock, int)
+                 + (f"+用户确认不涉及({stock})={expected_raw}" if isinstance(stock, int)
                     else f"={expected_raw}")
                  + "；复验摘录不能自说自话，修完或如实上报后重答。")
         if all_fullcheck_calls:
@@ -2017,7 +2017,7 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
     if excerpt_actual is not None and excerpt_actual != excerpt_expected:
         bail(f"复验摘录合计 {excerpt_actual} 条告警与真实对账口径"
              f"（本单遗留 {nums['REMAINING_COUNT']}"
-             + (f" + 存量 {stock}" if isinstance(stock, int) else "")
+             + (f" + 用户确认不涉及 {stock}" if isinstance(stock, int) else "")
              + f" = {excerpt_expected}）矛盾。")
 
 

@@ -182,7 +182,7 @@ flow.json 步骤字段语义：
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 
-**CodeCheck/UT 覆盖口径（2026-07-26 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐（用户确认线上同为增量，本地过滤不会造成 MR 被存量告警打回）。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 告警按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口过滤（scan 与 done 复核同源同口径，存量数如实展示；明细缺行号时保守全算并明示）；UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口外扩是"改动所在函数"的近似——函数级规则（超长/圈复杂度）告警常报在签名行。
+**CodeCheck/UT 覆盖口径（2026-07-27 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口做**预分类**，窗口内直接计入，窗口外逐条编号交用户确认是否涉及本次修改，未经确认不得排除、派修复 Agent 或 done；明细缺行号时保守全算。月光模式无法询问用户，故将全部候选保守计入。UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口只是近似，不是真相——函数级规则、宏展开和定位漂移正是必须保留用户裁决的原因。
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
 | `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
 | `codecheck_clean` | 保留作旧在途流程兼容，不再由 `review_codecheck` 正常路径调用。新路径以首检或 Agent 最终 fullcheck 的绑定凭证收口，避免 done 第三次长跑 |

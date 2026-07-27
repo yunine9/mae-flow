@@ -1387,12 +1387,13 @@ def _changed_lines(st, files):
     return result, ""
 
 
-def _scope_filter_codecheck(result, st, files):
-    """把告警过滤到本次修改范围(变更行±SLACK)。
+def _scope_classify_codecheck(result, st, files):
+    """把告警预分类为“机器判定相关”和“待用户确认是否涉及”。
 
-    返回 (filtered_result, excluded_stock_or_None)。None = 无法过滤——
+    返回 (filtered_result, excluded_pairs_or_None)。None = 无法分类——
     告警明细缺行号(纯计数输出/JSON 无行号)或明细与总数对不上时保守全算,
-    宁可多报也不静默漏掉真告警;scan 会如实标注无法区分存量。"""
+    宁可多报也不静默漏掉真告警。机器只能按变更行±SLACK 预分类，不能再
+    单方面把窗口外结果定性为存量；excluded_pairs 必须交用户确认。"""
     pairs = result.get("pairs") or []
     if not pairs or result.get("total") != len(pairs) \
             or any(p[2] is None for p in pairs):
@@ -1400,8 +1401,7 @@ def _scope_filter_codecheck(result, st, files):
     changed, err = _changed_lines(st, files)
     if err or changed is None:
         return result, None
-    norm_files = {norm(f): f for f in files}
-    kept, excluded = [], 0
+    kept, excluded = [], []
     for rule, wfile, line in pairs:
         window = changed.get(norm(wfile))
         if window is None:
@@ -1411,9 +1411,19 @@ def _scope_filter_codecheck(result, st, files):
         if any(abs(line - c) <= CODECHECK_LINE_SLACK for c in window):
             kept.append((rule, wfile, line))
         else:
-            excluded += 1
+            excluded.append((rule, wfile, line))
     return {"total": len(kept), "pairs": kept,
             "commands": result.get("commands", [])}, excluded
+
+
+def _scope_filter_codecheck(result, st, files):
+    """旧调用口径兼容：返回过滤结果与窗口外数量。
+
+    codecheck-scan 使用 _scope_classify_codecheck 保留逐条候选并要求用户确认；
+    旧的现场复核只需要数量对账，继续走这个薄包装。
+    """
+    filtered, excluded = _scope_classify_codecheck(result, st, files)
+    return filtered, (len(excluded) if excluded is not None else None)
 
 
 def _render_warning_pairs(pairs):
@@ -1745,6 +1755,12 @@ def ev_review_codecheck(spec, st):
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if scan.get("step") != st.get("current"):
         return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
+    if scan.get("scope_pending"):
+        return False, (
+            "CodeCheck 仍有 %d 条机器准备排除的候选，尚未经用户确认是否涉及本次修改。"
+            "按 codecheck-scan 输出使用 AskUserQuestion 展示候选，再执行 codecheck-scope；"
+            "确认前不能忽略这些结果。"
+            % len(scan.get("scope_candidates") or []))
     if scan.get("status") == "TOOL_ERROR":
         changed, err = _source_changed_since(scan.get("head", ""), st)
         if err:
@@ -4690,6 +4706,9 @@ def cmd_agent_task(flow, st, args):
         scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
         if scan.get("step") != sid:
             die("先执行 codecheck-scan 冻结首检结果，再生成 CODECHECK 任务卡。", 2)
+        if scan.get("scope_pending"):
+            die("CodeCheck 仍有机器准备排除的候选，必须先让用户确认是否涉及本次修改，"
+                "再按 scan 输出执行 codecheck-scope；禁止先派修复 Agent。", 2)
         if scan.get("status") == "TOOL_ERROR":
             die("CodeCheck 工具本轮已真实尝试但不可用/不可解析；这是建议项留痕，"
                 "不派修复 Agent，直接 done。", 2)
@@ -4749,7 +4768,7 @@ def cmd_agent_task(flow, st, args):
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if kind == "CODECHECK":
         lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
-                  "Harness已识别范围外存量告警数: "
+                  "用户已确认不涉及本次修改的告警数: "
                   + (str(scan.get("stock_excluded"))
                      if isinstance(scan.get("stock_excluded"), int)
                      else "无法区分（本轮按 raw 全量计入）"),
@@ -4854,21 +4873,56 @@ def cmd_codecheck_scan(flow, st, args):
         print(err, file=sys.stderr)
         print("直接 done；源码若变化，当前诊断会失效并要求重新尝试。")
         return
-    # 覆盖口径:只算本次修改范围内的告警,文件里的存量告警不背(用户拍板)
-    stock = None
+    # 机器只做预分类：变更行±3 内直接计入，窗口外不能再自动定性为
+    # “存量债”。逐条保留为候选，交用户确认是否与本次修改有关。
+    excluded_pairs = None
     if files:
-        result, stock = _scope_filter_codecheck(result, st, files)
+        result, excluded_pairs = _scope_classify_codecheck(result, st, files)
+    candidates = [
+        {"id": "W%d" % (i + 1), "rule": pair[0], "file": pair[1],
+         "line": pair[2]}
+        for i, pair in enumerate(excluded_pairs or [])
+    ]
+    if candidates and _moonlight(st):
+        # 月光宝盒禁止询问用户；此时不能沿用旧逻辑自动排除，也不能卡住无人值守链。
+        # 最保守的安全选择是把全部候选计入本次修复范围，宁可多报、不能漏报。
+        result["pairs"] = list(result.get("pairs") or []) + [
+            (item["rule"], item["file"], item["line"]) for item in candidates
+        ]
+        result["total"] = len(result["pairs"])
+        print("[mae-flow] 🌙 月光模式无法进行用户范围裁决；%d 条疑似范围外告警"
+              "已保守全部计入本次修复范围。" % len(candidates))
+        candidates = []
+        excluded_pairs = []
     st.setdefault("quality", {})["codecheck_scan"] = {
         "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
         "files": files, "pairs": result["pairs"], "commands": result["commands"],
-        "stock_excluded": stock}
+        "raw_count": result["total"] + len(candidates),
+        "scope_candidates": candidates,
+        "scope_pending": bool(candidates),
+        "stock_excluded": (0 if excluded_pairs is not None else None)}
     st["quality"].pop("codecheck_verify", None)
-    if stock:
-        print("[mae-flow] 范围过滤:另有 %d 条告警在变更文件内但不属于本次修改"
-              "(存量债,不计入本单;线上流水线同为增量口径不拦存量,确需治理另立单)。"
-              % stock)
-    elif stock is None and result["total"]:
+    if result.get("pairs"):
+        print("[mae-flow] 机器已直接计入本次修改的告警:")
+        for i, pair in enumerate(result["pairs"], 1):
+            print("  A%d | %s | %s:%s" % (
+                i, pair[0], pair[1], pair[2] if pair[2] is not None else "?"))
+    if candidates:
+        print("[mae-flow] ⚠ 机器按变更行±%d 预分类出 %d 条“疑似范围外”告警；"
+              "它们尚未被排除，必须先让用户确认是否涉及本次修改。"
+              % (CODECHECK_LINE_SLACK, len(candidates)))
+        for item in candidates:
+            print("  %s | %s | %s:%s" % (
+                item["id"], item["rule"], item["file"], item["line"]))
+        print("用 AskUserQuestion 分批展示上述候选，让用户选择“涉及本次修改”的编号。")
+        print("确认后执行以下二选一命令（--ack 必须复制用户确认原话）：")
+        print('  python "%s" codecheck-scope --include W1,W3 --ack "<用户原话>"'
+              % os.path.abspath(sys.argv[0]))
+        print('  python "%s" codecheck-scope --none --ack "<用户原话>"'
+              % os.path.abspath(sys.argv[0]))
+        print("在 codecheck-scope 完成前，禁止生成修复任务卡，也不能 done。")
+    elif excluded_pairs is None and result["total"]:
         print("[mae-flow] ⚠ 本轮告警明细缺行号,无法区分存量与本单修改,"
               "已保守全算。", file=sys.stderr)
     # 每次重扫都是新一轮；旧 Agent 令牌不能替新告警背书。
@@ -4876,10 +4930,91 @@ def cmd_codecheck_scan(flow, st, args):
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
     print(f"[mae-flow] CodeCheck 首检完成:业务文件 {len(files)} 个,告警 {result['total']} 条。")
-    if result["total"]:
+    if candidates:
+        print("先完成用户范围确认；此时显示的告警数仅为机器明确相关部分。")
+    elif result["total"]:
         print("禁止主会话修复。下一步执行 agent-task codecheck 生成完整任务卡，再启动 codecheck-fix-agent。")
     else:
         print("零告警，不派修复 agent；直接 done（期间源码若变化，证据会过期并要求重扫）。")
+
+
+def cmd_codecheck_scope(flow, st, args):
+    """把机器准备排除的 CodeCheck 结果交给用户裁定是否涉及本次修改。"""
+    if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
+        die("codecheck-scope 只能在规范检查步骤使用。", 2)
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    if scan.get("step") != st["current"]:
+        die("尚无本步骤的 codecheck-scan 结果；先执行首检。", 2)
+    candidates = scan.get("scope_candidates") or []
+    if not candidates:
+        die("本轮没有需要用户判断的疑似范围外告警，不需要 codecheck-scope。", 2)
+    if not scan.get("scope_pending"):
+        die("本轮 CodeCheck 涉及范围已经确认；代码未变化时直接按 current 继续。", 2)
+    changed, why = _source_changed_since(scan.get("head", ""), st)
+    if why:
+        die("CodeCheck 首检基点失效:" + why + "；重新执行 codecheck-scan。", 2)
+    if changed:
+        die("首检后源码发生变化: " + "、".join(changed[:5])
+            + "。旧候选不再代表当前代码，重新执行 codecheck-scan。", 2)
+    include = {
+        value.upper()
+        for value in re.split(r"[\s,，、]+", args.include or "")
+        if value.strip()
+    }
+    if bool(include) == bool(args.none):
+        die("codecheck-scope 必须二选一：--include W1,W3 或 --none。", 2)
+    valid = {str(item.get("id", "")).upper() for item in candidates}
+    unknown = sorted(include - valid)
+    if unknown:
+        die("未知候选编号: " + "、".join(unknown)
+            + "；只能从本轮输出的 " + "、".join(sorted(valid)) + " 中选择。", 2)
+    if not args.ack:
+        die("codecheck-scope 必须携带用户确认原话 --ack。", 2)
+    ok, why = _ack_verified(st, args.ack)
+    if not ok:
+        die("CodeCheck 涉及范围确认验真失败:" + why, 2)
+    ack_upper = str(args.ack).upper()
+    if include:
+        missing = sorted(
+            item for item in include
+            if not re.search(r"(?<![A-Z0-9])" + re.escape(item)
+                             + r"(?![A-Z0-9])", ack_upper))
+        if missing:
+            die("--include 中的 " + "、".join(missing)
+                + " 没有出现在用户确认原话里。必须让用户看到编号并明确选择，"
+                  "不能由 Agent 根据自己的判断补选。", 2)
+    elif not re.search(r"(?:均|都|全部).{0,4}不涉及|没有.{0,4}涉及|无.{0,4}涉及",
+                       args.ack):
+        die("--none 必须对应用户明确表示“全部/均不涉及本次修改”的原话，"
+            "普通的“确认/继续”不能替代范围裁决。", 2)
+    selected = [
+        (item.get("rule", ""), item.get("file", ""), item.get("line"))
+        for item in candidates if str(item.get("id", "")).upper() in include
+    ]
+    original = list(scan.get("pairs") or [])
+    scan["pairs"] = original + selected
+    scan["count"] = len(scan["pairs"])
+    scan["stock_excluded"] = len(candidates) - len(selected)
+    scan["scope_pending"] = False
+    scan["scope_review"] = {
+        "head": scan.get("head", ""), "included": sorted(include),
+        "ack": args.ack, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    st["quality"].pop("codecheck_verify", None)
+    _drop_agent_token("CODECHECK")
+    (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
+    save_state(st)
+    if include:
+        print("[mae-flow] 用户确认以下候选涉及本次修改: "
+              + "、".join(sorted(include)) + "；已加入本轮修复范围。")
+    else:
+        print("[mae-flow] 用户确认疑似范围外候选均不涉及本次修改。")
+    print("最终本轮告警 %d 条，用户确认不涉及 %d 条。"
+          % (scan["count"], scan["stock_excluded"]))
+    if scan["count"]:
+        print("现在执行 agent-task codecheck 生成任务卡并启动修复 Agent。")
+    else:
+        print("最终范围为 0 条，可直接 done。")
 
 
 def cmd_codecheck_record(flow, st, args):
@@ -6134,6 +6269,8 @@ def main():
         return cmd_agent_task(flow, st, args)
     if args.cmd == "codecheck-scan":
         return cmd_codecheck_scan(flow, st, args)
+    if args.cmd == "codecheck-scope":
+        return cmd_codecheck_scope(flow, st, args)
     if args.cmd == "codecheck-record":
         return cmd_codecheck_record(flow, st, args)
     if args.cmd == "approve-exemption":

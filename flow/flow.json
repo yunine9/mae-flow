@@ -114,7 +114,36 @@
           ]
         }
       ],
-      "next": "rf_codecheck"
+      "next": "rf_review"
+    },
+    "rf_review": {
+      "title": "处理评审意见 — 用户检视代码",
+      "user_ack": true,
+      "choice_key": "rf_review_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "我已认真检视并完成自验证，继续"
+        ],
+        "revise": [
+          "需要调整代码"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "review_snapshot",
+          "base_step": "rf_fix"
+        }
+      ],
+      "next": {
+        "continue": "rf_codecheck",
+        "revise": "rf_fix"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
     },
     "rf_codecheck": {
       "title": "处理评审意见 — 规范检查",
@@ -412,7 +441,36 @@
           ]
         }
       ],
-      "next": "tw_codecheck"
+      "next": "tw_review"
+    },
+    "tw_review": {
+      "title": "小改 — 用户检视代码",
+      "user_ack": true,
+      "choice_key": "tw_review_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "我已认真检视并完成自验证，继续"
+        ],
+        "revise": [
+          "需要调整代码"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "review_snapshot",
+          "base_step": "tw_change"
+        }
+      ],
+      "next": {
+        "continue": "tw_codecheck",
+        "revise": "tw_change"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
     },
     "tw_codecheck": {
       "title": "小改 — 规范检查",
@@ -473,7 +531,36 @@
           ]
         }
       ],
-      "next": "verify_ponytail"
+      "next": "build_review"
+    },
+    "build_review": {
+      "title": "编码完成 — 用户检视代码",
+      "user_ack": true,
+      "choice_key": "build_review_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "我已认真检视并完成自验证，继续"
+        ],
+        "revise": [
+          "需要调整代码"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "review_snapshot",
+          "base_step": "build"
+        }
+      ],
+      "next": {
+        "continue": "verify_ponytail",
+        "revise": "build"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
     },
     "verify_ponytail": {
       "title": "验证 1/4 — 代码精简(先删)",

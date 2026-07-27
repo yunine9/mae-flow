@@ -134,19 +134,39 @@ if flow:
     check("证据类型全部注册", not unreg, str(unreg))
 
     # 4.5 review-fix 质量链必须保持拆分，禁止退化回一个 rf_verify 大步骤
-    review_chain = ["rf_fix", "rf_compile", "rf_codecheck", "rf_ut", "push"]
+    review_chain = ["rf_fix", "rf_compile", "rf_review", "rf_codecheck", "rf_ut", "push"]
     got, cur = [], "rf_fix"
     for _ in range(len(review_chain)):
         got.append(cur)
-        cur = steps.get(cur, {}).get("next")
+        nxt = steps.get(cur, {}).get("next")
+        cur = nxt.get("continue") if isinstance(nxt, dict) else nxt
     check("review-fix 质量链分阶段", got == review_chain, str(got))
     actual_ack_steps = {
         sid for sid, step in steps.items() if step.get("user_ack")}
-    check("人工确认只保留真实选择和不可逆决策",
+    check("人工确认只保留真实选择、代码检视和不可逆决策",
           actual_ack_steps == {
               "config_confirm", "workflow_select", "grill_ask",
               "story_ask", "hf_open", "tw_open", "archive_confirm",
+              "build_review", "tw_review", "rf_review",
           }, str(sorted(actual_ack_steps)))
+    check("三条编码链均在编译后停靠用户代码检视",
+          steps.get("build", {}).get("next") == "build_review"
+          and steps.get("tw_compile", {}).get("next") == "tw_review"
+          and steps.get("rf_compile", {}).get("next") == "rf_review"
+          and steps.get("build_review", {}).get("next", {}).get("continue") == "verify_ponytail"
+          and steps.get("tw_review", {}).get("next", {}).get("continue") == "tw_codecheck"
+          and steps.get("rf_review", {}).get("next", {}).get("continue") == "rf_codecheck")
+    check("代码检视收据绑定本轮快照且月光直接旁路",
+          all(
+              step.get("skip_in_moonlight")
+              and step.get("moonlight_choice") == "continue"
+              and any(e.get("type") == "review_snapshot"
+                      for e in step.get("evidence", []))
+              for step in (
+                  steps.get("build_review", {}),
+                  steps.get("tw_review", {}),
+                  steps.get("rf_review", {}),
+              )))
     story_ask = steps.get("story_ask", {})
     check("STORY 入库决定并入开场卡且不在 story 步追加停顿",
           story_ask.get("choices") == ["commit", "local", "no"]
@@ -174,12 +194,13 @@ if flow:
     check("主流程 UT 改源码后回流专用编译节点",
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
-    tweak_chain = ["tw_change", "tw_compile", "tw_codecheck", "tw_ut",
+    tweak_chain = ["tw_change", "tw_compile", "tw_review", "tw_codecheck", "tw_ut",
                    "tw_verify", "archive_confirm"]
     got, cur = [], "tw_change"
     for _ in range(len(tweak_chain)):
         got.append(cur)
-        cur = steps.get(cur, {}).get("next")
+        nxt = steps.get(cur, {}).get("next")
+        cur = nxt.get("continue") if isinstance(nxt, dict) else nxt
     check("小改流程也经过编译、规范检查和 UT", got == tweak_chain, str(got))
     check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
     check("精简改源码后自动进入专用编译步骤",

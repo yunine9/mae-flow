@@ -1105,6 +1105,38 @@ def ev_review_agent_or_no_code(spec, st):
     return ev_agent_or_no_source(spec, st)
 
 
+def ev_review_snapshot(spec, st):
+    """用户确认只能背书进入检视节点时展示的那一版代码。
+
+    检视期间若 HEAD 或源码工作区变化，旧展示立即失效，必须回到对应编码环节，
+    重新提交、编译并生成新检视收据，不能确认 A 后让 B 继续。
+    """
+    sid = st.get("current", "")
+    entered = (st.get("step_heads", {}) or {}).get(sid, "")
+    current = sh("git rev-parse --verify HEAD")
+    if not entered or argv_out(["git", "cat-file", "-t", entered]) != "commit":
+        return False, f"缺少 {sid} 的检视入口 HEAD，无法确定用户看到的是哪版代码"
+    if current != entered:
+        return False, (
+            f"检视期间 HEAD 已从 {entered[:10]} 变为 {current[:10] or '未知'}。"
+            "旧展示已失效；回到对应编码环节，重新编译后再让用户检视。")
+    base_step = spec.get("base_step", "")
+    base = (st.get("step_heads", {}) or {}).get(base_step, "")
+    if not base or argv_out(["git", "cat-file", "-t", base]) != "commit":
+        return False, f"缺少 {base_step} 的入口 HEAD，无法生成本轮完整代码差异"
+    if argv_out(["git", "merge-base", base, current]) != base:
+        return False, (
+            f"本轮检视基点 {base[:10]} 已不在当前 HEAD 历史上，可能发生了 rebase/reset。"
+            "必须重新进入编码和编译环节建立可信范围。")
+    dirty = _blocking_dirty_source_paths(st)
+    if dirty:
+        return False, (
+            "用户检视期间源码/测试/构建文件又发生未提交变化: "
+            + "、".join(dirty[:8])
+            + "。旧编译和检视收据均已失效；先回到对应编码环节处理。")
+    return True, ""
+
+
 def ev_content_free(spec, st):
     """文件内容不得命中任何禁止 pattern(正则)。用于把'标注协议'变成机器可查的终态校验。"""
     path = subst(spec["file"], st)
@@ -1763,6 +1795,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
+            "review_snapshot": ev_review_snapshot,
             "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
             "spec_validate": ev_spec_validate, "tier_scope": ev_tier_scope,
             "pushed": ev_pushed, "agent_ran": ev_agent_ran,
@@ -2173,18 +2206,24 @@ def _sentinel_lines(sid, st):
     return out
 
 
-def _resolved_next(flow, st, sid):
-    """按当前 choices 解析某历史步骤的去向，供旧状态恢复入口 HEAD。"""
-    step = flow.get("steps", {}).get(sid, {})
+def _next_from_step(step, st, choice_override=""):
+    """解析步骤去向；月光旁路可显式指定其保守分支而不伪造用户选择。"""
     nxt = step.get("next")
     try:
         if step.get("next_by"):
             return nxt[st.get("choices", {}).get(step["next_by"])]
         if isinstance(nxt, dict):
-            return nxt[st.get("choices", {}).get(step.get("choice_key"))]
+            choice = choice_override or st.get("choices", {}).get(step.get("choice_key"))
+            return nxt[choice]
     except Exception:
         return None
     return nxt
+
+
+def _resolved_next(flow, st, sid):
+    """按当前 choices 解析某历史步骤的去向，供旧状态恢复入口 HEAD。"""
+    step = flow.get("steps", {}).get(sid, {})
+    return _next_from_step(step, st)
 
 
 def _ensure_step_entry_head(flow, st, sid):
@@ -2240,6 +2279,47 @@ def _step_md_text(sid, st):
     return subst(txt, st)
 
 
+def _review_receipt_lines(st, step):
+    """生成编译后人工检视收据；只展示机器解析出的本轮精确 Git 范围。"""
+    evidence = next(
+        (item for item in step.get("evidence", [])
+         if item.get("type") == "review_snapshot"), {})
+    base_step = evidence.get("base_step", "")
+    base = (st.get("step_heads", {}) or {}).get(base_step, "")
+    head = sh("git rev-parse --verify HEAD")
+    if (not base or not head
+            or argv_out(["git", "cat-file", "-t", base]) != "commit"):
+        return ["❌ 无法生成本轮检视收据：缺少可信 Git 基点；done 会安全拒绝。"]
+    commits = argv_out([
+        "git", "-c", "core.quotepath=false", "log", "--format=%h %s",
+        base + ".." + head,
+    ]).splitlines()
+    files = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-status",
+        base, head,
+    ]).splitlines()
+    stat = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--shortstat",
+        base, head,
+    ])
+    lines = [
+        "🔎 本轮代码检视收据（确认只对这一版有效）",
+        f"  范围: {base[:10]}..{head[:10]}（入口步骤 {base_step} → 编译通过）",
+        "  提交:",
+    ]
+    lines += ["    " + item for item in commits[:30]] or ["    （本轮没有新提交）"]
+    if len(commits) > 30:
+        lines.append(f"    …另有 {len(commits) - 30} 个提交")
+    lines.append("  文件:")
+    lines += ["    " + item for item in files[:80]] or ["    （本轮没有文件差异）"]
+    if len(files) > 80:
+        lines.append(f"    …另有 {len(files) - 80} 个文件")
+    if stat:
+        lines.append("  统计: " + stat)
+    lines.append(f"  完整差异命令: git diff {base} {head}")
+    return lines
+
+
 def _defaults():
     """读仓库预设 .mae-flow-defaults.json。解析失败必须可见(fail-open 但可观测,不静默吞)。"""
     if not os.path.exists(DEFAULTS_PATH):
@@ -2276,6 +2356,9 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
+    if any(e.get("type") == "review_snapshot"
+           for e in step.get("evidence", [])):
+        print("\n".join(_review_receipt_lines(st, step)))
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:
         print(f"🔓 本步源码修改已解锁(用户裁决: {ul.get('reason', '')};推进后自动失效)")
@@ -3304,11 +3387,25 @@ def advance(flow, st, sid, step, tag, note=""):
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
     st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    nxt = step.get("next")
-    if step.get("next_by"):
-        nxt = step["next"][st["choices"][step["next_by"]]]
-    elif isinstance(nxt, dict):
-        nxt = nxt[st["choices"][step["choice_key"]]]
+    nxt = _next_from_step(step, st)
+    # 编译后人工检视是普通模式的显式停靠点。月光宝盒必须完全无交互，
+    # 状态机在进入前直接旁路，既不显示步骤也不伪造一条用户确认。
+    seen = set()
+    while (_moonlight(st) and nxt and nxt not in seen
+           and flow.get("steps", {}).get(nxt, {}).get("skip_in_moonlight")):
+        seen.add(nxt)
+        bypass = flow["steps"][nxt]
+        moon_choice = bypass.get("moonlight_choice", "")
+        resolved = _next_from_step(bypass, st, moon_choice)
+        if not resolved:
+            die(f"月光旁路步骤 {nxt} 缺少可解析的 moonlight_choice/next，拒绝卡死流程。", 2)
+        st["history"].append({
+            "step": nxt,
+            "result": "moonlight:skipped-human-review",
+            "note": "无人值守模式不进入编译后用户检视",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        nxt = resolved
     if _moonlight(st) and nxt == "archive_confirm":
         st["history"].append({
             "step": sid, "result": "moonlight:archive-deferred",
@@ -3455,6 +3552,10 @@ def cmd_done(flow, st, args):
     if sid == "moonlight_review":
         die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
             "不能用 done 跳过报告闭环。", 2)
+    if _moonlight(st) and step.get("skip_in_moonlight") and not args.choice:
+        # 兼容升级时已经停在旧现场、随后才开启月光的状态。正常路径会在
+        # advance 进入本节点之前旁路；这里仅让在途状态也不需要人工选择。
+        args.choice = step.get("moonlight_choice")
 
     review = st.get("config_review") if sid == "config_confirm" else None
     if sid == "config_confirm" and not _moonlight(st):

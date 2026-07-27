@@ -259,6 +259,9 @@ def _trusted_harness_commit_path(path):
         p in {".gitignore", ".gitattributes"}
         or p.startswith("openspec/")
         or p.startswith("docs/req/")
+        or p.startswith("docs/review/")
+        or p.startswith("docs/clarifications-")
+        or p.startswith("docs/codecheck-exempt-")
     )
 
 
@@ -1202,11 +1205,20 @@ def ev_pushed(spec, st):
         if fingerprints:
             changed_initial = {p for p in current & initial
                                if fingerprints.get(p) != _path_fingerprint(p)}
-        new_dirty = (current - initial) | changed_initial
+        changed_during_flow = (current - initial) | changed_initial
     else:
-        new_dirty = {
-            p for p in current if _is_source_path(p, st)
-            or p.startswith(("openspec/", "docs/review/", "docs/req/", "docs/codecheck-exempt-"))}
+        # 旧在途状态没有初始化快照，只能从当前脏路径中再按来源缩小。
+        changed_during_flow = current
+
+    # 与提交前 Gate 使用同一来源口径：只有 Agent 通过文件工具直接写过的
+    # 路径，以及 Mae-Flow 明确维护的交付产物，才可能属于本单提交范围。
+    # IDE/CodeAgent/编译器在流程中生成的未证明路径仍留在工作区供审计，但
+    # 不能仅凭“初始化后出现”就逼用户把它提交进 MR。
+    written = _agent_written_paths()
+    new_dirty = {
+        p for p in changed_during_flow
+        if p in written or _trusted_harness_commit_path(p)
+    }
     story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
     if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
         story = "docs/story/STORY-" + st.get("config", {}).get("单号", "") + ".md"
@@ -1217,7 +1229,11 @@ def ev_pushed(spec, st):
                            "用 git rm --cached 精确移出索引并按单号提交修正；本地文件可以保留。")
         new_dirty = {p for p in new_dirty if not p.startswith("docs/story/")}
     if new_dirty:
-        return False, "仍有本单产生但未提交的文件，远端并不包含它们: " + "、".join(sorted(new_dirty)[:8])
+        return False, (
+            "仍有 Agent 实际写入或流程明确维护的交付候选未处理，远端不包含这些变化: "
+            + "、".join(sorted(new_dirty)[:8])
+            + "。逐个查看 diff：需要交付的精确提交，不需要的撤销修改；"
+              "候选范围不代表必须全部提交。")
     return True, ""
 
 

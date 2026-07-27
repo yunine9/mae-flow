@@ -2021,6 +2021,40 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
              + f" = {excerpt_expected}）矛盾。")
 
 
+def _ac_coverage_has_mapping(coverage):
+    """Accept either arrow mappings or a real Markdown EARS/test table.
+
+    The agent contract asks for a comparison table, so requiring a literal
+    arrow rejects the most natural compliant representation.  A Markdown table
+    only counts when it has a separator row and at least one non-empty data row;
+    a header-only table or a prose assertion still does not prove coverage.
+    """
+    if re.search(r"(->|→|=>)", coverage):
+        return True
+
+    rows = []
+    for raw in coverage.splitlines():
+        line = raw.strip()
+        if not line.startswith("|") or "|" not in line[1:]:
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) >= 2:
+            rows.append(cells)
+
+    for index, cells in enumerate(rows):
+        if not all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
+                   for cell in cells):
+            continue
+        if index == 0 or index + 1 >= len(rows):
+            continue
+        for data in rows[index + 1:]:
+            if len(data) >= 2 and data[0] and data[1] and not all(
+                    re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
+                    for cell in data):
+                return True
+    return False
+
+
 def _ut_contract(status, report, tool_calls=None, soft=False):
     def bail(msg):
         _contract_bail("UT", msg, soft)
@@ -2094,11 +2128,13 @@ def _ut_contract(status, report, tool_calls=None, soft=False):
     if re.search(r"缺口|未覆盖|无对应", cleaned):
         bail("AC_COVERAGE 仍有验收缺口，不能报告 PASS(若只是措辞请改写为"
              "正向表述;若为事实缺口按契约用 NEEDS_INPUT/缺口标注上报)。")
-    # 校准实锤:AC_COVERAGE 需至少一行"条目 → 用例名"映射,纯声明式单行
-    # (「全部已覆盖」)不算对照——UT agent 的存在目的是逐条映射,不是背书。
-    if not re.search(r"(->|→|=>)", coverage):
-        bail("AC_COVERAGE 必须是「EARS 条目 → 对应测试用例名」的逐行映射"
-             "(至少一行含 → 分隔),而非一句『全部已覆盖』的声明。")
+    # 校准实锤:AC_COVERAGE 必须给出逐项映射，但表现形式可以是箭头列表或
+    # 标准 Markdown 对照表。旧规则把“含箭头”误当成“存在映射”，导致契约
+    # 明明要求表格、Hook 却打回有效表格。
+    if not _ac_coverage_has_mapping(coverage):
+        bail("AC_COVERAGE 必须逐项给出 EARS 条目与对应测试用例名；"
+             "可使用「条目 → 用例」列表或至少含一行数据的 Markdown 对照表，"
+             "不能只写一句『全部已覆盖』。")
     nums = {}
     for name in ("TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED"):
         value = _number_field(report, name)

@@ -1591,6 +1591,57 @@ if flow:
         for step, kind in token_requirements)
     check("所有流程 Agent 令牌证据都能识别统一风险放行", all_token_steps_covered)
 
+# push/done 的工作区范围必须与提交前 Gate 同源：初始化后出现不等于本单产物。
+with _TmpDir() as td:
+    old_cwd = os.getcwd()
+    try:
+        repo = os.path.join(td, "repo")
+        remote = os.path.join(td, "remote.git")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+        os.chdir(repo)
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+        subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+        open("README.md", "w", encoding="utf-8").write("fixture\n")
+        subprocess.run(["git", "add", "README.md"], check=True)
+        subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+        subprocess.run(["git", "branch", "-M", "main"], check=True)
+        subprocess.run(["git", "remote", "add", "origin", remote], check=True)
+        subprocess.run(["git", "push", "-qu", "origin", "main"], check=True)
+        state = {
+            "current": "push", "config": {}, "choices": {},
+            "initial_dirty": [], "initial_dirty_fingerprints": {},
+        }
+        json.dump({"paths": {}}, open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8"))
+
+        os.makedirs(".codeAgent")
+        open(".codeAgent/session.json", "w", encoding="utf-8").write("{}\n")
+        unowned_ok, unowned_why = mf.ev_pushed({}, state)
+        check("DONE 不把流程中出现的未证明 .codeAgent 目录强制纳入提交",
+              unowned_ok, unowned_why)
+
+        os.makedirs("src")
+        open("src/changed.cpp", "w", encoding="utf-8").write("int changed = 1;\n")
+        json.dump(
+            {"paths": {"src/changed.cpp": {
+                "at": "2026-07-27 00:00:00", "tool": "file-write"}}},
+            open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8"))
+        written_ok, written_why = mf.ev_pushed({}, state)
+        check("DONE 仍拦 Agent 实际写入但未处理的候选并允许提交或撤销",
+              not written_ok and "src/changed.cpp" in written_why
+              and "不需要的撤销" in written_why, written_why)
+
+        os.remove("src/changed.cpp")
+        os.makedirs("openspec/changes/demo")
+        open("openspec/changes/demo/change.md", "w", encoding="utf-8").write("# change\n")
+        explicit_ok, explicit_why = mf.ev_pushed({}, state)
+        check("DONE 继续硬校验流程明确维护但无文件工具来源的交付产物",
+              not explicit_ok and "openspec/changes/demo/change.md" in explicit_why,
+              explicit_why)
+    finally:
+        os.chdir(old_cwd)
+
 # 6. agent 契约与 dispatch 识别同步
 dp = open(os.path.join(ROOT, "hooks", "dispatch.py"), encoding="utf-8").read()
 dspec = importlib.util.spec_from_file_location("dispatch", os.path.join(ROOT, "hooks", "dispatch.py"))
@@ -1930,6 +1981,26 @@ try:
         except SystemExit:
             ut_first_ok = False
         check("UT 真实 Skill/命令优先于摘要名称且兼容同行数字字段", ut_first_ok)
+
+        markdown_coverage_report = ut_report.replace(
+            "- 场景A -> TestA\n- 场景B -> TestB",
+            "| Spec EARS Scenario | Test Case |\n"
+            "|---|---|\n"
+            "| WHEN key absent THEN return N/A | keyAbsentReturnsNA |\n"
+            "| WHEN key is illegal THEN return N/A | illegalValueReturnsNA |")
+        markdown_coverage_ok = True
+        try:
+            dispatch._ut_contract(
+                "PASS", markdown_coverage_report, ut_calls, soft=False)
+        except SystemExit:
+            markdown_coverage_ok = False
+        check("UT AC_COVERAGE 接受逐项 Markdown 对照表",
+              markdown_coverage_ok)
+        check("UT AC_COVERAGE 不接受只有表头或空单元格的伪表格",
+              not dispatch._ac_coverage_has_mapping(
+                  "| Spec EARS Scenario | Test Case |\n|---|---|")
+              and not dispatch._ac_coverage_has_mapping(
+                  "| Spec EARS Scenario | Test Case |\n|---|---|\n| 场景A | |"))
 
         # “随 AutoUT 生成”是运行策略，不是要与真实命令逐字相同的字符串。
         json.dump({"current": "rf_ut",

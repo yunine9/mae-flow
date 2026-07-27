@@ -178,7 +178,7 @@ flow.json 步骤字段语义：
 | `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `spec_field` | 读 `.mae-flow.json` spec 段字段（v3 起阶段/产物指针的单一真相源）：`equals` 精确匹配或非空即过；指针字段登记时校验文件真实存在 + 现场复核（`yaml_field` 保留为在途兼容别名，指向同一实现） |
-| `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送） |
+| `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送），并按 `.mae-flow.json.agent-writes` 与流程明确维护的交付产物核对尚未处理的候选；初始化后出现但没有 Agent 直接写入来源的 IDE/编译器目录只保留在工作区审计，不会被误判成必须提交 |
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 

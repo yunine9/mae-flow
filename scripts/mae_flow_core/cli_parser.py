@@ -21,7 +21,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
-            "agent-task|accept-risk|moonlight|action|messages|config-review|requirement-record|"
+            "agent-task|checkpoint|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
@@ -171,6 +171,24 @@ def parse_args(argv=None):
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")
+    task.add_argument(
+        "--checkpoint",
+        help="编译任务所属检查点，如 CP1；仅开发节奏已确认的编码步骤使用")
+    checkpoint = sub.add_parser("checkpoint")
+    checkpoint_actions = checkpoint.add_subparsers(
+        dest="checkpoint_action", required=True)
+    checkpoint_plan = checkpoint_actions.add_parser("plan")
+    checkpoint_plan.add_argument(
+        "--item", action="append", required=True,
+        help="按顺序给出检查点标题/范围；可重复 1-6 次")
+    checkpoint_actions.add_parser("status")
+    checkpoint_ready = checkpoint_actions.add_parser("ready")
+    checkpoint_ready.add_argument("checkpoint_id", help="当前检查点，如 CP1")
+    checkpoint_actions.add_parser("final")
+    checkpoint_decide = checkpoint_actions.add_parser("decide")
+    checkpoint_decide.add_argument(
+        "choice", choices=["continue", "revise", "continuous"])
+    checkpoint_decide.add_argument("--ack", required=True)
     sub.add_parser("codecheck-scan")
     codecheck_scope = sub.add_parser("codecheck-scope")
     codecheck_scope.add_argument(

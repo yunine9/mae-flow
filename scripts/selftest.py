@@ -58,6 +58,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_state_core.py",
           "scripts/tests/test_capabilities.py",
           "scripts/tests/test_specengine.py",
+          "scripts/tests/test_checkpoints.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
     try:
@@ -87,6 +88,12 @@ specengine_tests = subprocess.run(
     text=True, capture_output=True, timeout=300)
 check("内置规格引擎回归与差分对拍", specengine_tests.returncode == 0,
       (specengine_tests.stdout + specengine_tests.stderr)[-5000:])
+checkpoint_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_checkpoints.py")],
+    text=True, capture_output=True, timeout=180)
+check("开发检查点与最终增量检视回归", checkpoint_tests.returncode == 0,
+      (checkpoint_tests.stdout + checkpoint_tests.stderr)[-5000:])
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (
@@ -134,12 +141,16 @@ if flow:
     check("证据类型全部注册", not unreg, str(unreg))
 
     # 4.5 review-fix 质量链必须保持拆分，禁止退化回一个 rf_verify 大步骤
-    review_chain = ["rf_fix", "rf_compile", "rf_review", "rf_codecheck", "rf_ut", "push"]
+    review_chain = [
+        "rf_fix", "rf_compile", "rf_review", "rf_codecheck", "rf_ut",
+        "delivery_review", "push"]
     got, cur = [], "rf_fix"
     for _ in range(len(review_chain)):
         got.append(cur)
-        nxt = steps.get(cur, {}).get("next")
-        cur = nxt.get("continue") if isinstance(nxt, dict) else nxt
+        current_step = steps.get(cur, {})
+        nxt = current_step.get("next")
+        cur = (nxt.get("review") if current_step.get("next_by") == "workflow"
+               else nxt.get("continue") if isinstance(nxt, dict) else nxt)
     check("review-fix 质量链分阶段", got == review_chain, str(got))
     actual_ack_steps = {
         sid for sid, step in steps.items() if step.get("user_ack")}
@@ -148,7 +159,23 @@ if flow:
               "config_confirm", "workflow_select", "grill_ask",
               "story_ask", "hf_open", "tw_open", "archive_confirm",
               "build_review", "tw_review", "rf_review",
+              "build_pace", "tw_pace", "rf_pace",
           }, str(sorted(actual_ack_steps)))
+    check("三条新流程均在写码前确认开发节奏且月光旁路",
+          steps.get("hf_open", {}).get("next") == "build_pace"
+          and steps.get("tw_open", {}).get("next") == "tw_pace"
+          and steps.get("rf_triage", {}).get("next") == "rf_pace"
+          and all(
+              x.get("choices") == ["staged", "continuous", "adjust"]
+              and x.get("skip_in_moonlight")
+              and x.get("moonlight_choice") == "continuous"
+              and any(e.get("type") == "checkpoint_plan"
+                      for e in x.get("evidence", []))
+              for x in (
+                  steps.get("build_pace", {}),
+                  steps.get("tw_pace", {}),
+                  steps.get("rf_pace", {}),
+              )))
     check("三条编码链均在编译后停靠用户代码检视",
           steps.get("build", {}).get("next") == "build_review"
           and steps.get("tw_compile", {}).get("next") == "tw_review"
@@ -172,7 +199,7 @@ if flow:
           story_ask.get("choices") == ["commit", "local", "no"]
           and story_ask.get("next", {}).get("commit") == "story"
           and story_ask.get("next", {}).get("local") == "story"
-          and story_ask.get("next", {}).get("no") == "build"
+          and story_ask.get("next", {}).get("no") == "build_pace"
           and story_ask.get("choice_sets", {}).get("commit", {}).get("STORY入库")
           and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库")
           and story_ask.get("choice_sets", {}).get("no", {}).get("STORY入库") == "不生成")
@@ -195,13 +222,22 @@ if flow:
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
     tweak_chain = ["tw_change", "tw_compile", "tw_review", "tw_codecheck", "tw_ut",
-                   "tw_verify", "archive_confirm"]
+                   "tw_verify", "delivery_review", "archive_confirm"]
     got, cur = [], "tw_change"
     for _ in range(len(tweak_chain)):
         got.append(cur)
-        nxt = steps.get(cur, {}).get("next")
-        cur = nxt.get("continue") if isinstance(nxt, dict) else nxt
+        current_step = steps.get(cur, {})
+        nxt = current_step.get("next")
+        cur = (nxt.get("tweak") if current_step.get("next_by") == "workflow"
+               else nxt.get("continue") if isinstance(nxt, dict) else nxt)
     check("小改流程也经过编译、规范检查和 UT", got == tweak_chain, str(got))
+    check("三条质量链均在不可逆定稿/最终推送前核对最终代码增量",
+          steps.get("verify_comet", {}).get("next") == "delivery_review"
+          and steps.get("tw_verify", {}).get("next") == "delivery_review"
+          and steps.get("rf_ut", {}).get("next") == "delivery_review"
+          and any(e.get("type") == "final_review_clear"
+                  for e in steps.get("delivery_review", {}).get("evidence", []))
+          and steps.get("delivery_review", {}).get("skip_in_moonlight"))
     check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
     check("精简改源码后自动进入专用编译步骤",
           steps.get("verify_ponytail", {}).get("source_change_next") == "verify_post_ponytail_compile"
@@ -506,6 +542,38 @@ if flow:
                           f, ensure_ascii=False)
             structured_ack_ok, _ = mf._ack_verified(config_state, "我确认以上配置")
             check("主流程确认兼容宿主结构化应答", structured_ack_ok)
+            stale_state = {
+                "current": "grill_ask", "config": {}, "choices": {},
+                "history": [{
+                    "step": "branch_create", "result": "goto:grill_ask",
+                    "at": "2026-01-01 00:00:02",
+                }],
+                "started": "2026-01-01 00:00:00",
+            }
+            mf.save_state(stale_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": "在现有分支上继续 (推荐)",
+                    "step": "branch_create", "at": "2026-01-01 00:00:01",
+                }], f, ensure_ascii=False)
+            stale_ok, stale_why = mf._ack_verified(
+                stale_state, "在现有分支上继续 (推荐)")
+            stale_messages = io.StringIO()
+            try:
+                with contextlib.redirect_stderr(stale_messages):
+                    mf.cmd_messages(
+                        stale_state, types.SimpleNamespace(id=None, full=False))
+            except SystemExit:
+                pass
+            check("跨步骤旧回答会被说明为已捕获但已失效",
+                  not stale_ok
+                  and "Hook 已捕获用户回复" in stale_why
+                  and "branch_create" in stale_why
+                  and "不是" not in stale_why
+                  and "当前步骤没有可复用" in stale_messages.getvalue())
+            config_state.pop("revision", None)
+            config_state.pop("updated_at", None)
+            mf.save_state(config_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{"text": json.dumps({
                     "options": ["我确认以上配置", "需要调整配置"],
@@ -736,6 +804,7 @@ if flow:
                 "current": "story_ask",
                 "config": {"STORY入库": "生成并入库"},
                 "choices": {"story": "commit"},
+                "protocols": {"development_checkpoints": 1},
                 "history": [], "started": now,
             }
             mf.save_state(revisit)
@@ -751,7 +820,7 @@ if flow:
                 types.SimpleNamespace(ack=None, choice="no", set=[]))
             no_story = mf.load_state()
             check("STORY 返工改选不生成会覆盖旧入库状态",
-                  no_story.get("current") == "build"
+                  no_story.get("current") == "build_pace"
                   and no_story.get("config", {}).get("STORY入库") == "不生成")
 
             os.makedirs("docs/review", exist_ok=True)
@@ -847,6 +916,154 @@ if flow:
                   branch_ok and not wrong_parent_ok and "起点" in wrong_parent_why)
         finally:
             os.chdir(old_cwd)
+
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            os.makedirs("src", exist_ok=True)
+            open("src/base.cpp", "w", encoding="utf-8").write("int base = 1;\n")
+            subprocess.run(["git", "add", "src/base.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], check=True)
+            subprocess.run(["git", "branch", "-M", "main"], check=True)
+            subprocess.run(["git", "checkout", "-qb", "existing-work"], check=True)
+            open("src/work.cpp", "w", encoding="utf-8").write("int work = 1;\n")
+            subprocess.run(["git", "add", "src/work.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "existing work"], check=True)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            branch_state = {
+                "current": "branch_create",
+                "config": {
+                    "基线分支": "main",
+                    "分支名": "main_u1_REQ1",
+                    "单号": "REQ1",
+                    "单号类型": "feat",
+                },
+                "choices": {"workflow": "full"},
+                "history": [], "started": now,
+            }
+            mf.save_state(branch_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": "跳过创建分支，继续下一步",
+                    "step": "branch_create", "at": now,
+                }], f, ensure_ascii=False)
+            branch_skip_blocked = False
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    mf.cmd_goto(flow, branch_state, types.SimpleNamespace(
+                        step="grill_ask", force=True,
+                        ack="跳过创建分支，继续下一步"))
+            except SystemExit as exc:
+                branch_skip_blocked = exc.code == 2
+            check("goto 不能只跳过分支关而留下后续必失败状态",
+                  branch_skip_blocked
+                  and mf.load_state().get("current") == "branch_create")
+
+            adoption_ack = "在现有分支上继续 (推荐)"
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": adoption_ack,
+                    "step": "branch_create", "at": now,
+                }], f, ensure_ascii=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_goto(flow, branch_state, types.SimpleNamespace(
+                    step="branch_create", force=True, ack=adoption_ack))
+            adopted = mf.load_state()
+            adopted_ok, _ = mf.ev_branch_ok({}, adopted)
+            stale_receipt = json.loads(json.dumps(adopted))
+            stale_receipt["branch_resolution"]["head"] = "0" * 40
+            stale_ok, stale_reason = mf.ev_branch_ok({}, stale_receipt)
+            check("用户选择沿用现有分支会登记配置和绑定HEAD",
+                  adopted_ok
+                  and adopted.get("config", {}).get("分支名") == "existing-work"
+                  and adopted.get("branch_resolution", {}).get("previous_branch")
+                  == "main_u1_REQ1"
+                  and not stale_ok and "裁决已过期" in stale_reason)
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_done(flow, adopted, types.SimpleNamespace(
+                    ack=None, choice=None, set=[]))
+            check("沿用分支裁决后 branch_create 可正常推进",
+                  mf.load_state().get("current") == "grill_ask")
+
+            upgrade_state = {
+                "current": "tw_open",
+                "config": {
+                    "基线分支": "main", "分支名": "existing-work",
+                    "CHANGE_NAME": "upgrade-test",
+                },
+                "choices": {"workflow": "tweak"},
+                "history": [], "started": now,
+                "spec": {
+                    "change": "upgrade-test", "phase": "open",
+                    "workflow": "tweak", "initialized_at": now,
+                    "verification_report": "old-report.md",
+                    "verify_result": "pass",
+                },
+            }
+            mf.save_state(upgrade_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": "确认升级为完整开发并进入方案设计",
+                    "step": "tw_open", "at": now,
+                }], f, ensure_ascii=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_goto(flow, upgrade_state, types.SimpleNamespace(
+                    step="design", force=True,
+                    ack="确认升级为完整开发并进入方案设计"))
+            upgraded = mf.load_state()
+            check("轻量流程 goto design 会同步 workflow 和规格阶段",
+                  upgraded.get("current") == "design"
+                  and upgraded.get("choices", {}).get("workflow") == "full"
+                  and upgraded.get("spec", {}).get("workflow") == "full"
+                  and upgraded.get("spec", {}).get("phase") == "design"
+                  and "verification_report" not in upgraded.get("spec", {})
+                  and "verify_result" not in upgraded.get("spec", {}))
+
+            rewind_state = {
+                "current": "verify_ponytail",
+                "config": {
+                    "基线分支": "main", "分支名": "existing-work",
+                    "CHANGE_NAME": "rewind-test",
+                },
+                "choices": {"workflow": "full"},
+                "history": [], "started": now,
+                "spec": {
+                    "change": "rewind-test", "phase": "verify",
+                    "workflow": "full", "initialized_at": now,
+                    "design_doc": "design.md", "plan": "plan.md",
+                    "verification_report": "verify.md",
+                    "verify_result": "pass", "verified_at": now,
+                },
+            }
+            mf.save_state(rewind_state)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{
+                    "text": "规格有误，回到 open 修订",
+                    "step": "verify_ponytail", "at": now,
+                }], f, ensure_ascii=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_goto(flow, rewind_state, types.SimpleNamespace(
+                    step="open", force=True, ack="规格有误，回到 open 修订"))
+            rewound = mf.load_state()
+            check("goto open 会同步回退规格阶段并作废下游证据",
+                  rewound.get("current") == "open"
+                  and rewound.get("spec", {}).get("phase") == "open"
+                  and all(key not in rewound.get("spec", {}) for key in (
+                      "design_doc", "plan", "verification_report",
+                      "verify_result", "verified_at")))
+            archived_ok, archived_why = mf._prepare_spec_for_goto({
+                "choices": {"workflow": "full"},
+                "spec": {"phase": "archived"},
+            }, "open")
+            check("不可逆定稿不能被 goto 假回退",
+                  not archived_ok and "新的修订轮次" in archived_why)
+        finally:
+            os.chdir(old_cwd)
+
     # Plugin-owned runtime is prepared in-process: no project Skill directory,
     # global npm mutation, setup script or reload marker.
     # v4 换轨：规格目录由内置纯 Python 引擎创建（不再自检外部 openspec 版本号），
@@ -1196,6 +1413,26 @@ if flow:
                   resumed2.get("current") == "verify_recompile"
                   and "quality" not in resumed2 and "agent_tasks" not in resumed2
                   and not os.path.exists(mf.STATE_PATH + ".tokens"))
+
+            # 新增的最终检视节点也必须属于晚阶段回流范围；否则 Direct
+            # 模式改码后会直接留在检视页，绕过重新编译和质量链。
+            subprocess.run(["git", "add", "keep.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "direct change"], check=True)
+            resumed2["current"] = "delivery_review"
+            resumed2["choices"] = {"workflow": "full"}
+            mf.save_state(resumed2)
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "确认第三次退出", "step": "delivery_review",
+                            "at": now}], f, ensure_ascii=False)
+            mf.cmd_exit(flow, resumed2, types.SimpleNamespace(
+                ack="确认第三次退出", reason="最终检视时直接修复"))
+            open("keep.cpp", "a", encoding="utf-8").write("int final_changed = 3;\n")
+            rec3 = json.load(open(mf.EXIT_PATH, encoding="utf-8"))
+            rec3["direct_messages"] = [{"text": "重新接回 mae-flow"}]
+            mf._write_json_atomic(mf.EXIT_PATH, rec3)
+            resumed3 = mf._resume_direct_mode("重新接回 mae-flow")
+            check("最终检视期间 Direct 改码会回退完整质量链",
+                  resumed3.get("current") == "verify_recompile")
         finally:
             os.chdir(old_cwd)
 
@@ -1345,14 +1582,31 @@ if flow:
                   not mf._explicit_direct_reentry("review-fix 是什么？")
                   and not mf._explicit_direct_reentry("这个项目支持 review-fix 吗？")
                   and not mf._explicit_direct_reentry("review-fix 能修复这个问题吗？")
+                  and not mf._explicit_direct_reentry("怎么恢复 mae-flow？")
+                  and not mf._explicit_direct_reentry("mae-flow 能恢复吗？")
                   and not mf._explicit_direct_reentry("不确认重新启用mae-flow")
                   and not mf._explicit_direct_reentry("不要恢复 mae-flow")
+                  and not mf._explicit_direct_reentry(
+                      "不要恢复 mae-flow，直接帮我改代码")
+                  and not mf._explicit_direct_reentry(
+                      "不要执行 review-fix，按普通开发处理")
                   and not mf._explicit_direct_reentry("暂时不要接回这个工作流")
                   and mf._explicit_direct_reentry(
                       "review-fix 现在方案有变动，请按 version 修复")
                   and mf._explicit_direct_reentry(
+                      "review-fix 现在方案有变动，不要按长度判断，请改用version")
+                  and mf._explicit_direct_reentry(
                       "/mae-flow:mae-flow review-fix 不要按字节长度判断，请改用version")
                   and mf._explicit_direct_reentry("确认重新启用"))
+            revoked_auth, revoked_why = mf._direct_reentry_authorization({
+                "direct_messages": [{
+                    "id": "older-positive", "text": "重新启用 mae-flow",
+                }, {
+                    "id": "newer-negative", "text": "不要恢复 mae-flow",
+                }],
+            }, message_id="older-positive")
+            check("Direct 最新明确拒绝会撤销旧的重入消息ID",
+                  not revoked_auth and "旧消息 ID 已撤销" in revoked_why)
 
             status_out = io.StringIO()
             with contextlib.redirect_stdout(status_out):
@@ -1630,6 +1884,16 @@ if flow:
             subprocess.run(["git", "commit", "-qm", "fixture"], cwd=td, check=True)
             child = os.path.join(td, "service", "module")
             os.makedirs(child)
+            os.chdir(td)
+            rejected_preinit = []
+            for text in ("月光宝盒是什么？", "不要开启月光宝盒"):
+                mf._write_json_atomic(mf.MOONLIGHT_INTENT_PATH, {
+                    "epoch": time.time(), "text": text,
+                })
+                rejected_preinit.append(
+                    mf._consume_preinit_moonlight_intent("月光宝盒")[0])
+            check("月光宝盒咨询和否定不能冒充预初始化授权",
+                  rejected_preinit == [False, False])
             payload = json.dumps({
                 "cwd": child,
                 "prompt": "今晚开启月光宝盒，把这个需求尽力开发完并推送",
@@ -1804,6 +2068,17 @@ if flow:
             }
             mf.save_state(ml_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+                json.dump([{"text": "不要开启月光宝盒", "step": "rf_codecheck",
+                            "at": now}], f, ensure_ascii=False)
+            negative_moonlight_blocked = False
+            try:
+                mf.cmd_moonlight(flow, ml_state, types.SimpleNamespace(
+                    action="on", ack="月光宝盒", reason=None))
+            except SystemExit as exc:
+                negative_moonlight_blocked = exc.code == 2
+            check("在途流程的月光宝盒否定原话不会开启无人值守",
+                  negative_moonlight_blocked and not mf._moonlight(mf.load_state()))
+            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{"text": "开启月光宝盒继续开发", "step": "rf_codecheck", "at": now}],
                           f, ensure_ascii=False)
             mf.cmd_moonlight(flow, ml_state, types.SimpleNamespace(
@@ -1972,11 +2247,17 @@ with _TmpDir() as td:
         os.makedirs("src")
         open("src/changed.cpp", "w", encoding="utf-8").write("int changed = 1;\n")
         json.dump(
-            {"paths": {"src/changed.cpp": {
+            {"paths": {"SRC/CHANGED.CPP": {
                 "at": "2026-07-27 00:00:00", "tool": "file-write"}}},
             open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8"))
-        written_ok, written_why = mf.ev_pushed({}, state)
-        check("DONE 仍拦 Agent 实际写入但未处理的候选并允许提交或撤销",
+        original_identity = mf._repo_path_identity
+        try:
+            mf._repo_path_identity = lambda path, case_insensitive=None: (
+                original_identity(path, case_insensitive=True))
+            written_ok, written_why = mf.ev_pushed({}, state)
+        finally:
+            mf._repo_path_identity = original_identity
+        check("Windows 路径大小写差异不会丢失 Agent 写入候选",
               not written_ok and "src/changed.cpp" in written_why
               and "不需要的撤销" in written_why, written_why)
 
@@ -1987,6 +2268,33 @@ with _TmpDir() as td:
         check("DONE 继续硬校验流程明确维护但无文件工具来源的交付产物",
               not explicit_ok and "openspec/changes/demo/change.md" in explicit_why,
               explicit_why)
+    finally:
+        os.chdir(old_cwd)
+
+with _TmpDir() as td:
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(td)
+        open(".gitignore", "w", encoding="utf-8").write(
+            "# .mae-flow.json* 将由工具维护\n"
+            "# .mae-flow-work/ 是过程目录\n")
+        open(".gitattributes", "w", encoding="utf-8").write(
+            "# openspec/** text eol=lf 由工具维护\n")
+        mf._gitignore()
+        ignore_rules = {
+            line.strip() for line in open(
+                ".gitignore", encoding="utf-8").read().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        attribute_rules = {
+            line.strip() for line in open(
+                ".gitattributes", encoding="utf-8").read().splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        check("注释中的状态路径不会冒充有效 Git 忽略规则",
+              ".mae-flow.json*" in ignore_rules
+              and ".mae-flow-work/" in ignore_rules
+              and "openspec/** text eol=lf" in attribute_rules)
     finally:
         os.chdir(old_cwd)
 

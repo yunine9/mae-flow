@@ -24,6 +24,8 @@
                                          无人值守开发、带遗留推送与晨间修复闭环
   mae-flow.py messages                    查看当前步骤捕获的用户消息 ID/编码
   mae-flow.py config-review --set k=v ... 校验并展示完整配置，生成待确认收据
+  mae-flow.py checkpoint plan|ready|status|final|decide
+                                         开发节奏、小步 push 与代码检视收据
   mae-flow.py requirement-record ...      将用户原话/已有文本规范化为 UTF-8 需求入口
   mae-flow.py action start|confirm-scope|status|critic|finish|cancel
                                          独立运行 UT/CodeCheck/Grill，不启动完整流程
@@ -83,6 +85,20 @@ def norm(p):
     """路径/命令归一化:Windows 反斜杠 → 正斜杠,供正则匹配。"""
     return (p or "").replace("\\", "/")
 
+
+def _repo_path_identity(path, case_insensitive=None):
+    """Normalize a repository path for identity comparisons.
+
+    Git normally reports the index spelling while file tools may preserve the
+    caller's spelling. On Windows those names address the same file, so exact
+    string comparison would lose Agent-write provenance.
+    """
+    value = re.sub(r"^(?:\./)+", "", norm(path).strip().strip("\"'"))
+    if case_insensitive is None:
+        case_insensitive = os.name == "nt"
+    return value.casefold() if case_insensitive else value
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLOW_PATH = os.path.join(HERE, "..", "flow", "flow.json")
 STEPS_DIR = os.path.join(HERE, "..", "flow", "steps")
@@ -115,10 +131,18 @@ FAILURE_PATH = STATE_PATH + ".failures"
 ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
 ACTION_SCOPE_ACK = "确认以上范围"
 CONFIG_CONFIRM_ACK = "确认以上全部配置"
+CHECKPOINT_CONTINUE_ACK = "我已认真检视并完成自验证，继续"
+CHECKPOINT_REVISE_ACK = "需要调整代码"
+CHECKPOINT_CONTINUOUS_ACK = "当前批次先不确认，剩余代码一次完成后统一检视"
 HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时追加本单摘要(gitignored,gate 防篡改)
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
 MOONLIGHT_REPORT_PATH = os.path.join(".mae-flow-work", "moonlight-report.md")
+PACE_STEPS = {"build_pace", "tw_pace", "rf_pace"}
+CHECKPOINT_CODE_STEPS = {
+    "full": "build", "hotfix": "build", "tweak": "tw_change", "review": "rf_fix",
+}
+LEGACY_CODE_REVIEW_STEPS = {"build_review", "tw_review", "rf_review"}
 
 # source_patterns 只适合识别目录，不能承担跨仓源码真相（顶层 include/lib/app 已真实漏过）。
 # 扩展名与构建入口作为保守底座；仓库可用 defaults/config 的「源码路径」补私有布局。
@@ -247,8 +271,8 @@ def _agent_written_paths():
     if not isinstance(entries, dict):
         return set()
     return {
-        re.sub(r"^(?:\./)+", "", norm(path)) for path in entries
-        if isinstance(path, str) and re.sub(r"^(?:\./)+", "", norm(path))
+        _repo_path_identity(path) for path in entries
+        if isinstance(path, str) and _repo_path_identity(path)
     }
 
 
@@ -297,7 +321,8 @@ def _pending_commit_files(command=""):
     written = _agent_written_paths()
 
     def has_provenance(path):
-        return path in written or _trusted_harness_commit_path(path)
+        return (_repo_path_identity(path) in written
+                or _trusted_harness_commit_path(path))
 
     unproven = [path for path in candidates if not has_provenance(path)]
     strong_unproven = [
@@ -763,6 +788,62 @@ def ev_glob(spec, st):
     return False, "未找到证据文件(任一即可): " + " | ".join(pats)
 
 
+def _branch_adoption_requested(text):
+    """Whether the user explicitly chose to keep working on the current branch."""
+    value = re.sub(r"[（(]推荐[）)]", "", str(text or "")).strip()
+    if re.search(
+            r"(不要|不在|不想|拒绝|取消|改用其他|另开|新建|切到|切换到|"
+            r"是否|能否|可以吗|怎么|如何|为什么|[?？])",
+            value, re.I):
+        return False
+    branch = r"(?:当前|现有|现在|这个)分支"
+    keep = r"(?:继续|沿用|保留|使用|开发|往下做)"
+    return bool(
+        re.search(branch + r"[^，。！？,;；]{0,12}" + keep, value, re.I)
+        or re.search(keep + r"[^，。！？,;；]{0,12}" + branch, value, re.I)
+    )
+
+
+def _adopt_current_branch(st, ack):
+    """Bind the explicitly chosen existing branch to this delivery round."""
+    current = sh("git branch --show-current")
+    head = argv_out(["git", "rev-parse", "--verify", "HEAD"])
+    base = str((st.get("config", {}) or {}).get("基线分支", "") or "")
+    base_head = argv_out(["git", "rev-parse", "--verify", base + "^{commit}"]) if base else ""
+    if not current or not head:
+        return False, "当前处于 detached HEAD 或 Git 状态不可读，不能登记为本单工作分支。"
+    if not base or not base_head:
+        return False, "配置中的基线分支不可解析，不能判断现有分支是否来自正确基线。"
+    if current == base:
+        return False, (
+            "当前仍是基线分支 %s，不能把主干直接登记成本单工作分支。"
+            "请创建约定分支，或先让用户选择一个非基线的现有工作分支。" % base
+        )
+    if argv_out(["git", "merge-base", base_head, head]) != base_head:
+        return False, (
+            "现有分支 %s 不包含基线 %s 的当前 HEAD，直接沿用会把无关历史带入本单。"
+            "请先迁移/同步分支后重新让用户裁决。" % (current, base)
+        )
+    previous = str((st.get("config", {}) or {}).get("分支名", "") or "")
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    st.setdefault("config", {})["分支名"] = current
+    st["branch_resolution"] = {
+        "mode": "adopt-current",
+        "branch": current,
+        "head": head,
+        "base": base,
+        "base_head": base_head,
+        "previous_branch": previous,
+        "ack_sha256": hashlib.sha256(
+            str(ack or "").encode("utf-8")).hexdigest(),
+        "at": now,
+    }
+    return True, (
+        "用户明确选择沿用现有分支；本单分支由 %s 调整为 %s，"
+        "裁决时 HEAD=%s" % (previous or "(未配置)", current, head[:10])
+    )
+
+
 def ev_branch_ok(spec, st):
     want = st["config"].get("分支名", "")
     base = st["config"].get("基线分支", "")
@@ -778,10 +859,28 @@ def ev_branch_ok(spec, st):
     if not base_head:
         return False, f"基线分支 {base} 不可解析；先 fetch/checkout 确认基线存在"
     if not head or head != base_head:
+        resolution = st.get("branch_resolution") or {}
+        if resolution.get("mode") == "adopt-current":
+            if (resolution.get("branch") == cur
+                    and resolution.get("head") == head
+                    and resolution.get("base") == base
+                    and resolution.get("base_head") == base_head):
+                return True, ""
+            return False, (
+                "用户沿用现有分支的裁决已过期：裁决绑定 %s@%s、基线 %s，"
+                "当前为 %s@%s、基线 HEAD %s。请展示变化后重新裁决，"
+                "旧回答不能复用。"
+                % (resolution.get("branch", "?"),
+                   str(resolution.get("head", ""))[:10],
+                   str(resolution.get("base_head", ""))[:10],
+                   cur or "未知", head[:10] if head else "未知",
+                   base_head[:10]))
         return False, (
             f"工作分支 {want} 的起点 {head[:10] if head else '未知'} != "
             f"基线 {base} 当前 HEAD {base_head[:10]}。branch_create 尚未开始实现，"
-            "不能带入其他分支的提交；请回到基线重新切分支，已有工作需先让用户决定如何迁移。"
+            "不能静默带入其他分支的提交。已有工作时先展示分支与提交差异，"
+            "让用户选择迁移到约定分支或沿用当前非基线分支；选择沿用后按"
+            "本步骤 current 输出的 goto 命令登记裁决。"
         )
     return True, ""
 
@@ -1142,6 +1241,203 @@ def ev_review_snapshot(spec, st):
     return True, ""
 
 
+def _development_review(st):
+    """Return the optional checkpoint state without migrating legacy deliveries.
+
+    Absence is meaningful: an in-flight delivery created by an older release
+    must keep its original build_review/tw_review/rf_review behavior.
+    """
+    data = st.get("development_review")
+    return data if isinstance(data, dict) and data.get("version") == 1 else None
+
+
+def _development_checkpoints_enabled(st):
+    protocols = st.get("protocols") or {}
+    return bool(
+        isinstance(protocols, dict)
+        and int(protocols.get("development_checkpoints", 0) or 0) >= 1)
+
+
+def _task_structure_fingerprint(st):
+    """Hash task identity/order while ignoring checkbox state and notes."""
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    lines = []
+    if workflow == "review":
+        path = os.path.join(
+            "docs", "review",
+            "REVIEW-" + str((st.get("config", {}) or {}).get("单号", "")) + ".md")
+        try:
+            text = open(path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            text = ""
+        for raw in text.splitlines():
+            if not raw.lstrip().startswith("|"):
+                continue
+            cells = [re.sub(r"\s+", " ", x.strip().strip("*`"))
+                     for x in raw.strip().strip("|").split("|")]
+            if (len(cells) >= 4 and cells[0] != "#"
+                    and not set(cells[0]) <= {"-", ":"}
+                    and cells[-1] == "修复(已确认)"):
+                lines.append("|".join(cells[:-1]))
+    else:
+        change_name = str((st.get("config", {}) or {}).get("CHANGE_NAME", ""))
+        try:
+            from mae_flow_core import specengine
+            _label, text = specengine.tasks_source(os.getcwd(), change_name)
+        except Exception:
+            text = ""
+        for raw in (text or "").splitlines():
+            match = re.match(r"^\s*[-*]\s*\[[ xX]\]\s*(.+?)\s*$", raw)
+            if match:
+                lines.append(re.sub(r"\s+", " ", match.group(1)).strip())
+    body = "\n".join(lines)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest(), lines
+
+
+def _checkpoint_current(st):
+    data = _development_review(st)
+    if not data:
+        return None
+    items = data.get("checkpoints") or []
+    index = int(data.get("current_index", 0) or 0)
+    return items[index] if 0 <= index < len(items) else None
+
+
+def _checkpoint_expected_code_step(st):
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    return CHECKPOINT_CODE_STEPS.get(workflow, "")
+
+
+def _checkpoint_review_pending(st):
+    if _moonlight(st):
+        return False
+    data = _development_review(st)
+    if not data:
+        return False
+    item = _checkpoint_current(st)
+    return bool(item and item.get("status") == "review_pending")
+
+
+def _upstream_snapshot():
+    ref = argv_out([
+        "git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+    remote_head = argv_out(["git", "rev-parse", "--verify", "@{u}"])
+    local_head = argv_out(["git", "rev-parse", "--verify", "HEAD"])
+    return ref, remote_head, local_head
+
+
+def _checkpoint_review_lines(base, head, title, remote_ref=""):
+    commits = argv_out([
+        "git", "-c", "core.quotepath=false", "log", "--format=%h %s",
+        base + ".." + head,
+    ]).splitlines()
+    files = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-status",
+        base, head,
+    ]).splitlines()
+    stat = argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--shortstat",
+        base, head,
+    ])
+    lines = [
+        "🔎 " + title,
+        f"  范围: {base[:10]}..{head[:10]}",
+    ]
+    if remote_ref:
+        lines.append(f"  远端收据: {remote_ref}@{head[:10]}")
+    lines.append("  提交:")
+    lines += ["    " + x for x in commits[:30]] or ["    （无提交）"]
+    if len(commits) > 30:
+        lines.append(f"    …另有 {len(commits) - 30} 个提交")
+    lines.append("  文件:")
+    lines += ["    " + x for x in files[:80]] or ["    （无文件差异）"]
+    if len(files) > 80:
+        lines.append(f"    …另有 {len(files) - 80} 个文件")
+    if stat:
+        lines.append("  统计: " + stat)
+    lines.append(f"  完整差异命令: git diff {base} {head}")
+    return lines
+
+
+def _final_review_delta(st):
+    data = _development_review(st)
+    if not data or _moonlight(st):
+        return [], ""
+    base = str(data.get("last_reviewed_head") or data.get("delivery_base") or "")
+    if not base:
+        return None, "缺少上次已检视代码基点"
+    current = sh("git rev-parse --verify HEAD")
+    if (argv_out(["git", "cat-file", "-t", base]) != "commit"
+            or argv_out(["git", "merge-base", base, current]) != base):
+        return None, (
+            "上次已检视代码基点 %s 已不在当前 HEAD 历史上，可能发生了 "
+            "rebase/reset；旧收据不能为改写后的提交历史背书" % base[:10])
+    return _source_changed_since(base, st)
+
+
+def ev_checkpoint_plan(spec, st):
+    if _moonlight(st):
+        return True, ""
+    data = _development_review(st)
+    if not data or data.get("status") != "plan_pending":
+        return False, (
+            "尚未生成开发检查点方案。先按本步指令执行 checkpoint plan --item ...，"
+            "让用户看到具体批次后再选择开发节奏")
+    if data.get("plan_step") != st.get("current"):
+        return False, "检查点方案属于旧步骤，重新分析并生成本步方案"
+    items = data.get("checkpoints") or []
+    if not 1 <= len(items) <= 6:
+        return False, "检查点数量必须为 1-6 个；小改可 1 个，常规任务建议 2-4 个"
+    changed, err = _source_changed_since(data.get("plan_head", ""), st)
+    if err:
+        return False, "检查点方案基点无法核实:" + err
+    if changed:
+        return False, (
+            "检查点方案呈现后代码已经变化: " + "、".join(changed[:5])
+            + "。必须在写码前重新生成方案，不能确认旧划分")
+    return True, ""
+
+
+def ev_checkpoint_plan_complete(spec, st):
+    """New deliveries honor their pace plan; legacy states remain untouched."""
+    data = _development_review(st)
+    if not data or _moonlight(st):
+        return True, ""
+    if data.get("status") != "active":
+        return False, "开发节奏尚未完成用户确认"
+    mode = data.get("mode")
+    items = data.get("checkpoints") or []
+    closed = (
+        (lambda item: item.get("status") == "accepted")
+        if mode == "staged" else
+        (lambda item: item.get("status") in ("completed", "accepted"))
+    )
+    pending = [x.get("id", "?") for x in items if not closed(x)]
+    if pending:
+        action = (
+            "完成本批编译和 push 后 checkpoint status，等待用户检视"
+            if mode == "staged" else
+            "完成本批编译后 checkpoint ready <CP编号>；连续模式不会停下来")
+        return False, "检查点尚未闭环: %s。%s" % ("、".join(pending), action)
+    return True, ""
+
+
+def ev_final_review_clear(spec, st):
+    """No final code delta may pass into irreversible archive/final push unseen."""
+    data = _development_review(st)
+    if not data or _moonlight(st):
+        return True, ""
+    changed, err = _final_review_delta(st)
+    if err:
+        return False, "最终检视基点无法核实:" + err
+    if changed:
+        return False, (
+            "质量链后仍有未检视代码增量: " + "、".join(changed[:8])
+            + "。执行 checkpoint final；分阶段模式会先小步 push 再检视，"
+              "一次完成模式会在最终 push 前统一检视")
+    return True, ""
+
+
 def ev_content_free(spec, st):
     """文件内容不得命中任何禁止 pattern(正则)。用于把'标注协议'变成机器可查的终态校验。"""
     path = subst(spec["file"], st)
@@ -1198,7 +1494,10 @@ def ev_pushed(spec, st):
     if not up:
         return False, "分支无上游跟踪——用 git push -u origin HEAD 推送并建立跟踪"
     if head != up:
-        return False, "本地 HEAD 与远端上游不一致(未推送/推送失败/远端有新提交):git push -u origin HEAD;冲突则 git pull --rebase 后重推"
+        return False, (
+            "本地 HEAD 与远端上游不一致(未推送/推送失败/远端有新提交):"
+            "先尝试普通 git push -u origin HEAD；若远端领先，执行 git fetch 后展示分叉，"
+            "不要自动 rebase、reset 或 force-push（可能改写已检视检查点）")
     current = set(_dirty_paths())
     initial = set(st.get("initial_dirty", []))
     if "initial_dirty" in st:
@@ -1219,7 +1518,7 @@ def ev_pushed(spec, st):
     written = _agent_written_paths()
     new_dirty = {
         p for p in changed_during_flow
-        if p in written or _trusted_harness_commit_path(p)
+        if _repo_path_identity(p) in written or _trusted_harness_commit_path(p)
     }
     story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
     if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
@@ -1830,6 +2129,9 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "commit_tagged_after_entry": ev_commit_tagged_after_entry,
             "review_fix_committed": ev_review_fix_committed,
             "review_snapshot": ev_review_snapshot,
+            "checkpoint_plan": ev_checkpoint_plan,
+            "checkpoint_plan_complete": ev_checkpoint_plan_complete,
+            "final_review_clear": ev_final_review_clear,
             "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
             "spec_validate": ev_spec_validate, "tier_scope": ev_tier_scope,
             "pushed": ev_pushed, "agent_ran": ev_agent_ran,
@@ -1934,11 +2236,30 @@ def _trusted_answer_candidates(text):
     return [value for value in candidates if value != raw]
 
 
-def _current_ack_messages(st, extra_steps=()):
+def _all_ack_messages():
     try:
         msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
     except Exception:
         return []
+    return msgs if isinstance(msgs, list) else []
+
+
+def _ack_message_signature(item):
+    payload = json.dumps({
+        "id": item.get("id", ""),
+        "step": item.get("step", ""),
+        "at": item.get("at", ""),
+        "text": item.get("text", ""),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _ack_message_cursor():
+    return [_ack_message_signature(item) for item in _all_ack_messages()]
+
+
+def _current_ack_messages(st, extra_steps=()):
+    msgs = _all_ack_messages()
     sid = st.get("current", "")
     entered = _step_entered_at(st)
     started = st.get("started", "")
@@ -1953,6 +2274,37 @@ def _current_ack_messages(st, extra_steps=()):
             # 供随后的选择步直接消费,免逐步重复提问;仍是本单内真实捕获的用户答案。
             out.append(item)
     return out
+
+
+def _out_of_scope_ack_reason(st):
+    """Explain captured-but-stale answers without blaming the Hook."""
+    rows = _all_ack_messages()
+    if not rows:
+        return ""
+    sid = st.get("current", "")
+    entered = _step_entered_at(st)
+    latest = rows[-1]
+    old_step = str(latest.get("step", "") or "(未标步骤)")
+    old_at = str(latest.get("at", "") or "?")
+    if old_step != sid:
+        return (
+            "Hook 已捕获用户回复，但最新一条绑定在步骤 %s；当前已是 %s。"
+            "步骤切换后旧回答按设计失效，不能再次授权新的 done/goto；"
+            "请展示当前步骤需要的决定并取得一次新回复（旧回复时间 %s）。"
+            % (old_step, sid, old_at)
+        )
+    if old_at < entered:
+        return (
+            "Hook 已捕获用户回复，但它早于当前步骤这一轮的进入时间 %s；"
+            "旧轮回答按设计失效，不能为重进后的新一轮背书。"
+            "请展示当前步骤需要的决定并取得一次新回复。"
+            % entered
+        )
+    return (
+        "Hook 已捕获用户回复，但其结构中没有当前命令可验真的答案字段。"
+        "先执行 messages --full 查看原始回传；若按钮正文确实缺失，"
+        "让用户发送当前页面要求的普通确认消息。"
+    )
 
 
 def _fresh_askuser(st):
@@ -1987,7 +2339,8 @@ def _implicit_ack_verified(step, st):
         for value in step.get("confirmation_answers", [])
         if str(value).strip()
     }
-    for item in reversed(_current_ack_messages(st)):
+    rows = _current_ack_messages(st)
+    for item in reversed(rows):
         for candidate in reversed(_trusted_answer_candidates(item.get("text", ""))):
             normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
             normalized = re.sub(r"[（(]推荐[）)]", "", normalized)
@@ -2000,7 +2353,7 @@ def _implicit_ack_verified(step, st):
                 _ack_failure(st, success=True)
                 return True, ""
     wanted = " / ".join(step.get("confirmation_answers", []))
-    why = (
+    why = (_out_of_scope_ack_reason(st) if not rows else "") or (
         "尚未捕获到本步骤的%s选择。正常情况下直接使用 AskUserQuestion 让用户点选即可，"
         "done 会自动读取结果，不要再要求用户补输“确认××”。"
         "只有宿主确实没有回传按钮结果时，才让用户发送一次页面上的确认选项。"
@@ -2009,7 +2362,7 @@ def _implicit_ack_verified(step, st):
     return False, why + _ack_retry_guidance(count)
 
 
-def _choice_verified(step, st, choice):
+def _choice_verified(step, st, choice, ack_cursor=None):
     """Bind --choice to the answer when readable; trust a fresh UI token as fallback."""
     # 一卡合一:开场三个选择步同时接受配置确认卡期间捕获的真实答案。
     extra = (("config_confirm",)
@@ -2023,8 +2376,13 @@ def _choice_verified(step, st, choice):
             if normalized:
                 alias_rows.append((key, normalized.lower()))
 
+    rows = _current_ack_messages(st, extra_steps=extra)
+    if ack_cursor is not None:
+        cursor = set(ack_cursor or [])
+        rows = [item for item in rows
+                if _ack_message_signature(item) not in cursor]
     readable = []
-    for item in _current_ack_messages(st, extra_steps=extra):
+    for item in rows:
         readable.extend(_trusted_answer_candidates(item.get("text", "")))
     for candidate in reversed(readable):
         normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
@@ -2053,11 +2411,14 @@ def _choice_verified(step, st, choice):
                 "请按按钮真实结果执行，禁止替用户改选。" % (candidate, choice)
             )
 
-    if _fresh_askuser(st):
+    if ack_cursor is None and _fresh_askuser(st):
         # Some CodeAgent builds emit the interaction token but omit the selected label.
         # The UI interaction is still stronger evidence than forcing the user to type it again.
         _ack_failure(st, success=True)
         return True, ""
+    scope_why = _out_of_scope_ack_reason(st) if not rows else ""
+    if scope_why:
+        return False, scope_why
     return False, (
         "没有检测到本步骤的真实选项回答。请用 AskUserQuestion 展示固定选项；"
         "用户点选后直接执行 done --choice %s，不需要再输入确认句。" % choice
@@ -2082,8 +2443,9 @@ def _ack_verified(st, ack, exact=True):
     """
     msgs = _current_ack_messages(st)
     if not msgs:
-        why = ("harness 尚未记录到用户回复。先执行 doctor 检查 UserPromptSubmit 输入，"
-               "不要重复执行相同 done，也无需退出重开。")
+        why = _out_of_scope_ack_reason(st) or (
+            "harness 尚未记录到任何用户回复。先执行 doctor 检查 UserPromptSubmit 输入，"
+            "不要重复执行相同 done，也无需退出重开。")
         count = _ack_failure(st, why)
         return False, why + _ack_retry_guidance(count)
 
@@ -2139,8 +2501,9 @@ def _is_full_config_confirmation(value):
 
 def _config_ack_verified(st, ack, config_sha, review_id):
     """Verify one final confirmation bound to the exact reviewed config."""
+    current_rows = _current_ack_messages(st)
     messages = [
-        item for item in _current_ack_messages(st)
+        item for item in current_rows
         if item.get("config_review_sha256") == config_sha
         and item.get("config_review_id") == review_id
     ]
@@ -2164,6 +2527,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
             "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
             "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"
         )
+    elif not messages and not current_rows and _out_of_scope_ack_reason(st):
+        why = _out_of_scope_ack_reason(st)
     elif not messages:
         why = (
             "没有捕获到与当前配置确认单绑定的用户回复。AskUserQuestion 的应答可能未被宿主回传；"
@@ -2390,6 +2755,42 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
+    checkpoint_state = _development_review(st)
+    if checkpoint_state and checkpoint_state.get("status") == "active":
+        mode_label = ("分阶段 push + 检视"
+                      if checkpoint_state.get("mode") == "staged"
+                      else "一次完成、最终统一检视")
+        print("🧭 开发节奏: " + mode_label)
+        current_checkpoint = _checkpoint_current(st)
+        if sid == _checkpoint_expected_code_step(st) and current_checkpoint:
+            print("   当前检查点: %s [%s] %s" % (
+                current_checkpoint.get("id"),
+                current_checkpoint.get("status"),
+                current_checkpoint.get("title")))
+            if current_checkpoint.get("status") == "push_pending":
+                print("   编译已通过；完成普通 push 后执行 checkpoint status 冻结远端检视收据。")
+            elif current_checkpoint.get("status") == "review_pending":
+                receipt = current_checkpoint.get("receipt") or {}
+                print("\n".join(_checkpoint_review_lines(
+                    receipt.get("base", ""), receipt.get("head", ""),
+                    "%s 等待用户检视" % current_checkpoint.get("id"),
+                    receipt.get("remote_ref", ""))))
+                _print_checkpoint_decisions(final=False)
+        elif (sid == _checkpoint_expected_code_step(st)
+              and (checkpoint_state.get("final_rework") or {}).get("status")
+              == "coding"):
+            print("   当前是最终检视返工，不新增或重开原 CP。按本步骤提交修改并走正常编译/质量链，"
+                  "不要再执行 checkpoint ready；回到 delivery_review 后会重新展示完整增量。")
+        if sid == "delivery_review":
+            changed, review_err = _final_review_delta(st)
+            if review_err:
+                print("❌ 最终检视基点异常: " + review_err)
+            elif changed:
+                print("🔎 质量链后仍有未检视代码增量: "
+                      + "、".join(changed[:8]))
+                print("   执行 checkpoint final 生成最终收据；不能直接进入不可逆规格定稿。")
+            else:
+                print("✅ 当前最终代码已被既有检查点/最终收据完整覆盖，无需重复确认。")
     if any(e.get("type") == "review_snapshot"
            for e in step.get("evidence", [])):
         print("\n".join(_review_receipt_lines(st, step)))
@@ -3058,10 +3459,28 @@ def _captured_user_messages(st):
 def cmd_messages(st, args):
     """Show stable IDs and trusted answer fields instead of question metadata."""
     rows = _captured_user_messages(st)
-    if getattr(args, "id", None):
-        rows = [item for item in rows if item.get("id") == args.id]
+    message_id = getattr(args, "id", None)
+    if message_id:
+        rows = [item for item in rows if item.get("id") == message_id]
     if not rows:
-        die("当前步骤没有捕获到用户消息。检查 UserPromptSubmit hook；"
+        if message_id:
+            old = [
+                item for item in _all_ack_messages()
+                if item.get("id") == message_id
+            ]
+            if old:
+                die(
+                    "消息 ID %s 已被 Hook 捕获，但它属于步骤 %s，当前是 %s；"
+                    "旧步骤消息不能跨步骤复用。"
+                    % (message_id, old[-1].get("step", "(未标步骤)"),
+                       st.get("current", "")),
+                    2)
+            die("用户消息中不存在 ID %s；请先执行 messages 查看当前可用 ID。"
+                % message_id, 2)
+        why = _out_of_scope_ack_reason(st)
+        if why:
+            die("当前步骤没有可复用的用户消息。" + why, 2)
+        die("尚未捕获到任何用户消息。检查 UserPromptSubmit hook；"
             "不要重复执行同一条确认命令；AskUserQuestion 不回传时，"
             "让用户发送当前页面要求的普通确认消息即可恢复。", 2)
     print("[mae-flow] 当前步骤捕获到的用户消息（需求落盘请使用左侧 ID）:")
@@ -3164,7 +3583,7 @@ def cmd_requirement_record(st, args):
 
 
 def _reopen_spec_archive(st):
-    """把交付阶段从 archive 退回 verify(源码在退出期间变过,验证结论必须重做)。
+    """把交付阶段从 archive 退回 verify（源码返工时验证结论必须重做）。
 
     v3:阶段是自家状态里的一个字段,回退就是改它 + 作废验证结论——不再需要调外部
     引擎的 archive-reopen 转换(那条链在纯内嵌项目上曾必死:只找 .cac/.claude 旧脚本)。"""
@@ -3176,12 +3595,69 @@ def _reopen_spec_archive(st):
     data.pop("verified_at", None)
     st.setdefault("history", []).append(
         {"step": st.get("current", ""), "result": "spec:archive-reopen",
-         "note": "退出期间源码变化,验证结论作废", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+         "note": "源码返工,验证结论作废", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     return True, ""
 
 
 def _explicit_direct_reentry(text):
     """Whether captured user text explicitly asks Mae-Flow to take control again."""
+    return _direct_reentry_decision(text) == "allow"
+
+
+def _looks_like_control_question(value):
+    return bool(re.search(
+        r"(是什么|什么意思|怎么(?:用|恢复|开启|进入|接回)?|如何|能不能|"
+        r"可以吗|是否|要不要|会不会|会怎样|有什么影响|[?？])",
+        value, re.I))
+
+
+def _targeted_flow_denial(value):
+    """Reject only negation aimed at workflow control, not business wording."""
+    target = r"(?:mae[- ]?flow|review-fix|这个工作流|原流程|月光宝盒|moonlight)"
+    negative = r"(?:不确认|不要|不想|不再|不用|暂不|暂时不要|先别|别|拒绝|取消|停止|关闭|退出)"
+    control = r"(?:重新)?(?:恢复|启用|接回|进入|使用|执行|开启|启动|切回|继续使用|用)"
+    return bool(
+        re.search(negative + r"\s*" + control + r"?\s*" + target, value, re.I)
+        or re.search(target + r"[^，。！？,;；]{0,12}" + negative
+                     + r"\s*" + control, value, re.I)
+        or re.search(target + r"\s*(?:不要了|不用了|先别了?|取消|停止|关闭|退出)",
+                     value, re.I)
+    )
+
+
+def _moonlight_activation_decision(text):
+    """Return allow/deny/neutral for an unattended-mode activation request."""
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    lower = value.lower()
+    command = re.match(r"^/mae-flow(?::mae-flow)?(?:\s+([^\s]+))?", lower)
+    if command:
+        action = (command.group(1) or "").strip()
+        return "allow" if action in ("moonlight", "月光宝盒") else "neutral"
+    if not re.search(r"月光宝盒|moonlight", value, re.I):
+        return "neutral"
+    if _targeted_flow_denial(value):
+        return "deny"
+    activation = bool(
+        re.search(
+            r"(?:开启|启动|启用|进入|切换到?|使用|用|继续|恢复)\s*(?:一下|这个)?\s*"
+            r"(?:月光宝盒|moonlight)",
+            value, re.I)
+        or re.search(
+            r"(?:月光宝盒|moonlight)(?:模式)?\s*(?:开启|启动|启用|继续|运行|接着|恢复)",
+            value, re.I)
+    )
+    strong = bool(re.search(
+        r"(?:请|帮我|直接|立即|马上|务必)\s*"
+        r"(?:开启|启动|启用|进入|切换到?|使用|用|继续|恢复)\s*"
+        r"(?:一下|这个)?\s*(?:月光宝盒|moonlight)",
+        value, re.I))
+    if _looks_like_control_question(value) and not strong:
+        return "neutral"
+    return "allow" if activation else "neutral"
+
+
+def _direct_reentry_decision(text):
+    """Return allow/deny/neutral for a captured Direct-mode user message."""
     value = re.sub(r"\s+", " ", str(text or "")).strip()
     lower = value.lower()
     command = re.match(r"^/mae-flow(?::mae-flow)?(?:\s+([^\s]+))?", lower)
@@ -3189,66 +3665,90 @@ def _explicit_direct_reentry(text):
         action = (command.group(1) or "").strip()
         # 独立 ut/codecheck/grill/story/chain/help 不应重新启用完整流程；
         # review-fix、月光宝盒和无参数完整入口都是明确的重新接管意图。
-        return action in ("", "review-fix", "moonlight", "月光宝盒")
-    # 否定必须先于自然语言关键词命中，但只认“整句拒绝”。业务请求里的
-    # “不要用长度判断，请改按 version”不能反过来被当成拒绝 review-fix。
-    negative = (
-        re.fullmatch(
-            r"(?:我)?(?:不确认|不要|暂不|暂时不要|先别|别|拒绝|取消|停止)\s*"
-            r"(?:重新)?(?:恢复|启用|接回|进入|使用|执行|开启)?\s*"
-            r"(?:mae[- ]?flow|review-fix|这个工作流|原流程|月光宝盒|moonlight)?"
-            r"[。.!！]?",
-            value, re.I)
-        or re.fullmatch(
-            r"(?:mae[- ]?flow|review-fix|这个工作流|原流程|月光宝盒|moonlight)\s*"
-            r"(?:不要|暂不|先别|拒绝|取消|停止)\s*"
-            r"(?:恢复|启用|接回|进入|使用|执行|开启)?[。.!！]?",
-            value, re.I)
-    )
-    if negative:
-        return False
+        return ("allow" if action in ("", "review-fix", "moonlight", "月光宝盒")
+                else "neutral")
+    # 否定只在明确指向流程控制时生效。业务请求里的“不要用长度判断”
+    # 不应反过来否定开头已经明确发起的 review-fix。
+    if _targeted_flow_denial(value):
+        return "deny"
     if "review-fix" in lower:
         # 兼容宿主去掉 slash 前缀后只留下 action + 参数的形态，但“review-fix
         # 是什么/怎么用”只是咨询，不能因包含关键词就恢复门禁。
-        asks_only = bool(re.search(
-            r"(是什么|什么意思|怎么用|如何用|能不能|可以吗|是否|[?？])", value))
+        asks_only = _looks_like_control_question(value)
         directs_action = bool(re.search(
             r"(请|帮我|执行|开启|进入|使用|处理|修复|调整|改成|改为|方案.{0,12}变)",
             value, re.I))
         strong_directive = bool(re.search(
-            r"(请(?!问)|帮我|执行|开启|进入|直接(?:处理|修复|改)|"
+            r"(?:(?:请(?!问|告诉|说明|介绍)|帮我|直接|立即|马上|务必)\s*"
+            r"(?:执行|开启|进入|使用|用|处理|修复|调整|改成|改为)|"
             r"(?:处理|修复|调整)一下|改成|改为)",
             value, re.I))
         if asks_only and not strong_directive:
-            return False
-        return bool(re.match(r"^review-fix(?:\s|$)", lower) or directs_action)
-    if re.search(r"月光宝盒|moonlight", value, re.I) and re.search(
-            r"开启|切换|继续|恢复|启用", value):
-        return True
+            return "neutral"
+        return ("allow" if re.match(r"^review-fix(?:\s|$)", lower)
+                or directs_action else "neutral")
+    moonlight = _moonlight_activation_decision(value)
+    if moonlight != "neutral":
+        return moonlight
     names_flow = (
         "mae-flow" in lower or "mae flow" in lower or "这个工作流" in value
         or bool(re.search(r"(?:原|之前|先前)流程", value))
         or bool(re.fullmatch(r"(?:确认)?重新启用(?:流程)?", value))
     )
-    return names_flow and bool(re.search(
-        r"重新(?:使用|启用|进入|接回)?|恢复|接回|继续使用|确认重新|切回", value, re.I))
+    action = bool(re.search(
+        r"重新(?:使用|启用|进入|接回)?|恢复|接回|继续使用|确认重新|切回",
+        value, re.I))
+    strong_directive = bool(re.search(
+        r"(?:请(?!问|告诉|说明|介绍)|帮我|直接|立即|马上|务必)\s*"
+        r"(?:重新)?(?:恢复|启用|接回|进入|切回|继续使用)",
+        value, re.I))
+    if _looks_like_control_question(value) and not strong_directive:
+        return "neutral"
+    return "allow" if names_flow and action else "neutral"
+
+
+def _direct_message_decision(text):
+    """Classify only trusted answer fields from one captured message."""
+    decisions = [
+        _direct_reentry_decision(candidate)
+        for candidate in _trusted_answer_candidates(str(text or ""))
+    ]
+    if "deny" in decisions:
+        return "deny"
+    if "allow" in decisions:
+        return "allow"
+    return "neutral"
 
 
 def _direct_reentry_authorization(rec, ack="", message_id=""):
     """Resolve a real Direct-mode user message and verify explicit re-entry intent."""
-    rows = list((rec or {}).get("direct_messages", []) or [])
+    all_rows = list((rec or {}).get("direct_messages", []) or [])
+    rows = list(enumerate(all_rows))
     if message_id:
-        rows = [row for row in rows if row.get("id") == message_id]
+        rows = [(index, row) for index, row in rows
+                if row.get("id") == message_id]
         if not rows:
             return "", "退出记录中不存在消息 ID %s" % message_id
     needle = re.sub(r"\s+", "", ack or "")
     matched_without_intent = False
-    for row in reversed(rows):
+    for index, row in reversed(rows):
         text = str(row.get("text", "") or "")
         candidates = _trusted_answer_candidates(text)
         for candidate in candidates:
             if message_id or (needle and needle == candidate):
-                if _explicit_direct_reentry(candidate):
+                decision = _direct_reentry_decision(candidate)
+                if decision == "allow":
+                    later_decisions = [
+                        _direct_message_decision(item.get("text", ""))
+                        for item in all_rows[index + 1:]
+                    ]
+                    later_decisive = [
+                        item for item in later_decisions if item != "neutral"
+                    ]
+                    if later_decisive and later_decisive[-1] == "deny":
+                        return "", (
+                            "该授权之后用户又明确表示不要恢复/启用 Mae-Flow；"
+                            "旧消息 ID 已撤销，请以最新用户意图为准")
                     return text, ""
                 matched_without_intent = True
     if matched_without_intent:
@@ -3327,19 +3827,31 @@ def _resume_direct_mode(ack="", message_id=""):
     source_changed = any(_is_source_path(
         p[:-len("(未提交)")] if p.endswith("(未提交)") else p, st)
         for p in (changed or []))
+    if source_changed:
+        review_state = _development_review(st)
+        if review_state:
+            item = _checkpoint_current(st)
+            if item and item.get("status") in ("push_pending", "review_pending"):
+                item["status"] = "coding"
+                for key in ("receipt", "head", "compile_head",
+                            "compile_task_sha256"):
+                    item.pop(key, None)
+            review_state.pop("final_review", None)
     old_step = st.get("current", "")
     workflow = (st.get("choices", {}) or {}).get("workflow", "")
     target = old_step
     if source_changed:
-        if workflow == "review" and old_step in ("rf_compile", "rf_codecheck", "rf_ut", "push", "end"):
+        if workflow == "review" and old_step in (
+                "rf_compile", "rf_codecheck", "rf_ut",
+                "delivery_review", "push", "end"):
             target = "rf_compile"
         elif workflow == "tweak" and old_step in (
                 "tw_compile", "tw_codecheck", "tw_ut", "tw_verify",
-                "archive_confirm", "archive", "push", "end"):
+                "delivery_review", "archive_confirm", "archive", "push", "end"):
             target = "tw_compile"
         elif old_step in ("verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
-                          "verify_codecheck", "verify_ut", "verify_comet", "archive_confirm",
-                          "archive", "push", "end"):
+                          "verify_codecheck", "verify_ut", "verify_comet",
+                          "delivery_review", "archive_confirm", "archive", "push", "end"):
             if _spec_phase(st) == "archive":
                 ok, why = _reopen_spec_archive(st)
                 if not ok:
@@ -3490,6 +4002,7 @@ def cmd_init(flow, args):
     _gitignore()
     dirty = _dirty_paths()
     st = {"current": flow["start"], "config": {}, "choices": {},
+          "protocols": {"development_checkpoints": 1},
           "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),
           "initial_dirty": dirty,
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
@@ -3578,7 +4091,11 @@ def _gitignore():
     # 崩 traceback(且报错看不出和 .gitignore 有关);替换字符只影响去重判断,无害。
     txt = (open(gi, encoding="utf-8", errors="replace").read()
            if os.path.exists(gi) else "")
-    add = [l for l in lines if l not in txt]
+    existing = {
+        line.strip() for line in txt.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    add = [line for line in lines if line not in existing]
     if add:
         open(gi, "a", encoding="utf-8").write(
             ("\n" if txt and not txt.endswith("\n") else "") + "\n".join(add) + "\n")
@@ -3594,7 +4111,11 @@ def _gitattributes():
     try:
         txt = (open(ga, encoding="utf-8", errors="replace").read()
                if os.path.exists(ga) else "")
-        if line in txt:
+        existing = {
+            item.strip() for item in txt.splitlines()
+            if item.strip() and not item.lstrip().startswith("#")
+        }
+        if line in existing:
             return
         open(ga, "a", encoding="utf-8", newline="\n").write(
             ("\n" if txt and not txt.endswith("\n") else "")
@@ -3674,6 +4195,42 @@ def advance(flow, st, sid, step, tag, note=""):
     st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     nxt = _next_from_step(step, st)
+    # States created before the checkpoint protocol existed keep the original
+    # route. Merely upgrading the plugin must not add a new human gate to an
+    # in-flight delivery that happens to be just before a pace step.
+    if (nxt in PACE_STEPS and not _development_checkpoints_enabled(st)
+            and not _development_review(st) and not _moonlight(st)):
+        st["history"].append({
+            "step": nxt,
+            "result": "legacy:skipped-development-pace",
+            "note": "旧版在途状态没有检查点协议标记，保持升级前路径",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        nxt = _next_from_step(flow["steps"][nxt], st, "continuous")
+    # New checkpoint-enabled deliveries already review staged batches themselves,
+    # while continuous mode deliberately waits for delivery_review. Keep the old
+    # review nodes for in-flight states created before this feature.
+    review_state = _development_review(st)
+    if nxt == "delivery_review" and not review_state and not _moonlight(st):
+        st["history"].append({
+            "step": "delivery_review",
+            "result": "legacy:skipped-final-review",
+            "note": "旧版在途状态没有开发节奏收据，保持升级前路径",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        nxt = _next_from_step(flow["steps"]["delivery_review"], st)
+    while (not _moonlight(st) and review_state
+           and review_state.get("status") == "active"
+           and nxt in LEGACY_CODE_REVIEW_STEPS):
+        bypass = flow["steps"][nxt]
+        st["history"].append({
+            "step": nxt,
+            "result": "checkpoint:replaced-legacy-review",
+            "note": ("分阶段检查点已检视" if review_state.get("mode") == "staged"
+                     else "一次完成模式改在质量链后统一检视"),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        nxt = _next_from_step(bypass, st, "continue")
     # 编译后人工检视是普通模式的显式停靠点。月光宝盒必须完全无交互，
     # 状态机在进入前直接旁路，既不显示步骤也不伪造一条用户确认。
     seen = set()
@@ -3830,11 +4387,529 @@ def cmd_config_review(flow, st, args):
           "无需退出或重新初始化。")
 
 
+def _activate_checkpoint_plan(st, mode):
+    data = _development_review(st)
+    head = sh("git rev-parse --verify HEAD")
+    data.update({
+        "status": "active",
+        "mode": mode,
+        "delivery_base": head,
+        "last_reviewed_head": head,
+        "current_index": 0,
+        "configured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    no_code = bool(data.get("no_code_plan"))
+    for index, item in enumerate(data.get("checkpoints") or []):
+        for key in ("head", "compile_head", "compile_task_sha256",
+                    "receipt", "accepted_head", "completed_head"):
+            item.pop(key, None)
+        item["status"] = (
+            ("accepted" if mode == "staged" else "completed")
+            if no_code else "coding")
+        item["attempt"] = 1
+        item["fixed_base"] = head if index == 0 else ""
+        if no_code:
+            item["completed_head"] = head
+            if mode == "staged":
+                item["accepted_head"] = head
+    if no_code:
+        data["current_index"] = len(data.get("checkpoints") or [])
+
+
+def cmd_checkpoint_plan(st, args):
+    if st.get("current") not in PACE_STEPS:
+        die("checkpoint plan 只允许在开发节奏确认步骤执行；先按 current 完成方案/范围分析。", 2)
+    if _moonlight(st):
+        die("月光宝盒不需要人工开发节奏方案；状态机会自动旁路本步骤。", 2)
+    items = [re.sub(r"\s+", " ", str(x or "")).strip()
+             for x in (args.item or [])]
+    if not 1 <= len(items) <= 6 or any(len(x) < 2 for x in items):
+        die("检查点必须给出 1-6 个非空 --item；小改可 1 个，常规任务建议 2-4 个。", 2)
+    if len(set(items)) != len(items):
+        die("检查点标题/范围不能重复；请写出各批次可区分的业务边界。", 2)
+    dirty = _blocking_dirty_source_paths(st, FLOW)
+    if dirty:
+        die("开发节奏必须在写第一行代码前确认；当前已有本轮未提交源码: "
+            + "、".join(dirty[:8]) + "。先归因并处理，再重新生成方案。", 2)
+    task_sha, task_lines = _task_structure_fingerprint(st)
+    head = sh("git rev-parse --verify HEAD")
+    checkpoints = [
+        {"id": "CP%d" % (i + 1), "title": title, "status": "planned"}
+        for i, title in enumerate(items)
+    ]
+    plan_body = json.dumps({
+        "head": head, "task_sha256": task_sha,
+        "items": [{"id": x["id"], "title": x["title"]} for x in checkpoints],
+    }, ensure_ascii=False, sort_keys=True)
+    st["development_review"] = {
+        "version": 1,
+        "status": "plan_pending",
+        "plan_step": st.get("current"),
+        "plan_head": head,
+        "plan_sha256": hashlib.sha256(plan_body.encode("utf-8")).hexdigest(),
+        "task_structure_sha256": task_sha,
+        "task_count": len(task_lines),
+        "ack_cursor": _ack_message_cursor(),
+        "no_code_plan": (
+            (st.get("choices", {}) or {}).get("workflow") == "review"
+            and not task_lines),
+        "checkpoints": checkpoints,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_state(st)
+    print("[mae-flow] 开发检查点方案（确认前尚未开始写码）")
+    print("  代码基点: " + head[:10])
+    print("  实现/评审任务数: %d（勾选状态和备注不计入结构指纹）" % len(task_lines))
+    for item in checkpoints:
+        print("  %s — %s" % (item["id"], item["title"]))
+    print("\n用 AskUserQuestion 提供三个固定选项：")
+    print("  - 按检查点分阶段开发、推送和检视")
+    print("  - 一次完成全部代码，最终统一检视")
+    print("  - 调整检查点划分")
+    print("用户点选后执行 done --choice staged|continuous|adjust；"
+          "月光宝盒不会进入此确认。")
+
+
+def _checkpoint_plan_drift(st):
+    data = _development_review(st) or {}
+    current_sha, _ = _task_structure_fingerprint(st)
+    planned = str(data.get("task_structure_sha256", ""))
+    return bool(planned and current_sha != planned)
+
+
+def _checkpoint_source_fresh(head, st):
+    changed, err = _source_changed_since(head, st)
+    if err:
+        return False, "代码基点无法核实:" + err
+    if changed:
+        return False, "代码发生变化:" + "、".join(changed[:8])
+    return True, ""
+
+
+def _print_checkpoint_decisions(final=False):
+    print("\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：")
+    print("  - " + CHECKPOINT_CONTINUE_ACK)
+    print("  - " + CHECKPOINT_REVISE_ACK)
+    if not final:
+        print("  - " + CHECKPOINT_CONTINUOUS_ACK)
+    print("点选后执行 checkpoint decide continue|revise"
+          + ("" if final else "|continuous") + ' --ack "用户选择原文"。')
+
+
+def cmd_checkpoint_ready(flow, st, args):
+    data = _development_review(st)
+    if not data or data.get("status") != "active":
+        die("当前没有已确认的开发检查点方案；旧版在途流程继续按原有 review 节点执行。", 2)
+    if _moonlight(st):
+        die("月光宝盒不执行人工检查点；继续按当前质量链无人值守推进。", 2)
+    expected_step = _checkpoint_expected_code_step(st)
+    if st.get("current") != expected_step:
+        die("checkpoint ready 只允许在本工作流编码步骤 %s 执行；当前为 %s。"
+            % (expected_step or "(未知)", st.get("current")), 2)
+    item = _checkpoint_current(st)
+    if not item or item.get("id") != args.checkpoint_id:
+        die("当前应处理 %s，不是 %s。先执行 checkpoint status 查看计划。"
+            % ((item or {}).get("id", "无剩余检查点"), args.checkpoint_id), 2)
+    if item.get("status") not in ("coding",):
+        die("%s 当前状态为 %s，不能重复 ready；执行 checkpoint status 查看下一步。"
+            % (item["id"], item.get("status", "未知")), 2)
+    dirty = _blocking_dirty_source_paths(st, flow)
+    if dirty:
+        die("检查点编译收尾前仍有未提交源码/测试/构建文件: "
+            + "、".join(dirty[:8]) + "。只精确提交本批应入库文件后重试。", 2)
+    base = str(item.get("fixed_base") or data.get("delivery_base") or "")
+    head = sh("git rev-parse --verify HEAD")
+    if (not base or argv_out(["git", "cat-file", "-t", base]) != "commit"
+            or argv_out(["git", "merge-base", base, head]) != base):
+        die("检查点固定基点不在当前历史上，可能发生 rebase/reset；"
+            "不能用改写后的历史冒充原检查点。", 2)
+    if not argv_out(["git", "log", "-1", "--format=%H", base + ".." + head]):
+        die("%s 自固定基点后没有新提交；空批次应调整/合并检查点，不制造空检视。"
+            % item["id"], 2)
+    ok, why = ev_commit_tagged({}, st)
+    if not ok:
+        die("检查点最新提交格式不合规:" + why, 2)
+    source_files = [
+        path for path in argv_out([
+            "git", "-c", "core.quotepath=false", "diff", "--name-only",
+            base, head]).splitlines()
+        if path and _is_source_path(path, st, flow)
+    ]
+    task = (st.get("agent_tasks", {}) or {}).get("COMPILE", {})
+    if source_files:
+        if task.get("checkpoint") != item["id"]:
+            die("最后一次编译任务没有绑定当前检查点 %s。先执行 agent-task compile "
+                "--checkpoint %s --scope \"<本批模块/任务>\"，再启动 compile-agent。"
+                % (item["id"], item["id"]), 2)
+        ok, why = ev_agent_ran({"agent": "COMPILE", "statuses": ["OK"]}, st)
+        if not ok:
+            die("检查点编译证据不足:" + why, 2)
+    item.update({
+        # ev_agent_ran has just proved the token still covers current source.
+        # The task-card head predates compile-agent fixes, so freezing it here
+        # would falsely treat the agent's own committed repair as post-compile.
+        "compile_head": head,
+        "compile_task_sha256": task.get("sha256", "") if source_files else "",
+        "compile_skipped_no_source": not source_files,
+        "head": head,
+        "task_structure_drift": _checkpoint_plan_drift(st),
+        "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    mode = data.get("mode")
+    if mode == "continuous":
+        item["status"] = "completed"
+        item["completed_head"] = head
+        data["current_index"] = int(data.get("current_index", 0)) + 1
+        nxt = _checkpoint_current(st)
+        if nxt:
+            nxt["fixed_base"] = head
+        save_state(st)
+        print("[mae-flow] %s 已编译并记录范围 %s..%s；连续模式不 push、不等待，直接进入%s。"
+              % (item["id"], base[:10], head[:10],
+                 (" " + nxt["id"]) if nxt else "编码收尾"))
+        if item.get("task_structure_drift"):
+            print("⚠ 实现清单结构较确认时有变化，最终检视会显式标注；"
+                  "若业务边界发生实质变化，应主动呈用户调整计划。")
+        return
+    item["status"] = "push_pending"
+    save_state(st)
+    print("[mae-flow] %s 编译通过，已冻结候选范围 %s..%s。现在小步推送："
+          % (item["id"], base[:10], head[:10]))
+    print("  git push -u origin HEAD")
+    print("推送成功后执行 checkpoint status；系统会核对真实上游 HEAD 后才开始检视。")
+
+
+def _refresh_staged_checkpoint(st, item):
+    fresh, why = _checkpoint_source_fresh(item.get("compile_head", ""), st)
+    if not fresh:
+        item["status"] = "coding"
+        item.pop("receipt", None)
+        return False, "编译后" + why + "；已回到当前批次，重新提交并编译"
+    head = sh("git rev-parse --verify HEAD")
+    # 文档提交不会使编译证据失效，但远端/检视收据必须冻结真实 HEAD。
+    item["head"] = head
+    ref, remote_head, local_head = _upstream_snapshot()
+    if not ref:
+        return False, "当前分支没有上游；执行 git push -u origin HEAD"
+    if remote_head != local_head:
+        return False, (
+            "本地与上游不一致（本地 %s，%s=%s）。执行普通 git push；"
+            "若远端领先，禁止自动 rebase/force-push，先展示分叉。"
+            % (local_head[:10], ref, remote_head[:10] if remote_head else "未知"))
+    item["status"] = "review_pending"
+    item["receipt"] = {
+        "base": item.get("fixed_base", ""),
+        "head": local_head,
+        "remote_ref": ref,
+        "remote_head": remote_head,
+        "ack_cursor": _ack_message_cursor(),
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    return True, ""
+
+
+def cmd_checkpoint_status(st):
+    data = _development_review(st)
+    if not data:
+        print("[mae-flow] 当前是旧版在途流程，没有检查点子状态；继续按 current 的既有步骤执行。")
+        return
+    print("[mae-flow] 开发节奏: %s；计划状态: %s"
+          % (data.get("mode", "待确认"), data.get("status", "未知")))
+    for item in data.get("checkpoints") or []:
+        print("  %s [%s] %s" % (item.get("id"), item.get("status"), item.get("title")))
+    item = _checkpoint_current(st)
+    if not item:
+        print("全部计划检查点已闭环；继续当前主流程。")
+        return
+    if data.get("mode") == "staged" and item.get("status") == "push_pending":
+        ok, why = _refresh_staged_checkpoint(st, item)
+        save_state(st)
+        if not ok:
+            die(why, 2)
+    if item.get("status") == "review_pending":
+        receipt = item.get("receipt") or {}
+        print("\n".join(_checkpoint_review_lines(
+            receipt.get("base", ""), receipt.get("head", ""),
+            "%s 用户代码检视" % item.get("id"),
+            receipt.get("remote_ref", ""))))
+        if item.get("task_structure_drift"):
+            print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
+        _print_checkpoint_decisions(final=False)
+    elif item.get("status") == "coding":
+        print("当前正在编码 %s；完成提交和绑定本批的 compile-agent 后执行 checkpoint ready %s。"
+              % (item["id"], item["id"]))
+
+
+def cmd_checkpoint_final(st):
+    if st.get("current") != "delivery_review":
+        die("checkpoint final 只允许在最终代码增量检视步骤执行；"
+            "中间批次使用 checkpoint ready/status。", 2)
+    data = _development_review(st)
+    if not data or _moonlight(st):
+        print("[mae-flow] 当前无需检查点式最终检视；直接按 current 执行 done。")
+        return
+    changed, err = _final_review_delta(st)
+    if err:
+        die("最终检视基点无法核实:" + err, 2)
+    if not changed:
+        print("[mae-flow] 最后已检视代码版本之后没有源码/测试/构建变化；"
+              "无需重复确认，直接执行 done。")
+        return
+    dirty = [x for x in changed if x.endswith("(未提交)")]
+    if dirty:
+        die("最终检视前仍有未提交代码: " + "、".join(dirty[:8])
+            + "。先归因并精确提交，不能让用户检视不完整版本。", 2)
+    base = str(data.get("last_reviewed_head") or data.get("delivery_base") or "")
+    head = sh("git rev-parse --verify HEAD")
+    mode = data.get("mode")
+    remote_ref = ""
+    if mode == "staged":
+        ref, remote_head, local_head = _upstream_snapshot()
+        if not ref or remote_head != local_head:
+            data["final_review"] = {
+                "status": "push_pending", "base": base, "head": head,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            save_state(st)
+            print("[mae-flow] 质量链产生了新的代码增量，分阶段模式先小步 push 再检视：")
+            print("  git push -u origin HEAD")
+            print("成功后重新执行 checkpoint final。远端领先时不要自动 rebase/force-push。")
+            return
+        remote_ref = ref
+    data["final_review"] = {
+        "status": "review_pending", "base": base, "head": head,
+        "remote_ref": remote_ref,
+        "remote_head": head if remote_ref else "",
+        "changed": changed,
+        "ack_cursor": _ack_message_cursor(),
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    save_state(st)
+    print("\n".join(_checkpoint_review_lines(
+        base, head, "最终未检视代码增量", remote_ref)))
+    drifted = [
+        item.get("id", "?") for item in data.get("checkpoints") or []
+        if item.get("task_structure_drift")
+    ]
+    if drifted:
+        print("⚠ 开发期间实现/评审任务结构曾偏离编码前方案（%s）；"
+              "请在最终检视中额外核对新增、删除或重排的任务仍符合需求边界。"
+              % "、".join(drifted))
+    if mode == "continuous":
+        print("  模式说明:本轮中途未 push；用户确认最终整体代码后才进入正式 push。")
+        completed = [x for x in data.get("checkpoints") or []
+                     if x.get("completed_head")]
+        if completed:
+            print("  已记录批次:")
+            for item in completed:
+                print("    %s %s → %s" % (
+                    item.get("id"), item.get("title"),
+                    str(item.get("completed_head"))[:10]))
+    _print_checkpoint_decisions(final=True)
+
+
+def _checkpoint_ack(st, ack, expected, receipt):
+    if ack != expected:
+        return False, "选择原文必须精确为「%s」，不能用近义词代答" % expected
+    cursor = set((receipt or {}).get("ack_cursor") or [])
+    fresh = [
+        item for item in _current_ack_messages(st)
+        if _ack_message_signature(item) not in cursor
+    ]
+    normalized = re.sub(r"\s+", "", expected)
+    if any(
+            normalized in _ack_candidates(item.get("text", ""))
+            for item in fresh):
+        _ack_failure(st, success=True)
+        return True, ""
+    why = (
+        "没有捕获到本次检视收据呈现之后的新用户选择。"
+        "同一编码步骤内上一批的“继续”不能复用到当前批次；"
+        "请展示当前收据并重新取得一次选项回答")
+    count = _ack_failure(st, why)
+    return False, why + _ack_retry_guidance(count)
+
+
+def _invalidate_quality_for_rework(st):
+    st.pop("unlock", None)
+    st.pop("risk_acceptances", None)
+    st.pop("agent_tasks", None)
+    st.pop("quality", None)
+    for kind in ("COMPILE", "CODECHECK", "UT"):
+        _drop_agent_token(kind)
+
+
+def cmd_checkpoint_decide(flow, st, args):
+    data = _development_review(st)
+    if not data or _moonlight(st):
+        die("当前没有等待用户裁决的普通模式检查点。", 2)
+    expected = {
+        "continue": CHECKPOINT_CONTINUE_ACK,
+        "revise": CHECKPOINT_REVISE_ACK,
+        "continuous": CHECKPOINT_CONTINUOUS_ACK,
+    }[args.choice]
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    final = data.get("final_review") or {}
+    if st.get("current") == "delivery_review" and final.get("status") == "review_pending":
+        ok, why = _checkpoint_ack(st, args.ack, expected, final)
+        if not ok:
+            die("检查点用户裁决验真失败:" + why, 2)
+        if args.choice == "continuous":
+            die("最终检视已经是统一收尾，不能再切换为连续模式。", 2)
+        if args.choice == "revise":
+            workflow = (st.get("choices", {}) or {}).get("workflow", "")
+            target = CHECKPOINT_CODE_STEPS.get(workflow, "")
+            if not target:
+                die("无法确定返工编码入口，workflow=" + (workflow or "未设置"), 2)
+            reopened, reopen_why = _reopen_spec_archive(st)
+            if not reopened:
+                die("最终检视返工无法回退规格验证阶段:" + reopen_why, 2)
+            data.pop("final_review", None)
+            data["final_rework"] = {
+                "status": "coding",
+                "base": final.get("base", ""),
+                "rejected_head": final.get("head", ""),
+                "at": now,
+            }
+            st["current"] = target
+            st.setdefault("step_heads", {})[target] = sh("git rev-parse --verify HEAD")
+            _invalidate_quality_for_rework(st)
+            st.setdefault("history", []).append({
+                "step": "delivery_review", "result": "checkpoint:revise-final",
+                "note": args.ack, "at": now})
+            save_state(st)
+            print("[mae-flow] 用户要求调整最终代码，已回到 %s。修复提交后必须重新走编译和质量链；"
+                  "已检视基点不前移，最终会展示完整修复组合。" % target)
+            print_current(flow, st)
+            return
+        receipt_head = final.get("head", "")
+        if sh("git rev-parse --verify HEAD") != receipt_head:
+            die("最终检视期间 HEAD 已变化，旧确认不能背书新版本；先选择调整并重新验证。", 2)
+        fresh, why = _checkpoint_source_fresh(receipt_head, st)
+        if not fresh:
+            die("最终检视收据已失效:" + why, 2)
+        if final.get("remote_ref"):
+            ref, remote_head, local_head = _upstream_snapshot()
+            if ref != final.get("remote_ref") or remote_head != local_head:
+                die("远端检查点在检视期间发生变化，拒绝确认旧远端收据。", 2)
+        data["last_reviewed_head"] = receipt_head
+        final["status"] = "accepted"
+        final["accepted_at"] = now
+        data.pop("final_rework", None)
+        st.setdefault("history", []).append({
+            "step": "delivery_review", "result": "checkpoint:accept-final",
+            "note": args.ack, "at": now})
+        save_state(st)
+        print("[mae-flow] 最终代码增量已确认。执行 done 进入规格定稿/最终 push。")
+        return
+
+    item = _checkpoint_current(st)
+    if not item or item.get("status") != "review_pending":
+        die("当前没有处于 review_pending 的中间检查点；执行 checkpoint status 查看。", 2)
+    ok, why = _checkpoint_ack(st, args.ack, expected, item.get("receipt") or {})
+    if not ok:
+        die("检查点用户裁决验真失败:" + why, 2)
+    if args.choice == "revise":
+        item["status"] = "coding"
+        item["attempt"] = int(item.get("attempt", 1)) + 1
+        for key in ("receipt", "head", "compile_head", "compile_task_sha256"):
+            item.pop(key, None)
+        _invalidate_quality_for_rework(st)
+        st.setdefault("history", []).append({
+            "step": st.get("current"), "result": "checkpoint:revise:" + item["id"],
+            "note": args.ack, "at": now})
+        save_state(st)
+        print("[mae-flow] %s 返回修改；固定基点仍为 %s，修复后会重新展示整批组合差异。"
+              % (item["id"], str(item.get("fixed_base", ""))[:10]))
+        return
+    if args.choice == "continuous":
+        fresh, fresh_why = _checkpoint_source_fresh(
+            item.get("compile_head", ""), st)
+        if not fresh:
+            die("切换一次完成模式前，当前批编译收据已失效:"
+                + fresh_why + "。先选择调整并重新编译。", 2)
+        completed_head = sh("git rev-parse --verify HEAD")
+        data["mode"] = "continuous"
+        item["status"] = "completed"
+        item["completed_head"] = completed_head
+        item["closed_at"] = now
+        item.pop("receipt", None)
+        data["current_index"] = int(data.get("current_index", 0)) + 1
+        nxt = _checkpoint_current(st)
+        if nxt:
+            nxt["fixed_base"] = completed_head
+        st.setdefault("history", []).append({
+            "step": st.get("current"), "result": "checkpoint:switch-continuous",
+            "note": args.ack, "at": now})
+        save_state(st)
+        print("[mae-flow] 已切换为一次完成模式。当前批的有效编译结果已保留，"
+              "但不会冒充用户已检视；%s质量链结束后从上一个已确认 HEAD 统一检视。"
+              % (("进入 " + nxt["id"] + "，") if nxt else "全部检查点已完成，"))
+        return
+    receipt = item.get("receipt") or {}
+    receipt_head = receipt.get("head", "")
+    if sh("git rev-parse --verify HEAD") != receipt_head:
+        die("检视期间 HEAD 已变化；旧远端收据失效，选择调整后重新编译、push、检视。", 2)
+    fresh, why = _checkpoint_source_fresh(receipt_head, st)
+    if not fresh:
+        die("检查点收据已失效:" + why, 2)
+    ref, remote_head, local_head = _upstream_snapshot()
+    if (ref != receipt.get("remote_ref") or remote_head != receipt_head
+            or local_head != receipt_head):
+        die("检视期间本地或远端分支发生变化；拒绝确认旧收据。", 2)
+    item["status"] = "accepted"
+    item["accepted_head"] = receipt_head
+    item["accepted_at"] = now
+    data["last_reviewed_head"] = receipt_head
+    data["current_index"] = int(data.get("current_index", 0)) + 1
+    nxt = _checkpoint_current(st)
+    if nxt:
+        nxt["fixed_base"] = receipt_head
+    st.setdefault("history", []).append({
+        "step": st.get("current"), "result": "checkpoint:accept:" + item["id"],
+        "note": args.ack, "at": now})
+    save_state(st)
+    print("[mae-flow] %s 已确认并冻结远端收据。%s"
+          % (item["id"], ("进入 " + nxt["id"]) if nxt else "全部计划检查点已完成"))
+
+
+def cmd_checkpoint(flow, st, args):
+    action = args.checkpoint_action
+    if action == "plan":
+        return cmd_checkpoint_plan(st, args)
+    if action == "status":
+        return cmd_checkpoint_status(st)
+    if action == "ready":
+        return cmd_checkpoint_ready(flow, st, args)
+    if action == "final":
+        return cmd_checkpoint_final(st)
+    if action == "decide":
+        return cmd_checkpoint_decide(flow, st, args)
+    die("未知 checkpoint 动作: " + str(action), 2)
+
+
 def cmd_done(flow, st, args):
     sid = st["current"]
     step = flow["steps"][sid]
     if step.get("terminal"):
         die("流程已在终态。")
+    if (sid in PACE_STEPS and not _development_checkpoints_enabled(st)
+            and not _development_review(st)):
+        # Compatibility for an old state that was already advanced onto the
+        # newly inserted pace node by an earlier build of this release.
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        target = _next_from_step(step, st, "continuous")
+        st.setdefault("history", []).append({
+            "step": sid, "result": "legacy:skipped-development-pace",
+            "note": "旧版在途状态恢复升级前路径", "at": now})
+        st["current"] = target
+        st.setdefault("step_heads", {})[target] = sh(
+            "git rev-parse --verify HEAD")
+        save_state(st)
+        print("[mae-flow] 检测到升级前在途状态；本单不追加开发节奏确认，"
+              "已按原流程进入 %s。\n" % target)
+        print_current(flow, st)
+        return
     if sid == "moonlight_review":
         die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
             "不能用 done 跳过报告闭环。", 2)
@@ -3881,7 +4956,11 @@ def cmd_done(flow, st, args):
     if (sid != "config_confirm" and step.get("user_ack")
             and not _moonlight(st)):
         if step.get("choice_key"):
-            ok, why = _choice_verified(step, st, args.choice)
+            pace_state = _development_review(st) if sid in PACE_STEPS else None
+            ok, why = _choice_verified(
+                step, st, args.choice,
+                (pace_state or {}).get("ack_cursor")
+                if pace_state else None)
         elif step.get("confirmation_answers"):
             ok, why = _implicit_ack_verified(step, st)
         elif args.ack:
@@ -3902,6 +4981,7 @@ def cmd_done(flow, st, args):
     st["config"] = pending_config
     if sid == "config_confirm":
         st.pop("config_review", None)
+        st.pop("branch_resolution", None)
     if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
     want = st.get("config", {}).get("分支名", "")
@@ -3997,17 +5077,38 @@ def cmd_done(flow, st, args):
         # 与 gate 三振同一哲学:重复拒绝时自动亮出用户出口,平时不广告。
         count = _evidence_failure_count(sid)
         if count >= 2 and not _moonlight(st):
-            nxt = step.get("next")
-            target = nxt if isinstance(nxt, str) else "<按 current 显示的下一步>"
+            target = _next_from_step(step, st, args.choice or "")
+            goto_hint = (
+                '执行 python "%s" goto %s --force --ack "用户原话"'
+                % (os.path.abspath(sys.argv[0]), target)
+                if target else
+                "先按 current 完成本步选择；目标确定后再执行 goto <目标步骤> "
+                '--force --ack "用户原话"'
+            )
             msg += ("\n⚠ 本步证据已连续 %d 次不满足。机器事实不能由口头确认替代;"
                     "但若**用户已明确表示**接受现状/跳过本步(如“跳过吧/我认为可以了”),"
-                    "这是用户的风险裁决,执行 python \"%s\" goto %s --force --ack \"用户原话\" "
+                    "这是用户的风险裁决,%s "
                     "整步跳过并留痕审计;缺的是 COMPILE/CODECHECK/UT 等 Agent 令牌时,"
                     "优先用报错里的 accept-risk(只放当前令牌,其他证据照查)。"
                     "没有用户原话时 Agent 不得自行跳过。"
-                    % (count, os.path.abspath(sys.argv[0]), target))
+                    % (count, goto_hint))
         die(msg, 2)
     _evidence_failure_count(sid, success=True)
+    if sid in PACE_STEPS and not _moonlight(st):
+        if args.choice == "adjust":
+            st.pop("development_review", None)
+            st.get("choices", {}).pop("development_pace", None)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            st.setdefault("history", []).append({
+                "step": sid, "result": "checkpoint-plan:adjust",
+                "note": "用户要求调整检查点划分", "at": now})
+            st.setdefault("step_heads", {})[sid] = sh("git rev-parse --verify HEAD")
+            save_state(st)
+            print("[mae-flow] 用户选择调整检查点；旧方案已失效，代码仍未解锁。"
+                  "结合用户意见重新执行 checkpoint plan --item ...。")
+            print_current(flow, st)
+            return
+        _activate_checkpoint_plan(st, args.choice)
     kind = _moonlight_step_kind(sid)
     if kind:
         _moonlight_resolve_kind(st, kind)
@@ -4708,6 +5809,13 @@ def cmd_gate(flow, st, args):
             jdie("edit-specs",
                  f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
         if _is_source_path(p, st, flow):
+            if _checkpoint_review_pending(st):
+                item = _checkpoint_current(st) or {}
+                jdie(
+                    "edit-checkpoint-review",
+                    "检查点 %s 正在等待用户检视，Agent 不能继续改源码。"
+                    "用户选择“需要调整代码”后执行 checkpoint decide revise，"
+                    "状态回到 coding 才能修改。" % item.get("id", "?"))
             if not step.get("allow_source_edit"):
                 jdie("edit-source",
                      f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
@@ -4762,6 +5870,13 @@ def cmd_gate(flow, st, args):
             if name and want and name != want and not baseline_checkout:
                 jdie("bash-branch-name",
                      f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
+        if (_checkpoint_review_pending(st)
+                and re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I)):
+            item = _checkpoint_current(st) or {}
+            jdie(
+                "bash-checkpoint-review-commit",
+                "检查点 %s 的远端检视收据已冻结，等待用户裁决期间禁止新增提交。"
+                "需要改代码先让用户选择“需要调整代码”。" % item.get("id", "?"))
         m = re.search(r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
                       r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
         if m and st:
@@ -4905,6 +6020,12 @@ def cmd_gate(flow, st, args):
         offenders = list(dict.fromkeys(redirect_sources
                                        + (source_toks if strong_write else [])))
         if offenders:
+            if _checkpoint_review_pending(st):
+                item = _checkpoint_current(st) or {}
+                jdie(
+                    "bash-checkpoint-review-source",
+                    "检查点 %s 正在等待用户检视，禁止经 Bash 改源码。"
+                    "先由用户选择继续或调整。" % item.get("id", "?"))
             if not step.get("allow_source_edit"):
                 jdie("bash-source",
                      f"当前步骤 {sid} 禁止经 Bash 写源码文件(命中: {'、'.join(offenders[:3])});"
@@ -4960,13 +6081,33 @@ def _requirement_sources(st):
 def cmd_agent_task(flow, st, args):
     """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""
     kind = args.kind.upper()
-    expected_steps = {"COMPILE": {"build", "rf_compile", "tw_compile", "verify_recompile", "verify_post_ponytail_compile"},
+    expected_steps = {"COMPILE": {"build", "rf_fix", "rf_compile", "tw_change", "tw_compile",
+                                  "verify_recompile", "verify_post_ponytail_compile"},
                       "CODECHECK": {"verify_codecheck", "tw_codecheck", "rf_codecheck", "rf_verify"},
                       "UT": {"verify_ut", "rf_ut", "tw_ut", "rf_verify"}}
     sid = st["current"]
+    checkpoint_id = str(getattr(args, "checkpoint", "") or "")
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if sid not in expected_steps[kind]:
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
+    if checkpoint_id:
+        if kind != "COMPILE":
+            die("--checkpoint 只用于 compile 任务卡。", 2)
+        item = _checkpoint_current(st)
+        review_state = _development_review(st) or {}
+        if (not item
+                and (review_state.get("final_rework") or {}).get("status")
+                == "coding"):
+            die("当前是最终检视返工，原检查点已闭环；不要传 --checkpoint，"
+                "按本步骤正常生成编译任务卡并重走质量链。", 2)
+        if (not item or item.get("id") != checkpoint_id
+                or sid != _checkpoint_expected_code_step(st)):
+            die("检查点编译目标不匹配：当前应为 %s@%s，收到 %s@%s。"
+                % ((item or {}).get("id", "无"), _checkpoint_expected_code_step(st),
+                   checkpoint_id, sid), 2)
+        if item.get("status") != "coding":
+            die("检查点 %s 当前状态为 %s，不能重复生成编译任务卡。"
+                % (checkpoint_id, item.get("status", "未知")), 2)
     dirty_source = _blocking_dirty_source_paths(st, flow)
     inherited_dirty = _unchanged_initial_dirty_source_paths(st, flow)
     if dirty_source:
@@ -5006,6 +6147,7 @@ def cmd_agent_task(flow, st, args):
         f"需求基线分支: {cfg.get('基线分支', '')}",
         f"本轮检查范围: {diff}",
         f"本次子任务范围: {args.scope or '任务卡文件清单全部'}",
+        f"开发检查点: {checkpoint_id or '无（主流程质量节点）'}",
         f"编译方式: {cfg.get('编译方式', '')}",
         f"UT生成方式: {cfg.get('UT生成方式', '')}",
         f"UT运行命令: {cfg.get('UT运行命令', '')}",
@@ -5091,6 +6233,7 @@ def cmd_agent_task(flow, st, args):
     st.setdefault("agent_tasks", {})[kind] = {
         "step": sid, "path": path, "sha256": digest,
         "head": task_head, "scope": args.scope or "",
+        "checkpoint": checkpoint_id,
         "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
         "unchanged_initial_dirty": inherited_dirty,
         "at": time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -5682,6 +6825,12 @@ def _consume_preinit_moonlight_intent(ack):
         return False, "捕获的用户原话没有明确提到月光宝盒。", ""
     if compact(ack) not in compact(text):
         return False, "--ack 不在本轮用户原话中，禁止由 Agent 自行补授权。", ""
+    decision = _moonlight_activation_decision(text)
+    if decision != "allow":
+        return False, (
+            "捕获的用户原话没有明确要求开启月光宝盒"
+            + ("，且表达了拒绝/关闭意图。" if decision == "deny"
+               else "；咨询、介绍或仅提到名称都不算授权。")), ""
     try:
         os.remove(MOONLIGHT_INTENT_PATH)
     except OSError:
@@ -5750,6 +6899,11 @@ def cmd_moonlight(flow, st, args):
             if not ok:
                 die("月光宝盒授权验真失败:" + why, 2)
             activation_request = _moonlight_request_from_messages(st, args.ack)
+            decision = _moonlight_activation_decision(activation_request)
+            if decision != "allow":
+                die("月光宝盒授权验真失败:用户原话没有明确要求开启无人值守模式"
+                    + ("，且表达了拒绝/关闭意图。" if decision == "deny"
+                       else "；咨询、介绍或仅提到名称都不算授权。"), 2)
         if flow["steps"].get(st.get("current", ""), {}).get("terminal"):
             # 上一单已交付完成:必须像 init 一样换单滚动。否则月光在终态(安全停点)上
             # 启用,整夜什么都不发生;授权已在旧状态的消息上验真通过,滚动后直接开新单。
@@ -6125,25 +7279,115 @@ def cmd_reloaded(flow, st, args):
     print("[mae-flow] 能力随插件直接加载，不再需要 reload。执行 current 继续。")
 
 
+def _prepare_spec_for_goto(st, target):
+    """Synchronize the embedded spec phase when a user-approved goto rewinds work."""
+    if target not in ("open", "design"):
+        return True, ""
+    data = _spec_data(st)
+    phase = _spec_phase(st)
+    if not phase:
+        return False, (
+            "尚未初始化本单交付登记，不能直接 goto %s。"
+            "请先回到对应的 open 步创建变更记录。" % target
+        )
+    if phase == "archived":
+        return False, (
+            "本单规格已经完成不可逆定稿，不能在同一轮 goto %s 回写。"
+            "请开启新的修订轮次。" % target
+        )
+    desired = "open" if target == "open" else "design"
+    if target == "open":
+        clear = (
+            "design_doc", "plan", "verification_report",
+            "verify_result", "verified_at", "archived_to", "archived_at",
+        )
+    else:
+        clear = (
+            "design_doc", "plan", "verification_report",
+            "verify_result", "verified_at",
+        )
+    removed = [key for key in clear if key in data]
+    for key in clear:
+        data.pop(key, None)
+    previous = phase
+    data["phase"] = desired
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    if workflow:
+        data["workflow"] = workflow
+    if previous == desired and not removed:
+        return True, ""
+    detail = "规格阶段 %s → %s" % (previous, desired)
+    if removed:
+        detail += "，作废下游登记 " + "、".join(removed)
+    return True, detail
+
+
 def cmd_goto(flow, st, args):
     if not args.force:
         die("goto 是人工修复通道,必须 --force。")
     if not args.ack:
         die("goto 是**人工**修复通道,必须携带用户明确授权:--ack \"用户原话\"。"
             "证据不足该修证据/重跑 agent,禁止用 goto 绕过关卡——绕过 = 最严重违规。", 2)
+    if args.step not in flow["steps"]:
+        die("未知步骤: " + args.step)
+    source = st.get("current", "")
+    branch_context = source == "branch_create" or args.step == "branch_create"
+    branch_adoption = branch_context and _branch_adoption_requested(args.ack)
+    if args.step == source and not branch_adoption:
+        die("当前已经在步骤 %s；同一步 goto 不会修复任何证据，反而会让本步旧授权失效。"
+            "请按 current 的补救指引处理。若是在 branch_create 明确沿用现有分支，"
+            "用户原话必须包含“沿用/在当前（现有）分支继续”。" % source, 2)
     ok, why = _ack_verified(st, args.ack)
     if not ok:
         die("goto 授权验真失败:" + why, 2)
-    if args.step not in flow["steps"]:
-        die("未知步骤: " + args.step)
+    notes = []
+    if branch_adoption:
+        adopted, detail = _adopt_current_branch(st, args.ack)
+        if not adopted:
+            die("沿用现有分支失败:" + detail, 2)
+        notes.append(detail)
+    elif args.step == "branch_create":
+        # A fresh branch attempt must not inherit a previous branch exception.
+        st.pop("branch_resolution", None)
+    if source == "branch_create" and args.step != "branch_create":
+        branch_ok, branch_why = ev_branch_ok({}, st)
+        if not branch_ok:
+            die(
+                "goto 不能只跳过 branch_create：后续提交和推进仍会校验本单分支。"
+                + branch_why
+                + " 若用户决定保留现有非基线分支，请让原话明确包含"
+                  "“在现有分支上继续”，再执行本次 goto；系统会同步登记分支裁决。",
+                2)
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    if args.step == "design" and workflow in ("hotfix", "tweak"):
+        st.setdefault("choices", {})["workflow"] = "full"
+        notes.append("工作流 %s → full（进入方案设计即完成升级）" % workflow)
+    spec_ok, spec_note = _prepare_spec_for_goto(st, args.step)
+    if not spec_ok:
+        die("goto 转移准备失败:" + spec_note, 2)
+    if spec_note:
+        notes.append(spec_note)
+    if args.step == "config_confirm":
+        st.pop("branch_resolution", None)
+    if args.step in {
+            "config_confirm", "workflow_select", "branch_create", "grill_ask",
+            "grill", "open", "design", "story_ask", "story",
+            "hf_open", "tw_open", "rf_triage",
+            "build_pace", "tw_pace", "rf_pace"}:
+        st.pop("development_review", None)
+    if args.step in PACE_STEPS:
+        st.setdefault("protocols", {})["development_checkpoints"] = 1
     st.pop("unlock", None)   # 跳转同样使解锁失效
     st.pop("risk_acceptances", None)
     st.pop("config_review", None)
     st["history"].append({"step": st["current"], "result": "goto:" + args.step,
-                          "note": "manual", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+                          "note": "；".join(notes) if notes else "manual",
+                          "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     st["current"] = args.step
     st.setdefault("step_heads", {})[args.step] = sh("git rev-parse --verify HEAD")
     save_state(st)
+    for note in notes:
+        print("[mae-flow] goto 同步处理：" + note)
     print_current(flow, st)
 
 
@@ -6541,6 +7785,8 @@ def main():
         return cmd_moonlight(flow, st, args)
     if args.cmd == "current":
         return print_current(flow, st)
+    if args.cmd == "checkpoint":
+        return cmd_checkpoint(flow, st, args)
     if args.cmd == "agent-task":
         return cmd_agent_task(flow, st, args)
     if args.cmd == "codecheck-scan":

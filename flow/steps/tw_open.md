@@ -8,7 +8,7 @@
 展示改动范围，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮；
 用户点选确认后 done --set CHANGE_NAME=<change目录名>，不再要求输入确认句(done 硬校验占位不得残留)。
 若触发升级条件(5+ 文件/多模块协调/需新 capability/需规格条目)，停手展示原因并等用户确认(文件数这一条由 done 的 tier_scope 证据机器亲数,超限硬拦并给升级/accept-risk 两条出路)；
-确认升级后用内嵌 state 命令正规更新 workflow，再 goto design --force。
+确认升级后执行 `goto design --force --ack "用户原话"`；状态机会把 workflow 与规格阶段一起同步到完整开发的设计入口，禁止手写状态。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:tweak-open}}

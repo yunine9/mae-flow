@@ -90,7 +90,40 @@
           ]
         }
       ],
-      "next": "rf_fix"
+      "next": "rf_pace"
+    },
+    "rf_pace": {
+      "title": "处理评审意见 — 开发节奏确认",
+      "user_ack": true,
+      "choice_key": "development_pace",
+      "choices": [
+        "staged",
+        "continuous",
+        "adjust"
+      ],
+      "choice_answers": {
+        "staged": [
+          "按检查点分阶段开发、推送和检视"
+        ],
+        "continuous": [
+          "一次完成全部代码，最终统一检视"
+        ],
+        "adjust": [
+          "调整检查点划分"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "checkpoint_plan"
+        }
+      ],
+      "next": {
+        "staged": "rf_fix",
+        "continuous": "rf_fix",
+        "adjust": "rf_pace"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continuous"
     },
     "rf_fix": {
       "title": "处理评审意见 — 修改代码",
@@ -98,6 +131,9 @@
       "evidence": [
         {
           "type": "review_fix_committed"
+        },
+        {
+          "type": "checkpoint_plan_complete"
         }
       ],
       "next": "rf_compile"
@@ -169,7 +205,7 @@
           ]
         }
       ],
-      "next": "push"
+      "next": "delivery_review"
     },
     "rf_verify": {
       "title": "处理评审意见 — 旧版验证迁移",
@@ -335,7 +371,7 @@
       "next": {
         "commit": "story",
         "local": "story",
-        "no": "build"
+        "no": "build_pace"
       }
     },
     "story": {
@@ -372,7 +408,7 @@
           "note": "待确认闭环未完成:文档残留『待确认』,或存在未经用户确认的裸『不涉及』。合法终态只有『不涉及(已确认)』——由你用 AskUserQuestion 拿到用户逐项拍板后亲自改写,agent 无权消除标注"
         }
       ],
-      "next": "build"
+      "next": "build_pace"
     },
     "hf_open": {
       "title": "已定位问题修复 — 确认修改范围",
@@ -390,7 +426,7 @@
           "allow_empty": true
         }
       ],
-      "next": "build",
+      "next": "build_pace",
       "require_sets": [
         "CHANGE_NAME"
       ]
@@ -411,10 +447,43 @@
           "allow_empty": true
         }
       ],
-      "next": "tw_change",
+      "next": "tw_pace",
       "require_sets": [
         "CHANGE_NAME"
       ]
+    },
+    "tw_pace": {
+      "title": "局部修改 — 开发节奏确认",
+      "user_ack": true,
+      "choice_key": "development_pace",
+      "choices": [
+        "staged",
+        "continuous",
+        "adjust"
+      ],
+      "choice_answers": {
+        "staged": [
+          "按检查点分阶段开发、推送和检视"
+        ],
+        "continuous": [
+          "一次完成全部代码，最终统一检视"
+        ],
+        "adjust": [
+          "调整检查点划分"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "checkpoint_plan"
+        }
+      ],
+      "next": {
+        "staged": "tw_change",
+        "continuous": "tw_change",
+        "adjust": "tw_pace"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continuous"
     },
     "tw_change": {
       "title": "局部修改 — 修改代码",
@@ -425,6 +494,9 @@
         },
         {
           "type": "commit_tagged_after_entry"
+        },
+        {
+          "type": "checkpoint_plan_complete"
         }
       ],
       "next": "tw_compile"
@@ -507,7 +579,40 @@
           "equals": "pass"
         }
       ],
-      "next": "archive_confirm"
+      "next": "delivery_review"
+    },
+    "build_pace": {
+      "title": "编码前开发节奏确认",
+      "user_ack": true,
+      "choice_key": "development_pace",
+      "choices": [
+        "staged",
+        "continuous",
+        "adjust"
+      ],
+      "choice_answers": {
+        "staged": [
+          "按检查点分阶段开发、推送和检视"
+        ],
+        "continuous": [
+          "一次完成全部代码，最终统一检视"
+        ],
+        "adjust": [
+          "调整检查点划分"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "checkpoint_plan"
+        }
+      ],
+      "next": {
+        "staged": "build",
+        "continuous": "build",
+        "adjust": "build_pace"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continuous"
     },
     "build": {
       "title": "编码实现",
@@ -529,6 +634,9 @@
           "statuses": [
             "OK"
           ]
+        },
+        {
+          "type": "checkpoint_plan_complete"
         }
       ],
       "next": "build_review"
@@ -632,7 +740,23 @@
           "equals": "pass"
         }
       ],
-      "next": "archive_confirm"
+      "next": "delivery_review"
+    },
+    "delivery_review": {
+      "title": "最终代码增量检视",
+      "evidence": [
+        {
+          "type": "final_review_clear"
+        }
+      ],
+      "next_by": "workflow",
+      "next": {
+        "full": "archive_confirm",
+        "hotfix": "archive_confirm",
+        "tweak": "archive_confirm",
+        "review": "push"
+      },
+      "skip_in_moonlight": true
     },
     "archive_confirm": {
       "title": "规格定稿确认(不可逆)",

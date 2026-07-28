@@ -136,6 +136,11 @@ Hook 另记本流程中 Agent 通过 Write/Edit/MultiEdit 成功改写的路径�
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
 SHA-256；SubagentStop 要求报告回传同一指纹并复算文件内容。主模型漏传配置、旧卡复用、手改任务卡均拿不到令牌。
+新单的开发检查点存于主状态的 `development_review` 子树：计划确认只冻结业务边界与任务结构，
+勾选/备注不使计划漂移；每批 compile 任务卡额外绑定 CP 编号。分阶段模式的收据同时绑定固定 base、
+当前 HEAD 和真实上游 ref，返工不前移 base；连续模式只记录批次 HEAD，最终在 `delivery_review`
+统一检视。新初始化状态以 `protocols.development_checkpoints=1` 声明采用该协议；旧状态没有此标记时
+必须跳过新插入的 pace 节点并走原有检视路径，不能升级后突然新增人工门。
 独立 Grill 的 prep/final 任务卡由 `action critic` 同样签名；PreToolUse 在 Task 派发时通过统一
 `_contract_state()` 先验任务卡，缺卡当场拦，不把错误拖到整只 agent 跑完。
 对配置声明为 AutoUT/java-autout/build-fix 的任务，SubagentStop 还从子会话 transcript 验真实 Skill 工具调用；
@@ -176,7 +181,7 @@ flow.json 步骤字段语义：
 | 类型 | 校验内容 |
 |---|---|
 | `glob` | 文件存在（`any` 数组任一命中；pattern 支持 `{配置键}` 占位） |
-| `branch_ok` | 当前 git 分支 == 配置的分支名（实测） |
+| `branch_ok` | 正常路径校验当前分支名与基线起点；已有工作时仅接受用户明确选择沿用、且绑定当前分支/HEAD/基线的裁决收据 |
 | `env_ok` | 环境检查全绿（实测，带 24h 缓存，见 3.5） |
 | `tasks_checked` | 本 change 的实现清单无未勾选项（v5 = change.md 的「# 实现清单」节；旧布局在途单 = tasks.md，来源由引擎 `tasks_source` 统一裁决） |
 | `tier_scope` | 轻量档范围硬校验:改动业务文件数超升级阈值(tweak>5/hotfix>3,与步骤文档升级条件一致)即拒,出路=升级工作流或 accept-risk tier_scope(绑 HEAD)。此前升级条件是纯提示词零机器锚点 |
@@ -394,6 +399,8 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **CodeCheck 是建议型工具**——REMAINING/工具故障不阻断插件内交付，最终流水线可能仍有自己的独立门禁；
   本地必须保留首检、Agent 报告或工具诊断，源码变化会让它们失效。`approve-exemption` 仅保留给旧在途流程兼容。
 - **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。配置确认是特殊强类型通道：`config-review` 先冻结完整配置、需求文档 SHA 与一次性收据 ID，用户最终回答必须绑定该收据；多问题的局部回答不能代替整单确认。连续失败只停止同命令自动重试，不形成永久锁，也不要求 exit/init。
+- **同一编码步骤内的多次检查点确认**还要绑定消息游标：收据呈现前已经存在的回答全部排除，
+  防止 CP1 的“继续”在 CP2 或最终检视被重复消费；宿主不回传新按钮正文时仍可让用户补一条纯文本选择。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 

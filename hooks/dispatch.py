@@ -840,7 +840,16 @@ def _capture_direct_prompt(text):
         text = (text or "").strip()
         if not text or not os.path.isfile(EXIT_STATE):
             return
-        row = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": text[:2000]}
+        captured = text[:2000]
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        row = {
+            "id": hashlib.sha256(
+                (str(time.time_ns()) + "\0direct\0" + captured).encode(
+                    "utf-8")).hexdigest()[:12],
+            "at": stamp,
+            "epoch": time.time(),
+            "text": captured,
+        }
 
         def append_direct(rec):
             msgs = rec.get("direct_messages", []) or []
@@ -2428,7 +2437,14 @@ def main():
                     _capture_direct_prompt(d.get("prompt") or "")
                 if _session_notice_due("direct", d, ev):
                     print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
-                          "不要运行 current/done，也不要自行重新进入。只有用户明确要求重新接回原流程时才 init。")
+                          "不要运行 current/done。用户明确要求恢复原流程或执行 /mae-flow review-fix 时，"
+                          "先运行 messages 取得真实消息 ID，再按命令说明执行 init；"
+                          ".mae-flow.json.exited 是退出指针，不是主状态，禁止移动或改名。")
+            elif ev == "posttooluse" and d.get("tool_name") == "AskUserQuestion":
+                # Direct 模式不恢复任何 gate/令牌，但若 Agent 为“是否重新启用”发起按钮确认，
+                # 真实答案必须进入同一授权账本。旧逻辑把整个 PostToolUse 旁路，造成用户明明
+                # 点了确认，init 却永远验不到。
+                _capture_direct_prompt(_text_of(d.get("tool_response")))
             _log("direct mode: bypass " + ev)
             rc = 0
         elif runtime.mode == RuntimeMode.INACTIVE and ev in (

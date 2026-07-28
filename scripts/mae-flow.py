@@ -939,6 +939,8 @@ def _source_changed_since(head, st=None):
     if not re.fullmatch(r"[0-9a-f]{7,64}", head):
         return None, "令牌基点格式异常"
     cur = sh("git rev-parse --verify HEAD")
+    if not cur:
+        return None, "无法读取当前 HEAD（仓库可能已切走、损坏或不再是 Git 工作区）"
     changed = []
     if cur and cur != head:
         # cat-file 探基点存在性(不用 rev-parse ^{commit}:^ 在 Windows cmd 是转义符)
@@ -2513,6 +2515,22 @@ def _state_sidecars():
             MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]
 
 
+def _clear_auxiliary_state():
+    """A new delivery round must not inherit tokens/messages from the old one."""
+    failed = []
+    for path in _state_sidecars():
+        if path == STATE_PATH or not os.path.exists(path):
+            continue
+        try:
+            remove_with_retry(path)
+        except OSError as exc:
+            failed.append("%s: %s" % (path, exc))
+    if failed:
+        die("开启新流程前无法清理旧辅助状态，继续会造成证据或消息串单："
+            + "；".join(failed)
+            + "。关闭占用这些文件的程序后重试；主状态和退出现场均未覆盖。", 2)
+
+
 def _unique_exit_dir(st):
     ticket = re.sub(r"[^A-Za-z0-9._-]+", "-", (st.get("config", {}) or {}).get("单号", "unknown"))
     base = os.path.join(".mae-flow-work", "exited",
@@ -3066,6 +3084,34 @@ def cmd_messages(st, args):
                 m["config_review_sha256"][:12]))
 
 
+def cmd_direct_messages(args):
+    """Show Direct-mode prompts/answers that may authorize a safe re-entry."""
+    rec = _read_exit_record()
+    rows = list(rec.get("direct_messages", []) or [])
+    if getattr(args, "id", None):
+        rows = [item for item in rows if item.get("id") == args.id]
+    if not rows:
+        die("退出后尚未捕获到用户消息。让用户直接发送恢复 Mae-Flow、"
+            "执行 /mae-flow review-fix 或开启另一流程的真实请求；"
+            "不要让 Agent 自行生成授权，也不要移动 .mae-flow.json.exited。", 2)
+    print("[mae-flow] Direct 模式捕获到的用户消息：")
+    for m in rows:
+        text = re.sub(r"\s+", " ", str(m.get("text", "") or "")).strip()
+        preview = text if getattr(args, "full", False) else text[:100]
+        print("  %s  %s  %s" % (
+            m.get("id", "(旧记录无ID)"), m.get("at", "?"), preview))
+        extracted = _trusted_answer_candidates(str(m.get("text", "") or ""))
+        compact_raw = re.sub(r"\s+", "", str(m.get("text", "") or ""))
+        extracted = [value for value in extracted if value != compact_raw]
+        if extracted:
+            print("    提取答案: " + " | ".join(extracted))
+    if any(not item.get("id") for item in rows):
+        print("旧记录没有消息 ID：请直接重新发送一次明确的恢复/换单请求，"
+              "Hook 会生成 ID；不需要再点一轮“确认”。")
+    print("恢复原流程：init --message-id <ID>")
+    print("保留旧现场并开启另一流程：init --new --message-id <ID>")
+
+
 def cmd_requirement_record(st, args):
     """从 Hook 捕获原文或已有文本文件生成统一 UTF-8 需求入口，并做写后回读校验。"""
     if (st or {}).get("current") != "config_confirm":
@@ -3134,29 +3180,146 @@ def _reopen_spec_archive(st):
     return True, ""
 
 
-def _resume_direct_mode(ack=""):
+def _explicit_direct_reentry(text):
+    """Whether captured user text explicitly asks Mae-Flow to take control again."""
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    lower = value.lower()
+    command = re.match(r"^/mae-flow(?::mae-flow)?(?:\s+([^\s]+))?", lower)
+    if command:
+        action = (command.group(1) or "").strip()
+        # 独立 ut/codecheck/grill/story/chain/help 不应重新启用完整流程；
+        # review-fix、月光宝盒和无参数完整入口都是明确的重新接管意图。
+        return action in ("", "review-fix", "moonlight", "月光宝盒")
+    # 否定必须先于自然语言关键词命中，但只认“整句拒绝”。业务请求里的
+    # “不要用长度判断，请改按 version”不能反过来被当成拒绝 review-fix。
+    negative = (
+        re.fullmatch(
+            r"(?:我)?(?:不确认|不要|暂不|暂时不要|先别|别|拒绝|取消|停止)\s*"
+            r"(?:重新)?(?:恢复|启用|接回|进入|使用|执行|开启)?\s*"
+            r"(?:mae[- ]?flow|review-fix|这个工作流|原流程|月光宝盒|moonlight)?"
+            r"[。.!！]?",
+            value, re.I)
+        or re.fullmatch(
+            r"(?:mae[- ]?flow|review-fix|这个工作流|原流程|月光宝盒|moonlight)\s*"
+            r"(?:不要|暂不|先别|拒绝|取消|停止)\s*"
+            r"(?:恢复|启用|接回|进入|使用|执行|开启)?[。.!！]?",
+            value, re.I)
+    )
+    if negative:
+        return False
+    if "review-fix" in lower:
+        # 兼容宿主去掉 slash 前缀后只留下 action + 参数的形态，但“review-fix
+        # 是什么/怎么用”只是咨询，不能因包含关键词就恢复门禁。
+        asks_only = bool(re.search(
+            r"(是什么|什么意思|怎么用|如何用|能不能|可以吗|是否|[?？])", value))
+        directs_action = bool(re.search(
+            r"(请|帮我|执行|开启|进入|使用|处理|修复|调整|改成|改为|方案.{0,12}变)",
+            value, re.I))
+        strong_directive = bool(re.search(
+            r"(请(?!问)|帮我|执行|开启|进入|直接(?:处理|修复|改)|"
+            r"(?:处理|修复|调整)一下|改成|改为)",
+            value, re.I))
+        if asks_only and not strong_directive:
+            return False
+        return bool(re.match(r"^review-fix(?:\s|$)", lower) or directs_action)
+    if re.search(r"月光宝盒|moonlight", value, re.I) and re.search(
+            r"开启|切换|继续|恢复|启用", value):
+        return True
+    names_flow = (
+        "mae-flow" in lower or "mae flow" in lower or "这个工作流" in value
+        or bool(re.search(r"(?:原|之前|先前)流程", value))
+        or bool(re.fullmatch(r"(?:确认)?重新启用(?:流程)?", value))
+    )
+    return names_flow and bool(re.search(
+        r"重新(?:使用|启用|进入|接回)?|恢复|接回|继续使用|确认重新|切回", value, re.I))
+
+
+def _direct_reentry_authorization(rec, ack="", message_id=""):
+    """Resolve a real Direct-mode user message and verify explicit re-entry intent."""
+    rows = list((rec or {}).get("direct_messages", []) or [])
+    if message_id:
+        rows = [row for row in rows if row.get("id") == message_id]
+        if not rows:
+            return "", "退出记录中不存在消息 ID %s" % message_id
+    needle = re.sub(r"\s+", "", ack or "")
+    matched_without_intent = False
+    for row in reversed(rows):
+        text = str(row.get("text", "") or "")
+        candidates = _trusted_answer_candidates(text)
+        for candidate in candidates:
+            if message_id or (needle and needle == candidate):
+                if _explicit_direct_reentry(candidate):
+                    return text, ""
+                matched_without_intent = True
+    if matched_without_intent:
+        return "", ("对应用户消息没有明确要求恢复/重新启用 Mae-Flow；"
+                    "普通改码请求不能被 Agent 解释成重新接管")
+    if message_id:
+        return "", "消息 ID %s 没有可验证的用户答案" % message_id
+    return "", ("--ack 必须与 Direct 模式捕获到的完整用户原话或按钮答案精确一致")
+
+
+def _read_exit_record():
+    try:
+        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+        return rec if isinstance(rec, dict) else {}
+    except Exception:
+        return {}
+
+
+def _exit_snapshot_path(rec):
+    dst = str((rec or {}).get("snapshot", "") or "")
+    return dst, (os.path.join(dst, STATE_PATH) if dst else "")
+
+
+def _preserve_exit_pointer(rec):
+    """Archive the latest pointer, including Direct-mode authorization messages."""
+    dst, _saved = _exit_snapshot_path(rec)
+    recovery = (dst if dst and os.path.isdir(dst)
+                else _unique_exit_dir({"config": {"单号": "restarted"}}))
+    os.makedirs(recovery, exist_ok=True)
+    target = os.path.join(recovery, "exit-record.json")
+    if rec:
+        atomic_write_json(target, rec)
+    elif not os.path.isfile(target):
+        # 损坏指针无法结构化保存时保留原始字节，避免 doctor/冲突收敛丢现场。
+        shutil.copy2(EXIT_PATH, target)
+    return recovery
+
+
+def _resume_direct_mode(ack="", message_id=""):
     """恢复退出前现场；直接开发期间若改过源码，只回退到必要的质量链入口。"""
     if not os.path.exists(EXIT_PATH):
         return None
-    try:
-        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
-    except Exception:
-        rec = {}
-    normalized_ack = re.sub(r"\s+", "", ack or "")
-    direct_messages = [re.sub(r"\s+", "", m.get("text", ""))
-                       for m in (rec.get("direct_messages", []) or [])]
-    if not normalized_ack or normalized_ack not in direct_messages:
-        die("当前项目处于普通开发模式。重新启用 mae-flow 会恢复门禁，必须由用户明确提出，并执行 "
-            "init --ack \"用户原话\"；普通改码请求不能由 Agent 自行解释成重新启用。", 2)
-    dst = rec.get("snapshot", "")
-    saved_state = os.path.join(dst, STATE_PATH) if dst else ""
+    rec = _read_exit_record()
+    _authorized, auth_why = _direct_reentry_authorization(
+        rec, ack=ack, message_id=message_id)
+    if not _authorized:
+        die("当前项目处于普通开发模式，重新启用会恢复门禁，但授权验真失败："
+            + auth_why
+            + "。先执行 messages 查看真实消息 ID，再使用 "
+              "init --message-id <ID>；恢复原流程不要加 --new，开启另一流程加 --new。"
+              "禁止移动、重命名或复制 .mae-flow.json.exited——它只是退出指针，"
+              "真正状态位于其 snapshot 指向的目录。", 2)
+    dst, saved_state = _exit_snapshot_path(rec)
     if not saved_state or not os.path.isfile(saved_state):
         die("退出现场缺少状态快照，不能自动恢复：%s。退出标记仍保留，请交维护人处理。" %
-            (saved_state or "(无 snapshot)"), 2)
+            (saved_state or "(无 snapshot)")
+            + " 如用户明确要放弃旧现场开启另一流程，执行 "
+              "init --new --message-id <messages输出的ID>；"
+              "禁止把 .mae-flow.json.exited 改名成 .mae-flow.json。", 2)
     try:
         st = json.load(open(saved_state, encoding="utf-8"))
     except Exception as exc:
         die("退出状态快照不可解析，不能自动恢复：%s" % exc, 2)
+
+    current_branch = sh("git branch --show-current")
+    recorded_branch = str(rec.get("branch", "") or "")
+    if recorded_branch and current_branch != recorded_branch:
+        die("退出前流程位于分支 %s，当前分支是 %s，不能把旧断点恢复到错误分支。"
+            "要续原流程请先 git checkout %s；要保留旧现场开启另一流程则使用 "
+            "init --new --message-id <ID>。退出指针尚未消费。"
+            % (recorded_branch, current_branch or "(detached/不可读)", recorded_branch), 2)
 
     changed, err = _source_changed_since(rec.get("head", ""), st)
     if err:
@@ -3204,13 +3367,58 @@ def _resume_direct_mode(ack=""):
                                           "at": now})
     if target != old_step:
         st.setdefault("step_heads", {})[target] = rec.get("head", "")
+    dst = _preserve_exit_pointer(rec)
     save_state(st)
-    os.remove(EXIT_PATH)
+    remove_with_retry(EXIT_PATH)
     print("[mae-flow] 已重新启用流程，退出现场仍保留在 %s；旧 agent/CodeCheck 令牌已清空。"
           % (dst or ".mae-flow-work/exited/"))
     if target != old_step:
         print("检测到退出期间改过源码：%s → %s，重新执行后续质量链。" % (old_step, target))
     return st
+
+
+def _start_new_from_direct(flow, ack="", message_id=""):
+    """Keep the exited snapshot for audit and deliberately start another flow."""
+    if not os.path.exists(EXIT_PATH):
+        die("当前没有已退出流程，init --new 无需使用；直接执行 init。", 2)
+    rec = _read_exit_record()
+    _authorized, auth_why = _direct_reentry_authorization(
+        rec, ack=ack, message_id=message_id)
+    if not _authorized:
+        die("开启另一流程的授权验真失败：" + auth_why
+            + "。先执行 messages，再用 init --new --message-id <ID>。"
+              "禁止手工移动 .mae-flow.json.exited。", 2)
+
+    # 先完成可能失败的环境前检和旧辅助状态清理，再消费退出指针。任何失败都仍
+    # 保持 Direct 模式，用户可原样重试，不留下半初始化现场。
+    try:
+        prepare_project(os.getcwd())
+    except CapabilityError as exc:
+        die("插件运行时预检失败，旧退出现场和指针均未改动：%s。"
+            "解决环境问题后原样重试 init --new。" % exc, 2)
+    _clear_auxiliary_state()
+
+    dst, saved_state = _exit_snapshot_path(rec)
+    dst = _preserve_exit_pointer(rec)
+    previous = None
+    if saved_state and os.path.isfile(saved_state):
+        try:
+            previous = json.load(open(saved_state, encoding="utf-8"))
+        except Exception:
+            previous = None
+    if previous:
+        sid = previous.get("current", "")
+        terminal = bool(flow.get("steps", {}).get(sid, {}).get("terminal"))
+        _append_history(
+            previous,
+            outcome=("已完成后开启新流程" if terminal else
+                     "用户保留退出现场并开启另一流程"))
+        if terminal:
+            # 终态换单仍维持 .last 语义，review-fix 可继承上一轮配置。
+            atomic_write_json(STATE_PATH + ".last", previous)
+    # 根指针由 cmd_init 在新主状态成功写盘后再消费；中途任何异常都会继续
+    # 保持 Direct 模式，避免“旧现场还在但恢复入口消失”的半完成状态。
+    return previous, dst
 
 
 def cmd_init(flow, args):
@@ -3219,24 +3427,66 @@ def cmd_init(flow, args):
         die("独立任务 %s(%s) 尚未收尾。先 action finish 或 action cancel；"
             "独立任务不会自动升级成完整流程。" % (
                 action.get("id", "?"), action.get("kind", "?")), 2)
-    resumed = _resume_direct_mode(args.ack or "")
-    if resumed is not None:
-        print_current(flow, resumed)
-        return
+    live_before = load_state()
+    has_exit = os.path.exists(EXIT_PATH)
+    new_exit_snapshot = ""
+    if (not live_before and not has_exit
+            and (getattr(args, "message_id", None) or args.ack)):
+        die("当前没有退出指针，--message-id/--ack 已失效，不能悄悄改成新建流程。"
+            "若确实要开启全新流程，请去掉这两个参数后执行 init；"
+            "若原本要恢复旧现场，请先用 doctor 查明退出指针为何不存在。", 2)
+    if getattr(args, "new", False) and live_before:
+        die("当前仍有完整流程状态，init --new 不会覆盖它。先查看 current/status；"
+            "确需放弃时走 /mae-flow exit 留存现场，再用 Direct 模式的 messages + "
+            "init --new --message-id。禁止删除或改名状态文件。", 2)
+    if getattr(args, "new", False):
+        _previous, new_exit_snapshot = _start_new_from_direct(
+            flow, args.ack or "", getattr(args, "message_id", "") or "")
+    elif not live_before:
+        resumed = _resume_direct_mode(
+            args.ack or "", getattr(args, "message_id", "") or "")
+        if resumed is not None:
+            # 退出现场本身已经终态时，“重新启用”不能只恢复到 end 然后原地
+            # 返回；继续走下面既有终态滚动逻辑，自动备份 .last 并开启下一轮。
+            if not flow["steps"].get(resumed.get("current"), {}).get("terminal"):
+                print_current(flow, resumed)
+                return
     old = load_state()
+    prepared = bool(getattr(args, "new", False))
+    auxiliary_cleared = prepared
     if old:
         sid = old.get("current")
         if flow["steps"].get(sid, {}).get("terminal"):
+            if not prepared:
+                try:
+                    prepare_project(os.getcwd())
+                except CapabilityError as exc:
+                    die("插件运行时预检失败，上一单状态和退出指针均未改动：%s" % exc, 2)
+                prepared = True
+            _clear_auxiliary_state()
+            auxiliary_cleared = True
             _append_history(old)
+            if os.path.exists(EXIT_PATH):
+                # FLOW 与 EXIT 冲突时有效主状态优先。终态 init 已获开启下一轮授权，
+                # 消费陈旧退出指针前仍把它留到过程区，绝不让旧 snapshot 覆盖主状态。
+                stale = _preserve_exit_pointer(_read_exit_record())
+                remove_with_retry(EXIT_PATH)
+                print("[mae-flow] 已收敛陈旧退出指针，旧记录保留在 %s。"
+                      % norm(stale))
             os.replace(STATE_PATH, STATE_PATH + ".last")
             print(f"[mae-flow] 上一单({old.get('config', {}).get('单号', '?')})已交付完成,"
                   f"旧状态备份为 {STATE_PATH}.last,开启新流程。")
         else:
-            die(f"流程已存在(进行中,当前步骤 {sid}),查看用 status;确要重来先删除 " + STATE_PATH)
-    try:
-        prepared = prepare_project(os.getcwd())
-    except CapabilityError as exc:
-        die("插件运行时预检失败，尚未创建流程状态，因此不会拦截普通开发: %s" % exc, 2)
+            die(f"流程已存在(进行中,当前步骤 {sid}),查看用 status。"
+                "不要删除或改名状态文件；确要放弃并开启另一流程，先执行 /mae-flow exit "
+                "留存现场，再按 Direct 模式 messages 输出使用 init --new。", 2)
+    if not prepared:
+        try:
+            prepare_project(os.getcwd())
+        except CapabilityError as exc:
+            die("插件运行时预检失败，尚未创建流程状态，因此不会拦截普通开发: %s" % exc, 2)
+    if not auxiliary_cleared:
+        _clear_auxiliary_state()
     _gitignore()
     dirty = _dirty_paths()
     st = {"current": flow["start"], "config": {}, "choices": {},
@@ -3245,6 +3495,10 @@ def cmd_init(flow, args):
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
     atomic_write_json(AGENT_WRITES_PATH, {"paths": {}})
     save_state(st)
+    if new_exit_snapshot and os.path.exists(EXIT_PATH):
+        remove_with_retry(EXIT_PATH)
+        print("[mae-flow] 已按用户明确授权开启另一流程；旧退出现场继续保留在 %s。"
+              % norm(new_exit_snapshot))
     print("[mae-flow] 流程已初始化；内置规格引擎已就绪，未创建项目级 Skill。")
     print_current(flow, st)
 
@@ -5461,7 +5715,7 @@ def cmd_moonlight(flow, st, args):
         resumed_from_direct = False
         authorized_preinit = False
         activation_request = ""
-        if os.path.exists(EXIT_PATH):
+        if os.path.exists(EXIT_PATH) and st is None:
             # 直接开发模式的用户消息保存在退出记录中。允许 shell 只传“月光宝盒/moonlight”
             # 这个短词，但恢复函数仍使用捕获到的完整原文验真。
             try:
@@ -5499,12 +5753,13 @@ def cmd_moonlight(flow, st, args):
         if flow["steps"].get(st.get("current", ""), {}).get("terminal"):
             # 上一单已交付完成:必须像 init 一样换单滚动。否则月光在终态(安全停点)上
             # 启用,整夜什么都不发生;授权已在旧状态的消息上验真通过,滚动后直接开新单。
-            _append_history(st)
-            os.replace(STATE_PATH, STATE_PATH + ".last")
             try:
                 prepare_project(os.getcwd())
             except CapabilityError as exc:
-                die("插件运行时预检失败,新一单尚未创建: %s" % exc, 2)
+                die("插件运行时预检失败，上一单状态仍保持可用：%s" % exc, 2)
+            _clear_auxiliary_state()
+            _append_history(st)
+            os.replace(STATE_PATH, STATE_PATH + ".last")
             st = _new_state()
             save_state(st)
             print(f"[mae-flow] 上一单已完成,旧状态备份为 {STATE_PATH}.last;月光宝盒在新单上开启。")
@@ -6078,7 +6333,9 @@ def print_direct_mode_status():
     print("退出时间: %s  原步骤: %s  原因: %s" %
           (rec.get("at", "?"), rec.get("step", "?"), rec.get("reason", "?")))
     print("现场保留在: " + rec.get("snapshot", ".mae-flow-work/exited/"))
-    print("只有用户明确要求重新接回原流程时才执行 init；init 会恢复原断点并重新取证。另一张新单请另开 worktree。")
+    print("用户明确要求恢复或开启评审修复时，先执行 messages 取得真实消息 ID："
+          "恢复原断点用 init --message-id <ID>；保留旧现场开启另一流程用 "
+          "init --new --message-id <ID>。不同单并行时再另开 worktree。")
 
 
 def cmd_runtime_doctor(runtime, args, state_error=""):
@@ -6256,10 +6513,13 @@ def main():
     if args.cmd == "report" and args.all:
         return cmd_report_all()   # 账本聚合是无状态命令,不要求存在在途单
     if runtime.mode == RuntimeMode.DIRECT:
+        if args.cmd == "messages":
+            return cmd_direct_messages(args)
         if args.cmd in ("current", "status", "doctor", "exit"):
             return print_direct_mode_status()
         die("当前项目已退出 mae-flow，普通开发不需要执行流程命令。"
-            "若用户明确要重新进入流程，请执行 init；旧质量证据不会复用。", 2)
+            "若用户明确要重新进入流程，先执行 messages，再按输出使用 init；"
+            "旧质量证据不会复用。禁止移动或改名 .mae-flow.json.exited。", 2)
     if runtime.mode == RuntimeMode.STANDALONE:
         if args.cmd in ("current", "status", "doctor"):
             return cmd_action_status()

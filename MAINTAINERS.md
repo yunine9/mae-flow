@@ -115,6 +115,11 @@ skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 损坏主状态进入 `corrupt`，Hook fail-open 保普通开发，但保留 `/mae-flow exit` 的独立逃生路径。
 终态后 `init` 先把本单摘要（耗时/goto/摩擦统计）追加进 `.mae-flow-history.jsonl`
 （gitignored + gate 防篡改；`report --all` 聚合展示，团队度量数据出口），再自动备份为 `.last` 开新档；非终态 `init` 拒绝。
+Direct 模式重入使用退出记录中的真实消息 ID：`init --message-id` 恢复原断点，
+`init --new --message-id` 保留旧 snapshot 后开启另一流程。AskUserQuestion 的结构化答案在 Direct
+模式只进入重入授权账本，不恢复其他 Hook 门禁或旧令牌。退出 snapshot 已是终态时，普通 init 直接沿用
+终态滚动语义开启下一轮，不能恢复到 `end` 后原地卡住。`.mae-flow.json.exited` 仅是控制指针，
+绝不能当作 `.mae-flow.json` 主状态使用。
 仓根可提交 `.mae-flow-defaults.json`（团队预设：编译方式/UT生成方式/UT运行命令等恒定项），
 require_sets 步骤的 `current` 会展示预填块；它只是候选值，配置阶段统一放进完整确认单一次确认，
 不再逐项要求用户签字。

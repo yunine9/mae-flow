@@ -82,9 +82,10 @@ python "<插件目录>/scripts/mae-flow.py" exit --interactive --reason "切换�
 
 退出只保留现场并解除接管，不回滚、不删除业务文件。命令成功后按普通开发请求执行，不再运行
 current/done，也不再自行补流程检查。只有用户后来明确要求“重新接回原流程”时才可执行 init；
-重新启用必须把用户原话传给 `init --ack "<用户原话>"`，工具会与直接模式期间捕获的真实消息精确匹配；
-普通改码请求不得被 Agent 擅自解释成重新启用。init 会重新取证，禁止复用退出前的编译、CodeCheck、UT
-或子 agent 令牌。若用户要做的是另一张新单，不要覆盖这份退出现场；按一仓一单原则建议另开 worktree。
+先执行 `messages` 取得本条真实消息 ID：恢复原断点用 `init --message-id <ID>`；保留旧现场开启另一流程
+用 `init --new --message-id <ID>`。普通改码请求不得被 Agent 擅自解释成重新启用。init 会重新取证，
+禁止复用退出前的编译、CodeCheck、UT 或子 agent 令牌。`.mae-flow.json.exited` 只是退出指针，禁止
+移动或改名成主状态；不同单需要并行时仍按一仓一单原则另开 worktree。
 
 ## 独立能力（明确点名时不启动完整流程）
 

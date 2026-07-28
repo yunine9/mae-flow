@@ -1165,10 +1165,15 @@ if flow:
                 reenable_blocked = exc.code == 2
             check("Agent 不能自行重新启用流程",
                   reenable_blocked and os.path.exists(mf.EXIT_PATH))
-            rec["direct_messages"] = [{"text": "重新使用 mae-flow 交付新需求"}]
+            rec["direct_messages"] = [{
+                "id": "resume-answer-1",
+                "text": json.dumps({
+                    "answers": {"是否恢复": "确认重新启用mae-flow"}
+                }, ensure_ascii=False),
+            }]
             mf._write_json_atomic(mf.EXIT_PATH, rec)
-            restored = mf._resume_direct_mode("重新使用 mae-flow 交付新需求")
-            check("用户明确确认后恢复原断点且清空旧令牌",
+            restored = mf._resume_direct_mode(message_id="resume-answer-1")
+            check("Direct 模式按钮确认可按真实消息ID恢复原断点且清空旧令牌",
                   not os.path.exists(mf.EXIT_PATH) and restored.get("current") == "config_confirm"
                   and os.path.isfile(mf.STATE_PATH) and not os.path.exists(mf.STATE_PATH + ".tokens"))
 
@@ -1191,6 +1196,306 @@ if flow:
                   resumed2.get("current") == "verify_recompile"
                   and "quality" not in resumed2 and "agent_tasks" not in resumed2
                   and not os.path.exists(mf.STATE_PATH + ".tokens"))
+        finally:
+            os.chdir(old_cwd)
+
+    # Direct 生命周期：终态恢复应自动换单；明确 review-fix 应保留旧现场并开启新轮次。
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            head = mf.sh("git rev-parse --verify HEAD")
+            snapshot = os.path.join(".mae-flow-work", "exited", "terminal")
+            os.makedirs(snapshot)
+            terminal_state = {
+                "current": "end", "config": {"单号": "REQ-END"},
+                "choices": {"workflow": "full"}, "history": [],
+                "started": "2026-07-27 10:00:00",
+            }
+            json.dump(
+                terminal_state,
+                open(os.path.join(snapshot, mf.STATE_PATH), "w", encoding="utf-8"),
+                ensure_ascii=False)
+            mf._write_json_atomic(mf.EXIT_PATH, {
+                "status": "exited", "snapshot": snapshot, "head": head,
+                "direct_messages": [{
+                    "id": "terminal-next",
+                    "text": "重新接回 mae-flow 开启下一单",
+                }],
+            })
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_init(flow, types.SimpleNamespace(
+                    ack=None, message_id="terminal-next", new=False))
+            terminal_new = mf.load_state()
+            terminal_last = json.load(open(
+                mf.STATE_PATH + ".last", encoding="utf-8"))
+            check("退出快照已终态时 init 自动备份上一单并开启新流程",
+                  terminal_new.get("current") == flow["start"]
+                  and terminal_last.get("current") == "end"
+                  and not os.path.exists(mf.EXIT_PATH))
+
+            # 不经 Direct 的普通终态换单也必须清掉上一轮辅助状态，不能把消息、
+            # Agent 令牌或失败计数带进下一张单。
+            terminal_new["current"] = "end"
+            terminal_new["config"] = {"单号": "REQ-END-2"}
+            mf.save_state(terminal_new)
+            mf._write_json_atomic(mf.STATE_PATH + ".tokens", {
+                "UT": {"status": "PASS", "step": "verify_ut"},
+            })
+            mf._write_json_atomic(mf.STATE_PATH + ".usermsg", [{
+                "text": "上一单消息", "step": "config_confirm",
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }])
+            mf._write_json_atomic(mf.FAILURE_PATH, {
+                "ack:config_confirm": {"count": 3},
+            })
+            mf._write_json_atomic(mf.AGENT_WRITES_PATH, {
+                "paths": {"old.cpp": {"tool": "file-write"}},
+            })
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_init(flow, types.SimpleNamespace(
+                    ack=None, message_id=None, new=False))
+            fresh_round = mf.load_state()
+            fresh_writes = json.load(open(
+                mf.AGENT_WRITES_PATH, encoding="utf-8"))
+            check("普通终态换单清空旧消息令牌和失败计数",
+                  fresh_round.get("current") == flow["start"]
+                  and not os.path.exists(mf.STATE_PATH + ".tokens")
+                  and not os.path.exists(mf.STATE_PATH + ".usermsg")
+                  and not os.path.exists(mf.FAILURE_PATH)
+                  and fresh_writes == {"paths": {}})
+        finally:
+            os.chdir(old_cwd)
+
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            stale_id_blocked = False
+            stale_id_err = io.StringIO()
+            try:
+                with contextlib.redirect_stderr(stale_id_err):
+                    mf.cmd_init(flow, types.SimpleNamespace(
+                        ack=None, message_id="missing-exit-record", new=False))
+            except SystemExit as exc:
+                stale_id_blocked = exc.code == 2
+            check("退出指针不存在时失效消息ID不会悄悄新建流程",
+                  stale_id_blocked and not os.path.exists(mf.STATE_PATH)
+                  and "不能悄悄改成新建流程" in stale_id_err.getvalue())
+        finally:
+            os.chdir(old_cwd)
+
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            head = mf.sh("git rev-parse --verify HEAD")
+            snapshot = os.path.join(".mae-flow-work", "exited", "paused")
+            os.makedirs(snapshot)
+            paused_state = {
+                "current": "verify_ut", "config": {"单号": "REQ-OLD"},
+                "choices": {"workflow": "full"}, "history": [],
+                "started": "2026-07-27 10:00:00",
+            }
+            json.dump(
+                paused_state,
+                open(os.path.join(snapshot, mf.STATE_PATH), "w", encoding="utf-8"),
+                ensure_ascii=False)
+            # 真实 exit 会先写一份退出时记录；后续 Direct 消息只追加到根指针。
+            # 重入前必须把最新版同步回来，不能因为旧文件已存在就丢授权审计。
+            json.dump(
+                {"status": "exited", "snapshot": snapshot,
+                 "direct_messages": []},
+                open(os.path.join(snapshot, "exit-record.json"),
+                     "w", encoding="utf-8"),
+                ensure_ascii=False)
+            review_prompt = (
+                "/mae-flow:mae-flow review-fix REQ-NEW "
+                "评审方案改为通过version判断字段")
+            original_branch = mf.sh("git branch --show-current")
+            mf._write_json_atomic(mf.EXIT_PATH, {
+                "status": "exited", "snapshot": snapshot, "head": head,
+                "branch": original_branch,
+                "direct_messages": [{
+                    "id": "review-new", "text": review_prompt,
+                }, {
+                    "id": "resume-old", "text": "重新接回 mae-flow",
+                }],
+            })
+            direct_messages_out = io.StringIO()
+            with contextlib.redirect_stdout(direct_messages_out):
+                mf.cmd_direct_messages(types.SimpleNamespace(
+                    id=None, full=False))
+            check("Direct 模式 messages 提供稳定ID和恢复/换单命令",
+                  "review-new" in direct_messages_out.getvalue()
+                  and "init --new --message-id" in direct_messages_out.getvalue())
+            check("Direct 重入只认明确动作而不把 review-fix 咨询当授权",
+                  not mf._explicit_direct_reentry("review-fix 是什么？")
+                  and not mf._explicit_direct_reentry("这个项目支持 review-fix 吗？")
+                  and not mf._explicit_direct_reentry("review-fix 能修复这个问题吗？")
+                  and not mf._explicit_direct_reentry("不确认重新启用mae-flow")
+                  and not mf._explicit_direct_reentry("不要恢复 mae-flow")
+                  and not mf._explicit_direct_reentry("暂时不要接回这个工作流")
+                  and mf._explicit_direct_reentry(
+                      "review-fix 现在方案有变动，请按 version 修复")
+                  and mf._explicit_direct_reentry(
+                      "/mae-flow:mae-flow review-fix 不要按字节长度判断，请改用version")
+                  and mf._explicit_direct_reentry("确认重新启用"))
+
+            status_out = io.StringIO()
+            with contextlib.redirect_stdout(status_out):
+                mf.print_direct_mode_status()
+            check("Direct 状态提示展示消息ID恢复和保留现场换单路径",
+                  "init --message-id" in status_out.getvalue()
+                  and "init --new --message-id" in status_out.getvalue())
+
+            invalid_err = io.StringIO()
+            invalid_blocked = False
+            try:
+                with contextlib.redirect_stderr(invalid_err):
+                    mf.cmd_init(flow, types.SimpleNamespace(
+                        ack="删掉命令前缀后的转述", message_id=None, new=True))
+            except SystemExit as exc:
+                invalid_blocked = exc.code == 2
+            check("重入授权失败保留退出指针并明确禁止手工改名",
+                  invalid_blocked and os.path.exists(mf.EXIT_PATH)
+                  and "禁止手工移动" in invalid_err.getvalue())
+
+            original_prepare = mf.prepare_project
+            preflight_blocked = False
+            try:
+                def fail_prepare(_root):
+                    raise mf.CapabilityError("预检失败夹具")
+
+                mf.prepare_project = fail_prepare
+                try:
+                    mf.cmd_init(flow, types.SimpleNamespace(
+                        ack=None, message_id="review-new", new=True))
+                except SystemExit as exc:
+                    preflight_blocked = exc.code == 2
+            finally:
+                mf.prepare_project = original_prepare
+            check("开启另一流程预检失败时不提前消费退出指针",
+                  preflight_blocked and os.path.exists(mf.EXIT_PATH)
+                  and not os.path.exists(mf.STATE_PATH))
+
+            original_save = mf.save_state
+            state_write_failed = False
+            try:
+                def fail_save(_state):
+                    raise RuntimeError("状态写盘失败夹具")
+
+                mf.save_state = fail_save
+                try:
+                    mf.cmd_init(flow, types.SimpleNamespace(
+                        ack=None, message_id="review-new", new=True))
+                except RuntimeError:
+                    state_write_failed = True
+            finally:
+                mf.save_state = original_save
+            check("开启另一流程主状态写盘失败时退出指针仍可恢复",
+                  state_write_failed and os.path.exists(mf.EXIT_PATH)
+                  and not os.path.exists(mf.STATE_PATH))
+
+            subprocess.run(
+                ["git", "checkout", "-qb", "direct-other"], check=True)
+            branch_err = io.StringIO()
+            wrong_branch_blocked = False
+            try:
+                with contextlib.redirect_stderr(branch_err):
+                    mf.cmd_init(flow, types.SimpleNamespace(
+                        ack=None, message_id="resume-old", new=False))
+            except SystemExit as exc:
+                wrong_branch_blocked = exc.code == 2
+            check("恢复原断点时错误分支会被挡住且退出指针仍可重试",
+                  wrong_branch_blocked and os.path.exists(mf.EXIT_PATH)
+                  and original_branch in branch_err.getvalue())
+            subprocess.run(["git", "checkout", "-q", original_branch], check=True)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_init(flow, types.SimpleNamespace(
+                    ack=None, message_id="review-new", new=True))
+            review_new = mf.load_state()
+            archived_exit = json.load(open(
+                os.path.join(snapshot, "exit-record.json"),
+                encoding="utf-8"))
+            check("明确 review-fix 可保留未完成旧现场并开启另一流程",
+                  review_new.get("current") == flow["start"]
+                  and os.path.isfile(os.path.join(snapshot, mf.STATE_PATH))
+                  and not os.path.exists(mf.EXIT_PATH))
+            check("消费退出指针前会把最新授权消息同步回快照",
+                  any(item.get("id") == "review-new"
+                      for item in archived_exit.get("direct_messages", [])))
+        finally:
+            os.chdir(old_cwd)
+
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            active = {
+                "current": "config_confirm", "config": {}, "choices": {},
+                "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            mf.save_state(active)
+            snapshot = os.path.join(".mae-flow-work", "exited", "stale")
+            os.makedirs(snapshot)
+            json.dump(
+                {
+                    "current": "verify_ut", "config": {"单号": "STALE"},
+                    "choices": {"workflow": "full"}, "history": [],
+                    "started": "2026-07-27 10:00:00",
+                },
+                open(os.path.join(snapshot, mf.STATE_PATH), "w", encoding="utf-8"),
+                ensure_ascii=False)
+            mf._write_json_atomic(mf.EXIT_PATH, {
+                "status": "exited", "snapshot": snapshot,
+                "head": mf.sh("git rev-parse --verify HEAD"),
+                "direct_messages": [{
+                    "id": "stale-resume", "text": "重新接回 mae-flow",
+                }],
+            })
+            conflict_blocked = False
+            try:
+                mf.cmd_init(flow, types.SimpleNamespace(
+                    ack=None, message_id="stale-resume", new=False))
+            except SystemExit as exc:
+                conflict_blocked = exc.code == 2
+            check("主状态与退出指针冲突时 init 不用旧 snapshot 覆盖有效主状态",
+                  conflict_blocked and mf.load_state().get("current") == "config_confirm")
+
+            moon_ack = "开启月光宝盒继续当前流程"
+            json.dump(
+                [{"text": moon_ack, "step": "config_confirm",
+                  "at": active["started"]}],
+                open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8"),
+                ensure_ascii=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_moonlight(flow, active, types.SimpleNamespace(
+                    action="on", ack="月光宝盒", reason=None))
+            conflict_moon = mf.load_state()
+            check("主状态与退出指针冲突时月光入口继续当前主状态",
+                  conflict_moon.get("current") == "config_confirm"
+                  and mf._moonlight(conflict_moon)
+                  and os.path.exists(mf.EXIT_PATH))
         finally:
             os.chdir(old_cwd)
 
@@ -1264,6 +1569,49 @@ if flow:
                 mf.ev_codecheck_clean = old_clean
             check("CodeCheck 已留痕后不在 done 重复现场长跑",
                   cc_ok and not cc_why)
+        finally:
+            os.chdir(old_cwd)
+
+    # 月光宝盒在终态换单时与普通 init 使用同一套辅助状态清场。
+    with _TmpDir() as td:
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(td)
+            subprocess.run(["git", "init", "-q"], check=True)
+            subprocess.run(["git", "config", "user.email", "mae-flow@test.invalid"], check=True)
+            subprocess.run(["git", "config", "user.name", "MAE Flow Test"], check=True)
+            open("biz.cpp", "w", encoding="utf-8").write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], check=True)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+            terminal_moon = {
+                "current": "end", "config": {"单号": "REQ-MOON-END"},
+                "choices": {"workflow": "full"}, "history": [], "started": now,
+            }
+            mf.save_state(terminal_moon)
+            mf._write_json_atomic(mf.STATE_PATH + ".usermsg", [{
+                "text": "开启月光宝盒继续下一单", "step": "end", "at": now,
+            }])
+            mf._write_json_atomic(mf.STATE_PATH + ".tokens", {
+                "UT": {"status": "PASS", "step": "verify_ut"},
+            })
+            mf._write_json_atomic(mf.FAILURE_PATH, {"ack:config_confirm": {"count": 2}})
+            mf._write_json_atomic(mf.AGENT_WRITES_PATH, {
+                "paths": {"old.cpp": {"tool": "file-write"}},
+            })
+            with contextlib.redirect_stdout(io.StringIO()):
+                mf.cmd_moonlight(flow, terminal_moon, types.SimpleNamespace(
+                    action="on", ack="月光宝盒", reason=None))
+            moon_new = mf.load_state()
+            moon_writes = json.load(open(
+                mf.AGENT_WRITES_PATH, encoding="utf-8"))
+            check("月光终态换单同样清空旧辅助状态",
+                  moon_new.get("current") == flow["start"]
+                  and mf._moonlight(moon_new)
+                  and not os.path.exists(mf.STATE_PATH + ".tokens")
+                  and not os.path.exists(mf.STATE_PATH + ".usermsg")
+                  and not os.path.exists(mf.FAILURE_PATH)
+                  and moon_writes == {"paths": {}})
         finally:
             os.chdir(old_cwd)
 
@@ -2468,6 +2816,31 @@ with _TmpDir() as td:
         cwd=td, input=payload, text=True, capture_output=True, timeout=10)
     check("仅安装插件、未 init 时所有工具门禁完整旁路", inactive.returncode == 0)
 
+    with open(os.path.join(td, ".mae-flow.json.exited"), "w", encoding="utf-8") as f:
+        json.dump({
+            "status": "exited", "snapshot": ".mae-flow-work/exited/fixture",
+            "direct_messages": [],
+        }, f, ensure_ascii=False)
+    direct_answer_payload = json.dumps({
+        "cwd": td,
+        "tool_name": "AskUserQuestion",
+        "tool_response": {
+            "answers": {"是否恢复": "确认重新启用mae-flow"},
+        },
+    }, ensure_ascii=False) + "\n"
+    direct_answer = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "posttooluse"],
+        cwd=td, input=direct_answer_payload.encode("utf-8"),
+        capture_output=True, timeout=10)
+    direct_record = json.load(open(
+        os.path.join(td, ".mae-flow.json.exited"), encoding="utf-8"))
+    direct_rows = direct_record.get("direct_messages", [])
+    check("Direct 模式旁路门禁但仍捕获恢复按钮的真实答案",
+          direct_answer.returncode == 0 and len(direct_rows) == 1
+          and direct_rows[0].get("id")
+          and "确认重新启用mae-flow" in direct_rows[0].get("text", ""))
+
+    os.remove(os.path.join(td, ".mae-flow.json.exited"))
     review_sha = "a" * 64
     review_id = "review-test-001"
     state = {"current": "config_confirm", "config": {}, "choices": {},

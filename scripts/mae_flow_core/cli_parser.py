@@ -36,6 +36,12 @@ def parse_args(argv=None):
     sub = parser.add_subparsers(dest="cmd", required=True)
     init = sub.add_parser("init")
     init.add_argument("--ack")
+    init.add_argument(
+        "--message-id",
+        help="直接模式下 messages 输出的真实用户消息 ID，避免把长原话重新塞进 shell")
+    init.add_argument(
+        "--new", action="store_true",
+        help="保留已退出的旧现场并开启另一轮流程；未指定时恢复原流程")
     sub.add_parser("current")
     done = sub.add_parser("done")
     done.add_argument("--ack")

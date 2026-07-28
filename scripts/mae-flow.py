@@ -54,12 +54,15 @@ from mae_flow_core import (
     save_action as core_save_action,
     save_versioned_json,
     update_json,
+    append_codecheck_event,
     capability_diagnostics,
+    codecheck_log_path,
     ensure_codecheck,
     prepare_project,
     render_pack,
     run_comet,
     run_openspec,
+    save_codecheck_artifact,
 )
 from mae_flow_core.moonlight import (
     QUALITY_STEPS as MOONLIGHT_QUALITY_STEPS,
@@ -276,20 +279,75 @@ def _agent_written_paths():
     }
 
 
-def _trusted_harness_commit_path(path):
-    """Paths Mae-Flow/Comet may create or move without an Edit/Write event."""
+def _is_story_document(path):
+    """Recognize STORY content even when an agent writes it to the wrong tree."""
     p = re.sub(r"^(?:\./)+", "", norm(path))
-    return (
-        p in {".gitignore", ".gitattributes"}
-        or p.startswith("openspec/")
-        or p.startswith("docs/req/")
-        or p.startswith("docs/review/")
-        or p.startswith("docs/clarifications-")
-        or p.startswith("docs/codecheck-exempt-")
-    )
+    if not p.lower().endswith(".md"):
+        return False
+    if "story" in os.path.basename(p).lower():
+        return True
+    try:
+        with open(p, encoding="utf-8", errors="replace") as stream:
+            sample = stream.read(65536)
+    except OSError:
+        # A staged file may have been moved/deleted from the worktree while its
+        # old blob is still queued for commit. Inspect the index too, otherwise
+        # `notes.md` containing a STORY could evade the content check.
+        sample = argv_out(["git", "show", ":" + p])[:65536]
+        if not sample:
+            return False
+    return bool(re.search(r"(?mi)^#\s*STORY[-：:]|Story转测自检表", sample))
 
 
-def _pending_commit_files(command=""):
+def _trusted_harness_commit_path(path, st=None):
+    """Paths the current delivery may create without an Edit/Write event.
+
+    OpenSpec is deliberately scoped to the active change/archive. Treating the
+    whole tree as trusted lets an old untracked file ride a later
+    ``git add openspec/`` without even a provenance warning.
+    """
+    p = re.sub(r"^(?:\./)+", "", norm(path))
+    if p in {".gitignore", ".gitattributes"}:
+        return True
+    if (p.startswith("docs/req/") or p.startswith("docs/review/")
+            or p.startswith("docs/clarifications-")
+            or p.startswith("docs/codecheck-exempt-")):
+        return True
+    if not p.startswith("openspec/") or _is_story_document(p):
+        return False
+    if p in {"openspec/config.yaml", "openspec/config.yml"}:
+        return True
+    state = st or {}
+    config = state.get("config", {}) or {}
+    change_name = str(config.get("CHANGE_NAME", "") or "")
+    active = "openspec/changes/" + change_name if change_name else ""
+    if active and (p == active or p.startswith(active + "/")):
+        return True
+    spec_data = state.get("spec", {}) or {}
+    archive_name = str(spec_data.get("archived_to", "") or "")
+    archived = ("openspec/changes/archive/" + archive_name
+                if archive_name else "")
+    if archived and (p == archived or p.startswith(archived + "/")):
+        return True
+    archive_paths = {
+        re.sub(r"^(?:\./)+", "", norm(item))
+        for item in spec_data.get("archive_paths", []) or []
+    }
+    if any(p == item or p.startswith(item.rstrip("/") + "/")
+           for item in archive_paths if item):
+        return True
+    # Old in-flight states predate archive_paths. During their archive/push
+    # handoff, specs are legitimate harness output; unchanged initial dirt is
+    # still rejected independently by the carry-over check below.
+    if (p.startswith("openspec/specs/")
+            and (state.get("current") == "archive"
+                 or (spec_data.get("phase") == "archived"
+                     and state.get("current") == "push"))):
+        return True
+    return False
+
+
+def _pending_commit_files(command="", st=None):
     """Inspect files that a commit is about to include.
 
     Staged paths are authoritative. For `git add ... && git commit ...` in one
@@ -322,8 +380,18 @@ def _pending_commit_files(command=""):
 
     def has_provenance(path):
         return (_repo_path_identity(path) in written
-                or _trusted_harness_commit_path(path))
+                or _trusted_harness_commit_path(path, st))
 
+    inherited = [
+        path for path in candidates
+        if _unchanged_initial_dirty(path, st or {})
+        and _repo_path_identity(path) not in written
+    ]
+    foreign_openspec = [
+        path for path in candidates
+        if path.startswith("openspec/")
+        and not _trusted_harness_commit_path(path, st)
+    ]
     unproven = [path for path in candidates if not has_provenance(path)]
     strong_unproven = [
         path for path in unproven
@@ -333,7 +401,7 @@ def _pending_commit_files(command=""):
         path for path in candidates
         if path not in strong_unproven and _build_artifact_confidence(path)
     ]
-    return strong_unproven, unproven, artifact_hints
+    return inherited, foreign_openspec, strong_unproven, unproven, artifact_hints
 
 
 def find_project_root(start=None):
@@ -1481,6 +1549,93 @@ def ev_clean_paths(spec, st):
     return False, "以下产物未提交(或有未提交改动),先 git add/commit 再 done: " + "、".join(dirty)
 
 
+def _archive_delivery_paths(st):
+    """Return only the paths produced by this delivery's archive operation."""
+    data = (st or {}).get("spec", {}) or {}
+    paths = [
+        re.sub(r"^(?:\./)+", "", norm(path))
+        for path in data.get("archive_paths", []) or []
+        if isinstance(path, str) and path.strip()
+    ]
+    if paths:
+        return list(dict.fromkeys(paths))
+
+    # Compatibility for an archive completed by a pre-upgrade in-flight state:
+    # archived_to identifies the moved change. The exact merged specs were not
+    # persisted then, so derive only currently dirty spec files and exclude
+    # unchanged dirt that was already present when this delivery started.
+    archive_name = str(data.get("archived_to", "") or "")
+    if archive_name:
+        paths.append("openspec/changes/archive/" + archive_name)
+    paths.extend(
+        path for path in _dirty_paths()
+        if path.startswith("openspec/specs/")
+        and not _unchanged_initial_dirty(path, st or {})
+    )
+    return list(dict.fromkeys(paths))
+
+
+def ev_archive_paths_clean(spec, st):
+    """Require this archive's exact outputs to be committed, not all OpenSpec."""
+    paths = _archive_delivery_paths(st)
+    if not paths:
+        return False, (
+            "缺少本次定稿的精确产物清单；重新执行 spec archive，"
+            "或由维护人核对旧在途状态后再推进")
+    dirty = []
+    for path in paths:
+        out = argv_out(["git", "status", "--porcelain", "--", path])
+        if out:
+            dirty.append(f"{path}({out.splitlines()[0][:2].strip()})")
+    if not dirty:
+        return True, ""
+    return False, (
+        "本次定稿产物尚未提交: " + "、".join(dirty)
+        + "。只精确 git add 上述路径并提交；不要 git add openspec/，"
+          "它可能卷入上一单遗留文件")
+
+
+def _committed_delivery_paths(st):
+    """List paths committed in this delivery's quality scope."""
+    scope, err = _scope_diff(st)
+    if err:
+        return [], err
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--name-only",
+             "--no-renames", scope, "--"],
+            shell=False, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+    except Exception as exc:
+        return [], str(exc)
+    if result.returncode != 0:
+        return [], (result.stderr or result.stdout or "git diff 失败").strip()
+    changed = {
+        re.sub(r"^(?:\./)+", "", norm(path))
+        for path in result.stdout.splitlines() if path.strip()
+    }
+    return sorted(changed), ""
+
+
+def _committed_initial_carryover(st):
+    """Find unchanged pre-flow dirt that was committed into this delivery."""
+    if not st or not st.get("initial_dirty"):
+        return [], ""
+    changed, err = _committed_delivery_paths(st)
+    if err:
+        return [], err
+    changed = set(changed)
+    written = _agent_written_paths()
+    carried = [
+        path for path in (st.get("initial_dirty", []) or [])
+        if path in changed
+        and _unchanged_initial_dirty(path, st)
+        and _repo_path_identity(path) not in written
+    ]
+    return carried, ""
+
+
 def ev_pushed(spec, st):
     """实测本地 HEAD 已推送到远端上游(push 步证据,推没推成不看口头汇报)。"""
     cur_branch = sh("git branch --show-current")
@@ -1498,6 +1653,33 @@ def ev_pushed(spec, st):
             "本地 HEAD 与远端上游不一致(未推送/推送失败/远端有新提交):"
             "先尝试普通 git push -u origin HEAD；若远端领先，执行 git fetch 后展示分叉，"
             "不要自动 rebase、reset 或 force-push（可能改写已检视检查点）")
+    carried, carry_err = _committed_initial_carryover(st)
+    if carry_err:
+        return False, "无法核对是否夹带上一单遗留文件:" + carry_err
+    if carried:
+        return False, (
+            "远端提交夹带了流程启动前已存在、且本单 Agent 未实际改写的文件: "
+            + "、".join(carried[:8])
+            + ("…" if len(carried) > 8 else "")
+            + "。这通常是上一单选择“不上传”后遗留的文件。"
+              "请用普通后续提交精确移除这些文件并重新 push；"
+              "不要 amend/rebase/force-push 改写已检视历史。"
+              "若本单确实需要它，先让 Agent 按本单需求实际修改并重新检视")
+    committed_paths, committed_err = _committed_delivery_paths(st)
+    if committed_err:
+        return False, "无法核对已推送 OpenSpec 的归属:" + committed_err
+    foreign_openspec = [
+        path for path in committed_paths
+        if path.startswith("openspec/")
+        and not _trusted_harness_commit_path(path, st)
+    ]
+    if foreign_openspec:
+        return False, (
+            "远端提交含不属于当前 CHANGE_NAME/本次归档的 OpenSpec 文件: "
+            + "、".join(foreign_openspec[:8])
+            + ("…" if len(foreign_openspec) > 8 else "")
+            + "。请用普通后续提交精确移除并重新 push；"
+              "STORY 不入库时应移入 .mae-flow-work/story")
     current = set(_dirty_paths())
     initial = set(st.get("initial_dirty", []))
     if "initial_dirty" in st:
@@ -1518,7 +1700,8 @@ def ev_pushed(spec, st):
     written = _agent_written_paths()
     new_dirty = {
         p for p in changed_during_flow
-        if _repo_path_identity(p) in written or _trusted_harness_commit_path(p)
+        if (_repo_path_identity(p) in written
+            or _trusted_harness_commit_path(p, st))
     }
     story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
     if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
@@ -1729,8 +1912,11 @@ def _scope_classify_codecheck(result, st, files):
             kept.append((rule, wfile, line))
         else:
             excluded.append((rule, wfile, line))
-    return {"total": len(kept), "pairs": kept,
-            "commands": result.get("commands", [])}, excluded
+    return {
+        "total": len(kept), "pairs": kept,
+        "commands": result.get("commands", []),
+        "log_path": result.get("log_path", ""),
+    }, excluded
 
 
 def _scope_filter_codecheck(result, st, files):
@@ -1786,11 +1972,31 @@ def _codecheck_launch(batch, executable=None, windows=None):
     return display, True, display
 
 
-def _run_codecheck(files):
+def _run_codecheck(files, st=None, phase="scan"):
     """执行 CodeCheck 并返回机器结果；scan、done 复核共用，避免两套解析口径漂移。"""
+    log_state = st if isinstance(st, dict) else {}
+    head = sh("git rev-parse --verify HEAD")
+    log_path = append_codecheck_event(
+        os.getcwd(), log_state, "run.started", {
+            "phase": phase, "cwd": os.path.abspath(os.getcwd()),
+            "head": head, "files": list(files), "file_count": len(files),
+        })
     capability = ensure_codecheck(install=True)
+    append_codecheck_event(
+        os.getcwd(), log_state, "capability.checked", {
+            "phase": phase,
+            "available": bool(capability.get("available")),
+            "path": capability.get("path", ""),
+            "detail": capability.get("detail", ""),
+            "installed": capability.get("installed"),
+        })
     if not capability.get("available"):
         detail = str(capability.get("detail", "")).strip()[-1200:]
+        append_codecheck_event(
+            os.getcwd(), log_state, "run.failed", {
+                "phase": phase, "kind": "capability-unavailable",
+                "detail": detail,
+            })
         return None, (
             "CodeCheck CLI 当前不可用。Mae-Flow 已按公司内网源尽力自动安装，但没有成功；"
             "这不会触发重复安装或派修复 Agent。"
@@ -1802,32 +2008,82 @@ def _run_codecheck(files):
     # 逗号会破坏 -f 的批次列表。这类文件名先拒绝,比"静默检错文件"或注入安全得多。
     risky = [f for f in files if re.search(r"[&|^%<>;,]", f)]
     if risky:
+        append_codecheck_event(
+            os.getcwd(), log_state, "run.failed", {
+                "phase": phase, "kind": "unsafe-file-name", "files": risky,
+            })
         return None, (
             "以下文件名含 cmd 元字符或逗号,无法安全传入 codecheck -f: "
             + "、".join(risky[:5])
             + "。请重命名文件或将其移出本次检查范围后重试。")
     total, pairs, commands = 0, [], []
-    for batch in _batches(files):
+    batches = _batches(files)
+    for batch_index, batch in enumerate(batches, 1):
         launch, use_shell, cmd = _codecheck_launch(batch, executable=executable)
         commands.append(cmd)
         started = time.time()
+        append_codecheck_event(
+            os.getcwd(), log_state, "command.started", {
+                "phase": phase, "batch": batch_index,
+                "batch_count": len(batches), "files": batch,
+                "command": cmd, "launch": launch,
+                "shell": use_shell, "executable": executable or "",
+            })
         try:
             r = subprocess.run(launch, shell=use_shell, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=900)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            append_codecheck_event(
+                os.getcwd(), log_state, "command.failed", {
+                    "phase": phase, "batch": batch_index,
+                    "command": cmd, "kind": "timeout",
+                    "timeout_seconds": 900,
+                    "stdout": save_codecheck_artifact(
+                        os.getcwd(), log_state,
+                        "batch-%d-timeout-stdout" % batch_index,
+                        getattr(exc, "stdout", "") or ""),
+                    "stderr": save_codecheck_artifact(
+                        os.getcwd(), log_state,
+                        "batch-%d-timeout-stderr" % batch_index,
+                        getattr(exc, "stderr", "") or ""),
+                })
             return None, "codecheck 现场检查超时(>15min)——批次过大或服务异常"
         except OSError as e:
+            append_codecheck_event(
+                os.getcwd(), log_state, "command.failed", {
+                    "phase": phase, "batch": batch_index,
+                    "command": cmd, "kind": "launch-error",
+                    "error": str(e),
+                })
             return None, "codecheck CLI 无法启动: " + str(e)
-        out = (r.stdout or "") + (r.stderr or "")
+        stdout, stderr = r.stdout or "", r.stderr or ""
+        out = stdout + stderr
+        stdout_artifact = save_codecheck_artifact(
+            os.getcwd(), log_state,
+            "batch-%d-stdout" % batch_index, stdout)
+        stderr_artifact = save_codecheck_artifact(
+            os.getcwd(), log_state,
+            "batch-%d-stderr" % batch_index, stderr)
         rp = re.search(r"检查报告已保存到:\s*(.+)", out)
         rtxt = out
+        report_path = ""
         if rp:
+            report_path = rp.group(1).strip()
             try:
-                rtxt = open(rp.group(1).strip(), encoding="utf-8", errors="replace").read()
+                with open(report_path, encoding="utf-8", errors="replace") as stream:
+                    rtxt = stream.read()
             except OSError:
                 pass
+        report_artifact = (
+            save_codecheck_artifact(
+                os.getcwd(), log_state,
+                "batch-%d-report" % batch_index, rtxt, ".md")
+            if rtxt != out else None)
         count = _parse_codecheck_count(out, rtxt)
         json_pairs = []
+        parsed_from = "console-or-report" if count is not None else ""
+        parsed_json_path = ""
+        parsed_json_artifact = None
         if count is None:
             candidates = [os.path.join(".codecheckcli", "codecheck-result.json")]
             if rp:
@@ -1838,9 +2094,33 @@ def _run_codecheck(files):
                         continue
                     count, json_pairs = _parse_codecheck_json(jp)
                     if count is not None:
+                        parsed_from = "json"
+                        parsed_json_path = os.path.abspath(jp)
+                        try:
+                            with open(jp, encoding="utf-8",
+                                      errors="replace") as stream:
+                                parsed_json_artifact = save_codecheck_artifact(
+                                    os.getcwd(), log_state,
+                                    "batch-%d-result-json" % batch_index,
+                                    stream.read(), ".json")
+                        except OSError:
+                            pass
                         break
                 except OSError:
                     continue
+        append_codecheck_event(
+            os.getcwd(), log_state, "command.completed", {
+                "phase": phase, "batch": batch_index,
+                "batch_count": len(batches), "command": cmd,
+                "return_code": r.returncode,
+                "duration_ms": int((time.time() - started) * 1000),
+                "parsed_count": count, "parsed_from": parsed_from,
+                "reported_path": report_path,
+                "parsed_json_path": parsed_json_path,
+                "parsed_json": parsed_json_artifact,
+                "stdout": stdout_artifact, "stderr": stderr_artifact,
+                "report": report_artifact,
+            })
         if count is None:
             d = os.path.join(".mae-flow-work", "codecheck-diagnostics")
             os.makedirs(d, exist_ok=True)
@@ -1849,6 +2129,12 @@ def _run_codecheck(files):
                 f.write("COMMAND: " + cmd + "\nRETURN_CODE: " + str(r.returncode) + "\n\n" + out)
                 if rtxt != out:
                     f.write("\n\n===== REPORT =====\n" + rtxt)
+            append_codecheck_event(
+                os.getcwd(), log_state, "run.failed", {
+                    "phase": phase, "kind": "unparsed-output",
+                    "batch": batch_index, "command": cmd,
+                    "diagnostic": os.path.abspath(snap),
+                })
             me = os.path.abspath(sys.argv[0])
             return None, ("codecheck 已返回但告警数无法解析。已尝试控制台、Markdown 汇总/明细和 JSON 结果；"
                           f"完整现场已保存到 {snap}。这是工具兼容问题，不要派修复 Agent、不要猜 0 条。"
@@ -1871,7 +2157,16 @@ def _run_codecheck(files):
                        or os.path.basename(x).lower() == os.path.basename(file_name).lower()]
             pairs.append((rule, matches[0] if len(matches) == 1 else norm(file_name),
                           line))
-    return {"total": total, "pairs": pairs, "commands": commands}, ""
+    append_codecheck_event(
+        os.getcwd(), log_state, "run.completed", {
+            "phase": phase, "head": head, "total": total,
+            "pairs": pairs, "commands": commands,
+            "log_path": log_path or codecheck_log_path(os.getcwd(), log_state),
+        })
+    return {
+        "total": total, "pairs": pairs, "commands": commands,
+        "log_path": log_path or codecheck_log_path(os.getcwd(), log_state),
+    }, ""
 
 
 def _parse_codecheck_count(console, report):
@@ -1983,6 +2278,11 @@ def ev_codecheck_clean(spec, st):
     if err:
         return False, err
     if not files:
+        append_codecheck_event(
+            os.getcwd(), st, "verify.empty", {
+                "head": sh("git rev-parse --verify HEAD"),
+                "reason": "no-business-code-files",
+            })
         return True, ""
     # 校准实锤:零告警正常路上 fullcheck 必然跑两遍(scan 一遍+done 复核一遍,
     # 每次 done 重试再+1)。scan 是 harness 亲跑的真实动作、记录绑 HEAD+文件清单
@@ -1995,6 +2295,11 @@ def ev_codecheck_clean(spec, st):
             and scan.get("files") == files and scan.get("head")):
         changed, cerr = _source_changed_since(scan.get("head"), st)
         if not cerr and not changed:
+            append_codecheck_event(
+                os.getcwd(), st, "verify.cache_reused", {
+                    "kind": "clean-scan", "head": scan.get("head", ""),
+                    "files": files, "count": 0,
+                })
             return True, ""
     ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
     # 豁免文件未提交是纯本地廉价事实，先报再跑昂贵 CLI；提交后复用下面绑定
@@ -2013,8 +2318,13 @@ def ev_codecheck_clean(spec, st):
     if use_verified:
         total = int(verified.get("count", 0))
         pairs = verified.get("pairs", []) or []
+        append_codecheck_event(
+            os.getcwd(), st, "verify.cache_reused", {
+                "kind": "verification", "head": verified.get("head", ""),
+                "files": files, "count": total, "pairs": pairs,
+            })
     else:
-        result, err = _run_codecheck(files)
+        result, err = _run_codecheck(files, st, "harness-verify")
         if err:
             manual = (st.get("quality", {}) or {}).get("codecheck_manual", {})
             same_files = manual.get("files") == files
@@ -2037,7 +2347,13 @@ def ev_codecheck_clean(spec, st):
         st.setdefault("quality", {})["codecheck_verify"] = {
             "step": st.get("current"), "head": sh("git rev-parse --verify HEAD"),
             "files": files, "count": total, "pairs": pairs,
+            "log_path": result.get("log_path", ""),
             "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        append_codecheck_event(
+            os.getcwd(), st, "verify.completed", {
+                "head": st["quality"]["codecheck_verify"]["head"],
+                "files": files, "count": total, "pairs": pairs,
+            })
     if total == 0:
         return True, ""
     if not os.path.exists(ex):
@@ -2136,6 +2452,7 @@ EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
             "spec_validate": ev_spec_validate, "tier_scope": ev_tier_scope,
             "pushed": ev_pushed, "agent_ran": ev_agent_ran,
             "content_free": ev_content_free, "clean_paths": ev_clean_paths,
+            "archive_paths_clean": ev_archive_paths_clean,
             "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
             "review_agent_or_no_code": ev_review_agent_or_no_code,
             "agent_or_no_source": ev_agent_or_no_source,
@@ -2984,7 +3301,10 @@ def _git_local_runtime_ignore():
     path = os.path.abspath(path)
     marker = "/.mae-flow-work/"
     try:
-        old = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
+        old = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as stream:
+                old = stream.read()
         if marker in {line.strip() for line in old.splitlines()}:
             return
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -3207,10 +3527,23 @@ def _action_task_card(action, kind, stage=""):
     }
     action.setdefault("tokens", {}).pop(label, None)
     action.setdefault("rejections", {}).pop(label, None)
+    if label == "CODECHECK":
+        append_codecheck_event(
+            os.getcwd(), action, "agent.task_created", {
+                "standalone": True,
+                "task_path": os.path.abspath(path),
+                "task_sha256": digest,
+                "head": head,
+                "allowed_files": scan.get("files", []),
+                "scan_count": scan.get("count"),
+            })
     _save_action(action)
     agent = {"UT": "ut-generator-agent", "CODECHECK": "codecheck-fix-agent",
              "GRILL": "grill-critic-agent"}[label]
     print(f"[mae-flow] 独立 {label} 任务卡已生成: {path}")
+    if label == "CODECHECK":
+        print("[mae-flow] CodeCheck 详细日志: %s"
+              % norm(codecheck_log_path(os.getcwd(), action)))
     print("启动 %s 时只传这一句:\n读取并严格执行任务卡 \"%s\"；"
           "最终报告必须原样带 TASK_CARD_SHA256: %s" % (agent, path, digest))
     return path
@@ -3316,7 +3649,13 @@ def cmd_action_confirm_scope(flow, args):
     action["scope_confirmed_ack"] = args.ack
     _save_action(action)
     if action["kind"] == "codecheck":
-        result, err = _run_codecheck(files)
+        append_codecheck_event(
+            os.getcwd(), action, "standalone.scope_confirmed", {
+                "head": action.get("base_head", ""),
+                "files": files,
+                "ack": args.ack,
+            })
+        result, err = _run_codecheck(files, action, "standalone-scan")
         if err:
             # 独立模式也遵循建议型语义：工具版本/协议不可识别不等于代码失败。
             # 保存真实诊断后正常结束，避免同一不可靠插件把用户拖进重跑循环。
@@ -3332,8 +3671,14 @@ def cmd_action_confirm_scope(flow, args):
                 "step": "standalone_codecheck", "head": action["base_head"],
                 "count": None, "status": "TOOL_ERROR", "files": files,
                 "pairs": [], "commands": [], "error": err,
+                "log_path": codecheck_log_path(os.getcwd(), action),
                 "at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
+            append_codecheck_event(
+                os.getcwd(), action, "standalone.scan_failed", {
+                    "head": action.get("base_head", ""),
+                    "files": files, "error": err,
+                })
             _save_action(action)
             work = _archive_action(
                 action, "tool-error",
@@ -3341,12 +3686,15 @@ def cmd_action_confirm_scope(flow, args):
             print("[mae-flow] ⚠ 独立 CodeCheck 已真实尝试，但工具不可用或输出无法解析。")
             print("诊断已保留在 %s；本任务按建议项结束，不派修复 Agent，也不要求重跑。"
                   % norm(os.path.join(work, "codecheck-report.md")))
+            print("[mae-flow] CodeCheck 详细日志: %s"
+                  % norm(os.path.join(work, "codecheck-debug.md")))
             print("未启动完整流程，也没有修改或提交代码。")
             return
         scan = {
             "step": "standalone_codecheck", "head": action["base_head"],
             "count": result["total"], "files": files, "pairs": result["pairs"],
-            "commands": result["commands"], "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "commands": result["commands"], "log_path": result.get("log_path", ""),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         action["quality"]["codecheck_scan"] = scan
         _save_action(action)
@@ -3358,12 +3706,29 @@ def cmd_action_confirm_scope(flow, args):
                 % (len(files), result["total"],
                    "\n".join("- `" + x + "`" for x in result["commands"])))
             outcome = "clean" if result["total"] == 0 else "check-only"
+            append_codecheck_event(
+                os.getcwd(), action, "standalone.scan_completed", {
+                    "head": action.get("base_head", ""),
+                    "files": files, "count": result["total"],
+                    "commands": result["commands"], "outcome": outcome,
+                })
             work = _archive_action(action, outcome, "机器首检完成")
             print("[mae-flow] 独立 CodeCheck 已完成：%d 条告警。报告：%s"
                   % (result["total"], norm(report)))
+            print("[mae-flow] CodeCheck 详细日志: %s"
+                  % norm(os.path.join(work, "codecheck-debug.md")))
             print("未启动完整流程，也没有修改或提交代码。")
             return
+        append_codecheck_event(
+            os.getcwd(), action, "standalone.scan_completed", {
+                "head": action.get("base_head", ""),
+                "files": files, "count": result["total"],
+                "pairs": result["pairs"], "commands": result["commands"],
+                "outcome": "repair-required",
+            })
         print("[mae-flow] 首检发现 %d 条告警，开始专项修复。" % result["total"])
+        print("[mae-flow] CodeCheck 详细日志: %s"
+              % norm(codecheck_log_path(os.getcwd(), action)))
         return _action_task_card(action, "codecheck")
     return _action_task_card(action, "ut")
 
@@ -4984,6 +5349,13 @@ def cmd_done(flow, st, args):
         st.pop("branch_resolution", None)
     if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
+    if sid == "story":
+        # The generator contract says docs/story, but older/weak agents have
+        # written STORY into openspec. Repair one unambiguous current-ticket
+        # output before evidence checks, so the same done both validates it and
+        # (for local mode) removes it from the delivery tree.
+        _canonicalize_story_output(
+            st.get("config", {}).get("单号", ""), st)
     want = st.get("config", {}).get("分支名", "")
     if sid not in ("config_confirm", "workflow_select", "branch_create") and want:
         cur = sh("git branch --show-current")
@@ -5115,18 +5487,7 @@ def cmd_done(flow, st, args):
     if sid == "story":
         story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
         if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
-            src = "docs/story/STORY-" + st.get("config", {}).get("单号", "") + ".md"
-            tracked = argv_out(["git", "ls-files", "--", src])
-            if tracked:
-                save_state(st)
-                die(f"用户选择 STORY 不入库，但 {src} 已被加入 Git。先用 git rm --cached 精确移出，"
-                    "保留本地文件并按单号提交索引修正，再重试 done；禁止继续把它带进 MR。", 2)
-            if os.path.exists(src):
-                dst_dir = os.path.join(".mae-flow-work", "story")
-                os.makedirs(dst_dir, exist_ok=True)
-                dst = os.path.join(dst_dir, os.path.basename(src))
-                os.replace(src, dst)
-                print(f"[mae-flow] STORY 已按用户选择自动移入本地过程区: {dst}")
+            _localize_story(st.get("config", {}).get("单号", ""))
     note = args.ack or ("月光宝盒自动决策" if _moonlight(st) and step.get("user_ack") else "")
     advance(flow, st, sid, step, "done", note)
 
@@ -5548,6 +5909,13 @@ def cmd_spec(flow, st, args):
             die("规格定稿失败(现场保持原样,可修正后直接重跑): " + str(exc), 2)
         data["phase"] = "archived"
         data["archived_to"] = info.get("archive_name", "")
+        archived_path = norm(os.path.relpath(
+            info.get("archived_to", ""), os.getcwd()))
+        data["archive_paths"] = list(dict.fromkeys(
+            ["openspec/changes/" + cn, archived_path] + [
+                re.sub(r"^(?:\./)+", "", norm(path))
+                for path in info.get("merged", []) or []
+            ]))
         data["archived_at"] = now
         st.setdefault("history", []).append(
             {"step": st["current"], "result": "spec:archived",
@@ -5558,6 +5926,9 @@ def cmd_spec(flow, st, args):
         print("[mae-flow] 规格已定稿:合并进真相源 %s;变更目录已移动到 %s。"
               % ("、".join(info.get("merged", [])) or "(无规格变更)",
                  info.get("archive_name", "")))
+        print("[mae-flow] 本次只需精确提交: "
+              + "、".join(data["archive_paths"]))
+        print("禁止 git add openspec/；该宽路径可能卷入其他单遗留文件。")
         print("统计: " + json.dumps(info.get("totals", {}), ensure_ascii=False))
         return
     if action == "init":
@@ -5772,6 +6143,11 @@ def cmd_gate(flow, st, args):
         sys.exit(0)
     sid = st["current"] if st else None
     step = flow["steps"].get(sid, {}) if st else {}
+    # end 状态保留在主文件中是为了报告与下一单滚动，不代表流程门禁仍活跃。
+    # Hook 主路由已整体旁路；这里再做一次 CLI 级防御，避免旧 Hook、手工 gate
+    # 调用或并发终态迁移继续拦截普通开发。
+    if step.get("terminal"):
+        sys.exit(0)
 
     def jdie(rule, msg):
         # 裁决类规则统一走 break-glass 出口(放行令+三振熔断);绝对类仍用裸 die
@@ -5895,7 +6271,27 @@ def cmd_gate(flow, st, args):
                          f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
                          f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
         if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
-            strong_artifacts, unproven_paths, artifact_hints = _pending_commit_files(c)
+            (inherited, foreign_openspec, strong_artifacts,
+             unproven_paths, artifact_hints) = _pending_commit_files(c, st)
+            if inherited:
+                shown = "、".join(inherited[:8])
+                more = "…" if len(inherited) > 8 else ""
+                jdie(
+                    "bash-cross-delivery-carryover",
+                    "提交前检测到流程启动前已经存在、内容至今未变，且本单 Agent "
+                    "没有实际改写的文件: " + shown + more
+                    + "。它们属于上一单/用户现场，不能因为本次暂存而变成本单交付。"
+                      "执行 git restore --staged -- <上述路径> 只移出暂存区；"
+                      "若本单确实需要某文件，让 Agent 按本单需求实际修改并检视后再提交。")
+            if foreign_openspec:
+                shown = "、".join(foreign_openspec[:8])
+                more = "…" if len(foreign_openspec) > 8 else ""
+                jdie(
+                    "bash-foreign-openspec",
+                    "提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec "
+                    "文件: " + shown + more
+                    + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
+                      "选择不入库后由流程移入 .mae-flow-work/story。")
             if strong_artifacts:
                 shown = "、".join(strong_artifacts[:8])
                 more = "…" if len(strong_artifacts) > 8 else ""
@@ -5932,6 +6328,14 @@ def cmd_gate(flow, st, args):
         if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
             die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
                 "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
+        add_paths, _add_force = _git_add_pathspecs(c)
+        if any(re.sub(r"/+$", "", path) == "openspec" for path in add_paths):
+            jdie(
+                "bash-wide-openspec-add",
+                "禁止整目录 git add openspec/：它会把其他单遗留的 change/STORY "
+                "一起卷入提交。open/design 只 add 当前 "
+                "openspec/changes/{CHANGE_NAME}；archive 只 add spec archive "
+                "输出的本次精确产物清单。")
         # 动词必须命令位锚定且只看它自己的参数:旧写法 `(mkdir|md|new-item)\b` 左侧
         # 不锚定,`git add openspec/changes/x/proposal.md` 里 "proposal.md" 的结尾
         # 也命中 "md"——提交规格文件被判成"手动创建",而 clean_paths 证据又要求
@@ -6237,8 +6641,21 @@ def cmd_agent_task(flow, st, args):
         "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
         "unchanged_initial_dirty": inherited_dirty,
         "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if kind == "CODECHECK":
+        append_codecheck_event(
+            os.getcwd(), st, "agent.task_created", {
+                "task_path": os.path.abspath(path),
+                "task_sha256": digest,
+                "head": task_head,
+                "allowed_files": scan.get("files", []),
+                "scan_count": scan.get("count"),
+                "scope": args.scope or "",
+            })
     save_state(st)
     print(f"[mae-flow] {kind} 任务卡已生成: {path}")
+    if kind == "CODECHECK":
+        print("[mae-flow] CodeCheck 详细日志: %s"
+              % norm(codecheck_log_path(os.getcwd(), st)))
     print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
 
 
@@ -6265,7 +6682,26 @@ def cmd_codecheck_scan(flow, st, args):
     files, err = _biz_changed_files(st)
     if err:
         die(err, 2)
-    result, err = _run_codecheck(files) if files else ({"total": 0, "pairs": [], "commands": []}, "")
+    # 兼容升级前已在途、尚未把过程目录写进 .gitignore 的项目；只改本机
+    # info/exclude，避免诊断日志被后续宽范围操作意外带入提交。
+    _git_local_runtime_ignore()
+    append_codecheck_event(
+        os.getcwd(), st, "scan.requested", {
+            "head": sh("git rev-parse --verify HEAD"),
+            "files": files, "file_count": len(files),
+        })
+    if files:
+        result, err = _run_codecheck(files, st, "harness-scan")
+    else:
+        log_path = append_codecheck_event(
+            os.getcwd(), st, "scan.empty", {
+                "head": sh("git rev-parse --verify HEAD"),
+                "reason": "no-business-code-files",
+            })
+        result, err = ({
+            "total": 0, "pairs": [], "commands": [],
+            "log_path": log_path or codecheck_log_path(os.getcwd(), st),
+        }, "")
     if err:
         # CodeCheck 是辅助规范工具，不是编译器或测试器。它的版本、输出协议和
         # 可用性都不稳定；真实尝试一次后把诊断绑定当前源码即可，不让工具故障
@@ -6275,7 +6711,12 @@ def cmd_codecheck_scan(flow, st, args):
             "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "head": head, "count": None, "status": "TOOL_ERROR",
             "files": files, "pairs": [], "commands": [], "error": err,
+            "log_path": codecheck_log_path(os.getcwd(), st),
         }
+        append_codecheck_event(
+            os.getcwd(), st, "scan.tool_error", {
+                "head": head, "files": files, "error": err,
+            })
         st["quality"].pop("codecheck_verify", None)
         _drop_agent_token("CODECHECK")
         (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
@@ -6284,6 +6725,8 @@ def cmd_codecheck_scan(flow, st, args):
               "诊断已绑定当前 HEAD，本轮按建议项留痕，不派修复 Agent，也不重复长跑。",
               file=sys.stderr)
         print(err, file=sys.stderr)
+        print("[mae-flow] CodeCheck 详细日志: %s"
+              % norm(codecheck_log_path(os.getcwd(), st)))
         print("直接 done；源码若变化，当前诊断会失效并要求重新尝试。")
         return
     # 机器只做预分类：变更行±3 内直接计入，窗口外不能再自动定性为
@@ -6311,10 +6754,22 @@ def cmd_codecheck_scan(flow, st, args):
         "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
         "files": files, "pairs": result["pairs"], "commands": result["commands"],
+        "log_path": result.get("log_path", codecheck_log_path(os.getcwd(), st)),
         "raw_count": result["total"] + len(candidates),
         "scope_candidates": candidates,
         "scope_pending": bool(candidates),
         "stock_excluded": (0 if excluded_pairs is not None else None)}
+    append_codecheck_event(
+        os.getcwd(), st, "scan.completed", {
+            "head": st["quality"]["codecheck_scan"]["head"],
+            "files": files,
+            "raw_count": st["quality"]["codecheck_scan"]["raw_count"],
+            "kept_count": result["total"],
+            "kept_pairs": result["pairs"],
+            "scope_candidates": candidates,
+            "scope_pending": bool(candidates),
+            "moonlight": _moonlight(st),
+        })
     st["quality"].pop("codecheck_verify", None)
     if result.get("pairs"):
         print("[mae-flow] 机器已直接计入本次修改的告警:")
@@ -6343,6 +6798,8 @@ def cmd_codecheck_scan(flow, st, args):
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
     print(f"[mae-flow] CodeCheck 首检完成:业务文件 {len(files)} 个,告警 {result['total']} 条。")
+    print("[mae-flow] CodeCheck 详细日志: %s"
+          % norm(result.get("log_path") or codecheck_log_path(os.getcwd(), st)))
     if candidates:
         print("先完成用户范围确认；此时显示的告警数仅为机器明确相关部分。")
     elif result["total"]:
@@ -6413,6 +6870,19 @@ def cmd_codecheck_scope(flow, st, args):
         "head": scan.get("head", ""), "included": sorted(include),
         "ack": args.ack, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    append_codecheck_event(
+        os.getcwd(), st, "scope.decided", {
+            "head": scan.get("head", ""),
+            "candidates": candidates,
+            "included": sorted(include),
+            "excluded": [
+                item.get("id") for item in candidates
+                if str(item.get("id", "")).upper() not in include
+            ],
+            "ack": args.ack,
+            "final_count": scan["count"],
+            "stock_excluded": scan["stock_excluded"],
+        })
     st["quality"].pop("codecheck_verify", None)
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
@@ -6424,6 +6894,8 @@ def cmd_codecheck_scope(flow, st, args):
         print("[mae-flow] 用户确认疑似范围外候选均不涉及本次修改。")
     print("最终本轮告警 %d 条，用户确认不涉及 %d 条。"
           % (scan["count"], scan["stock_excluded"]))
+    print("[mae-flow] CodeCheck 详细日志: %s"
+          % norm(scan.get("log_path") or codecheck_log_path(os.getcwd(), st)))
     if scan["count"]:
         print("现在执行 agent-task codecheck 生成任务卡并启动修复 Agent。")
     else:
@@ -6460,12 +6932,21 @@ def cmd_codecheck_record(flow, st, args):
     st.setdefault("quality", {})["codecheck_manual"] = rec
     st["quality"]["codecheck_scan"] = {"step": st["current"], "head": head,
         "files": files, "pairs": [], "commands": ["人工核对诊断文件:" + diag],
-        "count": args.count, "at": rec["at"], "manual": True}
+        "count": args.count, "at": rec["at"], "manual": True,
+        "log_path": codecheck_log_path(os.getcwd(), st)}
+    append_codecheck_event(
+        os.getcwd(), st, "manual.result_recorded", {
+            "head": head, "files": files, "count": args.count,
+            "diagnostic": diag, "diagnostic_sha256": digest,
+            "reason": args.reason, "ack": args.ack,
+        })
     st["quality"].pop("codecheck_verify", None)
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
     save_state(st)
     print(f"[mae-flow] 已记录人工核对结果: {args.count} 条，绑定 HEAD {head[:12]} 与诊断 SHA256 {digest[:12]}。")
+    print("[mae-flow] CodeCheck 详细日志: %s"
+          % norm(codecheck_log_path(os.getcwd(), st)))
     print("0 条可直接 done；大于 0 条必须生成 codecheck 任务卡交修复 Agent，不能把人工记录当豁免。")
 
 
@@ -6497,6 +6978,13 @@ def cmd_approve_exemption(flow, st, args):
     safe_reason = re.sub(r"[\r\n|]+", " ", args.reason).strip()
     with open(ex, "a", encoding="utf-8") as f:
         f.write(f"- {rule} | {file_name} | {safe_reason} | 用户原话:{safe_ack}\n")
+    append_codecheck_event(
+        os.getcwd(), st, "exemption.approved", {
+            "head": sh("git rev-parse --verify HEAD"),
+            "rule": rule, "file": file_name,
+            "reason": args.reason, "ack": args.ack,
+            "record_file": os.path.abspath(ex),
+        })
     save_state(st)
     print(f"[mae-flow] 已登记用户批准的正式豁免: {rule} | {file_name}\n"
           f"记录已写入 {ex}；请精确 git add/commit，禁止手写其他豁免冒充审批。")
@@ -6511,6 +6999,125 @@ def cmd_template(flow, args):
     if not os.path.exists(p):
         die(name + " 模板缺失: " + p)
     print(p)
+
+
+def _story_source_candidates(ticket):
+    """Find dirty STORY output for this ticket, including a wrong directory."""
+    canonical = "docs/story/STORY-" + ticket + ".md"
+    if os.path.isfile(canonical):
+        return [canonical]
+    candidates = []
+    for path in _dirty_paths():
+        if not os.path.isfile(path) or not _is_story_document(path):
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as stream:
+                sample = stream.read(65536)
+        except OSError:
+            sample = ""
+        if ticket.casefold() in (path + "\n" + sample).casefold():
+            candidates.append(path)
+    return list(dict.fromkeys(candidates))
+
+
+def _unstage_uncommitted_story(path):
+    """Remove a newly added STORY from the index without deleting its content."""
+    staged = argv_out(
+        ["git", "diff", "--cached", "--name-only", "--", path])
+    if not staged:
+        return
+    restored = subprocess.run(
+        ["git", "restore", "--staged", "--", path],
+        shell=False, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=30,
+    )
+    if restored.returncode != 0:
+        die(
+            f"{path} 已暂存但无法安全移出暂存区:"
+            + (restored.stderr or restored.stdout).strip()
+            + "。先执行 git restore --staged -- " + path + " 后重试。", 2)
+
+
+def _canonicalize_story_output(ticket, st=None):
+    """Move one wrong-path STORY to the canonical location before validation."""
+    canonical = "docs/story/STORY-" + ticket + ".md"
+    if os.path.isfile(canonical):
+        return canonical
+    candidates = _story_source_candidates(ticket)
+    if st is not None:
+        written = _agent_written_paths()
+        candidates = [
+            path for path in candidates
+            if (not _unchanged_initial_dirty(path, st)
+                or _repo_path_identity(path) in written)
+        ]
+    if len(candidates) > 1:
+        die(
+            "发现多个本单 STORY 输出且都不在标准路径: "
+            + "、".join(candidates)
+            + "。拒绝猜测，请先合并为 " + canonical + "。", 2)
+    if not candidates:
+        return ""
+    src = candidates[0]
+    tracked_in_head = argv_out(
+        ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", src])
+    if tracked_in_head:
+        die(
+            f"STORY 被写到错误路径且已经提交: {src}。"
+            "请用普通后续提交把它迁移到 " + canonical
+            + "，不能靠工作区移动掩盖已提交事实。", 2)
+    _unstage_uncommitted_story(src)
+    os.makedirs(os.path.dirname(canonical), exist_ok=True)
+    os.replace(src, canonical)
+    print(f"[mae-flow] ⚠ STORY 输出路径已自动纠正: {src} → {canonical}")
+    return canonical
+
+
+def _localize_story(ticket):
+    """Move a not-for-commit STORY out of the delivery tree deterministically."""
+    reason = _validate_config_value("单号", ticket)
+    if reason:
+        die("STORY 本地化失败:" + reason, 2)
+    candidates = _story_source_candidates(ticket)
+    canonical = "docs/story/STORY-" + ticket + ".md"
+    if not candidates:
+        print("[mae-flow] 用户选择 STORY 不入库；未发现本次生成的 STORY 文件，"
+              "无需清理。")
+        return ""
+    if len(candidates) > 1:
+        die(
+            "发现多个与本单匹配的 STORY，无法安全猜测该保留哪一份: "
+            + "、".join(candidates)
+            + "。先合并为 " + canonical + " 后重跑 story-localize。", 2)
+    src = candidates[0]
+    tracked_in_head = argv_out(
+        ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", src])
+    if tracked_in_head:
+        die(
+            f"用户选择 STORY 不入库，但 {src} 已存在于 HEAD。"
+            "不能仅移动本地文件掩盖已提交事实；请用普通后续提交精确删除它，"
+            "再重跑本命令。", 2)
+    _unstage_uncommitted_story(src)
+    _git_local_runtime_ignore()
+    dst_dir = os.path.join(".mae-flow-work", "story")
+    os.makedirs(dst_dir, exist_ok=True)
+    dst = os.path.join(dst_dir, os.path.basename(canonical))
+    if os.path.exists(dst):
+        stem, ext = os.path.splitext(os.path.basename(canonical))
+        number = 2
+        while os.path.exists(os.path.join(dst_dir, f"{stem}-{number}{ext}")):
+            number += 1
+        dst = os.path.join(dst_dir, f"{stem}-{number}{ext}")
+    os.replace(src, dst)
+    if src != canonical:
+        print(f"[mae-flow] ⚠ STORY 曾被写到错误目录 {src}，已一并纠正。")
+    print(f"[mae-flow] STORY 不入库，已移入 Git 本地排除的过程区: {norm(dst)}")
+    return norm(dst)
+
+
+def cmd_story_localize(args):
+    """Cleanup command for standalone `/mae-flow story`."""
+    return _localize_story((args.ticket or "").strip())
 
 
 def cmd_envcheck(flow, args):
@@ -7729,6 +8336,14 @@ def main():
         return cmd_capability(args)
     if args.cmd == "template":
         return cmd_template(flow, args)
+    if args.cmd == "story-localize":
+        if runtime.mode == RuntimeMode.STANDALONE:
+            die("当前有 UT/CodeCheck/Grill 独立任务正在运行，"
+                "先 finish/cancel 后再整理 STORY。", 2)
+        if st is not None:
+            die("完整流程中的 STORY 不入库由 story 步 done 自动处理，"
+                "无需手工执行 story-localize。", 2)
+        return cmd_story_localize(args)
     if args.cmd == "init":
         if runtime.mode == RuntimeMode.STANDALONE:
             die("当前有独立任务正在运行，不能同时初始化完整流程。"

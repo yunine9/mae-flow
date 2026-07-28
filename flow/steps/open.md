@@ -44,9 +44,12 @@ AskUserQuestion 展示①类决策摘要卡供抽查,选项固定为「通过并
 
 `python "{MAEFLOW_PATH}" spec phase design`
 
-确认状态已进入 design(spec show 应显示 phase=design)，再 git add openspec/(clarifications 尚在 docs/ 未随迁的,精确补 git add docs/clarifications-{单号}.md;
-**禁止 git add docs/ 或 -A**)&& git commit -m "[单号][类型]提案与规格",
-再 done --set CHANGE_NAME=<变更目录名>(done 硬校验 change.md 存在、规格结构校验通过且阶段已登记)。
+确认状态已进入 design(spec show 应显示 phase=design)，再精确
+`git add -- openspec/changes/{CHANGE_NAME}`（若本单确实新建/修改了 openspec/config.yaml，
+先查看 diff 后把该文件作为另一个精确路径加入；禁止 `git add openspec/`）。
+clarifications 尚在 docs/ 未随迁的，精确补 `git add docs/clarifications-{单号}.md`；
+**禁止 git add docs/ 或 -A**。然后 `git commit -m "[单号][类型]提案与规格"`，
+再 `done --set CHANGE_NAME=<变更目录名>`（done 硬校验 change.md 存在、规格结构校验通过且阶段已登记）。
 需求缺口已经在本步骤逐项让用户裁决，产物齐全后无需再索要一次“确认本阶段完成”。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────

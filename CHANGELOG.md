@@ -1,5 +1,34 @@
 # 更新记录
 
+## 2026-07-28：交付终态立即解除全部 Hook
+
+- 修复正常完成停在 `end` 时，因 `.mae-flow.json` 为审计和下一单滚动继续保留，
+  被运行模式误当成活跃流程，导致 Edit/Bash/Task 等仍受旧步骤门禁的问题；
+- `end` 现在仍保留 current/status/report 和下一次 init 所需状态，但
+  PreToolUse、PostToolUse、SubagentStop、Stop、UserPromptSubmit、SessionStart 全部旁路，
+  不再沿用旧月光标记、旧任务卡或把普通开发写入上一单账本；
+- `gate edit/bash` 增加终态二次放行，覆盖旧 Hook、手工调用和状态迁移并发窗口。
+
+## 2026-07-28：CodeCheck 全链路本地诊断
+
+- 每轮 CodeCheck 在 `.mae-flow-work/` 生成人类可直接阅读的 append-only Markdown 时间线，记录扫描文件、每批实际命令、
+  CLI 路径、退出码、耗时、解析来源和原始 stdout/stderr/report；大产物限长保存头尾并保留完整 SHA-256；
+- 范围候选的用户裁决、人工结果登记、正式豁免、任务卡与缓存复用都会写入同一日志；
+- SubagentStop 额外记录修复 Agent 的 Bash/Write/Edit/Skill 输入输出、最终报告、真实 Git diff、
+  契约拒签/通过和令牌签发，便于区分 CodeCheck 工具问题、流程解析问题与 Agent 修复问题；
+- 日志始终位于 Git 排除的过程区，路径在命令输出中明确展示；诊断写入 best-effort，不增加门禁。
+
+## 2026-07-28：跨单文件归属与 STORY 不入库闭环
+
+- 修复流程启动前的未跟踪文件被记为 `initial_dirty` 后，又因 OpenSpec 整树可信而随下一单提交的问题；
+  提交前会硬拦“指纹未变且本单 Agent 未实际改写”的跨单遗留，push 证据再做一次兜底；
+- OpenSpec 提交范围收窄为当前 `CHANGE_NAME` 和本次 archive 的精确产物；禁止整目录
+  `git add openspec/`，归档清单同时包含旧 change 删除、新 archive 新增和真实合并的 spec；
+- STORY 选择不入库时统一移入 Git 本地排除的 `.mae-flow-work/story/`；独立 story 模式新增
+  `story-localize` 确定性收尾，生成器误写进 OpenSpec 时可按单号唯一识别并纠正；
+- 保持原有“Agent 写过只是可能提交、不是必须提交”口径：普通源码、必要移动和歧义构建产物不因本修复
+  被扩大硬拦范围。
+
 ## 2026-07-28：编码前开发节奏与小步远端检视
 
 - 普通流程在实现范围稳定、写第一行代码前生成 1-6 个业务检查点，由用户选择“分阶段 push + 检视”

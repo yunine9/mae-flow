@@ -29,13 +29,16 @@ from mae_flow_core import (
     EXIT_FILE,
     FLOW_FILE,
     RuntimeMode,
+    append_codecheck_event,
     atomic_write_json,
     atomic_write_text,
+    codecheck_log_path,
     find_project_root,
     load_action as core_load_action,
     normalize_document,
     resolve_runtime,
     safe_read_json,
+    save_codecheck_artifact,
     update_json,
     update_versioned_json,
 )
@@ -538,6 +541,8 @@ def ev_subagentstop(d):
     # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
     if m:
         if m.group(1) == "CODECHECK":
+            _record_codecheck_agent_trace(
+                m.group(2), last, tool_calls, tp, retry=retry)
             _codecheck_contract(m.group(2), last, tool_calls, soft=retry)
         if m.group(1) == "UT":
             _ut_contract(m.group(2), last, tool_calls, soft=retry)
@@ -573,6 +578,11 @@ def ev_subagentstop(d):
                      r"story-generator-agent|compile-agent|grill-critic-agent", head):
         _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
         sys.exit(0)
+    if (standalone_expected == "CODECHECK"
+            or "codecheck-fix-agent" in head
+            or re.search(r"\bCODECHECK_RESULT:", head)):
+        _record_codecheck_agent_trace(
+            "NO_RESULT", last, tool_calls, tp, retry=retry)
     clue = _autopsy(tp, asst)
     # 打回话术必须与真实拒签原因一致:矛盾标记场景若仍说"第一行必须是标记",
     # 弱模型会按错误指引改写(第一行明明就是标记)再死一遍,循环重跑昂贵 agent。
@@ -622,6 +632,13 @@ def _record_agent_token(kind, status="", report=""):
                 return current
 
             update_versioned_json(ACTION_STATE, "action", update_action)
+            if kind == "CODECHECK":
+                append_codecheck_event(
+                    os.getcwd(), action, "agent.token_issued", {
+                        "status": status, "head": head,
+                        "report_path": report_path,
+                        "standalone": True,
+                    }, source="hook")
             _log("standalone agent token: %s/%s @%s" % (
                 kind, status or "-", head[:9] or "no-git"))
             return
@@ -642,6 +659,11 @@ def _record_agent_token(kind, status="", report=""):
             return tokens
 
         update_json(p, update_tokens, default={}, recover_corrupt=True)
+        if kind == "CODECHECK":
+            _codecheck_log_event("agent.token_issued", {
+                "status": status, "head": head,
+                "step": step, "standalone": False,
+            })
         _clear_rejection(kind)
         _log("agent token: %s/%s @%s" % (kind, status or "-", head[:9] or "no-git"))
     except Exception as e:
@@ -913,6 +935,169 @@ def _contract_state():
     }
 
 
+def _codecheck_log_state():
+    """Return the real persisted document so standalone logs use its work_dir."""
+    if not os.path.isfile(STATE):
+        action = _load_action()
+        if action:
+            return action
+    return _contract_state()
+
+
+def _codecheck_log_event(event, details=None):
+    return append_codecheck_event(
+        os.getcwd(), _codecheck_log_state(), event, details, source="hook")
+
+
+def _git_trace(args):
+    """Bounded read-only Git capture for diagnostics; never affects a gate."""
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", *args],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=2)
+        return {
+            "return_code": result.returncode,
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
+        }
+    except Exception as exc:
+        return {"return_code": None, "stdout": "", "stderr": str(exc)}
+
+
+def _tool_trace_summary(call):
+    value = call.get("input", {}) or {}
+    summary = {}
+    if isinstance(value, dict):
+        for key in ("command", "file_path", "path", "skill", "name"):
+            if value.get(key) not in (None, ""):
+                summary[key] = value.get(key)
+    elif value:
+        summary["input"] = str(value)[:2000]
+    return summary
+
+
+def _record_codecheck_agent_trace(
+        status, report, tool_calls, transcript_path, retry=False):
+    """Persist the agent's commands, results and actual Git delta.
+
+    This deliberately has no return-value contract: logging must never become
+    a new reason to reject an otherwise valid CodeCheck run.
+    """
+    try:
+        state = _codecheck_log_state()
+        task = (state.get("agent_tasks", {}) or {}).get("CODECHECK", {})
+        head = str(task.get("head", "") or "")
+        report_artifact = save_codecheck_artifact(
+            os.getcwd(), state, "agent-final-report", report or "", ".md")
+        changed = []
+        source_changed = []
+        diff_artifact = None
+        name_status = {"return_code": None, "stdout": "", "stderr": ""}
+        diff_stat = {"return_code": None, "stdout": "", "stderr": ""}
+        worktree_status = {"return_code": None, "stdout": "", "stderr": ""}
+        if re.fullmatch(r"[0-9a-fA-F]{7,64}", head):
+            raw_diff = _git_trace(["diff", "--no-ext-diff", "--binary", head, "--"])
+            diff_artifact = save_codecheck_artifact(
+                os.getcwd(), state, "agent-working-tree", raw_diff["stdout"], ".diff")
+            if raw_diff.get("stderr"):
+                diff_artifact["stderr"] = raw_diff["stderr"][-2000:]
+            diff_artifact["return_code"] = raw_diff.get("return_code")
+            name_status = _git_trace(["diff", "--name-status", head, "--"])
+            diff_stat = _git_trace(["diff", "--stat", head, "--"])
+            worktree_status = _git_trace(["status", "--porcelain"])
+            for line in name_status.get("stdout", "").splitlines():
+                fields = line.split("\t")
+                if len(fields) >= 2:
+                    changed.append(fields[-1].strip().strip('"'))
+            for line in worktree_status.get("stdout", "").splitlines():
+                value = line[3:] if len(line) > 3 else ""
+                if " -> " in value:
+                    value = value.split(" -> ")[-1]
+                if value.strip():
+                    changed.append(value.strip().strip('"'))
+            changed = list(dict.fromkeys(
+                path.replace("\\", "/") for path in changed if path))
+            source_changed = [path for path in changed if _source_like(path)]
+
+        traced_tools = {
+            "bash", "write", "edit", "multiedit", "skill",
+            "shell", "exec", "execcommand",
+        }
+        tool_rows = []
+        artifact_count = 0
+        for index, call in enumerate(tool_calls or [], 1):
+            name = str(call.get("name", "") or "")
+            normalized = re.sub(r"[^a-z]", "", name.lower())
+            if normalized not in traced_tools:
+                continue
+            input_text = json.dumps(
+                call.get("input", {}), ensure_ascii=False,
+                sort_keys=True, default=str)
+            result_text = str(call.get("result", "") or "")
+            if artifact_count < 40:
+                input_artifact = save_codecheck_artifact(
+                    os.getcwd(), state, "agent-tool-%03d-input" % index,
+                    input_text, ".json", max_bytes=64 * 1024)
+                result_artifact = save_codecheck_artifact(
+                    os.getcwd(), state, "agent-tool-%03d-result" % index,
+                    result_text, ".txt", max_bytes=64 * 1024)
+                artifact_count += 1
+            else:
+                input_artifact = {
+                    "omitted": "artifact-limit",
+                    "bytes": len(input_text.encode("utf-8", errors="replace")),
+                    "sha256": hashlib.sha256(
+                        input_text.encode("utf-8", errors="replace")).hexdigest(),
+                }
+                result_artifact = {
+                    "omitted": "artifact-limit",
+                    "bytes": len(result_text.encode("utf-8", errors="replace")),
+                    "sha256": hashlib.sha256(
+                        result_text.encode("utf-8", errors="replace")).hexdigest(),
+                }
+            row = {
+                "index": index, "name": name,
+                "summary": _tool_trace_summary(call),
+                "result_seen": bool(call.get("result_seen")),
+                "is_error": bool(call.get("is_error")),
+                "input": input_artifact,
+                "result": result_artifact,
+            }
+            tool_rows.append(row)
+            append_codecheck_event(
+                os.getcwd(), state, "agent.tool", row, source="hook")
+
+        fixed = ""
+        match = re.search(
+            r"^\s*FIXED_CHANGES:\s*(.*?)(?=^\s*[A-Z][A-Z0-9_]+:\s*|\Z)",
+            report or "", re.M | re.S)
+        if match:
+            fixed = match.group(1).strip()
+        append_codecheck_event(
+            os.getcwd(), state, "agent.stopped", {
+                "status": status,
+                "retry": bool(retry),
+                "task_path": task.get("path", ""),
+                "task_sha256": task.get("sha256", ""),
+                "task_head": head,
+                "transcript_path": os.path.abspath(transcript_path)
+                if transcript_path else "",
+                "report": report_artifact,
+                "fixed_changes_reported": fixed,
+                "changed_paths": changed,
+                "changed_source_paths": source_changed,
+                "name_status": name_status,
+                "diff_stat": diff_stat,
+                "worktree_status": worktree_status,
+                "diff": diff_artifact,
+                "traced_tool_count": len(tool_rows),
+                "tool_artifact_limit": 40,
+            }, source="hook")
+    except Exception as exc:
+        _log("codecheck trace EXC: " + str(exc))
+
+
 def _evidence_data():
     action = _load_action()
     if action and not os.path.isfile(STATE):
@@ -992,6 +1177,11 @@ def _clear_rejection(label):
 
 def _contract_bail(label, msg, soft):
     _record_rejection(label, msg)
+    if label == "CODECHECK":
+        _codecheck_log_event("agent.contract_rejected", {
+            "reason": msg, "soft_retry": bool(soft),
+            "head": _git_head(),
+        })
     if soft:
         _log(label + " 重答仍违规: " + msg)
         sys.exit(0)
@@ -1895,12 +2085,18 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
         _contract_bail("CODECHECK", msg, soft)
 
     task = _task_card_contract("CODECHECK", report, soft)
-    _enforce_agent_scope("CODECHECK", task, bail)
+    changed = _enforce_agent_scope("CODECHECK", task, bail)
     # 先记真实编译调用：后续哪怕只因报告字段写法被打回，也无需把十几分钟编译重跑一遍。
     _record_codecheck_build_receipt(task, tool_calls)
     # FAIL 早退必须先于字段对账(与 compile/grill/UT 契约排序一致——校准实锤:
     # CLI 不可用时 agent 写不出真实 fullcheck 命令,旧排序逼诚实者编造字段)。
     if status == "FAIL":
+        _codecheck_log_event("agent.contract_validated", {
+            "status": status, "task_sha256": task.get("sha256", ""),
+            "task_head": task.get("head", ""),
+            "changed_source_paths": changed,
+            "result": "accepted-honest-failure",
+        })
         return   # FAIL 是诚实上报,不再苛求对账字段
     if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
         bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
@@ -2028,6 +2224,19 @@ def _codecheck_contract(status, report, tool_calls=None, soft=False):
              f"（本单遗留 {nums['REMAINING_COUNT']}"
              + (f" + 用户确认不涉及 {stock}" if isinstance(stock, int) else "")
              + f" = {excerpt_expected}）矛盾。")
+    _codecheck_log_event("agent.contract_validated", {
+        "status": status,
+        "task_sha256": task.get("sha256", ""),
+        "task_head": task.get("head", ""),
+        "changed_source_paths": changed,
+        "found": nums["FOUND"],
+        "fixed": nums["FIXED"],
+        "remaining": nums["REMAINING_COUNT"],
+        "fullcheck_raw_counts": real_counts,
+        "fullcheck_expected_raw": excerpt_expected,
+        "fullcheck_command_count": command_count,
+        "result": "accepted",
+    })
 
 
 def _ac_coverage_has_mapping(coverage):
@@ -2400,7 +2609,8 @@ def main():
         runtime = resolve_runtime(os.getcwd())
         if runtime.has_conflict:
             _log("runtime conflict: " + ",".join(runtime.conflicts))
-            if ev in ("userprompt", "sessionstart"):
+            if (not runtime.flow_terminal
+                    and ev in ("userprompt", "sessionstart")):
                 print("[mae-flow] ⚠ 检测到流程状态冲突：%s。完整流程继续作为唯一控制源；"
                       "请执行 mae-flow doctor 查看并清理陈旧独立任务。"
                       % "、".join(runtime.conflicts))
@@ -2420,6 +2630,28 @@ def main():
                 # 保留损坏主状态下的一键退出通道；status 失败不会阻止普通对话。
                 if os.path.isfile(STATE):
                     ev_inject(d, session_start=(ev == "sessionstart"))
+            rc = 0
+        elif runtime.flow_terminal:
+            # end 是审计/换单所需的持久终态，不是仍在运行的门禁。状态文件必须
+            # 留给 current/status/report 和下一次 init 滚动，但所有 Hook 入口
+            # 都立即让出控制权：否则旧月光标记会拦 AskUserQuestion、旧任务卡会
+            # 拦 Task、PostToolUse 还会把下一单普通改动记进上一单账本。
+            if ev == "userprompt":
+                prompt = d.get("prompt") or ""
+                if _explicit_exit_prompt(prompt):
+                    # “已完成”与“显式退出”仍是两个可见生命周期状态；保留用户
+                    # 主动要求 exit 的既有控制入口，但它不属于普通开发门禁。
+                    ev_inject(d)
+                elif re.search(r"月光宝盒|moonlight", prompt, re.I):
+                    # 终态直接开启下一单月光模式仍需真实用户原话验真。只捕获这类
+                    # 明确控制意图，不把普通开发消息继续写进上一单账本。
+                    _capture_usermsg(prompt)
+            if (ev in ("userprompt", "sessionstart")
+                    and _session_notice_due("terminal", d, ev)):
+                print("[mae-flow] 上一单已交付完成，Hook 门禁已全部解除；"
+                      "当前按普通开发处理。终态记录仍可用 current/status/report 查看，"
+                      "发起下一单时 init 会自动归档并开启新流程。")
+            _log("terminal flow: bypass " + ev)
             rc = 0
         elif action_active and ev == "pretooluse":
             ev_action_pretooluse(d)

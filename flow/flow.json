@@ -797,10 +797,7 @@
           "equals": "archived"
         },
         {
-          "type": "clean_paths",
-          "paths": [
-            "openspec"
-          ]
+          "type": "archive_paths_clean"
         }
       ],
       "next": "push"

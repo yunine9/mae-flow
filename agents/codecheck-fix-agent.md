@@ -118,10 +118,12 @@ cd <项目根> && codecheck fullcheck -f 相对路径1,相对路径2,...
    FIXED: <已修复并编译通过数>
    REMAINING_COUNT: <复验输出的遗留数>
    ```
-5. 复验输出的每批告警总数锚点原文及 raw 合计；有任务卡存量数时同时列出
+5. `FIXED_CHANGES:` 按文件列出实际修复了哪些规则、改了什么；无修复写 `无`。
+   这里是给用户快速检视的摘要，harness 还会从 Git diff 独立记录真实变化，不以摘要代替事实。
+6. 复验输出的每批告警总数锚点原文及 raw 合计；有任务卡存量数时同时列出
    `raw 合计 - 用户确认不涉及本次修改 = REMAINING_COUNT`
-6. 检查文件数(注明排除了几个测试文件)、是否已 commit
-7. `REMAINING_WARNINGS:` 遗留清单(规则ID、文件、行号、内容、原因、**建议方案**),条数=REMAINING_COUNT;无则写 无
-8. FAIL 时:缺失项或执行失败的报错
+7. 检查文件数(注明排除了几个测试文件)、是否已 commit
+8. `REMAINING_WARNINGS:` 遗留清单(规则ID、文件、行号、内容、原因、**建议方案**),条数=REMAINING_COUNT;无则写 无
+9. FAIL 时:缺失项或执行失败的报错
 
 **禁止**只输出自然语言总结而不带 `CODECHECK_RESULT:` 标记。

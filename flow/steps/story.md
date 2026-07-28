@@ -2,6 +2,8 @@ STORY 模板绝对路径 = {STORY_TEMPLATE_PATH}(直接传给 agent,勿再查找
 中断恢复:读 docs/story/STORY-{单号}.md——残留"(待确认)"标注 = 未完成项,从那里继续逐项确认
 (文档即状态,agent 无需重跑;文档不存在才重新派 agent)。
 启动 story-generator-agent(契约见 agents/story-generator-agent.md)。
+输出只能是 `docs/story/STORY-{单号}.md`，禁止写入 openspec 或其他目录；若 agent 写错，
+done 会在能唯一识别本单 STORY 时自动纠正路径，再按下述证据校验与入库选择处理。
 **模板禁止编造**:任何情况下不得"按标准结构自行创建"——传入的路径读不到就如实 FAIL 上报。
 传入:单号、CHANGE_NAME、变更产物路径(v5=change.md 一个;在途旧布局单=proposal/design/delta spec 三个)、**上述模板绝对路径**、模式=常规生成。
 **给 agent 的任务提示禁止包含终态指标**("零待确认残留""写成不涉及(已确认)"等 done 校验要求)——

@@ -125,13 +125,18 @@ require_sets 步骤的 `current` 会展示预填块；它只是候选值，配�
 不再逐项要求用户签字。
 **过程区 `.mae-flow-work/`**（gitignored，2026-07-21 治"MR 里 md 泛滥"+STORY 误提交实战）：过程性产物的家——
 grill-prep 工作表、survey 代码勘察笔记、不入库 STORY，v5 起再加 superpowers 设计文档
-（design-{单号}.md）与实现计划（plan-{单号}.md）——物理上不可能被卷进提交。
-**提交白名单**（交付物才 commit）：openspec 全套、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
+（design-{单号}.md）与实现计划（plan-{单号}.md）。CodeCheck 的 append-only Markdown 诊断及原始
+stdout/stderr/report/Agent diff 同样放这里：主流程按单号+步骤归档，独立任务跟随 work_dir；
+单个大产物保存头尾并记录完整 SHA-256。诊断全程 best-effort，任何写入异常都不得成为新门禁。
+这些过程件物理上不可能被卷进提交。
+**提交候选**（交付物才 commit）：当前单 OpenSpec change/本次归档精确产物、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
 REVIEW（返工台账）、delivery-notes（团队沉淀）、STORY（仅用户选入库时）。
-git add 一律精确路径，gate 硬拦 `-A/--all/.`（宽 add 是 STORY 误提交的凶手）。
+git add 一律精确路径，gate 硬拦 `-A/--all/.` 和整目录 `openspec/`（宽 add 是 STORY 跨单误提交的凶手）。
 Hook 另记本流程中 Agent 通过 Write/Edit/MultiEdit 成功改写的路径，作为“可能需要提交”的候选集，
 不是“都要提交”的白名单。提交时未命中候选集只提示逐文件确认；若同时是新增的高置信临时编译
-产物才硬拦。Mae-Flow/Comet 自己创建或移动的 openspec、docs/req 与初始化文件走 harness 可信例外。
+产物才硬拦。流程启动前已存在、指纹未变且本单 Agent 未改写的路径属于跨单遗留，提交前硬拦，push
+证据再兜底一次。Mae-Flow 自建 OpenSpec 例外只信任当前 `CHANGE_NAME` 和 `spec archive` 记录的精确路径，
+不再信任整个 `openspec/`。
 
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
@@ -188,12 +193,13 @@ flow.json 步骤字段语义：
 | `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `spec_field` | 读 `.mae-flow.json` spec 段字段（v3 起阶段/产物指针的单一真相源）：`equals` 精确匹配或非空即过；指针字段登记时校验文件真实存在 + 现场复核（`yaml_field` 保留为在途兼容别名，指向同一实现） |
-| `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送），并按 `.mae-flow.json.agent-writes` 与流程明确维护的交付产物核对尚未处理的候选；初始化后出现但没有 Agent 直接写入来源的 IDE/编译器目录只保留在工作区审计，不会被误判成必须提交 |
+| `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送），并按 `.mae-flow.json.agent-writes` 与流程明确维护的交付产物核对尚未处理的候选；初始化后出现但没有 Agent 直接写入来源的 IDE/编译器目录只保留在工作区审计，不会被误判成必须提交；若绕过提交门夹带了指纹未变的初始脏文件，则在终态拒绝 |
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 
 **CodeCheck/UT 覆盖口径（2026-07-27 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口做**预分类**，窗口内直接计入，窗口外逐条编号交用户确认是否涉及本次修改，未经确认不得排除、派修复 Agent 或 done；明细缺行号时保守全算。月光模式无法询问用户，故将全部候选保守计入。UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口只是近似，不是真相——函数级规则、宏展开和定位漂移正是必须保留用户裁决的原因。
-| `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/archive 在用） |
+| `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/review 在用） |
+| `archive_paths_clean` | 只检查 `spec archive` 记录的旧 change 删除、新 archive 新增和实际合并的真相源，不让其他单 OpenSpec 脏文件反向逼迫入库 |
 | `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
 | `codecheck_clean` | 保留作旧在途流程兼容，不再由 `review_codecheck` 正常路径调用。新路径以首检或 Agent 最终 fullcheck 的绑定凭证收口，避免 done 第三次长跑 |
 | `agent_or_no_source` | 本轮没有源码、测试或构建文件改动时自动过；只要有改动就强制指定 agent 的成功状态。适用于主流程、小改和评审返工，不再只认 C++/Java |
@@ -214,10 +220,11 @@ flow.json 步骤字段语义：
 - git 约定：分支名（checkout -b/-B、switch -c/-C、branch -m）、commit 格式（含不带引号的 -m）、force push（含 +refspec）、`git worktree add`（与状态机不兼容）
 - `.env` 类密钥文件禁写；危险命令 denylist（管道执行远程脚本、`git clean -x`、对 `/`~`*`.`盘根 的递归删除——普通目录的 rm -r 不拦）。注：PreToolUse 硬拦在权限跳过模式下依然生效（hook 跑在 shell 里，提示词注入绕不过）
 - 全局 `comet init` 会话内全禁（含子 agent、含管道喂输入变体）：交互式 TUI 被非交互执行会把二三十个 agent 平台全部初始化污染仓库（2026-07-20 实战）。现在无需用户手动初始化，`prepare_project()` 只以 `--tools none` 创建规格配置；拦截消息直接指向内嵌能力，不再给人工安装话术。
-- `git add -A / --all / .` 全禁（宽提交会把无关文件与不入库产物卷进交付分支——STORY 误提交实战；提交必须精确到文件/明确产物目录）
+- `git add -A / --all / .` 与整目录 `git add openspec/` 全禁（宽提交会把无关文件与不入库产物卷进交付分支——STORY 跨单误提交实战；提交必须精确到当前 change 或 archive 输出清单）
 - `git commit` 前按 `.mae-flow.json.agent-writes` 缩小候选范围：未由 Agent 文件工具直接改写的路径
   默认视为命令副作用并提示；只有“未直接改写 + 新增 + 高置信临时编译产物”硬拦，避免对移动、
-  删除、生成源码和项目约定二进制误杀。候选集只表示“有可能提交”，不能替代逐文件 `git diff`。
+  删除、生成源码和项目约定二进制误杀。流程启动前已存在且指纹未变的候选属于跨单遗留，会硬拦；
+  OpenSpec 另按当前 change/本次 archive 精确归属硬校验。候选集只表示“有可能提交”，不能替代逐文件 `git diff`。
 - verify_ut/rf_ut 的测试路径收紧（`tests_only`）：仓库配置优先，缺失时放弃旧的 fail-open，改用内置保守测试路径规则；Edit/Bash 双路都拦非测试源码。**这不是死禁**——非标准目录补 `.mae-flow-defaults.json`，真源码缺陷走 unlock 裁决通道。
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步骤，历史留痕 `unlock:source`。done 检测到被测源码变化后不消费旧 UT 证据，而是自动回流完整质量链：review 回 rf_compile；主流程进入 verify_recompile，再走 Ponytail/CodeCheck/UT，不重做实现计划。无 unlock 却改了被测源码则判越权，不允许通过补验证洗白。
 
@@ -265,6 +272,10 @@ CodeCheck 不属于公开运行时。`ensure_codecheck()` 先解析 PATH、Windo
 CodeCheck 时执行一次公司 npm 安装，registry 用命令行一次性参数，禁止永久修改 npm config。失败记录
 30 分钟冷却，普通流程给 `codecheck_tool` 风险出口，月光模式记入晨间报告。Windows 执行继续使用
 `shell=True` + PATHEXT，不手工拼 `cmd.exe /s /c`。
+扫描器和 SubagentStop 共享 `mae_flow_core.codecheck_log`：前者记录每批 argv/展示命令、退出码、
+耗时、解析来源和原始产物；后者记录修复 Agent 的 Bash/Write/Edit/Skill 输入输出、最终报告、
+任务卡基点到当前工作区的 name-status/stat/diff、契约接受或拒签原因。日志只用于诊断，
+真实门禁仍由现有状态、任务卡、transcript 和 Git 证据决定，禁止反向依赖日志。
 
 ### 3.6 子 agent 契约
 

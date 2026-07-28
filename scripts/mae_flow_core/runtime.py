@@ -35,10 +35,26 @@ class RuntimeSnapshot:
     def has_conflict(self):
         return bool(self.conflicts)
 
+    @property
+    def flow_terminal(self):
+        """Whether the persisted full-flow state is completed, not active.
+
+        The terminal document deliberately remains at ``.mae-flow.json`` so
+        status/report and the next ``init`` can consume its audit history.
+        Its presence must not make Hooks treat the completed delivery as a
+        live gate.
+        """
+        return bool(
+            self.mode == RuntimeMode.FLOW
+            and self.flow
+            and self.flow.get("current") == "end"
+        )
+
     def summary(self):
         return {
             "root": self.root,
             "mode": self.mode,
+            "flow_terminal": self.flow_terminal,
             "conflicts": list(self.conflicts),
             "errors": list(self.errors),
             "ignored": list(self.ignored),

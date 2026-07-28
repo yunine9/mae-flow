@@ -140,6 +140,112 @@ class RuntimeAndStateTests(unittest.TestCase):
                 ledger = json.load(stream)
             self.assertIn("src/feature.cpp", ledger["paths"])
 
+    def test_terminal_flow_keeps_cli_state_but_all_hooks_bypass(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = os.path.join(td, "src", "feature.cpp")
+            os.makedirs(os.path.dirname(source), exist_ok=True)
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int feature() { return 1; }\n")
+            save_versioned_json(
+                os.path.join(td, ".mae-flow.json"),
+                {"current": "end", "config": {"单号": "REQ-DONE"},
+                 "choices": {}, "history": [],
+                 "started": "2026-07-28 12:00:00",
+                 "moonlight": {"enabled": True}},
+                "flow", project_root=td)
+
+            runtime = resolve_runtime(td)
+            self.assertEqual(RuntimeMode.FLOW, runtime.mode)
+            self.assertTrue(runtime.flow_terminal)
+
+            env = dict(os.environ)
+            env["PYTHONPYCACHEPREFIX"] = os.path.join(td, "pycache")
+
+            def hook(event, payload):
+                return subprocess.run(
+                    [sys.executable, os.path.join(
+                        ROOT, "hooks", "dispatch.py"), event],
+                    cwd=td, input=json.dumps(
+                        {"cwd": td, **payload}, ensure_ascii=False) + "\n",
+                    text=True, capture_output=True, env=env, timeout=15)
+
+            # 终态不是仍在运行的流程：六类 Hook 入口都不能继续使用旧步骤、
+            # 旧月光设置或旧 Agent 任务卡接管普通开发。
+            cases = [
+                ("pretooluse", {
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": source},
+                }),
+                ("pretooluse", {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "git reset --hard"},
+                }),
+                ("pretooluse", {
+                    "tool_name": "AskUserQuestion", "tool_input": {},
+                }),
+                ("pretooluse", {
+                    "tool_name": "Task",
+                    "tool_input": {
+                        "subagent_type": "compile-agent",
+                        "prompt": "run stale terminal task",
+                    },
+                }),
+                ("posttooluse", {
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": source},
+                    "tool_response": {"ok": True},
+                }),
+                ("subagentstop", {}),
+                ("stop", {}),
+                ("userprompt", {"prompt": "流程结束后直接修改普通代码"}),
+                ("sessionstart", {}),
+            ]
+            for event, payload in cases:
+                result = hook(event, payload)
+                self.assertEqual(
+                    0, result.returncode,
+                    "%s unexpectedly blocked:\n%s\n%s" % (
+                        event, result.stdout, result.stderr))
+
+            self.assertFalse(
+                os.path.exists(os.path.join(
+                    td, ".mae-flow.json.agent-writes")))
+            self.assertFalse(
+                os.path.exists(os.path.join(td, ".mae-flow.json.usermsg")))
+
+            moonlight_intent = hook(
+                "userprompt", {"prompt": "下一单开启月光宝盒继续"})
+            self.assertEqual(
+                0, moonlight_intent.returncode, moonlight_intent.stderr)
+            with open(
+                    os.path.join(td, ".mae-flow.json.usermsg"),
+                    encoding="utf-8") as stream:
+                messages = json.load(stream)
+            self.assertEqual("end", messages[-1]["step"])
+            self.assertIn("月光宝盒", messages[-1]["text"])
+
+            # CLI 仍保留终态报告和下一单滚动所需的状态；只是门禁已解除。
+            current = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"), "current"],
+                cwd=td, text=True, capture_output=True, env=env, timeout=15)
+            self.assertEqual(0, current.returncode, current.stderr)
+            self.assertIn("流程已完成", current.stdout)
+
+            direct_gate = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"),
+                 "gate", "edit", source],
+                cwd=td, text=True, capture_output=True, env=env, timeout=15)
+            self.assertEqual(0, direct_gate.returncode, direct_gate.stderr)
+            direct_bash_gate = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"),
+                 "gate", "bash", "git reset --hard"],
+                cwd=td, text=True, capture_output=True, env=env, timeout=15)
+            self.assertEqual(
+                0, direct_bash_gate.returncode, direct_bash_gate.stderr)
+
     def test_concurrent_read_modify_write_does_not_lose_updates(self):
         with tempfile.TemporaryDirectory() as td:
             counter = os.path.join(td, "counter.json")

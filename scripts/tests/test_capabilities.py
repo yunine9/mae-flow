@@ -338,7 +338,13 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             # --- 定稿:delta 合并进真相源 + 目录移动(不是复制) ---
             archived = self._spec_ok(root, "archive", env=env)
             self.assertIn("openspec/specs/runtime/spec.md", archived.stdout)
-            self.assertEqual("archived", self._spec_state(root)["phase"])
+            archived_state = self._spec_state(root)
+            self.assertEqual("archived", archived_state["phase"])
+            self.assertEqual([
+                "openspec/changes/" + CHANGE,
+                "openspec/changes/archive/" + archived_state["archived_to"],
+                "openspec/specs/runtime/spec.md",
+            ], archived_state["archive_paths"])
             self.assertFalse(os.path.exists(change))
             archived_dirs = glob.glob(os.path.join(
                 root, "openspec", "changes", "archive", "*-" + CHANGE))

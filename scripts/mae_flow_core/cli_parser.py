@@ -22,7 +22,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|checkpoint|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|exit"
+            "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
             "done 的 --set 可重复,值含空格要加引号；"
@@ -168,6 +168,10 @@ def parse_args(argv=None):
     template.add_argument(
         "kind", nargs="?", default="story",
         choices=["story", "chain", "grill", "review"])
+    story_localize = sub.add_parser("story-localize")
+    story_localize.add_argument(
+        "--ticket", required=True,
+        help="用户选择不入库的 STORY 单号；把文档移入本地过程区")
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")

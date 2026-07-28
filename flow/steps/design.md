@@ -20,7 +20,8 @@ done 硬校验占位已消失,方案节是入库档案里设计的唯一落点,�
 
 **收尾自查**:done 前 `spec show` 确认 phase=build 且 design_doc 已登记（done 的证据就查这两项加占位消除）。
 展示设计摘要后，若没有尚待用户决定的重大取舍，直接
-git add openspec/ && git commit -m "[单号][类型]设计定稿"，再 done。
+`git add -- openspec/changes/{CHANGE_NAME}` && git commit -m "[单号][类型]设计定稿"，再 done。
+禁止 `git add openspec/`，避免把其他单遗留的 change/STORY 卷进本单。
 只有发现会改变需求边界、外部契约或存在两个明显不同且影响重大的方案时才 AskUserQuestion；
 普通技术实现选择由 Agent 依据现有架构完成，不让用户为“设计阶段结束”签字。
 

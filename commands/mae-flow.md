@@ -103,9 +103,14 @@
      ③ 都没有 → 问用户要单号。
      确定后先执行 `mae-flow template` 拿模板绝对路径,再启动 story-generator-agent
      (模式=补生成,传入单号、该单的 change/archive 产物路径、模板绝对路径)。
-     agent 返回后照流程内 story 步的同一套确认纪律执行(本模式没有 done 硬校验兜底,全靠你自觉):
+     agent 的输出路径必须精确为 `docs/story/STORY-<单号>.md`；若写进 openspec 或其他目录，
+     视为生成失败，先纠正到该路径，禁止把错误目录留给下一单。
+     agent 返回后照流程内 story 步的同一套确认纪律执行:
      待确认项用 AskUserQuestion 逐项拿用户拍板 → 你亲自把"(待确认)"改写为"(已确认)"(agent 无权)
-     → 文档零"待确认"残留 → 用 AskUserQuestion 问是否入库 → 展示路径与章节概览收尾。
+     → 文档零"待确认"残留 → 用 AskUserQuestion 问是否入库。
+     用户选择入库时，只精确 `git add docs/story/STORY-<单号>.md`；选择不入库或不生成时，
+     必须执行 `python "<前面定位到的 MAEFLOW_PATH>" story-localize --ticket "<单号>"`，
+     由机器把文档移入 Git 本地排除的 `.mae-flow-work/story/`，再展示最终本地路径与章节概览收尾。
    - **review-fix** — 处理评审意见:本单已交付(MR 已建),处理评审/走读/流水线门禁意见。
      单号确定同 story 模式(参数带→直接用;.mae-flow.json 或 .last 里有→向用户确认;都没有→问)。
      用户本条 `/mae-flow review-fix ...` 已经是明确使用 Mae-Flow 开启评审修复轮的授权，禁止再问

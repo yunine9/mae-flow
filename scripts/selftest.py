@@ -48,6 +48,7 @@ def check(name, ok, detail=""):
 # 1. 语法
 for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/statusline.py", "scripts/mae_flow_core/capabilities.py",
+          "scripts/mae_flow_core/codecheck_log.py",
           "scripts/mae_flow_core/__init__.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
@@ -59,6 +60,8 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_capabilities.py",
           "scripts/tests/test_specengine.py",
           "scripts/tests/test_checkpoints.py",
+          "scripts/tests/test_commit_ownership.py",
+          "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
     try:
@@ -94,6 +97,18 @@ checkpoint_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("开发检查点与最终增量检视回归", checkpoint_tests.returncode == 0,
       (checkpoint_tests.stdout + checkpoint_tests.stderr)[-5000:])
+ownership_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_commit_ownership.py")],
+    text=True, capture_output=True, timeout=180)
+check("跨单提交归属与 STORY 本地化回归", ownership_tests.returncode == 0,
+      (ownership_tests.stdout + ownership_tests.stderr)[-5000:])
+codecheck_logging_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_codecheck_logging.py")],
+    text=True, capture_output=True, timeout=180)
+check("CodeCheck 全链路诊断日志回归", codecheck_logging_tests.returncode == 0,
+      (codecheck_logging_tests.stdout + codecheck_logging_tests.stderr)[-5000:])
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (
@@ -261,18 +276,24 @@ if flow:
     check("CodeCheck 告警数多格式解析",
           all(mf._parse_codecheck_count(a, b) == n for a, b, n in parser_cases))
     real_run, real_ensure = mf.subprocess.run, mf.ensure_codecheck
+    real_cwd = os.getcwd()
     try:
         sample = """[CodeCheck] 代码检查完成!\n### 1. [Minor] R.ONE 示例\n- **文件**: `Foo.cpp`\n- **规则**: R.ONE 示例\n💡 提示: 共有 1 条告警。"""
         mf.ensure_codecheck = lambda install=True: {
             "available": True, "path": "/fake/codecheck", "detail": ""}
         mf.subprocess.run = lambda *a, **k: types.SimpleNamespace(
             stdout=sample, stderr="", returncode=1)
-        result, err = mf._run_codecheck(["src/Foo.cpp"])
-        check("CodeCheck 成功不依赖退出码 0",
-              not err and result["total"] == 1
-              # 覆盖口径改造后告警带行号槽位;此样例明细无行号 → None(保守全算)
-              and result["pairs"] == [("R.ONE", "src/Foo.cpp", None)])
+        # _run_codecheck 现在会留下详细诊断；解析单测必须在临时项目中运行，
+        # 不能让发版自检反过来污染被检查仓库的 .mae-flow-work。
+        with _TmpDir() as codecheck_test_root:
+            os.chdir(codecheck_test_root)
+            result, err = mf._run_codecheck(["src/Foo.cpp"])
+            check("CodeCheck 成功不依赖退出码 0",
+                  not err and result["total"] == 1
+                  # 覆盖口径改造后告警带行号槽位;此样例明细无行号 → None(保守全算)
+                  and result["pairs"] == [("R.ONE", "src/Foo.cpp", None)])
     finally:
+        os.chdir(real_cwd)
         mf.subprocess.run, mf.ensure_codecheck = real_run, real_ensure
     win_argv, win_shell, _ = mf._codecheck_launch(
         ["src/My File.cpp"], executable=r"C:\Users\dev\AppData\Roaming\npm\codecheck.cmd", windows=True)
@@ -317,7 +338,7 @@ if flow:
             }
             calls = {"count": 0}
 
-            def fake_codecheck(_files):
+            def fake_codecheck(_files, *_args):
                 calls["count"] += 1
                 return ({
                     "total": 1,
@@ -406,7 +427,7 @@ if flow:
                 "config": {"单号": "REQ1", "基线分支": base},
                 "moonlight": {"enabled": True},
             }
-            mf._run_codecheck = lambda _files: ({
+            mf._run_codecheck = lambda _files, *_args: ({
                 "total": 2,
                 "pairs": [
                     ("R.NEAR", "src/Foo.cpp", 2),
@@ -438,7 +459,7 @@ if flow:
                 "int value = 1;\nint changed = 2;\n")
             state["quality"].pop("codecheck_verify", None)
             state["quality"]["codecheck_scan"].update({"count": 0, "manual": True})
-            mf._run_codecheck = lambda _files: (
+            mf._run_codecheck = lambda _files, *_args: (
                 calls.__setitem__("count", calls["count"] + 1)
                 or {"total": 0, "pairs": [], "commands": ["fullcheck"]}, "")
             manual_ok, _ = mf.ev_codecheck_clean({}, state)
@@ -1216,7 +1237,7 @@ if flow:
             old_run = mf._run_codecheck
             try:
                 calls = []
-                mf._run_codecheck = lambda files: (
+                mf._run_codecheck = lambda files, *_args: (
                     calls.append(list(files)) or
                     {"total": 0, "pairs": [], "commands": ["codecheck fullcheck -f " + ",".join(files)]}, "")
                 mf.cmd_action_start(flow, None, types.SimpleNamespace(
@@ -2233,7 +2254,9 @@ with _TmpDir() as td:
         subprocess.run(["git", "remote", "add", "origin", remote], check=True)
         subprocess.run(["git", "push", "-qu", "origin", "main"], check=True)
         state = {
-            "current": "push", "config": {}, "choices": {},
+            "current": "push",
+            "config": {"基线分支": "main", "CHANGE_NAME": "demo"},
+            "choices": {},
             "initial_dirty": [], "initial_dirty_fingerprints": {},
         }
         json.dump({"paths": {}}, open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8"))
@@ -3442,9 +3465,12 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "scripts/comet_compat.py", "scripts/mae_flow_core/capabilities.py",
+          "scripts/mae_flow_core/codecheck_log.py",
           "scripts/mae_flow_core/specengine.py",
           "scripts/tests/test_capabilities.py",
           "scripts/tests/test_specengine.py",
+          "scripts/tests/test_commit_ownership.py",
+          "scripts/tests/test_codecheck_logging.py",
           "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
           "runtime/vendor/ponytail/LICENSE",

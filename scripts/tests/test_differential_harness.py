@@ -113,6 +113,24 @@ class DifferentialRunnerTests(unittest.TestCase):
             goldens,
         )
 
+    def test_phase3_ordinary_advance_matches_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase3.json",
+        )
+        goldens = load_goldens(golden_path)
+        actual = run_scenario(ROOT, "ordinary_advance")
+        assert_matches_golden(
+            self,
+            "ordinary_advance",
+            actual,
+            goldens,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

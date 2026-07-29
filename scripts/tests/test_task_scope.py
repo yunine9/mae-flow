@@ -196,6 +196,131 @@ class TaskScopeTests(unittest.TestCase):
         self.assertIn(checkpoint_one + "..HEAD", card)
         self.assertNotIn("- services/anr/src/Logic.cpp", card)
 
+    def test_precommit_checkpoint_card_uses_tracked_and_untracked_worktree(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() { return 3; }\n")
+        write("services/anr/src/NewLogic.cpp",
+              "int newFunction() { return 4; }\n")
+        state = self.state("build")
+        state["development_review"] = {
+            "version": 1, "status": "active", "mode": "staged",
+            "review_before_commit": True, "current_index": 0,
+            "delivery_base": self.base, "last_reviewed_head": self.base,
+            "task_structure_sha256": "",
+            "checkpoints": [{
+                "id": "CP1", "title": "worktree batch",
+                "status": "coding", "fixed_base": self.base,
+            }],
+        }
+        mf.save_state(state)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_agent_task(
+                FLOW, state, types.SimpleNamespace(
+                    kind="compile", scope="未提交批次", checkpoint="CP1"))
+        task = mf.load_state()["agent_tasks"]["COMPILE"]
+        self.assertTrue(task["precommit_review"])
+        self.assertEqual(
+            set(task["task_files"]),
+            {"services/anr/src/Logic.cpp", "services/anr/src/NewLogic.cpp"})
+        self.assertIn(
+            "services/anr/src/NewLogic.cpp", task["source_snapshot"])
+        with open(task["path"], encoding="utf-8") as stream:
+            card = stream.read()
+        self.assertIn("先检视、后提交", card)
+        self.assertIn("禁止 git commit、git push", card)
+
+    def test_precommit_lightcheck_only_reads_exact_commit_candidates(self):
+        other = "services/anr/src/Other.cpp"
+        write(other, "int other() { return 1; }\n")
+        self.commit("add second source")
+        write(
+            "services/anr/src/Logic.cpp",
+            "int changedFunction(int a, int b, int c, int d, int e, int f) {\n"
+            "  return a;\n"
+            "}\n")
+        write(
+            other,
+            "int unrelated(int a, int b, int c, int d, int e, int f) {\n"
+            "  return a;\n"
+            "}\n")
+        result = mf._working_lightcheck_scope(
+            self.state("build"), ["services/anr/src/Logic.cpp"])
+        self.assertEqual(
+            {item["file"] for item in result["findings"]},
+            {"services/anr/src/Logic.cpp"},
+            result,
+        )
+
+    def test_precommit_lightcheck_reads_index_instead_of_unstaged_overlay(self):
+        path = "services/anr/src/Logic.cpp"
+        write(
+            path,
+            "int staged(int a, int b, int c, int d, int e, int f) {\n"
+            "  return a;\n"
+            "}\n")
+        git(self.repo, "add", path)
+        write(path, "int changedFunction() {\n  return 1;\n}\n")
+        snapshot = mf._pending_commit_candidates(
+            'git commit -m "[REQ-SCOPE][fix]test"')
+        result = mf._pending_lightcheck_scope(
+            self.state("build"), snapshot)
+        self.assertEqual(snapshot["working_paths"], set())
+        self.assertEqual(
+            [(item["file"], item["rule"]) for item in result["findings"]],
+            [(path, "MF-PARAM-5")],
+            result,
+        )
+
+    def test_commit_candidate_modes_use_the_content_git_will_commit(self):
+        path = "services/anr/src/Logic.cpp"
+        write(
+            path,
+            "int changed(int a, int b, int c, int d, int e, int f) {\n"
+            "  return a;\n"
+            "}\n")
+        commands = (
+            'git commit -am "[REQ-SCOPE][fix]test"',
+            'git commit --all -m "[REQ-SCOPE][fix]test"',
+            'git commit services/anr/src/Logic.cpp -m "[REQ-SCOPE][fix]test"',
+            'git add -u && git commit -m "[REQ-SCOPE][fix]test"',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                snapshot = mf._pending_commit_candidates(command)
+                self.assertEqual(snapshot["paths"], [path])
+                self.assertEqual(snapshot["working_paths"], {path})
+
+    def test_committed_diff_lightcheck_ignores_dirty_worktree_overlay(self):
+        path = "services/anr/src/Logic.cpp"
+        write(
+            path,
+            "int committed(int a, int b, int c, int d, int e, int f) {\n"
+            "  return a;\n"
+            "}\n")
+        self.commit("commit violation")
+        write(path, "int changedFunction() {\n  return 1;\n}\n")
+        result = mf._run_lightcheck_diff(
+            self.base + "..HEAD", [path], "test")
+        self.assertEqual(
+            [(item["file"], item["rule"]) for item in result["findings"]],
+            [(path, "MF-PARAM-5")],
+            result,
+        )
+
+    def test_lightcheck_prompt_covers_every_main_source_edit_route(self):
+        expected = {
+            "build", "rf_fix", "tw_change", "verify_ponytail",
+            "verify_ut", "rf_ut", "tw_ut",
+        }
+        for step in expected:
+            with self.subTest(step=step):
+                self.assertIn(
+                    "轻量编码预防",
+                    mf._with_lightcheck_prompt(step, "BASE"))
+        self.assertEqual(
+            mf._with_lightcheck_prompt("verify_codecheck", "BASE"),
+            "BASE")
+
     def test_codecheck_keeps_same_changed_function_but_not_stock_function(self):
         path = "services/anr/src/LongLogic.cpp"
         write(path, "\n".join([

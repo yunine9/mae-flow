@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-07-27",
+  "generated_at": "2026-07-29",
   "components": {
     "comet": {
       "version": "0.3.9",
@@ -25,6 +25,13 @@
       "source": "https://github.com/DietrichGebert/ponytail",
       "mode": "complete upstream skills directory",
       "sha256": "f7be89723fe90f0e0d3ffaff5ed01fe8f07a6d3e85543d875f5537395fbc1164"
+    },
+    "lizard": {
+      "version": "1.23.0",
+      "commit": "06284ec87c1966fee4ddbf3f068ccf89b987b0f8",
+      "source": "https://github.com/terryyin/lizard/tree/1.23.0",
+      "mode": "selected analyzer core and C/C++, Java, JavaScript/TypeScript, Python readers",
+      "sha256": "92b32bf6502b80441f2bd1ab923de39d120d046a5c8d41520953965ba6a08f4d"
     }
   }
 }

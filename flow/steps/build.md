@@ -16,19 +16,20 @@
 开工自查(计划评审通过后、写第一行码前,自己过一遍不问用户):实现清单逐项能指到方案节/规格条目的出处吗?
 三者有矛盾或遗漏 → 走上面的回流通道,**不带病开工**——现在对齐五分钟,verify 阶段返工半天。
 批次边界严格沿用编码前已经确认的 CP1/CP2…方案，不按行数、文件数或每个 commit 临时切分。
-每批提交后执行 `agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`，compile-agent OK 后执行
-`checkpoint ready CPn`：分阶段模式会要求普通 push，并在 `checkpoint status` 验真远端后等待用户检视；
-一次完成模式只记录批次范围，直接进入下一批，不 push、不等待。
-每批 commit 后是**安全的 /clear 点**:会话已明显冗长时主动向用户提议"/clear 后说继续";
+每批边界执行 `agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`，compile-agent OK 后执行
+`checkpoint ready CPn`：分阶段模式保持代码未提交，先冻结工作区 diff 让用户在 IDE 检视；用户确认后
+才精确 commit，再普通 push；一次完成模式仍按既有小步 commit 记录批次，直接进入下一批，不 push、不等待。
+分阶段模式在用户确认并完成精确 commit 后、一次完成模式在每批 commit 后，是**安全的 /clear 点**:
+会话已明显冗长时主动向用户提议"/clear 后说继续";
 批次交接必须**盘上自足**——本批的结论/偏离/踩坑写进实现清单对应任务的缩进备注行,
 让 /clear 后(或换会话)的你只靠磁盘就能无损接续。
 superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_override 授权,UT 由 verify 阶段 AutoUT 统一补,继续执行。
-按计划迭代,每完成一个任务:实现 → 规格条目同步检查(有偏差立即修) → 勾选实现清单 →
-git commit -m "[单号][类型]描述"(拒绝方法原文建议的 fix:/tweak:/设计意图式 message;
-**先 commit 后编译**是定死的顺序:任务代码可以带着编译错误入库,compile-agent 的修复另行 commit)。
+按计划迭代,每完成一个任务:实现 → 规格条目同步检查(有偏差立即修) → 勾选实现清单。
+一次完成模式继续小步 `git commit -m "[单号][类型]描述"`；分阶段模式在当前 CP 内先不要 commit，
+到批次边界编译通过并让用户检视未提交 diff，确认后只提交该收据中的文件。
 提交候选先收窄到你通过 Edit/Write 实际改过的文件，再逐个看 diff 决定是否提交；
 “改过”不等于“必须提交”，编译/格式化/生成命令顺带产生的文件默认不纳入。
-**积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 先执行
+**积累到模块/批次边界(一个 CMakeLists 模块完成,或一批相关任务)→ 执行
 `python "{MAEFLOW_PATH}" agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`，把输出的唯一启动话术原样交给 compile-agent**
 (任务卡由 harness 带齐单号、编译方式和本批范围):OK → 继续下一批;BLOCKED(含 SUSPECTED_ISSUES
 疑似要改接口/逻辑)→ 停下呈用户裁决,走既有回流通道,禁止自己乱改绕过。
@@ -62,7 +63,7 @@ mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(
 计划文档写到 **.mae-flow-work/plan-{单号}.md**(过程件不入库,git 本地排除已覆盖;禁止写进 docs/ 或 openspec/),生成后执行：
 `python "{MAEFLOW_PATH}" spec set plan ".mae-flow-work/plan-{单号}.md"`
 
-全部完成、任务全勾选且最后一轮 compile-agent 已 OK 后:
+全部完成、任务全勾选且最后一轮 compile-agent 已 OK，且分阶段模式最后一批已检视、精确提交并 push 后:
 展示任务状态与产物摘要后执行 done(状态机以任务清单、提交和编译令牌为证据,不重跑长编译)。
 新启动的普通流程按编码前选择执行检查点：分阶段模式的每批已经完成远端检视，一次完成模式留到质量链后统一检视；
 旧版在途流程仍进入原有 build_review，不会被升级强行改轨。所有普通流程在规格定稿前还会核对质量阶段是否产生

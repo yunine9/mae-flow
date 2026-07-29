@@ -280,7 +280,14 @@ def _gate_agent_dispatch(ti):
         # 因此同 HEAD 下出现新的未提交源码变化，必然发生在签卡后；现在拦比
         # SubagentStop 才拒签便宜得多。独立任务允许带脏工作区执行，仍由其
         # initial_source_fingerprints 在收尾契约中审计，不能在这里误伤恢复。
-        if not task.get("standalone") and head:
+        if task.get("precommit_review") and head:
+            current_snapshot = _source_snapshot(head)
+            if current_snapshot != (task.get("source_snapshot") or {}):
+                print("[mae-flow] 派发前拦截:%s 未提交任务卡签发后代码又发生变化。"
+                      "重新生成任务卡再派发，避免编译的不是即将检视的 diff。"
+                      % kind, file=sys.stderr)
+                sys.exit(2)
+        elif not task.get("standalone") and head:
             changed, err = _source_changed_since_receipt(head, st)
             if err:
                 print("[mae-flow] 派发前拦截:%s 无法核对任务卡新鲜度(%s)。"
@@ -607,6 +614,24 @@ def _git_head():
         return ""
 
 
+def _flow_task_for_token(kind):
+    try:
+        raw, err = safe_read_json(STATE)
+        if err or not raw:
+            return {}
+        current = normalize_document(raw, "flow")
+        return (current.get("agent_tasks", {}) or {}).get(kind, {})
+    except Exception:
+        return {}
+
+
+def _flow_token_source_snapshot(kind, fallback_head):
+    task = _flow_task_for_token(kind)
+    if task.get("precommit_review"):
+        return _source_snapshot(task.get("head", fallback_head))
+    return None
+
+
 def _record_agent_token(kind, status="", report=""):
     """子 agent 合法收尾的硬令牌:仅由本 hook(harness 调用)写入,是模型无法伪造的证据源——
     令牌文件在 gate 黑名单中(Edit/Bash 双拦),手动调 dispatch.py 也被 gate 拦截。
@@ -653,10 +678,14 @@ def _record_agent_token(kind, status="", report=""):
             pass
 
         def update_tokens(tokens):
-            tokens[kind] = {
+            token = {
                 "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
                 "status": status, "step": step,
             }
+            source_snapshot = _flow_token_source_snapshot(kind, head)
+            if source_snapshot is not None:
+                token["source_snapshot"] = source_snapshot
+            tokens[kind] = token
             return tokens
 
         update_json(p, update_tokens, default={}, recover_corrupt=True)
@@ -1239,6 +1268,10 @@ def _task_card_contract(kind, report, soft=False):
     if task.get("standalone") and _git_head() != head:
         _contract_bail(kind, "独立任务禁止自动 commit，但当前 HEAD 已变化。"
                        "保留代码后结束本任务并由用户自行决定是否提交。", soft)
+    if task.get("precommit_review") and _git_head() != head:
+        _contract_bail(
+            kind, "当前检查点要求用户先检视未提交 diff；子 Agent 禁止自动 commit。"
+            "保留工作区代码并重新按真实结果收尾。", soft)
     return task
 
 
@@ -1946,9 +1979,15 @@ def _empty_section(value):
 
 
 def _changed_paths_since(head):
-    out = _git_out(f"git -c core.quotepath=false diff --name-only {head}..HEAD")
+    out = _git_out(
+        f"git -c core.quotepath=false diff --name-only --no-renames {head}..HEAD")
     paths = [x.strip() for x in out.splitlines() if x.strip()]
-    for line in _git_out("git -c core.quotepath=false status --porcelain").splitlines():
+    paths.extend(
+        x.strip() for x in _git_out(
+            "git -c core.quotepath=false diff --name-only --no-renames HEAD"
+        ).splitlines() if x.strip())
+    for line in _git_out(
+            "git -c core.quotepath=false status --porcelain --untracked-files=all").splitlines():
         p = line.split(None, 1)
         if len(p) == 2:
             paths.append(p[1].split(" -> ")[-1].strip().strip('"'))
@@ -1978,6 +2017,39 @@ def _path_fingerprint(path):
     return h.hexdigest()
 
 
+def _update_review_hash(h, absolute, path_stat):
+    git_mode = path_stat.st_mode & 0o170000
+    executable = bool(path_stat.st_mode & 0o100)
+    h.update(("type:%o\0exec:%d\0" % (
+        git_mode, executable)).encode("ascii"))
+    if os.path.islink(absolute):
+        h.update(b"symlink\0")
+        h.update(os.readlink(absolute).encode(
+            "utf-8", errors="surrogateescape"))
+        return
+    if os.path.isfile(absolute):
+        h.update(b"file\0")
+        with open(absolute, "rb") as stream:
+            for chunk in iter(
+                    lambda: stream.read(1024 * 1024), b""):
+                h.update(chunk)
+        return
+    h.update(b"dir\0" if os.path.isdir(absolute) else b"other\0")
+
+
+def _review_path_fingerprint(path):
+    h = hashlib.sha256()
+    absolute = os.path.abspath(path)
+    try:
+        _update_review_hash(h, absolute, os.lstat(absolute))
+    except FileNotFoundError:
+        h.update(b"missing\0")
+    except OSError as exc:
+        h.update(("error:" + str(exc)).encode(
+            "utf-8", errors="replace"))
+    return h.hexdigest()
+
+
 def _unchanged_initial_dirty(path, st):
     rel = str(path or "").replace("\\", "/").strip().strip('"')
     initial = set((st or {}).get("initial_dirty", []) or [])
@@ -1987,23 +2059,32 @@ def _unchanged_initial_dirty(path, st):
 
 def _source_snapshot(head):
     return {
-        p: _path_fingerprint(p)
+        p: _review_path_fingerprint(p)
         for p in _changed_paths_since(head)
         if _source_like(p)
     }
 
 
-_TEST_PAT = re.compile(r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/|(^|/)src/test/|(^|/)test_[^/]+\.py$|"
-                       r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|js|jsx|ts|tsx)$|"
+_TEST_PAT = re.compile(
+    r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/|"
+    r"(^|/)src/test/|(^|/)test_[^/]+\.py$|"
+    r"(_test|\.test|\.spec)\."
+    r"(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|"
+    r"js|jsx|cjs|mjs|ts|tsx|cts|mts)$|"
                        r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$", re.I)
 _SOURCE_EXT_PAT = re.compile(
     r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|java|kt|kts|groovy|scala|py|pyi|"
-    r"go|rs|cs|js|jsx|ts|tsx|vue|swift|m|mm|proto|sql|s|asm|cmake|gradle|sln|"
+    r"go|rs|cs|js|jsx|cjs|mjs|ts|tsx|cts|mts|vue|swift|m|mm|proto|sql|s|asm|cmake|gradle|sln|"
     r"vcxproj|props|targets|sh|bash|bat|cmd|ps1|mk|gn|gni|bzl)$", re.I)
 _SOURCE_NAME_PAT = re.compile(
     r"^(CMakeLists\.txt|Makefile|GNUMakefile|pom\.xml|build\.gradle|settings\.gradle|"
     r"gradle\.properties|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|"
-    r"Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|meson\.build|build\.ninja)$", re.I)
+    r"Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|meson\.build|build\.ninja|"
+    r"CMakePresets\.json|CMakeUserPresets\.json|vcpkg\.json|conanfile\.py|"
+    r"conanfile\.txt|pyproject\.toml|setup\.py|setup\.cfg|tox\.ini|Pipfile|"
+    r"Pipfile\.lock|poetry\.lock|requirements\.txt|WORKSPACE|WORKSPACE\.bazel|"
+    r"MODULE\.bazel|BUILD|BUILD\.bazel|Gemfile|Rakefile|composer\.json|"
+    r"composer\.lock)$", re.I)
 _SOURCE_DIR_PAT = re.compile(r"(^|/)(service|src|include|lib|app|modules?)/", re.I)
 
 
@@ -2069,6 +2150,12 @@ def _enforce_agent_scope(kind, task, bail):
         initial = task.get("initial_source_fingerprints", {}) or {}
         # 独立任务允许用户带着未提交代码开始；只审计任务启动后真正发生变化的路径。
         changed = [p for p in changed if initial.get(p) != _path_fingerprint(p)]
+    elif task.get("precommit_review"):
+        initial = task.get("source_snapshot", {}) or {}
+        changed = [
+            p for p in changed
+            if initial.get(p) != _review_path_fingerprint(p)
+        ]
     else:
         # 完整流程同样可能在 init 前已有未提交源码。它不属于本任务，且只在
         # 指纹仍与初始快照一致时豁免；本轮再次改动仍会进入越权审计。
@@ -2450,8 +2537,30 @@ def _compile_net_lines(head):
                 n += int(p[0]) - int(p[1])
         return n
 
-    return (net_of(_git_out(f"git -c core.quotepath=false diff --numstat {head}..HEAD"))
-            + net_of(_git_out("git -c core.quotepath=false diff --numstat HEAD")))
+    untracked = 0
+    for path in _git_out(
+            "git ls-files --others --exclude-standard").splitlines():
+        if not _source_like(path):
+            continue
+        try:
+            with open(path, "rb") as stream:
+                untracked += sum(1 for _line in stream)
+        except OSError:
+            pass
+    return (
+        net_of(_git_out(
+            f"git -c core.quotepath=false diff --numstat {head}..HEAD"))
+        + net_of(_git_out(
+            "git -c core.quotepath=false diff --numstat HEAD"))
+        + untracked)
+
+
+def _compile_agent_net(task):
+    """Only attribute source growth/shrinkage after the compile task was issued."""
+    net = _compile_net_lines(task.get("head", ""))
+    if task.get("precommit_review"):
+        net -= int(task.get("initial_compile_net", 0) or 0)
+    return net
 
 
 def _compile_contract(status, report, tool_calls=None, soft=False):
@@ -2497,7 +2606,7 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
         bail(f"标记 OK 但 BUILD_ERRORS={n},自相矛盾。")
     if status == "BLOCKED" and n == 0:
         bail("标记 BLOCKED 但 BUILD_ERRORS=0,自相矛盾(编译已过应报 OK)。")
-    net = _compile_net_lines(task.get("head", ""))
+    net = _compile_agent_net(task)
     shrink = _section(report, "SHRINK_EXEMPT")
     if net < 0 and (shrink is None or _empty_section(shrink)):
         bail(f"代码净删 {-net} 行(git 亲算:未提交+修复编译 commit)且无 SHRINK_EXEMPT 声明——"

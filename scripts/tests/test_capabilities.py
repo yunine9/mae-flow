@@ -195,7 +195,10 @@ class EmbeddedCapabilityTests(unittest.TestCase):
         integrity = [
             item for item in checks
             if item["name"].startswith("源码完整性 ")]
-        self.assertEqual(4, len(integrity))
+        self.assertEqual(
+            {"源码完整性 comet", "源码完整性 lizard", "源码完整性 openspec",
+             "源码完整性 ponytail", "源码完整性 superpowers"},
+            {item["name"] for item in integrity})
         self.assertTrue(all(item["ok"] for item in integrity), integrity)
 
     # ------------------------------------------------------------------

@@ -18,6 +18,11 @@ SPEC = importlib.util.spec_from_file_location(
     "mae_flow_checkpoint_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mf)
+DISPATCH_SPEC = importlib.util.spec_from_file_location(
+    "mae_flow_checkpoint_dispatch_test",
+    os.path.join(ROOT, "hooks", "dispatch.py"))
+dispatch = importlib.util.module_from_spec(DISPATCH_SPEC)
+DISPATCH_SPEC.loader.exec_module(dispatch)
 FLOW = json.load(open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8"))
 mf.FLOW = FLOW
 
@@ -112,6 +117,22 @@ class CheckpointTests(unittest.TestCase):
                 "at": "9999-12-31 23:59:59", "step": state["current"],
                 "head": head, "status": "OK",
             }}, f)
+
+    def precommit_compile_receipt(self, state):
+        snapshot = mf._source_snapshot_since(self.base, state)
+        state.setdefault("agent_tasks", {})["COMPILE"] = {
+            "step": "tw_change", "head": self.base, "sha256": "task-CP1",
+            "scope": "CP1", "checkpoint": "CP1",
+            "precommit_review": True, "source_snapshot": snapshot,
+        }
+        state = self.save(state)
+        with open(mf.STATE_PATH + ".tokens", "w", encoding="utf-8") as stream:
+            json.dump({"COMPILE": {
+                "at": "9999-12-31 23:59:59", "step": "tw_change",
+                "head": self.base, "status": "OK",
+                "source_snapshot": snapshot,
+            }}, stream)
+        return state
 
     def test_plan_confirmed_before_code_and_continuous_batch_does_not_wait(self):
         state = self.save(self.state())
@@ -213,6 +234,278 @@ class CheckpointTests(unittest.TestCase):
             state["development_review"]["checkpoints"][0]["status"], "accepted")
         self.assertEqual(state["development_review"]["current_index"], 1)
 
+    def test_new_staged_plan_reviews_uncommitted_diff_then_commits_exact_snapshot(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        state = self.save(state)
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int reviewed_before_commit = 2;\n")
+        state = self.precommit_compile_receipt(state)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            mf.cmd_checkpoint_ready(
+                FLOW, state, types.SimpleNamespace(checkpoint_id="CP1"))
+        state = mf.load_state()
+        item = state["development_review"]["checkpoints"][0]
+        self.assertEqual(item["status"], "review_pending")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
+        self.assertIn("尚未提交", output.getvalue())
+
+        self.message(state, mf.CHECKPOINT_CONTINUE_ACK)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_decide(FLOW, state, types.SimpleNamespace(
+                choice="continue", ack=mf.CHECKPOINT_CONTINUE_ACK))
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["checkpoints"][0]["status"],
+            "commit_pending")
+        command = ("git add -- src/main.cpp && "
+                   "git commit -m '[REQ1][fix]batch 1'")
+        with self.assertRaises(SystemExit) as allowed:
+            mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                what="bash", arg=command))
+        self.assertEqual(allowed.exception.code, 0)
+        git(self.repo, "add", "--", "src/main.cpp")
+        git(self.repo, "commit", "-qm", "[REQ1][fix]batch 1")
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["checkpoints"][0]["status"],
+            "push_pending")
+        remote = os.path.join(self.tmp, "remote.git")
+        git(self.tmp, "init", "--bare", "-q", remote)
+        git(self.repo, "remote", "add", "origin", remote)
+        git(self.repo, "push", "-qu", "origin", "HEAD")
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["checkpoints"][0]["status"],
+            "accepted")
+        self.assertEqual(state["development_review"]["current_index"], 1)
+
+    def test_reviewed_snapshot_blocks_edits_and_extra_commit_files(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int frozen = 2;\n")
+        snapshot = {
+            "src/main.cpp": mf._review_path_fingerprint("src/main.cpp")}
+        item = state["development_review"]["checkpoints"][0]
+        item.update({
+            "status": "commit_pending",
+            "receipt": {
+                "base": self.base, "snapshot": snapshot,
+                "snapshot_sha256": mf._snapshot_sha256(snapshot),
+            },
+        })
+        state = self.save(state)
+        with open("notes.txt", "w", encoding="utf-8") as stream:
+            stream.write("not reviewed\n")
+        git(self.repo, "add", "notes.txt")
+        command = (
+            "git add -- src/main.cpp && "
+            "git commit -m '[REQ1][fix]batch 1'")
+        with self.assertRaises(SystemExit) as blocked:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                    what="bash", arg=command))
+        self.assertEqual(blocked.exception.code, 2)
+
+        with self.assertRaises(SystemExit) as edit_blocked:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                    what="edit", arg="src/main.cpp"))
+        self.assertEqual(edit_blocked.exception.code, 2)
+
+        for push_command in (
+                "git push -u origin HEAD",
+                command + " && git push -u origin HEAD"):
+            with self.assertRaises(SystemExit) as push_blocked:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                        what="bash", arg=push_command))
+            self.assertEqual(push_blocked.exception.code, 2)
+
+    def test_external_bad_commit_enters_recoverable_frozen_state(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int reviewed = 2;\n")
+        snapshot = {
+            "src/main.cpp": mf._review_path_fingerprint("src/main.cpp")}
+        item = state["development_review"]["checkpoints"][0]
+        item.update({
+            "status": "commit_pending",
+            "receipt": {
+                "base": self.base, "snapshot": snapshot,
+                "snapshot_sha256": mf._snapshot_sha256(snapshot),
+            },
+        })
+        self.save(state)
+        with open("notes.txt", "w", encoding="utf-8") as stream:
+            stream.write("not reviewed\n")
+        git(self.repo, "add", "src/main.cpp", "notes.txt")
+        git(self.repo, "commit", "-qm", "[REQ1][fix]bad mixed commit")
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        item = state["development_review"]["checkpoints"][0]
+        self.assertEqual(item["status"], "commit_recovery")
+        self.assertIn("notes.txt", item["verification_error"])
+        self.assertIn("禁止 push", output.getvalue())
+
+        self.message(state, mf.CHECKPOINT_REVISE_ACK)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_decide(FLOW, state, types.SimpleNamespace(
+                choice="revise", ack=mf.CHECKPOINT_REVISE_ACK))
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["checkpoints"][0]["status"],
+            "reset_pending")
+        git(self.repo, "reset", "--mixed", self.base)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        item = state["development_review"]["checkpoints"][0]
+        self.assertEqual(item["status"], "coding")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
+        self.assertTrue(os.path.exists("notes.txt"))
+        self.assertIn("src/main.cpp", mf._dirty_paths())
+
+    def test_delivery_snapshot_includes_agent_written_non_source_file(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int reviewed = 2;\n")
+        os.makedirs("assets")
+        with open("assets/banner.txt", "w", encoding="utf-8") as stream:
+            stream.write("delivery fixture\n")
+        self.assertFalse(
+            mf._is_source_path("assets/banner.txt", state, FLOW))
+        with open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8") as stream:
+            json.dump({"paths": {"assets/banner.txt": {"at": "now"}}}, stream)
+
+        snapshot = mf._checkpoint_worktree_snapshot(state, FLOW)
+        self.assertEqual(
+            set(snapshot), {"src/main.cpp", "assets/banner.txt"})
+
+    def test_non_source_only_checkpoint_skips_compile_and_enters_review(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        os.makedirs("assets")
+        with open("assets/banner.txt", "w", encoding="utf-8") as stream:
+            stream.write("delivery fixture\n")
+        with open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8") as stream:
+            json.dump({"paths": {"assets/banner.txt": {"at": "now"}}}, stream)
+        state = self.save(state)
+
+        with self.assertRaises(SystemExit) as no_task:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_agent_task(
+                    FLOW, state, types.SimpleNamespace(
+                        kind="compile", scope="资源交付",
+                        checkpoint="CP1"))
+        self.assertEqual(no_task.exception.code, 2)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_ready(
+                FLOW, mf.load_state(),
+                types.SimpleNamespace(checkpoint_id="CP1"))
+        item = mf.load_state()["development_review"]["checkpoints"][0]
+        self.assertEqual(item["status"], "review_pending")
+        self.assertTrue(item["compile_skipped_no_source"])
+        self.assertEqual(
+            set(item["receipt"]["snapshot"]), {"assets/banner.txt"})
+
+    @unittest.skipIf(os.name == "nt", "Windows does not expose Git executable bits")
+    def test_review_fingerprint_tracks_git_executable_bit_only(self):
+        path = "src/main.cpp"
+        os.chmod(path, 0o644)
+        regular = mf._review_path_fingerprint(path)
+        os.chmod(path, 0o600)
+        self.assertEqual(regular, mf._review_path_fingerprint(path))
+        os.chmod(path, 0o610)
+        self.assertEqual(regular, mf._review_path_fingerprint(path))
+        os.chmod(path, 0o755)
+        self.assertNotEqual(regular, mf._review_path_fingerprint(path))
+        self.assertEqual(
+            mf._review_path_fingerprint(path),
+            dispatch._review_path_fingerprint(path))
+
+    def test_precommit_scope_does_not_blame_existing_test_change(self):
+        test_path = "src/main_test.cpp"
+        with open(test_path, "w", encoding="utf-8") as stream:
+            stream.write("int test_value = 1;\n")
+        git(self.repo, "add", test_path)
+        git(self.repo, "commit", "-qm", "add test")
+        task_head = git(self.repo, "rev-parse", "HEAD")
+        with open(test_path, "a", encoding="utf-8") as stream:
+            stream.write("int main_agent_test = 2;\n")
+        task = {
+            "head": task_head,
+            "precommit_review": True,
+            "source_snapshot": dispatch._source_snapshot(task_head),
+        }
+
+        def bail(message):
+            raise AssertionError(message)
+
+        self.assertEqual(
+            dispatch._enforce_agent_scope("COMPILE", task, bail), [])
+        with open(test_path, "a", encoding="utf-8") as stream:
+            stream.write("int compile_agent_test = 3;\n")
+        with self.assertRaises(AssertionError):
+            dispatch._enforce_agent_scope("COMPILE", task, bail)
+
+    def test_main_and_hook_share_root_build_file_classification(self):
+        paths = [
+            "pyproject.toml", "CMakePresets.json", "vcpkg.json",
+            "setup.cfg", "WORKSPACE.bazel", "composer.json",
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(mf._is_source_path(path, {}, FLOW))
+                self.assertTrue(dispatch._source_like(path))
+
+    def test_compile_net_ignores_main_agent_deletion_before_task(self):
+        with open("src/main.cpp", "w", encoding="utf-8") as stream:
+            stream.write("")
+        baseline = dispatch._compile_net_lines(self.base)
+        self.assertEqual(baseline, -1)
+        task = {
+            "head": self.base,
+            "precommit_review": True,
+            "initial_compile_net": baseline,
+        }
+        self.assertEqual(dispatch._compile_agent_net(task), 0)
+
+    def test_precommit_compile_token_binds_final_worktree_snapshot(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int token_snapshot = 2;\n")
+        snapshot = mf._source_snapshot_since(self.base, state)
+        state["agent_tasks"] = {"COMPILE": {
+            "step": "tw_change", "head": self.base,
+            "precommit_review": True, "source_snapshot": snapshot,
+        }}
+        self.save(state)
+        dispatch._record_agent_token("COMPILE", "OK")
+        with open(mf.STATE_PATH + ".tokens", encoding="utf-8") as stream:
+            token = json.load(stream)["COMPILE"]
+        self.assertEqual(token["head"], self.base)
+        self.assertEqual(token["source_snapshot"], snapshot)
+
     def test_switch_to_continuous_keeps_valid_compile_and_closes_mixed_states(self):
         state = self.state(current="tw_change", mode="staged", checkpoints=3)
         state["development_review"]["checkpoints"][0].update({
@@ -297,7 +590,7 @@ class CheckpointTests(unittest.TestCase):
         self.commit_source("int late = 4;", "[REQ1][fix]late code")
         self.assertFalse(mf.ev_final_review_clear({}, mf.load_state())[0])
 
-    def test_staged_final_review_requires_exact_remote_head_before_acceptance(self):
+    def test_staged_final_review_happens_before_remote_push(self):
         state = self.state(
             current="delivery_review", mode="staged", checkpoints=1)
         state["development_review"]["checkpoints"][0].update({
@@ -311,22 +604,11 @@ class CheckpointTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             mf.cmd_checkpoint_final(mf.load_state())
         state = mf.load_state()
-        self.assertEqual(
-            state["development_review"]["final_review"]["status"],
-            "push_pending")
-
-        remote = os.path.join(self.tmp, "remote.git")
-        git(self.tmp, "init", "--bare", "-q", remote)
-        git(self.repo, "remote", "add", "origin", remote)
-        git(self.repo, "push", "-qu", "origin", "HEAD")
-        with contextlib.redirect_stdout(io.StringIO()):
-            mf.cmd_checkpoint_final(mf.load_state())
-        state = mf.load_state()
         final = state["development_review"]["final_review"]
         self.assertEqual(final["status"], "review_pending")
         self.assertEqual(final["head"], code_head)
-        self.assertEqual(final["remote_head"], code_head)
-        self.assertTrue(final["remote_ref"])
+        self.assertFalse(final.get("remote_ref"))
+        self.assertFalse(final.get("remote_head"))
 
         self.message(state, mf.CHECKPOINT_CONTINUE_ACK)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -336,6 +618,182 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(
             state["development_review"]["last_reviewed_head"], code_head)
         self.assertTrue(mf.ev_final_review_clear({}, state)[0])
+
+    def test_final_review_is_locked_idempotent_and_visible_in_status(self):
+        state = self.state(
+            current="delivery_review", mode="staged", checkpoints=1)
+        state["development_review"]["checkpoints"][0].update({
+            "status": "accepted", "completed_head": self.base,
+        })
+        state["development_review"]["current_index"] = 1
+        self.save(state)
+        self.commit_source(
+            "int final_lock = 8;", "[REQ1][fix]final lock")
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_final(mf.load_state())
+        state = mf.load_state()
+        original_cursor = list(
+            state["development_review"]["final_review"]["ack_cursor"])
+        self.assertTrue(mf._checkpoint_review_locked(state))
+
+        with self.assertRaises(SystemExit) as push_blocked:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                    what="bash", arg="git push -u origin HEAD"))
+        self.assertEqual(push_blocked.exception.code, 2)
+
+        self.message(state, mf.CHECKPOINT_CONTINUE_ACK)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_final(mf.load_state())
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["final_review"]["ack_cursor"],
+            original_cursor)
+        status_output = io.StringIO()
+        with contextlib.redirect_stdout(status_output):
+            mf.cmd_checkpoint_status(state)
+        self.assertIn("最终未检视代码增量", status_output.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_decide(FLOW, state, types.SimpleNamespace(
+                choice="continue", ack=mf.CHECKPOINT_CONTINUE_ACK))
+        self.assertEqual(
+            mf.load_state()["development_review"]["final_review"]["status"],
+            "accepted")
+
+    def test_legacy_final_push_pending_migrates_to_local_review(self):
+        state = self.state(
+            current="delivery_review", mode="continuous", checkpoints=1)
+        state["development_review"]["checkpoints"][0].update({
+            "status": "completed", "completed_head": self.base,
+        })
+        state["development_review"]["current_index"] = 1
+        code_head = self.commit_source(
+            "int legacy_final = 11;", "[REQ1][fix]legacy final")
+        state["development_review"]["final_review"] = {
+            "status": "push_pending",
+            "base": self.base,
+            "head": code_head,
+            "changed": ["src/main.cpp"],
+            "ack_cursor": [],
+        }
+        self.save(state)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        final = state["development_review"]["final_review"]
+        self.assertEqual(final["status"], "review_pending")
+        self.assertFalse(final.get("remote_ref"))
+        self.assertIn("本地先检视", output.getvalue())
+        self.assertIn("最终未检视代码增量", output.getvalue())
+
+        with self.assertRaises(SystemExit) as push_blocked:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_gate(FLOW, state, types.SimpleNamespace(
+                    what="bash", arg="git push -u origin HEAD"))
+        self.assertEqual(push_blocked.exception.code, 2)
+
+    def test_dirty_final_delta_is_reviewed_then_exactly_committed_and_rechecked(self):
+        state = self.state(
+            current="delivery_review", mode="continuous", checkpoints=1)
+        state["development_review"]["checkpoints"][0].update({
+            "status": "completed", "completed_head": self.base,
+        })
+        state["development_review"]["current_index"] = 1
+        state = self.save(state)
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int dirty_final = 9;\n")
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_final(state)
+        state = mf.load_state()
+        final = state["development_review"]["final_review"]
+        self.assertTrue(final["requires_commit"])
+        self.assertEqual(final["status"], "review_pending")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), self.base)
+
+        self.message(state, mf.CHECKPOINT_CONTINUE_ACK)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_decide(FLOW, state, types.SimpleNamespace(
+                choice="continue", ack=mf.CHECKPOINT_CONTINUE_ACK))
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["final_review"]["status"],
+            "commit_pending")
+        git(self.repo, "add", "src/main.cpp")
+        git(self.repo, "commit", "-qm", "[REQ1][fix]reviewed final delta")
+        reviewed_head = git(self.repo, "rev-parse", "HEAD")
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        self.assertEqual(state["current"], "tw_change")
+        self.assertEqual(
+            state["development_review"]["last_reviewed_head"],
+            reviewed_head)
+        self.assertEqual(state["step_heads"]["tw_change"], self.base)
+        self.assertNotIn("final_review", state["development_review"])
+
+    def test_final_review_detects_agent_written_non_document_delivery(self):
+        state = self.state(
+            current="delivery_review", mode="continuous", checkpoints=1)
+        state["development_review"]["checkpoints"][0].update({
+            "status": "completed", "completed_head": self.base,
+        })
+        state["development_review"]["current_index"] = 1
+        state = self.save(state)
+        with open("runtime.yaml", "w", encoding="utf-8") as stream:
+            stream.write("enabled: true\n")
+        with open(mf.AGENT_WRITES_PATH, "w", encoding="utf-8") as stream:
+            json.dump({"paths": {"runtime.yaml": {"at": "now"}}}, stream)
+        changed, why = mf._final_review_delta(state)
+        self.assertFalse(why)
+        self.assertEqual(changed, ["runtime.yaml(未提交)"])
+        self.assertFalse(mf.ev_final_review_clear({}, state)[0])
+
+    def test_recovery_blocks_when_any_reset_commit_is_already_upstream(self):
+        state = self.state(
+            current="tw_change", mode="staged", checkpoints=1)
+        state["development_review"]["review_before_commit"] = True
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int reviewed = 2;\n")
+        snapshot = {
+            "src/main.cpp": mf._review_path_fingerprint("src/main.cpp")}
+        state["development_review"]["checkpoints"][0].update({
+            "status": "commit_pending",
+            "receipt": {
+                "base": self.base, "snapshot": snapshot,
+                "snapshot_sha256": mf._snapshot_sha256(snapshot),
+            },
+        })
+        self.save(state)
+        with open("notes.txt", "w", encoding="utf-8") as stream:
+            stream.write("not reviewed\n")
+        git(self.repo, "add", "src/main.cpp", "notes.txt")
+        git(self.repo, "commit", "-qm", "[REQ1][fix]bad pushed commit")
+        remote = os.path.join(self.tmp, "remote.git")
+        git(self.tmp, "init", "--bare", "-q", remote)
+        git(self.repo, "remote", "add", "origin", remote)
+        git(self.repo, "push", "-qu", "origin", "HEAD")
+        with open("later.txt", "w", encoding="utf-8") as stream:
+            stream.write("later\n")
+        git(self.repo, "add", "later.txt")
+        git(self.repo, "commit", "-qm", "[REQ1][fix]later local commit")
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_status(mf.load_state())
+        state = mf.load_state()
+        self.assertEqual(
+            state["development_review"]["checkpoints"][0]["status"],
+            "commit_recovery")
+        self.message(state, mf.CHECKPOINT_REVISE_ACK)
+        with self.assertRaises(SystemExit) as blocked:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_checkpoint_decide(FLOW, state, types.SimpleNamespace(
+                    choice="revise", ack=mf.CHECKPOINT_REVISE_ACK))
+        self.assertEqual(blocked.exception.code, 2)
+        self.assertEqual(
+            mf.load_state()["development_review"]["checkpoints"][0]["status"],
+            "commit_recovery")
 
     def test_final_review_rejects_rewritten_reviewed_history(self):
         state = self.state(

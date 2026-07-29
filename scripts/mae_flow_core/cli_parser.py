@@ -21,7 +21,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
-            "agent-task|checkpoint|accept-risk|moonlight|action|messages|config-review|requirement-record|"
+            "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
@@ -178,6 +178,10 @@ def parse_args(argv=None):
     task.add_argument(
         "--checkpoint",
         help="编译任务所属检查点，如 CP1；仅开发节奏已确认的编码步骤使用")
+    lightcheck = sub.add_parser("lightcheck")
+    lightcheck.add_argument(
+        "--quiet", action="store_true",
+        help="CLEAN/安全降级时静默；仅发现高置信问题才提示")
     checkpoint = sub.add_parser("checkpoint")
     checkpoint_actions = checkpoint.add_subparsers(
         dest="checkpoint_action", required=True)

@@ -49,6 +49,7 @@ def check(name, ok, detail=""):
 for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/statusline.py", "scripts/mae_flow_core/capabilities.py",
           "scripts/mae_flow_core/codecheck_log.py",
+          "scripts/mae_flow_core/lightcheck.py",
           "scripts/mae_flow_core/__init__.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
@@ -62,6 +63,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_checkpoints.py",
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
+          "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_task_scope.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
@@ -116,6 +118,12 @@ task_scope_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("质量任务范围、函数边界与执行目录回归", task_scope_tests.returncode == 0,
       (task_scope_tests.stdout + task_scope_tests.stderr)[-5000:])
+lightcheck_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_lightcheck.py")],
+    text=True, capture_output=True, timeout=180)
+check("轻量编码预检跨语言与安全降级回归", lightcheck_tests.returncode == 0,
+      (lightcheck_tests.stdout + lightcheck_tests.stderr)[-5000:])
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (
@@ -3496,15 +3504,18 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "skills/mae-flow/assets/REVIEW-TEMPLATE.md",
           "scripts/comet_compat.py", "scripts/mae_flow_core/capabilities.py",
           "scripts/mae_flow_core/codecheck_log.py",
+          "scripts/mae_flow_core/lightcheck.py",
           "scripts/mae_flow_core/specengine.py",
           "scripts/tests/test_capabilities.py",
           "scripts/tests/test_specengine.py",
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
+          "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_task_scope.py",
           "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
-          "runtime/vendor/ponytail/LICENSE",
+          "runtime/vendor/ponytail/LICENSE", "runtime/vendor/lizard/LICENSE.txt",
+          "runtime/vendor/lizard/LICENSE-APACHE-2.0.txt",
           "flow/steps/moonlight_review.md", "commands/mae-flow.md", "README.md",
           "MAINTAINERS.md", "CHANGELOG.md", ".gitattributes"):
     check(f"存在 {f}", os.path.exists(os.path.join(ROOT, f)))

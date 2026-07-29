@@ -34,6 +34,7 @@
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
 import glob as globmod, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time
+from io import BytesIO
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
 from mae_flow_core import (
@@ -75,6 +76,10 @@ from mae_flow_core.moonlight import (
     unresolved as moonlight_unresolved,
 )
 from mae_flow_core.cli_parser import parse_args
+from mae_flow_core.lightcheck import (
+    analyze_changed_with_timeout,
+    render_markdown,
+)
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -152,7 +157,8 @@ LEGACY_CODE_REVIEW_STEPS = {"build_review", "tw_review", "rf_review"}
 SOURCE_EXTS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
     ".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".pyi", ".go", ".rs", ".cs",
-    ".js", ".jsx", ".ts", ".tsx", ".vue", ".swift", ".m", ".mm", ".proto", ".sql",
+    ".js", ".jsx", ".cjs", ".mjs", ".ts", ".tsx", ".cts", ".mts",
+    ".vue", ".swift", ".m", ".mm", ".proto", ".sql",
     ".s", ".asm", ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
     # 构建脚本(校准实锤:.sh/.mk/.gn 改动曾不触发任何证据失效,旧编译证据
     # 背新构建配置的书)
@@ -249,26 +255,113 @@ def _git_status_paths(pathspecs, include_ignored=False):
 def _git_add_pathspecs(command):
     """Extract explicit pathspecs from git-add segments in a compound command."""
     paths, force = [], False
+    for intent in _git_add_intents(command):
+        paths.extend(intent["pathspecs"])
+        force = force or intent["force"]
+    return list(dict.fromkeys(paths)), force
+
+
+def _git_subcommand_tokens(command, subcommand):
+    results = []
     for segment in re.split(r"&&|\|\||[;\n]", command):
-        match = re.search(r"(?:^|\s)git\s+add\b(.*)$", segment, re.I)
+        match = re.search(
+            r"(?:^|\s)git\s+" + re.escape(subcommand) + r"\b(.*)$",
+            segment, re.I)
         if not match:
             continue
         try:
-            tokens = shlex.split(match.group(1), posix=True)
+            results.append(shlex.split(match.group(1), posix=True))
         except ValueError:
             continue
-        after_double_dash = False
-        for token in tokens:
-            if token == "--":
-                after_double_dash = True
-                continue
-            if not after_double_dash and token in ("-f", "--force"):
-                force = True
-                continue
-            if not after_double_dash and token.startswith("-"):
-                continue
-            paths.append(norm(token))
-    return list(dict.fromkeys(paths)), force
+    return results
+
+
+_COMMIT_VALUE_OPTIONS = {
+    "-m", "--message", "-F", "--file", "-C", "--reuse-message",
+    "-c", "--reedit-message", "--author", "--date", "--cleanup",
+    "-t", "--template", "--fixup", "--squash", "--trailer",
+}
+
+
+def _option_consumes_following(token, value_options):
+    option = token.split("=", 1)[0]
+    if option in value_options:
+        return "=" not in token
+    return bool(re.fullmatch(r"-[A-Za-z]*[mFCctS]", token))
+
+
+class _PathspecCollector:
+    def __init__(self, value_options):
+        self.value_options = value_options
+        self.paths = []
+
+    def _consume(self, tokens, index):
+        token = tokens[index]
+        if not token.startswith("-"):
+            self.paths.append(norm(token))
+            return index + 1
+        return index + (
+            2 if _option_consumes_following(
+                token, self.value_options) else 1)
+
+    def collect(self, tokens):
+        index = 0
+        while index < len(tokens):
+            index = self._consume(tokens, index)
+        return self.paths
+
+
+def _command_pathspecs(tokens, value_options=None):
+    value_options = value_options or set()
+    if "--" in tokens:
+        marker = tokens.index("--")
+        before, explicit = tokens[:marker], tokens[marker + 1:]
+    else:
+        before, explicit = tokens, []
+    paths = _PathspecCollector(value_options).collect(before)
+    paths.extend(norm(token) for token in explicit)
+    return list(dict.fromkeys(paths))
+
+
+def _git_add_intent(tokens):
+    token_set = set(tokens)
+    all_mode = bool(
+        token_set & {"-A", "--all", "--no-ignore-removal"})
+    update = bool(token_set & {"-u", "--update"})
+    paths = _command_pathspecs(tokens)
+    default_paths = ["."] if all_mode or update else []
+    return {
+        "pathspecs": paths or default_paths,
+        "force": bool(token_set & {"-f", "--force"}),
+        "tracked_only": update,
+        "all": all_mode,
+    }
+
+
+def _git_add_intents(command):
+    return [
+        _git_add_intent(tokens)
+        for tokens in _git_subcommand_tokens(command, "add")
+    ]
+
+
+def _short_option_flags(tokens):
+    return "".join(
+        match.group(1) for token in tokens
+        for match in [re.fullmatch(r"-([A-Za-z]+)", token)]
+        if match)
+
+
+def _git_commit_intent(command):
+    token_sets = _git_subcommand_tokens(command, "commit")
+    tokens = token_sets[-1] if token_sets else []
+    token_set = set(tokens)
+    short_flags = _short_option_flags(tokens)
+    return {
+        "pathspecs": _command_pathspecs(tokens, _COMMIT_VALUE_OPTIONS),
+        "all": "a" in short_flags or "--all" in token_set,
+        "include": "i" in short_flags or "--include" in token_set,
+    }
 
 
 def _agent_written_paths():
@@ -357,14 +450,7 @@ def _trusted_harness_commit_path(path, st=None):
     return False
 
 
-def _pending_commit_files(command="", st=None):
-    """Inspect files that a commit is about to include.
-
-    Staged paths are authoritative. For `git add ... && git commit ...` in one
-    Bash call, explicit pathspecs are also inspected before either command has
-    run. A missing Write/Edit provenance is warning-only unless the path is also
-    a newly added, high-confidence temporary build artifact.
-    """
+def _staged_commit_candidates():
     staged_all = argv_out([
         "git", "-c", "core.quotepath=false", "diff", "--cached",
         "--name-only", "--no-renames", "--",
@@ -373,19 +459,104 @@ def _pending_commit_files(command="", st=None):
         "git", "-c", "core.quotepath=false", "diff", "--cached",
         "--name-only", "--diff-filter=A", "--no-renames", "--",
     ]).splitlines()
-    candidates = [norm(path) for path in staged_all if path]
-    new_candidates = [norm(path) for path in staged_new if path]
-    pathspecs, force = _git_add_pathspecs(command)
+    return (
+        [norm(path) for path in staged_all if path],
+        [norm(path) for path in staged_new if path],
+    )
+
+
+def _git_diff_name_args(diff, pathspecs, cached):
+    args = [
+        "git", "-c", "core.quotepath=false", "diff",
+        "--name-only", "--no-renames",
+    ]
+    if cached:
+        args.append("--cached")
+    if diff:
+        args.append(diff)
+    args += ["--", *(pathspecs or [])]
+    return args
+
+
+def _git_diff_names(diff="HEAD", pathspecs=None, cached=False):
+    args = _git_diff_name_args(diff, pathspecs, cached)
+    return [
+        norm(path) for path in argv_out(args).splitlines()
+        if path
+    ]
+
+
+def _intent_candidate_paths(intent):
+    pathspecs = intent["pathspecs"]
+    if not pathspecs:
+        return []
+    if intent["tracked_only"]:
+        return _git_diff_names("HEAD", pathspecs)
+    return _git_status_paths(
+        pathspecs, include_ignored=intent["force"])
+
+
+def _untracked_candidate_paths(paths):
+    return [
+        path for path in paths
+        if not argv_out([
+            "git", "ls-files", "--error-unmatch", "--", path])
+    ]
+
+
+def _compound_add_candidates(command):
+    pending, new_candidates = [], []
+    for intent in _git_add_intents(command):
+        current = _intent_candidate_paths(intent)
+        pending.extend(current)
+        new_candidates.extend(_untracked_candidate_paths(current))
+    return list(dict.fromkeys(pending)), list(dict.fromkeys(new_candidates))
+
+
+def _commit_worktree_candidates(command):
+    intent = _git_commit_intent(command)
+    pathspecs = intent["pathspecs"]
+    if intent["all"]:
+        return _git_diff_names("HEAD"), False
     if pathspecs:
-        pending = _git_status_paths(pathspecs, include_ignored=force)
+        return _git_diff_names("HEAD", pathspecs), not intent["include"]
+    return [], False
+
+
+def _pending_commit_candidates(command=""):
+    """Return exact staged/compound-add candidates before a commit runs."""
+    candidates, new_candidates = _staged_commit_candidates()
+    pending, pending_new = _compound_add_candidates(command)
+    commit_working, commit_only = _commit_worktree_candidates(command)
+    if commit_only:
+        candidates = list(commit_working)
+        new_candidates = [
+            path for path in new_candidates if path in candidates
+        ]
+    else:
         candidates.extend(pending)
-        # Compound commands are inspected before git add runs. Only untracked
-        # paths are considered newly added for the high-confidence hard block.
-        new_candidates.extend(
-            path for path in pending
-            if not argv_out(["git", "ls-files", "--error-unmatch", "--", path]))
+        candidates.extend(commit_working)
+        new_candidates.extend(pending_new)
     candidates = list(dict.fromkeys(candidates))
-    new_candidates = set(new_candidates)
+    return {
+        "paths": candidates,
+        "new_paths": set(new_candidates),
+        "working_paths": set(pending) | set(commit_working),
+    }
+
+
+def _pending_commit_files(command="", st=None, candidate_snapshot=None):
+    """Inspect files that a commit is about to include.
+
+    Staged paths are authoritative. For `git add ... && git commit ...` in one
+    Bash call, explicit pathspecs are also inspected before either command has
+    run. A missing Write/Edit provenance is warning-only unless the path is also
+    a newly added, high-confidence temporary build artifact.
+    """
+    if candidate_snapshot is None:
+        candidate_snapshot = _pending_commit_candidates(command)
+    candidates = candidate_snapshot["paths"]
+    new_candidates = candidate_snapshot["new_paths"]
     written = _agent_written_paths()
 
     def has_provenance(path):
@@ -573,6 +744,39 @@ def _path_fingerprint(path):
             h.update(b"missing\0")
     except OSError as e:
         h.update(("error:" + str(e)).encode("utf-8", errors="replace"))
+    return h.hexdigest()
+
+
+def _update_review_hash(h, absolute, path_stat):
+    git_mode = path_stat.st_mode & 0o170000
+    # Git's regular-file mode only tracks the owner's executable bit.
+    executable = bool(path_stat.st_mode & 0o100)
+    h.update(("type:%o\0exec:%d\0" % (
+        git_mode, executable)).encode("ascii"))
+    if os.path.islink(absolute):
+        h.update(b"symlink\0")
+        h.update(os.readlink(absolute).encode(
+            "utf-8", errors="surrogateescape"))
+        return
+    if os.path.isfile(absolute):
+        h.update(b"file\0")
+        with open(absolute, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                h.update(chunk)
+        return
+    h.update(b"dir\0" if os.path.isdir(absolute) else b"other\0")
+
+
+def _review_path_fingerprint(path):
+    """Hash the Git-relevant worktree state without changing legacy dirt IDs."""
+    h = hashlib.sha256()
+    absolute = os.path.abspath(path)
+    try:
+        _update_review_hash(h, absolute, os.lstat(absolute))
+    except FileNotFoundError:
+        h.update(b"missing\0")
+    except OSError as exc:
+        h.update(("error:" + str(exc)).encode("utf-8", errors="replace"))
     return h.hexdigest()
 
 
@@ -1157,6 +1361,118 @@ def _source_changed_since(head, st=None):
     return changed, ""
 
 
+def _changed_paths_since_head(head):
+    paths = []
+    if head and argv_out(["git", "cat-file", "-t", head]) == "commit":
+        paths.extend(argv_out([
+            "git", "-c", "core.quotepath=false", "diff",
+            "--name-only", "--no-renames", head, "HEAD",
+        ]).splitlines())
+    paths.extend(argv_out([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--name-only", "--no-renames", "HEAD",
+    ]).splitlines())
+    paths.extend(_dirty_paths())
+    return list(dict.fromkeys(norm(path) for path in paths if path))
+
+
+def _source_fingerprints(paths, st=None, flow=None):
+    result = {}
+    for path in paths:
+        if _is_source_path(path, st, flow or FLOW):
+            result[path] = _review_path_fingerprint(path)
+    return result
+
+
+def _source_snapshot_since(head, st=None, flow=None):
+    """Fingerprint committed, staged, unstaged and untracked source changes."""
+    return _source_fingerprints(
+        _changed_paths_since_head(head), st, flow)
+
+
+def _checkpoint_candidate_path(path, st, flow=None):
+    if _is_source_path(path, st, flow or FLOW):
+        return True
+    if _repo_path_identity(path) in _agent_written_paths():
+        return True
+    return _trusted_harness_commit_path(path, st)
+
+
+def _checkpoint_delivery_snapshot(st, head, flow=None):
+    """Fingerprint all reviewable delivery candidates, not just code suffixes."""
+    result = {}
+    for path in _changed_paths_since_head(head):
+        if _unchanged_initial_dirty(path, st):
+            continue
+        if _checkpoint_candidate_path(path, st, flow):
+            result[path] = _review_path_fingerprint(path)
+    return result
+
+
+def _checkpoint_worktree_snapshot(st, flow=None):
+    """Return the exact uncommitted delivery snapshot shown in the IDE."""
+    head = sh("git rev-parse --verify HEAD")
+    return _checkpoint_delivery_snapshot(st, head, flow)
+
+
+def _numstat_line_net(line, st=None, flow=None):
+    fields = line.split("\t")
+    if len(fields) != 3:
+        return 0
+    if not _is_source_path(fields[2], st, flow or FLOW):
+        return 0
+    try:
+        added, deleted = int(fields[0]), int(fields[1])
+    except ValueError:
+        return 0
+    return added - deleted
+
+
+def _numstat_source_net(output, st=None, flow=None):
+    return sum(
+        _numstat_line_net(line, st, flow)
+        for line in output.splitlines())
+
+
+def _file_line_count(path):
+    try:
+        with open(path, "rb") as stream:
+            return sum(1 for _line in stream)
+    except OSError:
+        return 0
+
+
+def _untracked_source_net(st=None, flow=None):
+    tracked = set(argv_out([
+        "git", "ls-files", "--others", "--exclude-standard",
+    ]).splitlines())
+    return sum(
+        _file_line_count(path) for path in tracked
+        if _is_source_path(path, st, flow or FLOW))
+
+
+def _working_source_net(head, st=None, flow=None):
+    committed = argv_out([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--numstat", head, "HEAD",
+    ])
+    working = argv_out([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--numstat", "HEAD",
+    ])
+    return (
+        _numstat_source_net(committed, st, flow)
+        + _numstat_source_net(working, st, flow)
+        + _untracked_source_net(st, flow))
+
+
+def _snapshot_sha256(snapshot):
+    body = json.dumps(
+        snapshot or {}, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 RISK_AGENT_LABELS = {
     "COMPILE": "没有可验证的编译成功证据，代码可能无法构建",
     "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；本次将只保留首检结果，缺少专项修复结论",
@@ -1233,6 +1549,7 @@ def ev_agent_ran(spec, st):
     head = tok.get("head", "") if isinstance(tok, dict) else ""
     status = tok.get("status", "") if isinstance(tok, dict) else ""
     token_step = tok.get("step", "") if isinstance(tok, dict) else ""
+    token_snapshot = tok.get("source_snapshot") if isinstance(tok, dict) else None
     if ts and ts >= entered:
         if token_step and token_step != st.get("current"):
             return blocked(f"{kind} 令牌属于步骤 {token_step}，当前是 {st.get('current')}。"
@@ -1242,7 +1559,13 @@ def ev_agent_ran(spec, st):
             return blocked(f"{kind} 子 agent 虽已收尾,但结果为 {status or '旧令牌未记录状态'},"
                            f"本步只接受 {'/'.join(wanted)}。FAIL/BLOCKED/NEEDS_INPUT 是有效上报,"
                            "但不是质量通过证据;处理报告中的问题后重启 agent。")
-        if head:
+        if head and isinstance(token_snapshot, dict):
+            current_snapshot = _source_snapshot_since(head, st)
+            if current_snapshot != token_snapshot:
+                return blocked(
+                    f"{kind} 证据已过期:令牌签发后的未提交代码快照已变化。"
+                    "重新启动对应 agent 对当前工作区收尾；旧证据不能背书另一份 diff。")
+        elif head:
             changed, err = _source_changed_since(head, st)
             if err:
                 return blocked(f"{kind} 证据新鲜度无法核实({err})。"
@@ -1405,11 +1728,43 @@ def _checkpoint_expected_code_step(st):
 def _checkpoint_review_pending(st):
     if _moonlight(st):
         return False
-    data = _development_review(st)
-    if not data:
-        return False
-    item = _checkpoint_current(st)
+    item = _checkpoint_locked_item(st)
     return bool(item and item.get("status") == "review_pending")
+
+
+CHECKPOINT_LOCKED_STATUSES = {
+    "review_pending", "commit_pending", "commit_recovery",
+    "reset_pending", "push_pending",
+}
+
+
+def _final_review_item(st):
+    data = _development_review(st)
+    if not data or st.get("current") != "delivery_review":
+        return None
+    final = data.get("final_review")
+    if not isinstance(final, dict):
+        return None
+    return final if final.get("status") in CHECKPOINT_LOCKED_STATUSES else None
+
+
+def _checkpoint_locked_item(st):
+    item = _checkpoint_current(st)
+    if item and item.get("status") in CHECKPOINT_LOCKED_STATUSES:
+        return item
+    return _final_review_item(st)
+
+
+def _checkpoint_review_locked(st):
+    """Freeze reviewed code through exact commit and push verification."""
+    if _moonlight(st):
+        return False
+    return _checkpoint_locked_item(st) is not None
+
+
+def _review_before_commit(data):
+    """New plans review worktree code; old in-flight plans retain their route."""
+    return bool((data or {}).get("review_before_commit"))
 
 
 def _upstream_snapshot():
@@ -1418,6 +1773,26 @@ def _upstream_snapshot():
     remote_head = argv_out(["git", "rev-parse", "--verify", "@{u}"])
     local_head = argv_out(["git", "rev-parse", "--verify", "HEAD"])
     return ref, remote_head, local_head
+
+
+def _reset_range_reaches_upstream(base, head, remote_head):
+    shared = argv_out(["git", "merge-base", head, remote_head])
+    if not shared or shared == base:
+        return False
+    if argv_out(["git", "merge-base", base, shared]) != base:
+        return False
+    return True
+
+
+def _upstream_contains_reset_commit(base, head):
+    """Return the upstream ref when resetting base..head would drop pushed work."""
+    ref, remote_head, _local_head = _upstream_snapshot()
+    if not ref or not remote_head:
+        return ""
+    if head == base:
+        return ""
+    return ref if _reset_range_reaches_upstream(
+        base, head, remote_head) else ""
 
 
 def _checkpoint_review_lines(base, head, title, remote_ref=""):
@@ -1453,6 +1828,91 @@ def _checkpoint_review_lines(base, head, title, remote_ref=""):
     return lines
 
 
+def _worktree_review_status(paths):
+    if not paths:
+        return [], ""
+    status = argv_out([
+        "git", "-c", "core.quotepath=false", "status", "--short",
+        "--untracked-files=all", "--", *paths,
+    ]).splitlines()
+    stat = argv_out([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--shortstat", "HEAD", "--", *paths,
+    ])
+    return status, stat
+
+
+def _untracked_review_paths(paths):
+    result = []
+    for path in paths:
+        tracked = argv_out([
+            "git", "ls-files", "--error-unmatch", "--", path])
+        if not tracked:
+            result.append(path)
+    return result
+
+
+def _worktree_review_file_lines(status):
+    lines = ["  文件:"]
+    lines += ["    " + line for line in status[:80]]
+    if not status:
+        lines.append("    （无文件差异）")
+    if len(status) > 80:
+        lines.append("    …另有 %d 个文件" % (len(status) - 80))
+    return lines
+
+
+def _worktree_review_detail_lines(paths, stat, receipt):
+    lines = []
+    if stat:
+        lines.append("  统计: " + stat)
+    command = " ".join(shlex.quote(path) for path in paths)
+    lines.append("  命令行复核: git diff HEAD -- " + command)
+    untracked = _untracked_review_paths(paths)
+    if untracked:
+        lines.append("  未跟踪新文件也属于本收据，请在 IDE Source Control 中逐个打开: "
+                     + "、".join(untracked))
+    lines.append("  收据指纹: " + str(
+        receipt.get("snapshot_sha256", ""))[:16])
+    return lines
+
+
+def _checkpoint_worktree_review_lines(item):
+    receipt = item.get("receipt") or {}
+    base = str(receipt.get("base", ""))
+    paths = list((receipt.get("snapshot") or {}).keys())
+    status, stat = _worktree_review_status(paths)
+    lines = [
+        "🔎 %s 用户代码检视（尚未提交）" % item.get("id"),
+        "  对比基点: HEAD@%s" % base[:10],
+        "  IDE 检视入口: Source Control / Local Changes；这里看到的未提交 diff "
+        "就是确认后允许提交的代码。",
+    ]
+    lines += _worktree_review_file_lines(status)
+    lines += _worktree_review_detail_lines(paths, stat, receipt)
+    return lines
+
+
+def _final_review_candidate_path(path, st):
+    if _is_source_path(path, st, FLOW):
+        return True
+    identity = _repo_path_identity(path)
+    if identity not in _agent_written_paths():
+        return False
+    low = norm(path).lower()
+    return not low.endswith((".md", ".rst", ".adoc"))
+
+
+def _final_delivery_snapshot(st, head):
+    result = {}
+    for path in _changed_paths_since_head(head):
+        if _unchanged_initial_dirty(path, st):
+            continue
+        if _final_review_candidate_path(path, st):
+            result[path] = _review_path_fingerprint(path)
+    return result
+
+
 def _final_review_delta(st):
     data = _development_review(st)
     if not data or _moonlight(st):
@@ -1466,7 +1926,13 @@ def _final_review_delta(st):
         return None, (
             "上次已检视代码基点 %s 已不在当前 HEAD 历史上，可能发生了 "
             "rebase/reset；旧收据不能为改写后的提交历史背书" % base[:10])
-    return _source_changed_since(base, st)
+    snapshot = _final_delivery_snapshot(st, base)
+    dirty = set(_dirty_paths())
+    changed = [
+        path + ("(未提交)" if path in dirty else "")
+        for path in snapshot
+    ]
+    return changed, ""
 
 
 def ev_checkpoint_plan(spec, st):
@@ -1508,10 +1974,14 @@ def ev_checkpoint_plan_complete(spec, st):
     )
     pending = [x.get("id", "?") for x in items if not closed(x)]
     if pending:
-        action = (
-            "完成本批编译和 push 后 checkpoint status，等待用户检视"
-            if mode == "staged" else
-            "完成本批编译后 checkpoint ready <CP编号>；连续模式不会停下来")
+        if mode == "staged" and _review_before_commit(data):
+            action = (
+                "保持本批代码未提交，完成 compile-agent 后执行 checkpoint ready "
+                "<CP编号>；用户检视确认后再精确提交、push")
+        elif mode == "staged":
+            action = "完成本批编译和 push 后 checkpoint status，等待用户检视"
+        else:
+            action = "完成本批编译后 checkpoint ready <CP编号>；连续模式不会停下来"
         return False, "检查点尚未闭环: %s。%s" % ("、".join(pending), action)
     return True, ""
 
@@ -1527,8 +1997,8 @@ def ev_final_review_clear(spec, st):
     if changed:
         return False, (
             "质量链后仍有未检视代码增量: " + "、".join(changed[:8])
-            + "。执行 checkpoint final；分阶段模式会先小步 push 再检视，"
-              "一次完成模式会在最终 push 前统一检视")
+            + "。执行 checkpoint final；所有普通模式都先检视本地增量，"
+              "用户确认后才进入最终 push")
     return True, ""
 
 
@@ -1859,12 +2329,13 @@ def ev_review_fix_committed(spec, st):
 
 CODE_EXTS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
-    ".java", ".js", ".jsx", ".ts", ".tsx", ".py", ".pyi",
+    ".java", ".js", ".jsx", ".cjs", ".mjs",
+    ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
 )
 DEFAULT_TEST_PATS = [
     r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/", r"(^|/)src/test/",
     r"(^|/)test_[^/]+\.py$",
-    r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|js|jsx|ts|tsx)$",
+    r"(_test|\.test|\.spec)\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|js|jsx|cjs|mjs|ts|tsx|cts|mts)$",
     r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$",
 ]
 
@@ -1895,25 +2366,442 @@ def _biz_changed_files(st):
 CODECHECK_LINE_SLACK = 3
 
 
+def _diff_output(diff, files, cached=False):
+    args = [
+        "git", "-c", "core.quotepath=false",
+        "diff", "-U0", "--no-renames",
+    ]
+    if cached:
+        args.append("--cached")
+    if diff:
+        args.append(diff)
+    args += ["--", *files]
+    return argv_out(args)
+
+
+def _diff_header_path(line):
+    value = line[4:].strip()
+    if value == "/dev/null":
+        return ""
+    if value.startswith("b/"):
+        value = value[2:]
+    return _decode_diff_path(value)
+
+
+def _decode_diff_path(value):
+    if not value.startswith('"') or not value.endswith('"'):
+        return norm(value)
+    try:
+        return norm(bytes(
+            value[1:-1], "utf-8").decode("unicode_escape"))
+    except UnicodeError:
+        return ""
+
+
+def _diff_hunk_range(line):
+    match = re.match(
+        r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+    if not match:
+        return set()
+    start = int(match.group(1))
+    count = int(
+        match.group(2) if match.group(2) is not None else "1")
+    return set(range(start, start + max(count, 1)))
+
+
+def _record_changed_hunk(result, current, line):
+    if current not in result or not line.startswith("@@ "):
+        return
+    result[current].update(_diff_hunk_range(line))
+
+
+def _changed_lines_for_diff(diff, files, cached=False):
+    """批量解析指定 Git diff 的 + 侧变更行，删除 hunk 锚定相邻行。"""
+    result = {norm(path): set() for path in files}
+    current = ""
+    for line in _diff_output(diff, files, cached).splitlines():
+        if line.startswith("+++ "):
+            current = _diff_header_path(line)
+            continue
+        _record_changed_hunk(result, current, line)
+    return result
+
+
 def _changed_lines(st, files):
     """本单每文件的变更行集合(+侧,git diff -U0 解析)——范围过滤的唯一数据源。
     返回 ({norm(file): set(行号)}, err)。"""
     diff, err = _scope_diff(st)
     if err:
         return None, err
+    return _changed_lines_for_diff(diff, files), ""
+
+
+LIGHTCHECK_REPORT_PATH = os.path.join(
+    ".mae-flow-work", "lightcheck", "latest.md")
+
+
+def _lightcheck_tool_error(reason):
+    return {
+        "status": "TOOL_ERROR", "findings": [], "existing_debt": [],
+        "skipped": [reason], "files": [], "functions_checked": 0,
+        "duration_ms": 0,
+    }
+
+
+def _diff_baseline_commit(diff):
+    """Resolve the left snapshot used to decide whether a warning is new."""
+    if "..." in diff:
+        left, right = diff.split("...", 1)
+        return argv_out(["git", "merge-base", left, right or "HEAD"])
+    if ".." in diff:
+        return diff.split("..", 1)[0]
+    return diff or "HEAD"
+
+
+def _diff_current_commit(diff):
+    if "..." in diff:
+        return diff.split("...", 1)[1] or "HEAD"
+    if ".." in diff:
+        return diff.split("..", 1)[1] or "HEAD"
+    return ""
+
+
+def _git_object_spec(commit, path):
+    return (":" + norm(path)
+            if commit == ":"
+            else "%s:%s" % (commit, norm(path)))
+
+
+def _git_source_at(commit, path):
+    if not commit:
+        return None
+    try:
+        run = subprocess.run(
+            ["git", "show", _git_object_spec(commit, path)],
+            shell=False, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return run.stdout if run.returncode == 0 else None
+
+
+def _cat_file_blob_size(header):
+    if not header:
+        return None
+    if header.endswith(b" missing"):
+        return None
+    parts = header.rsplit(b" ", 2)
+    if len(parts) != 3:
+        return None
+    if parts[-2] != b"blob":
+        return None
+    return _safe_int_bytes(parts[-1])
+
+
+def _safe_int_bytes(value):
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _read_cat_file_blob(stream):
+    size = _cat_file_blob_size(stream.readline().rstrip(b"\n"))
+    if size is None:
+        return None
+    source = stream.read(size).decode("utf-8", errors="replace")
+    stream.read(1)
+    return source
+
+
+def _parse_cat_file_output(raw, files):
+    stream = BytesIO(raw)
+    return {
+        path: _read_cat_file_blob(stream)
+        for path in files
+    }
+
+
+def _fallback_git_sources(commit, paths):
+    return {
+        path: _git_source_at(commit, path)
+        for path in paths
+    }
+
+
+def _cat_file_batch(commit, paths):
+    payload = "".join(
+        _git_object_spec(commit, path) + "\n" for path in paths).encode()
+    try:
+        run = subprocess.run(
+            ["git", "cat-file", "--batch"], input=payload,
+            capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return run.stdout if run.returncode == 0 else None
+
+
+def _unsafe_batch_paths(paths):
+    return any(
+        "\n" in path or "\r" in path
+        for path in paths)
+
+
+def _batch_or_fallback_sources(commit, paths):
+    if _unsafe_batch_paths(paths):
+        return _fallback_git_sources(commit, paths)
+    raw = _cat_file_batch(commit, paths)
+    if raw is None:
+        return _fallback_git_sources(commit, paths)
+    return _parse_cat_file_output(raw, paths)
+
+
+def _git_sources_at(commit, files):
+    paths = list(dict.fromkeys(norm(path) for path in files))
+    if not commit:
+        return {path: None for path in paths}
+    if not paths:
+        return {}
+    return _batch_or_fallback_sources(commit, paths)
+
+
+def _save_lightcheck_result(result, scope):
+    try:
+        atomic_write_text(
+            LIGHTCHECK_REPORT_PATH, render_markdown(result, scope))
+        return norm(os.path.abspath(LIGHTCHECK_REPORT_PATH))
+    except Exception as exc:
+        # 前置检查的日志失败同样不能变成另一堵门。
+        result.setdefault("skipped", []).append("报告写入失败: " + str(exc))
+        return ""
+
+
+def _lightcheck_code_files(files, require_worktree=True):
+    return [
+        norm(path) for path in files
+        if norm(path).lower().endswith(CODE_EXTS)
+        if not require_worktree or os.path.isfile(path)
+    ]
+
+
+def _lightcheck_diff_sources(diff, code_files):
+    current_commit = _diff_current_commit(diff)
+    if not current_commit:
+        return None
+    return _git_sources_at(current_commit, code_files)
+
+
+def _available_snapshot_files(code_files, current_sources):
+    if current_sources is None:
+        return code_files
+    return [
+        path for path in code_files
+        if current_sources.get(path) is not None
+    ]
+
+
+def _run_lightcheck_analysis(
+        code_files, changed, baseline_sources, current_sources):
+    return analyze_changed_with_timeout(
+        os.getcwd(), code_files, changed,
+        baseline_sources=baseline_sources,
+        options={"current_sources": current_sources})
+
+
+def _run_lightcheck_diff(diff, files, scope):
+    code_files = _lightcheck_code_files(files, require_worktree=False)
+    baseline = _diff_baseline_commit(diff)
+    if code_files and not baseline:
+        result = _lightcheck_tool_error(
+            "无法解析检查基线，已自动放行")
+        result["report_path"] = _save_lightcheck_result(result, scope)
+        return result
+    changed = _changed_lines_for_diff(diff, code_files)
+    current_sources = _lightcheck_diff_sources(diff, code_files)
+    code_files = _available_snapshot_files(code_files, current_sources)
+    result = _run_lightcheck_analysis(
+        code_files, changed, _git_sources_at(baseline, code_files),
+        current_sources)
+    result["report_path"] = _save_lightcheck_result(result, scope)
+    return result
+
+
+def _working_code_files(st, candidates=None):
+    # 启动前未变化的用户现场必须排除；其余当前代码差异均可只读检查，
+    # 这样 Edit/Write 与 Agent 经 Bash 实际改写两条路径都不会漏。
+    if candidates is None:
+        dirty = _blocking_dirty_source_paths(st, FLOW) if st else _dirty_paths()
+    else:
+        dirty = [
+            path for path in candidates
+            if not _unchanged_initial_dirty(path, st)
+        ]
+    return _lightcheck_code_files(dirty)
+
+
+def _untracked_changed_lines(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as stream:
+            count = len(stream.read().splitlines())
+    except OSError:
+        count = 0
+    return set(range(1, count + 1))
+
+
+def _working_lightcheck_inputs(files):
+    tracked = set(argv_out([
+        "git", "-c", "core.quotepath=false",
+        "ls-files", "--", *files,
+    ]).splitlines())
+    tracked = {norm(path) for path in tracked}
+    changed = _changed_lines_for_diff(
+        "HEAD", [path for path in files if path in tracked])
+    sources = _git_sources_at("HEAD", tracked)
+    _add_untracked_lightcheck_inputs(
+        files, tracked, changed, sources)
+    return changed, sources
+
+
+def _add_untracked_lightcheck_inputs(
+        files, tracked, changed, sources):
+    for path in files:
+        if path not in tracked:
+            changed[path] = _untracked_changed_lines(path)
+            sources[path] = None
+
+
+def _working_lightcheck_scope(st, candidates=None):
+    """Inspect current-flow code dirt while preserving unchanged user dirt."""
+    dirty = _working_code_files(st, candidates)
+    changed, sources = _working_lightcheck_inputs(dirty)
+    result = analyze_changed_with_timeout(
+        os.getcwd(), dirty, changed, baseline_sources=sources)
+    scope = ("提交前：本次提交候选代码"
+             if candidates is not None
+             else "提交前：本轮当前代码差异（排除未变化的启动前脏文件）")
+    result["report_path"] = _save_lightcheck_result(
+        result, scope)
+    return result
+
+
+def _read_worktree_sources(files):
     result = {}
-    for f in files:
-        out = argv_out([
-            "git", "-c", "core.quotepath=false",
-            "diff", "-U0", diff, "--", f,
-        ])
-        lines = set()
-        for m in re.finditer(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", out, re.M):
-            start = int(m.group(1))
-            n = int(m.group(2) if m.group(2) is not None else "1")
-            lines.update(range(start, start + max(n, 1)))
-        result[norm(f)] = lines
-    return result, ""
+    for path in files:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as stream:
+                result[path] = stream.read()
+        except OSError:
+            result[path] = None
+    return result
+
+
+def _eligible_pending_paths(st, snapshot):
+    return [
+        path for path in snapshot["paths"]
+        if not _unchanged_initial_dirty(path, st)
+    ]
+
+
+def _partition_snapshot_files(code_files, working_paths):
+    working, indexed = [], []
+    for path in code_files:
+        target = working if path in working_paths else indexed
+        target.append(path)
+    return working, indexed
+
+
+def _pending_lightcheck_groups(st, snapshot):
+    candidates = _eligible_pending_paths(st, snapshot)
+    code_files = _lightcheck_code_files(
+        candidates, require_worktree=False)
+    working, indexed = _partition_snapshot_files(
+        code_files, snapshot["working_paths"])
+    return code_files, working, indexed
+
+
+def _pending_lightcheck_inputs(working, indexed):
+    changed = _changed_lines_for_diff("HEAD", working)
+    changed.update(_changed_lines_for_diff(
+        "HEAD", indexed, cached=True))
+    current_sources = _git_sources_at(":", indexed)
+    current_sources.update(_read_worktree_sources(working))
+    return changed, current_sources
+
+
+def _pending_lightcheck_scope(st, snapshot):
+    code_files, working, indexed = _pending_lightcheck_groups(
+        st, snapshot)
+    changed, current_sources = _pending_lightcheck_inputs(
+        working, indexed)
+    code_files = _available_snapshot_files(
+        code_files, current_sources)
+    result = _run_lightcheck_analysis(
+        code_files, changed, _git_sources_at("HEAD", code_files),
+        current_sources)
+    result["report_path"] = _save_lightcheck_result(
+        result, "提交前：本次提交候选快照")
+    return result
+
+
+def _print_lightcheck_findings(findings, report):
+    print("[mae-flow] ⚠ 轻量编码预检发现 %d 个本轮新触发问题（建议修复，不阻断）:"
+          % len(findings), file=sys.stderr)
+    for item in findings[:12]:
+        function = (" " + item["function"]) if item.get("function") else ""
+        print("  %s %s:%s%s — %s (%s > %s)" % (
+            item["rule"], item["file"], item["line"], function,
+            item["message"], item["actual"], item["limit"]),
+            file=sys.stderr)
+    if len(findings) > 12:
+        print("  …其余 %d 项见报告" % (len(findings) - 12), file=sys.stderr)
+    if report:
+        print("  人类可读报告: " + report, file=sys.stderr)
+    print("  请按项目 formatter/附近同类代码修正后再提交；"
+          "最多修复并复查两轮，仍不确定则留给正式 CodeCheck，禁止扩大范围。",
+          file=sys.stderr)
+
+
+def _print_lightcheck_degraded(result, report):
+    print("[mae-flow] 轻量编码预检 %s（建议层已自动放行，不替代正式 CodeCheck）"
+          % result.get("status", "SKIPPED"))
+    for reason in (result.get("skipped") or [])[:5]:
+        print("  - " + reason)
+    if report:
+        print("[mae-flow] 报告: " + report)
+
+
+def _print_lightcheck_empty(result, report):
+    if result.get("status") != "CLEAN":
+        _print_lightcheck_degraded(result, report)
+        return
+    print("[mae-flow] 轻量编码预检 CLEAN（建议项，不替代正式 CodeCheck）")
+    if report:
+        print("[mae-flow] 报告: " + report)
+
+
+def _print_lightcheck_result(result, quiet=False):
+    findings = result.get("findings", [])
+    report = result.get("report_path", "")
+    if findings:
+        _print_lightcheck_findings(findings, report)
+        return
+    if not quiet:
+        _print_lightcheck_empty(result, report)
+
+
+def cmd_lightcheck(st, args):
+    try:
+        result = _working_lightcheck_scope(st or {})
+    except Exception as exc:
+        # 此命令的合同就是 fail-open；即使适配层自身有 bug 也只报告。
+        result = _lightcheck_tool_error(
+            "轻量检查异常: " + str(exc))
+        result["report_path"] = _save_lightcheck_result(
+            result, "提交前：异常安全降级")
+    _print_lightcheck_result(result, quiet=bool(getattr(args, "quiet", False)))
+    return 0
 
 
 def _hunk_targets_for_diff(diff, files):
@@ -3199,6 +4087,25 @@ def _ensure_step_entry_head(flow, st, sid):
     return base, ""
 
 
+def _with_lightcheck_prompt(sid, text):
+    if sid not in (
+            "build", "rf_fix", "tw_change", "verify_ponytail",
+            "verify_ut", "rf_ut", "tw_ut"):
+        return text
+    prompt = (
+        "\n\n──── 轻量编码预防（建议层，不新增门禁） ────\n"
+        "写每个函数时主动控制：正式入参≤5（Python self/cls 不计）、"
+        "有效代码行≤50（空行/纯注释/仅括号分隔行不计）、McCabe 圈复杂度≤5、"
+        "本次新增/修改代码行≤120字符。长行禁止机械切字符串：优先仓库 formatter 配置，"
+        "否则参考同文件附近同类参数列表/条件/链式调用的换行方式。\n"
+        "提交 Hook 会自动执行轻量检查，无需主动调用或向用户展示 CLEAN 结果；"
+        "只修 Hook 提示中高置信且属于本次范围的建议，最多修复并复查两轮。"
+        "工具异常、超时、解析不确定或仅为基线旧债时直接留痕继续，"
+        "不得扩大需求、不得让用户确认、不得把它当正式 CodeCheck。"
+    )
+    return text + prompt
+
+
 def _step_md_text(sid, st):
     """步骤指令文本:模板路径与已确认配置全部替换后返回(无该 md 返回 None)。
     占位符替换 = 把"需要模型去拿"的信息直接喂到嘴边(弱模型会跳过"去拿"的动作);
@@ -3220,7 +4127,7 @@ def _step_md_text(sid, st):
         except CapabilityError as exc:
             die("插件内嵌能力包损坏，当前步骤不能可靠执行: %s。"
                 "请升级/重装 Mae-Flow；流程状态尚未推进。" % exc, 2)
-    return subst(txt, st)
+    return subst(_with_lightcheck_prompt(sid, txt), st)
 
 
 def _review_receipt_lines(st, step):
@@ -3302,7 +4209,7 @@ def print_current(flow, st):
         print(_w)
     checkpoint_state = _development_review(st)
     if checkpoint_state and checkpoint_state.get("status") == "active":
-        mode_label = ("分阶段 push + 检视"
+        mode_label = ("分阶段先检视、后提交并 push"
                       if checkpoint_state.get("mode") == "staged"
                       else "一次完成、最终统一检视")
         print("🧭 开发节奏: " + mode_label)
@@ -3313,13 +4220,41 @@ def print_current(flow, st):
                 current_checkpoint.get("status"),
                 current_checkpoint.get("title")))
             if current_checkpoint.get("status") == "push_pending":
-                print("   编译已通过；完成普通 push 后执行 checkpoint status 冻结远端检视收据。")
+                if _review_before_commit(checkpoint_state):
+                    print("   用户检视过的精确提交待推送；普通 push 后执行 checkpoint status 验真。")
+                else:
+                    print("   编译已通过；完成普通 push 后执行 checkpoint status 冻结远端检视收据。")
+            elif current_checkpoint.get("status") == "commit_pending":
+                base = str((current_checkpoint.get("receipt") or {}).get(
+                    "base", ""))
+                if sh("git rev-parse --verify HEAD") == base:
+                    add, commit = _checkpoint_commit_command(
+                        st, current_checkpoint)
+                    print("   用户已确认未提交 diff；现在精确提交后执行 checkpoint status：")
+                    print("     " + add)
+                    print("     " + commit)
+                else:
+                    print("   检查点提交已产生但尚未核验；禁止再次 commit/push，"
+                          "直接执行 checkpoint status。")
+            elif current_checkpoint.get("status") == "commit_recovery":
+                print("   提交核验失败且 push 已冻结："
+                      + str(current_checkpoint.get("verification_error", "")))
+                print("   展示现场后让用户选择「需要调整代码」，再执行 checkpoint decide revise。")
+            elif current_checkpoint.get("status") == "reset_pending":
+                base = str((current_checkpoint.get("receipt") or {}).get(
+                    "base", ""))
+                print("   用户已授权拆回错误提交；执行 git reset --mixed %s，"
+                      "然后 checkpoint status。" % base)
             elif current_checkpoint.get("status") == "review_pending":
-                receipt = current_checkpoint.get("receipt") or {}
-                print("\n".join(_checkpoint_review_lines(
-                    receipt.get("base", ""), receipt.get("head", ""),
-                    "%s 等待用户检视" % current_checkpoint.get("id"),
-                    receipt.get("remote_ref", ""))))
+                if _review_before_commit(checkpoint_state):
+                    print("\n".join(_checkpoint_worktree_review_lines(
+                        current_checkpoint)))
+                else:
+                    receipt = current_checkpoint.get("receipt") or {}
+                    print("\n".join(_checkpoint_review_lines(
+                        receipt.get("base", ""), receipt.get("head", ""),
+                        "%s 等待用户检视" % current_checkpoint.get("id"),
+                        receipt.get("remote_ref", ""))))
                 _print_checkpoint_decisions(final=False)
         elif (sid == _checkpoint_expected_code_step(st)
               and (checkpoint_state.get("final_rework") or {}).get("status")
@@ -3327,15 +4262,20 @@ def print_current(flow, st):
             print("   当前是最终检视返工，不新增或重开原 CP。按本步骤提交修改并走正常编译/质量链，"
                   "不要再执行 checkpoint ready；回到 delivery_review 后会重新展示完整增量。")
         if sid == "delivery_review":
-            changed, review_err = _final_review_delta(st)
-            if review_err:
-                print("❌ 最终检视基点异常: " + review_err)
-            elif changed:
-                print("🔎 质量链后仍有未检视代码增量: "
-                      + "、".join(changed[:8]))
-                print("   执行 checkpoint final 生成最终收据；不能直接进入不可逆规格定稿。")
+            final = _final_review_active(checkpoint_state)
+            if final:
+                _show_final_review_receipt(st, checkpoint_state, final)
             else:
-                print("✅ 当前最终代码已被既有检查点/最终收据完整覆盖，无需重复确认。")
+                changed, review_err = _final_review_delta(st)
+                if review_err:
+                    print("❌ 最终检视基点异常: " + review_err)
+                elif changed:
+                    print("🔎 质量链后仍有未检视代码增量: "
+                          + "、".join(changed[:8]))
+                    print("   执行 checkpoint final 生成最终收据；"
+                          "不能直接进入不可逆规格定稿。")
+                else:
+                    print("✅ 当前最终代码已被既有检查点/最终收据完整覆盖，无需重复确认。")
     if any(e.get("type") == "review_snapshot"
            for e in step.get("evidence", [])):
         print("\n".join(_review_receipt_lines(st, step)))
@@ -4466,7 +5406,9 @@ def _resume_direct_mode(ack="", message_id=""):
         review_state = _development_review(st)
         if review_state:
             item = _checkpoint_current(st)
-            if item and item.get("status") in ("push_pending", "review_pending"):
+            if item and item.get("status") in (
+                    "push_pending", "review_pending", "commit_pending",
+                    "commit_recovery", "reset_pending"):
                 item["status"] = "coding"
                 for key in ("receipt", "head", "compile_head",
                             "compile_task_sha256"):
@@ -5140,6 +6082,9 @@ def cmd_checkpoint_plan(st, args):
     }, ensure_ascii=False, sort_keys=True)
     st["development_review"] = {
         "version": 1,
+        # New deliveries freeze the uncommitted IDE diff first.  The explicit
+        # flag preserves old in-flight version-1 states on their proven route.
+        "review_before_commit": True,
         "status": "plan_pending",
         "plan_step": st.get("current"),
         "plan_head": head,
@@ -5160,7 +6105,7 @@ def cmd_checkpoint_plan(st, args):
     for item in checkpoints:
         print("  %s — %s" % (item["id"], item["title"]))
     print("\n用 AskUserQuestion 提供三个固定选项：")
-    print("  - 按检查点分阶段开发、推送和检视")
+    print("  - 按检查点分阶段开发、检视确认后提交并推送")
     print("  - 一次完成全部代码，最终统一检视")
     print("  - 调整检查点划分")
     print("用户点选后执行 done --choice staged|continuous|adjust；"
@@ -5210,16 +6155,69 @@ def cmd_checkpoint_ready(flow, st, args):
     if item.get("status") not in ("coding",):
         die("%s 当前状态为 %s，不能重复 ready；执行 checkpoint status 查看下一步。"
             % (item["id"], item.get("status", "未知")), 2)
-    dirty = _blocking_dirty_source_paths(st, flow)
-    if dirty:
-        die("检查点编译收尾前仍有未提交源码/测试/构建文件: "
-            + "、".join(dirty[:8]) + "。只精确提交本批应入库文件后重试。", 2)
     base = str(item.get("fixed_base") or data.get("delivery_base") or "")
     head = sh("git rev-parse --verify HEAD")
     if (not base or argv_out(["git", "cat-file", "-t", base]) != "commit"
             or argv_out(["git", "merge-base", base, head]) != base):
         die("检查点固定基点不在当前历史上，可能发生 rebase/reset；"
             "不能用改写后的历史冒充原检查点。", 2)
+    mode = data.get("mode")
+    precommit_review = mode == "staged" and _review_before_commit(data)
+    if precommit_review:
+        if head != base:
+            die("%s 使用“先检视、后提交”，但固定基点之后已经产生提交。"
+                "旧提交不能冒充 IDE 未提交 diff；保留现场并让用户决定如何归因，"
+                "不要 amend/reset 自动改写历史。" % item["id"], 2)
+        snapshot = _checkpoint_worktree_snapshot(st, flow)
+        if not snapshot:
+            die("%s 没有本轮未提交交付差异；空批次应调整或合并，"
+                "不要制造空检视。" % item["id"], 2)
+        source_paths = [
+            path for path in snapshot
+            if _is_source_path(path, st, flow)
+        ]
+        task = (st.get("agent_tasks", {}) or {}).get("COMPILE", {})
+        if source_paths:
+            if (task.get("checkpoint") != item["id"]
+                    or not task.get("precommit_review")):
+                die("最后一次编译任务没有绑定当前未提交检查点 %s。先执行 agent-task "
+                    "compile --checkpoint %s --scope \"<本批模块/任务>\"，"
+                    "再启动 compile-agent。" % (item["id"], item["id"]), 2)
+            ok, why = ev_agent_ran(
+                {"agent": "COMPILE", "statuses": ["OK"]}, st)
+            if not ok:
+                die("检查点编译证据不足:" + why, 2)
+        # compile-agent may have made an allowed compile fix.  Freeze the exact
+        # post-build worktree that its token just proved, not the task input.
+        snapshot = _checkpoint_worktree_snapshot(st, flow)
+        receipt = {
+            "base": head,
+            "snapshot": snapshot,
+            "snapshot_sha256": _snapshot_sha256(snapshot),
+            "ack_cursor": _ack_message_cursor(),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        item.update({
+            "compile_head": head,
+            "compile_task_sha256": (
+                task.get("sha256", "") if source_paths else ""),
+            "compile_skipped_no_source": not source_paths,
+            "head": head,
+            "receipt": receipt,
+            "status": "review_pending",
+            "task_structure_drift": _checkpoint_plan_drift(st),
+            "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        save_state(st)
+        print("\n".join(_checkpoint_worktree_review_lines(item)))
+        if item.get("task_structure_drift"):
+            print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
+        _print_checkpoint_decisions(final=False)
+        return
+    dirty = _blocking_dirty_source_paths(st, flow)
+    if dirty:
+        die("检查点编译收尾前仍有未提交源码/测试/构建文件: "
+            + "、".join(dirty[:8]) + "。只精确提交本批应入库文件后重试。", 2)
     if not argv_out(["git", "log", "-1", "--format=%H", base + ".." + head]):
         die("%s 自固定基点后没有新提交；空批次应调整/合并检查点，不制造空检视。"
             % item["id"], 2)
@@ -5252,7 +6250,6 @@ def cmd_checkpoint_ready(flow, st, args):
         "task_structure_drift": _checkpoint_plan_drift(st),
         "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     })
-    mode = data.get("mode")
     if mode == "continuous":
         item["status"] = "completed"
         item["completed_head"] = head
@@ -5305,6 +6302,540 @@ def _refresh_staged_checkpoint(st, item):
     return True, ""
 
 
+def _reviewed_snapshot_current(st, item):
+    receipt = item.get("receipt") or {}
+    base = str(receipt.get("base", ""))
+    if receipt.get("scope") == "final":
+        return _final_delivery_snapshot(st, base)
+    return _checkpoint_delivery_snapshot(st, base)
+
+
+def _reviewed_worktree_fresh(st, item):
+    receipt = item.get("receipt") or {}
+    base = str(receipt.get("base", ""))
+    if sh("git rev-parse --verify HEAD") != base:
+        return False, "HEAD 已变化"
+    if _reviewed_snapshot_current(st, item) != (receipt.get("snapshot") or {}):
+        return False, "未提交 diff 已变化"
+    return True, ""
+
+
+def _checkpoint_commit_command(st, item):
+    paths = list(((item.get("receipt") or {}).get("snapshot") or {}).keys())
+    add = "git add -- " + " ".join(shlex.quote(path) for path in paths)
+    cfg = st.get("config", {}) or {}
+    message = "[%s][%s]%s" % (
+        cfg.get("单号", ""), cfg.get("单号类型", ""),
+        item.get("title", "检查点代码"))
+    return add, 'git commit -m %s' % shlex.quote(message)
+
+
+def _accept_pushed_checkpoint(st, data, item, head):
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    item["status"] = "accepted"
+    item["accepted_head"] = head
+    item["accepted_at"] = now
+    data["last_reviewed_head"] = head
+    data["current_index"] = int(data.get("current_index", 0)) + 1
+    nxt = _checkpoint_current(st)
+    if nxt:
+        nxt["fixed_base"] = head
+    st.setdefault("history", []).append({
+        "step": st.get("current"), "result": "checkpoint:accept:" + item["id"],
+        "note": CHECKPOINT_CONTINUE_ACK, "at": now})
+    return nxt
+
+
+def _reviewed_commit_head_error(st, item, head):
+    receipt = item.get("receipt") or {}
+    base = str(receipt.get("base", ""))
+    if head == base:
+        add, commit = _checkpoint_commit_command(st, item)
+        return "用户已确认，但检视代码尚未提交。依次执行:\n  %s\n  %s" % (
+            add, commit)
+    if argv_out(["git", "merge-base", base, head]) != base:
+        return "提交历史已改写，旧检视收据失效；禁止自动 reset/rebase"
+    return ""
+
+
+def _reviewed_commit_snapshot_error(st, item):
+    receipt = item.get("receipt") or {}
+    if _reviewed_snapshot_current(st, item) != (receipt.get("snapshot") or {}):
+        return (
+            "提交后的代码不等于用户检视快照；拒绝继续。保留现场并展示差异，"
+            "不要自动 amend/reset")
+    return ""
+
+
+def _commit_path_set_error(expected, actual):
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    details = []
+    if missing:
+        details.append("漏掉 " + "、".join(missing[:8]))
+    if extra:
+        details.append("夹带 " + "、".join(extra[:8]))
+    return "提交文件集合不等于检视收据：" + "；".join(details)
+
+
+def _commit_count_error(count):
+    shown = count if count else "不可核实"
+    return "每个检视检查点必须对应 1 个精确提交，当前产生 %s 个" % shown
+
+
+def _reviewed_commit_paths_error(item):
+    receipt = item.get("receipt", {})
+    base = str(receipt.get("base", ""))
+    expected = set(receipt.get("snapshot", {}).keys())
+    actual = set(argv_out([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--name-only", "--no-renames", base, "HEAD",
+    ]).splitlines())
+    if actual != expected:
+        return _commit_path_set_error(expected, actual)
+    count = argv_out(["git", "rev-list", "--count", base + "..HEAD"])
+    if count != "1":
+        return _commit_count_error(count)
+    return ""
+
+
+def _reviewed_commit_dirty_error(item):
+    receipt = item.get("receipt") or {}
+    reviewed = set((receipt.get("snapshot") or {}).keys())
+    dirty_reviewed = sorted(reviewed.intersection(_dirty_paths()))
+    if dirty_reviewed:
+        return "用户已检视文件仍有未提交变化: " + "、".join(
+            dirty_reviewed[:8])
+    return ""
+
+
+def _verify_reviewed_checkpoint_commit(st, item):
+    head = sh("git rev-parse --verify HEAD")
+    errors = [
+        _reviewed_commit_head_error(st, item, head),
+        _reviewed_commit_snapshot_error(st, item),
+        _reviewed_commit_paths_error(item),
+        _reviewed_commit_dirty_error(item),
+    ]
+    for error in errors:
+        if error:
+            return "", error
+    ok, why = ev_commit_tagged({}, st)
+    if not ok:
+        return "", "检视后提交格式不合规:" + why
+    return head, ""
+
+
+def _complete_continuous_checkpoint(data, item, head):
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    data["mode"] = "continuous"
+    item["status"] = "completed"
+    item["completed_head"] = head
+    item["closed_at"] = now
+    data["current_index"] = int(data.get("current_index", 0)) + 1
+    nxt = _checkpoint_current({"development_review": data})
+    if nxt:
+        nxt["fixed_base"] = head
+    return (
+        "已切换为一次完成模式；当前内部提交将在质量链后与剩余代码统一检视。"
+        + (("进入 " + nxt["id"]) if nxt else "全部检查点已完成"))
+
+
+def _checkpoint_already_pushed():
+    ref, remote_head, local_head = _upstream_snapshot()
+    return bool(ref and remote_head == local_head), local_head
+
+
+def _accepted_checkpoint_message(item, nxt):
+    suffix = ("进入 " + nxt["id"]) if nxt else "全部计划检查点已完成"
+    return "%s 的检视快照、精确提交和已存在的远端 push 均已核对。%s" % (
+        item["id"], suffix)
+
+
+def _refresh_reviewed_checkpoint_commit(st, data, item):
+    head, why = _verify_reviewed_checkpoint_commit(st, item)
+    if not head:
+        return False, why
+    item["head"] = head
+    item["committed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if item.pop("after_commit_continuous", False):
+        return True, _complete_continuous_checkpoint(data, item, head)
+    pushed, remote_head = _checkpoint_already_pushed()
+    if pushed and remote_head == head:
+        nxt = _accept_pushed_checkpoint(st, data, item, head)
+        return True, _accepted_checkpoint_message(item, nxt)
+    item["status"] = "push_pending"
+    return True, (
+        "检视确认后的精确提交已核对。现在执行 git push -u origin HEAD；"
+        "成功后再执行 checkpoint status。")
+
+
+def _reviewed_push_local_error(st, item):
+    receipt = item.get("receipt") or {}
+    head = str(item.get("head", ""))
+    if sh("git rev-parse --verify HEAD") != head:
+        return "检视后待推送 HEAD 已变化；旧收据不能背书新提交"
+    if _reviewed_snapshot_current(st, item) != (receipt.get("snapshot") or {}):
+        return "待推送代码不再等于用户检视快照；拒绝继续"
+    return ""
+
+
+def _reviewed_push_remote_error(item):
+    head = str(item.get("head", ""))
+    ref, remote_head, local_head = _upstream_snapshot()
+    if not ref:
+        return "当前分支没有上游；执行 git push -u origin HEAD"
+    if remote_head != local_head or local_head != head:
+        return (
+            "本地与上游不一致（本地 %s，%s=%s）。执行普通 git push；"
+            "远端领先时禁止自动 rebase/force-push，先展示分叉。"
+            % (local_head[:10], ref, remote_head[:10] if remote_head else "未知"))
+    return ""
+
+
+def _verify_reviewed_checkpoint_push(st, item):
+    errors = [
+        _reviewed_push_local_error(st, item),
+        _reviewed_push_remote_error(item),
+    ]
+    for error in errors:
+        if error:
+            return "", error
+    head = str(item.get("head", ""))
+    return head, ""
+
+
+def _refresh_reviewed_checkpoint_push(st, data, item):
+    head, why = _verify_reviewed_checkpoint_push(st, item)
+    if not head:
+        return False, why
+    nxt = _accept_pushed_checkpoint(st, data, item, head)
+    return True, "%s 已确认、精确提交并推送。%s" % (
+        item["id"], ("进入 " + nxt["id"]) if nxt else "全部计划检查点已完成")
+
+
+def _refresh_pending_checkpoint_commit(st, data, item):
+    ok, why = _refresh_reviewed_checkpoint_commit(st, data, item)
+    base = str((item.get("receipt") or {}).get("base", ""))
+    if not ok and sh("git rev-parse --verify HEAD") == base:
+        print("[mae-flow] " + why)
+        return
+    if not ok:
+        item["status"] = "commit_recovery"
+        item["verification_error"] = why
+        item.setdefault("receipt", {})["ack_cursor"] = _ack_message_cursor()
+        save_state(st)
+        print("[mae-flow] 提交核验失败，已禁止 push，现场保持不变："
+              + why)
+        print("把失败原因和真实 git diff 展示给用户，让用户选择「需要调整代码」；"
+              "随后执行 checkpoint decide revise --ack \"需要调整代码\"。")
+        return
+    save_state(st)
+    print("[mae-flow] " + why)
+
+
+def _refresh_pending_checkpoint_reset(st, item):
+    base = str((item.get("receipt") or {}).get("base", ""))
+    if sh("git rev-parse --verify HEAD") != base:
+        die("恢复尚未完成；执行 git reset --mixed %s，"
+            "它只撤销未推送的错误检查点提交并保留工作区内容。" % base, 2)
+    item["status"] = "coding"
+    item["attempt"] = int(item.get("attempt", 1)) + 1
+    for key in ("receipt", "head", "compile_head",
+                "compile_task_sha256", "verification_error"):
+        item.pop(key, None)
+    _invalidate_quality_for_rework(st)
+    save_state(st)
+    print("[mae-flow] 错误提交已安全拆回工作区，检查点返回 coding；"
+          "调整代码后重新生成编译任务和检视收据。")
+
+
+def _refresh_pending_checkpoint_push(st, data, item):
+    ok, why = _refresh_reviewed_checkpoint_push(st, data, item)
+    save_state(st)
+    if not ok:
+        die(why, 2)
+    print("[mae-flow] " + why)
+
+
+def _refresh_precommit_checkpoint_status(st, data, item):
+    status = item.get("status")
+    if status == "commit_pending":
+        _refresh_pending_checkpoint_commit(st, data, item)
+        return True
+    if status == "reset_pending":
+        _refresh_pending_checkpoint_reset(st, item)
+        return True
+    if status == "push_pending":
+        _refresh_pending_checkpoint_push(st, data, item)
+        return True
+    return False
+
+
+def _refresh_checkpoint_status(st, data, item):
+    if _review_before_commit(data):
+        return _refresh_precommit_checkpoint_status(st, data, item)
+    if data.get("mode") == "staged" and item.get("status") == "push_pending":
+        ok, why = _refresh_staged_checkpoint(st, item)
+        save_state(st)
+        if not ok:
+            die(why, 2)
+    return False
+
+
+def _show_pending_checkpoint_review(st, data, item):
+    if _review_before_commit(data):
+        fresh, why = _reviewed_worktree_fresh(st, item)
+        if not fresh:
+            die("检查点收据已失效:" + why
+                + "；选择调整后重新编译并生成收据。", 2)
+        print("\n".join(_checkpoint_worktree_review_lines(item)))
+    else:
+        receipt = item.get("receipt") or {}
+        print("\n".join(_checkpoint_review_lines(
+            receipt.get("base", ""), receipt.get("head", ""),
+            "%s 用户代码检视" % item.get("id"),
+            receipt.get("remote_ref", ""))))
+    if item.get("task_structure_drift"):
+        print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
+    _print_checkpoint_decisions(final=False)
+
+
+def _show_coding_checkpoint(data, item):
+    if data.get("mode") == "staged" and _review_before_commit(data):
+        print("当前正在编码 %s；保持代码未提交，绑定本批 compile-agent 通过后执行 "
+              "checkpoint ready %s。" % (item["id"], item["id"]))
+        return
+    print("当前正在编码 %s；完成提交和绑定本批的 compile-agent 后执行 checkpoint ready %s。"
+          % (item["id"], item["id"]))
+
+
+def _show_checkpoint_review(st, data, item):
+    if item.get("status") == "review_pending":
+        _show_pending_checkpoint_review(st, data, item)
+    elif item.get("status") == "coding":
+        _show_coding_checkpoint(data, item)
+
+
+def _final_drifted_checkpoints(data):
+    return [
+        item.get("id", "?") for item in data.get("checkpoints") or []
+        if item.get("task_structure_drift")
+    ]
+
+
+def _show_final_review_mode(data):
+    mode = data.get("mode")
+    if mode == "continuous":
+        print("  模式说明:中途策略是不 push；确认最终整体代码后才进入正式 push。")
+    elif mode == "staged":
+        print("  模式说明:最终质量增量确认后才进入正式 push；"
+              "若已被外部工具提前推送会明确告警。")
+
+
+def _show_final_review_context(data):
+    drifted = _final_drifted_checkpoints(data)
+    if drifted:
+        print("⚠ 开发期间实现/评审任务结构曾偏离编码前方案（%s）；"
+              "请额外核对新增、删除或重排的任务仍符合需求边界。"
+              % "、".join(drifted))
+    _show_final_review_mode(data)
+
+
+def _show_final_pending_review(data, final):
+    base = str(final.get("base", ""))
+    head = str(final.get("head", ""))
+    if base != head:
+        print("\n".join(_checkpoint_review_lines(
+            base, head, "最终未检视代码增量",
+            final.get("remote_ref", ""))))
+    receipt = final.get("receipt") or {}
+    if receipt.get("snapshot"):
+        print("\n".join(_checkpoint_worktree_review_lines({
+            "id": "最终增量", "receipt": receipt,
+        })))
+    if final.get("remote_ref"):
+        print("⚠ 当前本地 HEAD 已经存在于上游；仍须完成检视，"
+              "但不要再次 push 或改写远端历史。")
+    _show_final_review_context(data)
+    _print_checkpoint_decisions(final=True)
+
+
+def _show_final_pending_commit(st, final):
+    add, commit = _checkpoint_commit_command(st, final)
+    print("最终未提交增量已经用户确认；只允许提交该检视快照：")
+    print("  " + add)
+    print("  " + commit)
+    print("提交后执行 checkpoint status 核验；核验通过后会回流完整质量链。")
+
+
+def _show_final_commit_recovery(final):
+    print("最终增量提交核验失败，push 已冻结："
+          + str(final.get("verification_error", "未知原因")))
+    print("展示真实差异并让用户选择「需要调整代码」，"
+          "再执行 checkpoint decide revise。")
+
+
+def _show_final_reset_pending(final):
+    base = str(((final.get("receipt") or {}).get("base", "")))
+    print("用户已授权拆回错误的最终增量提交；执行 git reset --mixed "
+          + base + "，随后 checkpoint status。")
+
+
+def _show_legacy_final_push_pending():
+    print("检测到旧版“先 push、后最终检视”的在途状态；执行 checkpoint status "
+          "会原地迁移为本地先检视，不需要先 push。")
+
+
+def _show_final_review_receipt(st, data, final):
+    handlers = {
+        "review_pending": lambda: _show_final_pending_review(data, final),
+        "commit_pending": lambda: _show_final_pending_commit(st, final),
+        "commit_recovery": lambda: _show_final_commit_recovery(final),
+        "reset_pending": lambda: _show_final_reset_pending(final),
+        "push_pending": _show_legacy_final_push_pending,
+    }
+    handler = handlers.get(final.get("status"))
+    if handler:
+        handler()
+
+
+def _final_review_active(data):
+    final = (data or {}).get("final_review")
+    if not isinstance(final, dict):
+        return None
+    return final if final.get("status") in CHECKPOINT_LOCKED_STATUSES else None
+
+
+def _final_rework_target(flow, st):
+    workflow = (st.get("choices", {}) or {}).get("workflow", "")
+    target = CHECKPOINT_CODE_STEPS.get(workflow, "")
+    if not target:
+        die("无法确定返工编码入口，workflow=" + (workflow or "未设置"), 2)
+    return target
+
+
+def _activate_final_rework(flow, st, data, final, context=None):
+    context = context or {}
+    target = _final_rework_target(flow, st)
+    reopened, reopen_why = _reopen_spec_archive(st)
+    if not reopened:
+        die("最终检视返工无法回退规格验证阶段:" + reopen_why, 2)
+    reviewed_head = context.get("reviewed_head", "")
+    if reviewed_head:
+        data["last_reviewed_head"] = reviewed_head
+    data.pop("final_review", None)
+    data["final_rework"] = {
+        "status": "coding",
+        "base": final.get("base", ""),
+        "rejected_head": final.get("head", ""),
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    st["current"] = target
+    st.setdefault("step_heads", {})[target] = (
+        context.get("step_base") or sh("git rev-parse --verify HEAD"))
+    _invalidate_quality_for_rework(st)
+    st.setdefault("history", []).append({
+        "step": "delivery_review",
+        "result": "checkpoint:rework-final",
+        "note": context.get("note", ""),
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    save_state(st)
+    return target
+
+
+def _final_commit_recovery(st, final, why):
+    final["status"] = "commit_recovery"
+    final["verification_error"] = why
+    final["ack_cursor"] = _ack_message_cursor()
+    save_state(st)
+    print("[mae-flow] 最终增量提交核验失败，已禁止 push，现场保持不变："
+          + why)
+    print("展示真实差异，让用户选择「需要调整代码」后执行 "
+          "checkpoint decide revise。")
+
+
+def _handle_missing_final_commit(st, final, why):
+    base = str((final.get("receipt") or {}).get("base", ""))
+    if sh("git rev-parse --verify HEAD") == base:
+        print("[mae-flow] " + why)
+        return
+    _final_commit_recovery(st, final, why)
+
+
+def _finish_final_commit(st, data, final, head):
+    final["head"] = head
+    final["status"] = "accepted"
+    final["accepted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if final.get("requires_quality_rerun"):
+        commit_base = str((final.get("receipt") or {}).get("base", ""))
+        target = _activate_final_rework(
+            FLOW, st, data, final, {
+                "note": "用户检视后的最终工作区提交已核对，重新执行完整质量链",
+                "reviewed_head": head,
+                "step_base": commit_base,
+            })
+        print("[mae-flow] 用户检视后的精确提交已核对；为防止未验证代码直达 push，"
+              "已回到 %s 重新执行编译和完整质量链。" % target)
+        return
+    data["last_reviewed_head"] = head
+    save_state(st)
+    print("[mae-flow] 最终检视提交已核对；执行 done 进入规格定稿/最终 push。")
+
+
+def _refresh_final_pending_commit(st, data, final):
+    head, why = _verify_reviewed_checkpoint_commit(st, final)
+    if not head:
+        _handle_missing_final_commit(st, final, why)
+        return
+    _finish_final_commit(st, data, final, head)
+
+
+def _refresh_final_pending_reset(st, data, final):
+    base = str((final.get("receipt") or {}).get("base", ""))
+    if sh("git rev-parse --verify HEAD") != base:
+        die("恢复尚未完成；执行 git reset --mixed %s。该命令保留工作区内容。"
+            % base, 2)
+    target = _activate_final_rework(
+        FLOW, st, data, final, {
+            "note": "错误的最终增量提交已拆回工作区，重新执行完整质量链",
+        })
+    print("[mae-flow] 错误提交已拆回工作区并保留文件内容；已回到 %s，"
+          "调整后重新编译、检查和检视。" % target)
+
+
+def _migrate_legacy_final_push_pending(st, final):
+    head = str(final.get("head") or sh("git rev-parse --verify HEAD"))
+    if sh("git rev-parse --verify HEAD") != head:
+        die("旧版最终 push 状态的 HEAD 已变化，不能自动迁移旧收据；"
+            "先展示历史差异让用户决定。", 2)
+    ref, remote_head, _local_head = _upstream_snapshot()
+    final["status"] = "review_pending"
+    final["head"] = head
+    final["remote_ref"] = ref if remote_head == head else ""
+    final["remote_head"] = remote_head if remote_head == head else ""
+    final["ack_cursor"] = _ack_message_cursor()
+    save_state(st)
+    print("[mae-flow] 旧版最终状态已迁移为“本地先检视”；"
+          "不再要求先 push。")
+
+
+def _refresh_final_review_status(st, data, final):
+    status = final.get("status")
+    if status == "commit_pending":
+        _refresh_final_pending_commit(st, data, final)
+        return True
+    if status == "reset_pending":
+        _refresh_final_pending_reset(st, data, final)
+        return True
+    if status == "push_pending":
+        _migrate_legacy_final_push_pending(st, final)
+        _show_final_review_receipt(st, data, final)
+        return True
+    return False
+
+
 def cmd_checkpoint_status(st):
     data = _development_review(st)
     if not data:
@@ -5313,28 +6844,21 @@ def cmd_checkpoint_status(st):
     print("[mae-flow] 开发节奏: %s；计划状态: %s"
           % (data.get("mode", "待确认"), data.get("status", "未知")))
     for item in data.get("checkpoints") or []:
-        print("  %s [%s] %s" % (item.get("id"), item.get("status"), item.get("title")))
+        print("  %s [%s] %s" % (
+            item.get("id"), item.get("status"), item.get("title")))
     item = _checkpoint_current(st)
     if not item:
+        final = _final_review_active(data)
+        if final:
+            if _refresh_final_review_status(st, data, final):
+                return
+            _show_final_review_receipt(st, data, final)
+            return
         print("全部计划检查点已闭环；继续当前主流程。")
         return
-    if data.get("mode") == "staged" and item.get("status") == "push_pending":
-        ok, why = _refresh_staged_checkpoint(st, item)
-        save_state(st)
-        if not ok:
-            die(why, 2)
-    if item.get("status") == "review_pending":
-        receipt = item.get("receipt") or {}
-        print("\n".join(_checkpoint_review_lines(
-            receipt.get("base", ""), receipt.get("head", ""),
-            "%s 用户代码检视" % item.get("id"),
-            receipt.get("remote_ref", ""))))
-        if item.get("task_structure_drift"):
-            print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
-        _print_checkpoint_decisions(final=False)
-    elif item.get("status") == "coding":
-        print("当前正在编码 %s；完成提交和绑定本批的 compile-agent 后执行 checkpoint ready %s。"
-              % (item["id"], item["id"]))
+    if _refresh_checkpoint_status(st, data, item):
+        return
+    _show_checkpoint_review(st, data, item)
 
 
 def cmd_checkpoint_final(st):
@@ -5345,6 +6869,12 @@ def cmd_checkpoint_final(st):
     if not data or _moonlight(st):
         print("[mae-flow] 当前无需检查点式最终检视；直接按 current 执行 done。")
         return
+    active = _final_review_active(data)
+    if active:
+        if active.get("status") == "push_pending":
+            _migrate_legacy_final_push_pending(st, active)
+        _show_final_review_receipt(st, data, active)
+        return
     changed, err = _final_review_delta(st)
     if err:
         die("最终检视基点无法核实:" + err, 2)
@@ -5352,57 +6882,34 @@ def cmd_checkpoint_final(st):
         print("[mae-flow] 最后已检视代码版本之后没有源码/测试/构建变化；"
               "无需重复确认，直接执行 done。")
         return
-    dirty = [x for x in changed if x.endswith("(未提交)")]
-    if dirty:
-        die("最终检视前仍有未提交代码: " + "、".join(dirty[:8])
-            + "。先归因并精确提交，不能让用户检视不完整版本。", 2)
     base = str(data.get("last_reviewed_head") or data.get("delivery_base") or "")
     head = sh("git rev-parse --verify HEAD")
-    mode = data.get("mode")
-    remote_ref = ""
-    if mode == "staged":
-        ref, remote_head, local_head = _upstream_snapshot()
-        if not ref or remote_head != local_head:
-            data["final_review"] = {
-                "status": "push_pending", "base": base, "head": head,
-                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            save_state(st)
-            print("[mae-flow] 质量链产生了新的代码增量，分阶段模式先小步 push 再检视：")
-            print("  git push -u origin HEAD")
-            print("成功后重新执行 checkpoint final。远端领先时不要自动 rebase/force-push。")
-            return
-        remote_ref = ref
+    worktree_snapshot = _final_delivery_snapshot(st, head)
+    receipt = {}
+    if worktree_snapshot:
+        receipt = {
+            "base": head,
+            "snapshot": worktree_snapshot,
+            "snapshot_sha256": _snapshot_sha256(worktree_snapshot),
+            "scope": "final",
+        }
+    ref, remote_head, _local_head = _upstream_snapshot()
+    remote_ref = ref if remote_head == head else ""
     data["final_review"] = {
         "status": "review_pending", "base": base, "head": head,
+        "title": "最终检视增量",
         "remote_ref": remote_ref,
-        "remote_head": head if remote_ref else "",
+        "remote_head": remote_head if remote_ref else "",
         "changed": changed,
+        "receipt": receipt,
+        "requires_commit": bool(worktree_snapshot),
+        "requires_quality_rerun": bool(worktree_snapshot),
         "ack_cursor": _ack_message_cursor(),
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     save_state(st)
-    print("\n".join(_checkpoint_review_lines(
-        base, head, "最终未检视代码增量", remote_ref)))
-    drifted = [
-        item.get("id", "?") for item in data.get("checkpoints") or []
-        if item.get("task_structure_drift")
-    ]
-    if drifted:
-        print("⚠ 开发期间实现/评审任务结构曾偏离编码前方案（%s）；"
-              "请在最终检视中额外核对新增、删除或重排的任务仍符合需求边界。"
-              % "、".join(drifted))
-    if mode == "continuous":
-        print("  模式说明:本轮中途未 push；用户确认最终整体代码后才进入正式 push。")
-        completed = [x for x in data.get("checkpoints") or []
-                     if x.get("completed_head")]
-        if completed:
-            print("  已记录批次:")
-            for item in completed:
-                print("    %s %s → %s" % (
-                    item.get("id"), item.get("title"),
-                    str(item.get("completed_head"))[:10]))
-    _print_checkpoint_decisions(final=True)
+    final = data["final_review"]
+    _show_final_review_receipt(st, data, final)
 
 
 def _checkpoint_ack(st, ack, expected, receipt):
@@ -5454,27 +6961,8 @@ def cmd_checkpoint_decide(flow, st, args):
         if args.choice == "continuous":
             die("最终检视已经是统一收尾，不能再切换为连续模式。", 2)
         if args.choice == "revise":
-            workflow = (st.get("choices", {}) or {}).get("workflow", "")
-            target = CHECKPOINT_CODE_STEPS.get(workflow, "")
-            if not target:
-                die("无法确定返工编码入口，workflow=" + (workflow or "未设置"), 2)
-            reopened, reopen_why = _reopen_spec_archive(st)
-            if not reopened:
-                die("最终检视返工无法回退规格验证阶段:" + reopen_why, 2)
-            data.pop("final_review", None)
-            data["final_rework"] = {
-                "status": "coding",
-                "base": final.get("base", ""),
-                "rejected_head": final.get("head", ""),
-                "at": now,
-            }
-            st["current"] = target
-            st.setdefault("step_heads", {})[target] = sh("git rev-parse --verify HEAD")
-            _invalidate_quality_for_rework(st)
-            st.setdefault("history", []).append({
-                "step": "delivery_review", "result": "checkpoint:revise-final",
-                "note": args.ack, "at": now})
-            save_state(st)
+            target = _activate_final_rework(
+                flow, st, data, final, {"note": args.ack})
             print("[mae-flow] 用户要求调整最终代码，已回到 %s。修复提交后必须重新走编译和质量链；"
                   "已检视基点不前移，最终会展示完整修复组合。" % target)
             print_current(flow, st)
@@ -5482,13 +6970,29 @@ def cmd_checkpoint_decide(flow, st, args):
         receipt_head = final.get("head", "")
         if sh("git rev-parse --verify HEAD") != receipt_head:
             die("最终检视期间 HEAD 已变化，旧确认不能背书新版本；先选择调整并重新验证。", 2)
-        fresh, why = _checkpoint_source_fresh(receipt_head, st)
-        if not fresh:
-            die("最终检视收据已失效:" + why, 2)
         if final.get("remote_ref"):
             ref, remote_head, local_head = _upstream_snapshot()
             if ref != final.get("remote_ref") or remote_head != local_head:
                 die("远端检查点在检视期间发生变化，拒绝确认旧远端收据。", 2)
+        if final.get("requires_commit"):
+            fresh, why = _reviewed_worktree_fresh(st, final)
+            if not fresh:
+                die("最终检视收据已失效:" + why, 2)
+            final["status"] = "commit_pending"
+            final["confirmed_at"] = now
+            st.setdefault("history", []).append({
+                "step": "delivery_review",
+                "result": "checkpoint:confirmed-final-worktree",
+                "note": args.ack,
+                "at": now,
+            })
+            save_state(st)
+            _show_final_review_receipt(st, data, final)
+            return
+        dirty_after_receipt = _final_delivery_snapshot(st, receipt_head)
+        if dirty_after_receipt:
+            die("最终检视收据已失效:检视期间又出现交付代码变化："
+                + "、".join(list(dirty_after_receipt)[:8]), 2)
         data["last_reviewed_head"] = receipt_head
         final["status"] = "accepted"
         final["accepted_at"] = now
@@ -5500,7 +7004,52 @@ def cmd_checkpoint_decide(flow, st, args):
         print("[mae-flow] 最终代码增量已确认。执行 done 进入规格定稿/最终 push。")
         return
 
+    if (st.get("current") == "delivery_review"
+            and final.get("status") == "commit_recovery"):
+        if args.choice != "revise":
+            die("错误的最终增量提交不能直接放行；只能选择「需要调整代码」。", 2)
+        ok, why = _checkpoint_ack(
+            st, args.ack, CHECKPOINT_REVISE_ACK, final)
+        if not ok:
+            die("最终提交恢复裁决验真失败:" + why, 2)
+        base = str((final.get("receipt") or {}).get("base", ""))
+        head = sh("git rev-parse --verify HEAD")
+        pushed_ref = _upstream_contains_reset_commit(base, head)
+        if pushed_ref:
+            die("待拆回的最终增量提交已经存在于上游 %s，不能自动改写远端历史。"
+                "请让用户决定追加纠正提交、另开分支或由管理员处理；"
+                "禁止 force-push。" % pushed_ref, 2)
+        final["status"] = "reset_pending"
+        final["recovery_ack"] = args.ack
+        save_state(st)
+        print("[mae-flow] 用户已选择调整。执行：")
+        print("  git reset --mixed " + base)
+        print("完成后执行 checkpoint status；文件内容会保留并回到完整质量链。")
+        return
+
     item = _checkpoint_current(st)
+    if item and item.get("status") == "commit_recovery":
+        if args.choice != "revise":
+            die("错误提交不能用“继续”放行；只能让用户选择「需要调整代码」后安全拆回工作区。", 2)
+        ok, why = _checkpoint_ack(
+            st, args.ack, CHECKPOINT_REVISE_ACK, item.get("receipt") or {})
+        if not ok:
+            die("检查点恢复裁决验真失败:" + why, 2)
+        base = str((item.get("receipt") or {}).get("base", ""))
+        head = sh("git rev-parse --verify HEAD")
+        pushed_ref = _upstream_contains_reset_commit(base, head)
+        if pushed_ref:
+            die("错误提交已经存在于上游 %s，不能自动改写远端历史。"
+                "请让用户决定追加纠正提交、另开分支或由仓库管理员处理；"
+                "当前继续冻结，禁止 force-push。" % pushed_ref, 2)
+        item["status"] = "reset_pending"
+        item["recovery_ack"] = args.ack
+        save_state(st)
+        print("[mae-flow] 用户已选择调整。执行：")
+        print("  git reset --mixed " + base)
+        print("该命令只撤销尚未推送的错误检查点提交，文件内容保留在工作区；"
+              "完成后执行 checkpoint status 返回 coding。")
+        return
     if not item or item.get("status") != "review_pending":
         die("当前没有处于 review_pending 的中间检查点；执行 checkpoint status 查看。", 2)
     ok, why = _checkpoint_ack(st, args.ack, expected, item.get("receipt") or {})
@@ -5518,6 +7067,31 @@ def cmd_checkpoint_decide(flow, st, args):
         save_state(st)
         print("[mae-flow] %s 返回修改；固定基点仍为 %s，修复后会重新展示整批组合差异。"
               % (item["id"], str(item.get("fixed_base", ""))[:10]))
+        return
+    if _review_before_commit(data):
+        fresh, fresh_why = _reviewed_worktree_fresh(st, item)
+        if not fresh:
+            die("检查点收据已失效:" + fresh_why
+                + "；旧确认不能背书另一份未提交 diff。", 2)
+        item["status"] = "commit_pending"
+        item["confirmed_at"] = now
+        item["after_commit_continuous"] = args.choice == "continuous"
+        st.setdefault("history", []).append({
+            "step": st.get("current"),
+            "result": "checkpoint:confirmed-worktree:" + item["id"],
+            "note": args.ack, "at": now})
+        save_state(st)
+        add, commit = _checkpoint_commit_command(st, item)
+        if args.choice == "continuous":
+            print("[mae-flow] 用户选择后续统一检视；当前工作区快照已冻结，"
+                  "先形成可追踪的内部检查点提交，之后不 push、不再停顿。")
+        else:
+            print("[mae-flow] 用户已确认未提交 diff。现在只提交刚才检视过的精确文件：")
+        print("  " + add)
+        print("  " + commit)
+        print("提交成功后执行 checkpoint status；系统会逐文件核对提交内容与检视快照，"
+              + ("然后进入连续开发。" if args.choice == "continuous"
+                 else "相等后才允许小步 push。"))
         return
     if args.choice == "continuous":
         fresh, fresh_why = _checkpoint_source_fresh(
@@ -6453,6 +8027,18 @@ WRITEISH_WEAK = (r"(\btee\s+|\bcp\s+|\bmv\s+|(?<![\w-])copy\s+|(?<![\w-])move\s+
                  r"|(?<![\w-])patch\b)")
 
 
+def _advisory_lightcheck_before_commit(st, snapshot):
+    """Check exact commit candidates; any timeout/crash remains non-blocking."""
+    try:
+        result = _pending_lightcheck_scope(st, snapshot)
+    except BaseException as exc:
+        result = _lightcheck_tool_error(
+            "提交前轻量检查启动失败，已自动放行: " + str(exc))
+        result["report_path"] = _save_lightcheck_result(
+            result, "提交前：异常安全降级")
+    _print_lightcheck_result(result, quiet=True)
+
+
 def _redirect_targets(c):
     """提取 >/>> 的真实落盘目标。fd 复制(2>&1)与空设备不算写文件。
 
@@ -6517,13 +8103,14 @@ def cmd_gate(flow, st, args):
             jdie("edit-specs",
                  f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
         if _is_source_path(p, st, flow):
-            if _checkpoint_review_pending(st):
-                item = _checkpoint_current(st) or {}
+            if _checkpoint_review_locked(st):
+                item = _checkpoint_locked_item(st) or {}
                 jdie(
                     "edit-checkpoint-review",
-                    "检查点 %s 正在等待用户检视，Agent 不能继续改源码。"
+                    "检查点 %s 的检视快照已经冻结，Agent 不能继续改源码。"
                     "用户选择“需要调整代码”后执行 checkpoint decide revise，"
-                    "状态回到 coding 才能修改。" % item.get("id", "?"))
+                    "状态回到 coding 才能修改。"
+                    % item.get("id", item.get("title", "最终检视")))
             if not step.get("allow_source_edit"):
                 jdie("edit-source",
                      f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
@@ -6578,13 +8165,29 @@ def cmd_gate(flow, st, args):
             if name and want and name != want and not baseline_checkout:
                 jdie("bash-branch-name",
                      f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
-        if (_checkpoint_review_pending(st)
+        if (_checkpoint_review_locked(st)
                 and re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I)):
-            item = _checkpoint_current(st) or {}
-            jdie(
-                "bash-checkpoint-review-commit",
-                "检查点 %s 的远端检视收据已冻结，等待用户裁决期间禁止新增提交。"
-                "需要改代码先让用户选择“需要调整代码”。" % item.get("id", "?"))
+            item = _checkpoint_locked_item(st) or {}
+            if item.get("status") != "commit_pending":
+                jdie(
+                    "bash-checkpoint-review-commit",
+                    "检查点 %s 的检视收据已冻结，当前状态 %s 不允许新增提交。"
+                    "等待检视时先取得用户裁决；待推送时只允许 push。"
+                    % (item.get("id", item.get("title", "最终检视")),
+                       item.get("status", "?")))
+        if (_checkpoint_review_locked(st)
+                and re.search(r"(?:^|[\s;&|(])git\s+push\b", c, re.I)):
+            item = _checkpoint_locked_item(st) or {}
+            if item.get("status") != "push_pending":
+                jdie(
+                    "bash-checkpoint-push-before-verify",
+                    "检查点 %s 当前为 %s；提交内容尚未通过 checkpoint status "
+                    "核验，禁止提前 push 或把 commit/push 合成一条命令。"
+                    % (item.get("id", item.get("title", "最终检视")),
+                       item.get("status", "?")))
+        if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
+            die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
+                "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
         m = re.search(r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
                       r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
         if m and st:
@@ -6603,8 +8206,35 @@ def cmd_gate(flow, st, args):
                          f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
                          f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
         if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
+            candidate_snapshot = _pending_commit_candidates(c)
+            item = _checkpoint_locked_item(st) or {}
+            receipt = item.get("receipt") or {}
+            if (item.get("status") == "commit_pending"
+                    and receipt.get("snapshot")):
+                expected = set((receipt.get("snapshot") or {}).keys())
+                actual = set(candidate_snapshot.get("paths") or [])
+                current = _reviewed_snapshot_current(st, item)
+                if current != (receipt.get("snapshot") or {}):
+                    jdie(
+                        "bash-checkpoint-reviewed-snapshot",
+                        "检视后的未提交代码已经变化，禁止拿旧确认提交新 diff。"
+                        "保留现场并重新进入调整、编译和检视。")
+                if actual != expected:
+                    missing = sorted(expected - actual)
+                    extra = sorted(actual - expected)
+                    detail = []
+                    if missing:
+                        detail.append("漏掉 " + "、".join(missing[:8]))
+                    if extra:
+                        detail.append("夹带 " + "、".join(extra[:8]))
+                    jdie(
+                        "bash-checkpoint-reviewed-files",
+                        "本次 commit 必须精确等于用户刚检视的文件；"
+                        + "；".join(detail)
+                        + "。按 checkpoint status 输出的精确 git add/commit 执行。")
             (inherited, foreign_openspec, strong_artifacts,
-             unproven_paths, artifact_hints) = _pending_commit_files(c, st)
+             unproven_paths, artifact_hints) = _pending_commit_files(
+                 c, st, candidate_snapshot)
             if inherited:
                 shown = "、".join(inherited[:8])
                 more = "…" if len(inherited) > 8 else ""
@@ -6650,6 +8280,7 @@ def cmd_gate(flow, st, args):
                     + "、".join(artifact_hints[:8])
                     + ("…" if len(artifact_hints) > 8 else ""),
                     file=sys.stderr)
+            _advisory_lightcheck_before_commit(st, candidate_snapshot)
         if re.search(r"git\s+push\b.*(--force|-f\b)", c) or re.search(r"git\s+push\b.*\s\+\S+", c):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
@@ -6657,9 +8288,6 @@ def cmd_gate(flow, st, args):
         if re.search(r"mae-flow\.py[^;&|]*\bexit\b[^;&|]*--interactive\b", c, re.I):
             die("exit --interactive 是 Hook/ack 全坏时给用户的真实终端逃生口，"
                 "Agent 的 Bash 禁止调用或代答；把完整命令展示给用户手动执行。", 2)
-        if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
-            die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
-                "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
         add_paths, _add_force = _git_add_pathspecs(c)
         if any(re.sub(r"/+$", "", path) == "openspec" for path in add_paths):
             jdie(
@@ -6756,11 +8384,11 @@ def cmd_gate(flow, st, args):
         offenders = list(dict.fromkeys(redirect_sources
                                        + (source_toks if strong_write else [])))
         if offenders:
-            if _checkpoint_review_pending(st):
+            if _checkpoint_review_locked(st):
                 item = _checkpoint_current(st) or {}
                 jdie(
                     "bash-checkpoint-review-source",
-                    "检查点 %s 正在等待用户检视，禁止经 Bash 改源码。"
+                    "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
                     "先由用户选择继续或调整。" % item.get("id", "?"))
             if not step.get("allow_source_edit"):
                 jdie("bash-source",
@@ -6930,6 +8558,7 @@ def cmd_agent_task(flow, st, args):
     sid = st["current"]
     checkpoint_id = str(getattr(args, "checkpoint", "") or "")
     task_diff_override = ""
+    precommit_review = False
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if sid not in expected_steps[kind]:
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
@@ -6952,25 +8581,64 @@ def cmd_agent_task(flow, st, args):
             die("检查点 %s 当前状态为 %s，不能重复生成编译任务卡。"
                 % (checkpoint_id, item.get("status", "未知")), 2)
         checkpoint_base = item.get("fixed_base", "")
-        if checkpoint_base and argv_out(
+        precommit_review = bool(
+            review_state.get("mode") == "staged"
+            and _review_before_commit(review_state))
+        if precommit_review:
+            current_head = sh("git rev-parse --verify HEAD")
+            if current_head != checkpoint_base:
+                die("当前检查点采用先检视后提交，但 HEAD 已偏离固定基点。"
+                    "禁止拿已提交代码伪装成 IDE 未提交差异；保留现场让用户归因。", 2)
+            task_diff_override = "HEAD"
+        elif checkpoint_base and argv_out(
                 ["git", "cat-file", "-t", checkpoint_base]) == "commit":
             task_diff_override = checkpoint_base + "..HEAD"
     dirty_source = _blocking_dirty_source_paths(st, flow)
     inherited_dirty = _unchanged_initial_dirty_source_paths(st, flow)
-    if dirty_source:
+    if dirty_source and not precommit_review:
         die("生成任务卡前仍有未提交源码/测试/构建文件: " + "、".join(dirty_source[:8])
             + "。任务卡只信 Git 可追踪范围；先按单号格式精确提交，或回退不属于本单的改动。", 2)
-    diff, changes, err = _task_scope(st, task_diff_override)
-    if err:
-        die(err, 2)
-    source_files, source_err = (
-        _source_files_for_diff(diff, st) if diff
-        else (None, "无法计算任务卡 Git 范围"))
-    if source_err:
-        die(source_err, 2)
+    if precommit_review:
+        checkpoint_snapshot = _checkpoint_worktree_snapshot(st, flow)
+        source_files = [
+            path for path in checkpoint_snapshot
+            if _is_source_path(path, st, flow)
+        ]
+        if not source_files:
+            die("当前检查点只有配置、资源、文档或夹具等非代码交付差异，"
+                "无需生成空编译任务卡；直接执行 checkpoint ready %s，"
+                "流程会跳过编译并进入未提交 diff 检视。" % checkpoint_id, 2)
+        diff = "HEAD"
+        changes = argv_out([
+            "git", "-c", "core.quotepath=false", "status", "--short",
+            "--untracked-files=all", "--", *source_files,
+        ]).splitlines()
+    else:
+        diff, changes, err = _task_scope(st, task_diff_override)
+        if err:
+            die(err, 2)
+        source_files, source_err = (
+            _source_files_for_diff(diff, st) if diff
+            else (None, "无法计算任务卡 Git 范围"))
+        if source_err:
+            die(source_err, 2)
     if kind in ("COMPILE", "UT") and not source_files:
         die("本轮只有文档/台账等非代码变更，无需生成 %s 任务卡；直接 done。"
             "Harness 在证据层会自动放行，不要启动专项 Agent。" % kind, 2)
+    lightcheck_result = None
+    if kind == "COMPILE":
+        try:
+            lightcheck_result = (
+                _working_lightcheck_scope(st, source_files)
+                if precommit_review else
+                _run_lightcheck_diff(
+                    diff, source_files,
+                    "编译前兜底：" + (checkpoint_id or sid)))
+        except Exception as exc:
+            lightcheck_result = _lightcheck_tool_error(
+                "编译前轻量检查异常，已自动放行: " + str(exc))
+            lightcheck_result["report_path"] = _save_lightcheck_result(
+                lightcheck_result, "编译前：异常安全降级")
     ut_targets = {}
     if kind == "CODECHECK":
         scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
@@ -7015,6 +8683,14 @@ def cmd_agent_task(flow, st, args):
         f"UT运行命令: {cfg.get('UT运行命令', '')}",
         "需求/规格依据:",
     ]
+    if precommit_review:
+        lines += [
+            "检视/提交策略: 当前是分阶段“先检视、后提交”检查点。",
+            "任务卡范围是当前未提交工作区（含 staged/unstaged/untracked）；"
+            "允许为真实编译错误修复业务源码，但禁止 git commit、git push。",
+            "编译成功后保留全部代码为未提交状态，由主流程冻结快照并让用户在 IDE 检视；"
+            "用户确认后才会精确提交。",
+        ]
     if inherited_dirty:
         lines.append("流程启动前已脏但指纹未变(不属于本任务,保持可见): "
                      + "、".join(inherited_dirty))
@@ -7034,6 +8710,17 @@ def cmd_agent_task(flow, st, args):
     execution_files = (task_files if kind == "COMPILE"
                        else (groups["business"] or groups["tests"] or groups["build"]))
     _append_execution_context(lines, execution_files, kind)
+    if kind == "COMPILE" and lightcheck_result is not None:
+        lines += [
+            "Mae-Flow轻量编码预检: %s（%d 个本轮新触发建议；"
+            "不替代正式 CodeCheck，不是编译门禁）" % (
+                lightcheck_result.get("status", "UNKNOWN"),
+                len(lightcheck_result.get("findings") or [])),
+            "轻量预检报告: "
+            + (lightcheck_result.get("report_path") or "报告写入失败，已自动放行"),
+            "边界:compile-agent 不得为了轻量建议扩大职责；只处理真实编译错误。"
+            "主会话在后续写码时按建议预防/修正。",
+        ]
     # compound 沉淀统一在任务卡装载:一处注入,主流程/评审/小改三条质量链全部受益
     # (原先只有主流程 build/verify 的步骤文引用,rf/tw 的 agent 拿不到踩坑经验)。
     notes_path = os.path.join("docs", "delivery-notes.md")
@@ -7122,10 +8809,22 @@ def cmd_agent_task(flow, st, args):
         "step": sid, "path": path, "sha256": digest,
         "head": task_head, "scope": args.scope or "",
         "checkpoint": checkpoint_id,
+        "precommit_review": precommit_review,
+        "initial_compile_net": (
+            _working_source_net(task_head, st, flow)
+            if precommit_review else 0),
+        "source_snapshot": (
+            _source_snapshot_since(task_head, st, flow)
+            if precommit_review else {}),
         "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
         "task_files": task_files,
         "execution_roots": [root for root, _reason in _task_execution_roots(
             execution_files)[0]],
+        "lightcheck": ({
+            "status": lightcheck_result.get("status"),
+            "findings": len(lightcheck_result.get("findings") or []),
+            "report_path": lightcheck_result.get("report_path", ""),
+        } if lightcheck_result is not None else {}),
         "ut_targets": ut_targets if kind == "UT" else {},
         "unchanged_initial_dirty": inherited_dirty,
         "at": time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -7141,6 +8840,8 @@ def cmd_agent_task(flow, st, args):
             })
     save_state(st)
     print(f"[mae-flow] {kind} 任务卡已生成: {path}")
+    if kind == "COMPILE" and lightcheck_result is not None:
+        _print_lightcheck_result(lightcheck_result, quiet=True)
     if kind == "CODECHECK":
         print("[mae-flow] CodeCheck 详细日志: %s"
               % norm(codecheck_log_path(os.getcwd(), st)))
@@ -8864,6 +10565,8 @@ def main():
             die("当前有独立任务正在运行，不能叠加月光宝盒。"
                 "先执行 action finish 或 action cancel。", 2)
         return cmd_moonlight(flow, st, args)
+    if args.cmd == "lightcheck":
+        return cmd_lightcheck(st, args)
     if args.cmd == "gate":
         return cmd_gate(flow, st, args)
     if args.cmd == "action":

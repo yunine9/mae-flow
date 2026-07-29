@@ -202,7 +202,62 @@ def ordinary_advance(project, implementation_root):
     }, {}
 
 
+def evidence_rejection(project, implementation_root):
+    env = _prepare_repository(project)
+    state = {
+        "schema_version": 2,
+        "revision": 1,
+        "updated_at": "2026-07-29 10:00:00",
+        "current": "rf_triage",
+        "config": {
+            "单号": "REQ-DIFF",
+            "分支名": "",
+        },
+        "choices": {"workflow": "review"},
+        "history": [],
+        "started": "2026-07-29 10:00:00",
+    }
+    with open(
+            os.path.join(project, ".mae-flow.json"),
+            "w",
+            encoding="utf-8",
+            newline="\n") as stream:
+        json.dump(
+            state,
+            stream,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        stream.write("\n")
+
+    script = os.path.join(
+        implementation_root,
+        "scripts",
+        "mae-flow.py",
+    )
+    fixed_time_runner = (
+        "import os,runpy,sys,time;"
+        "path=sys.argv[1];"
+        "sys.path.insert(0,os.path.dirname(path));"
+        "time.strftime=lambda *_args:'2026-07-29 10:00:00';"
+        "sys.argv=[path,'done'];"
+        "runpy.run_path(path,run_name='__main__')"
+    )
+    return {
+        "argv": [
+            sys.executable,
+            "-c",
+            fixed_time_runner,
+            script,
+        ],
+        "stdin": "",
+        "env": env,
+    }, {}
+
+
 SCENARIOS = {
+    "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "terminal_status": terminal_status,
     "corrupt_state_doctor": corrupt_state_doctor,

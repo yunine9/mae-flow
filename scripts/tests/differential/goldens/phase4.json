@@ -1,0 +1,199 @@
+{
+  "corrupt_state_doctor": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "be302461cda285db3ed2d45fb767b23e08ca8808b35a638009937df22b332d73",
+        "size": 7
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "__unreadable__": "JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+      }
+    },
+    "stderr": "",
+    "stdout": "项目根(状态文件所在): <PROJECT>\n❌ 运行模式: corrupt（Hook 已 fail-open，普通改码不受阻）\n   - .mae-flow.json(JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))\n完整流程状态损坏。发送 `/mae-flow:mae-flow exit` 可保存坏现场并退出；Hook 同时损坏时由用户在真实终端执行 exit --interactive。\n"
+  },
+  "evidence_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "964ab03beccced0024e88eb97670c0a3ae4e53d8835b97a1df094e319718c9ea",
+        "size": 299
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "6f0f663bd8697eaea11af88f8f2d9b985b06610493a5166f1ebc97b676106e43",
+        "size": 82
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "rf_triage",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:rf_triage": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stdout": ""
+  },
+  "inactive_pretooluse_bypass": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": ""
+  },
+  "ordinary_advance": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "6bb756624bac9b5a7a10c9ced2b41c0895580d881bc2d3f1d15dca53368e811c",
+        "size": 501
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "rf_compile",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "",
+            "result": "done",
+            "step": "rf_verify"
+          }
+        ],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "rf_compile": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {}
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+  },
+  "terminal_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "abeb7a6b80e41f8178c6f6bf76a4b25b65c32523f9c95743278de18210ca52ec",
+        "size": 268
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF"
+        },
+        "current": "end",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "{\n  \"choices\": {\n    \"workflow\": \"tweak\"\n  },\n  \"config\": {\n    \"分支名\": \"main\",\n    \"单号\": \"REQ-DIFF\"\n  },\n  \"current\": \"end\",\n  \"history\": [],\n  \"revision\": 1,\n  \"schema_version\": 2,\n  \"started\": \"2026-07-29 10:00:00\",\n  \"updated_at\": \"2026-07-29 10:00:00\"\n}\n"
+  },
+  "workflow_steps": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill_ask 需求澄清询问             [可选环节:需求质询(流程内询问决定)、用户确认] (无硬证据)\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,clean_paths,content_free,glob\n   open 提案与规格                   证据:agent_ran,clean_paths,glob,spec_field,spec_validate\n   design 方案设计                  证据:clean_paths,spec_field,spec_validate\n   story_ask STORY 生成询问         [可选环节:STORY(流程内询问决定)、用户确认] (无硬证据)\n   story 生成 STORY               [随「STORY」询问可选] 证据:agent_ran,content_free,glob\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:spec_field,spec_validate\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:spec_field,spec_validate\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,clean_paths,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
+  }
+}

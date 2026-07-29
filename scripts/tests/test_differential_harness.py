@@ -131,6 +131,24 @@ class DifferentialRunnerTests(unittest.TestCase):
             goldens,
         )
 
+    def test_phase4_evidence_rejection_matches_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase4.json",
+        )
+        goldens = load_goldens(golden_path)
+        actual = run_scenario(ROOT, "evidence_rejection")
+        assert_matches_golden(
+            self,
+            "evidence_rejection",
+            actual,
+            goldens,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

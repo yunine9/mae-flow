@@ -89,6 +89,10 @@ from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core.file_io import load_json, read_bytes, read_lines, read_text, write_text
 from mae_flow_core.delivery import checkpoints as delivery_checkpoints
+from mae_flow_core.delivery.evidence import (
+    DeliveryEvidencePorts,
+    DeliveryEvidenceRules,
+)
 from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
 from mae_flow_core.quality import task_cards as quality_task_cards
@@ -1445,73 +1449,6 @@ def _final_review_delta(st):
     return changed, ""
 
 
-def ev_checkpoint_plan(spec, st):
-    if _moonlight(st):
-        return True, ""
-    data = _development_review(st)
-    if not data or data.get("status") != "plan_pending":
-        return False, (
-            "尚未生成开发检查点方案。先按本步指令执行 checkpoint plan --item ...，"
-            "让用户看到具体批次后再选择开发节奏")
-    if data.get("plan_step") != st.get("current"):
-        return False, "检查点方案属于旧步骤，重新分析并生成本步方案"
-    items = data.get("checkpoints") or []
-    if not 1 <= len(items) <= 6:
-        return False, "检查点数量必须为 1-6 个；小改可 1 个，常规任务建议 2-4 个"
-    changed, err = _source_changed_since(data.get("plan_head", ""), st)
-    if err:
-        return False, "检查点方案基点无法核实:" + err
-    if changed:
-        return False, (
-            "检查点方案呈现后代码已经变化: " + "、".join(changed[:5])
-            + "。必须在写码前重新生成方案，不能确认旧划分")
-    return True, ""
-
-
-def ev_checkpoint_plan_complete(spec, st):
-    """New deliveries honor their pace plan; legacy states remain untouched."""
-    data = _development_review(st)
-    if not data or _moonlight(st):
-        return True, ""
-    if data.get("status") != "active":
-        return False, "开发节奏尚未完成用户确认"
-    mode = data.get("mode")
-    items = data.get("checkpoints") or []
-    closed = (
-        (lambda item: item.get("status") == "accepted")
-        if mode == "staged" else
-        (lambda item: item.get("status") in ("completed", "accepted"))
-    )
-    pending = [x.get("id", "?") for x in items if not closed(x)]
-    if pending:
-        if mode == "staged" and _review_before_commit(data):
-            action = (
-                "保持本批代码未提交，完成 compile-agent 后执行 checkpoint ready "
-                "<CP编号>；用户检视确认后再精确提交、push")
-        elif mode == "staged":
-            action = "完成本批编译和 push 后 checkpoint status，等待用户检视"
-        else:
-            action = "完成本批编译后 checkpoint ready <CP编号>；连续模式不会停下来"
-        return False, "检查点尚未闭环: %s。%s" % ("、".join(pending), action)
-    return True, ""
-
-
-def ev_final_review_clear(spec, st):
-    """No final code delta may pass into irreversible archive/final push unseen."""
-    data = _development_review(st)
-    if not data or _moonlight(st):
-        return True, ""
-    changed, err = _final_review_delta(st)
-    if err:
-        return False, "最终检视基点无法核实:" + err
-    if changed:
-        return False, (
-            "质量链后仍有未检视代码增量: " + "、".join(changed[:8])
-            + "。执行 checkpoint final；所有普通模式都先检视本地增量，"
-              "用户确认后才进入最终 push")
-    return True, ""
-
-
 def _archive_delivery_paths(st):
     """Return only the paths produced by this delivery's archive operation."""
     data = (st or {}).get("spec", {}) or {}
@@ -1536,26 +1473,6 @@ def _archive_delivery_paths(st):
         and not _unchanged_initial_dirty(path, st or {})
     )
     return list(dict.fromkeys(paths))
-
-
-def ev_archive_paths_clean(spec, st):
-    """Require this archive's exact outputs to be committed, not all OpenSpec."""
-    paths = _archive_delivery_paths(st)
-    if not paths:
-        return False, (
-            "缺少本次定稿的精确产物清单；重新执行 spec archive，"
-            "或由维护人核对旧在途状态后再推进")
-    dirty = []
-    for path in paths:
-        out = argv_out(["git", "status", "--porcelain", "--", path])
-        if out:
-            dirty.append(f"{path}({out.splitlines()[0][:2].strip()})")
-    if not dirty:
-        return True, ""
-    return False, (
-        "本次定稿产物尚未提交: " + "、".join(dirty)
-        + "。只精确 git add 上述路径并提交；不要 git add openspec/，"
-          "它可能卷入上一单遗留文件")
 
 
 def _committed_delivery_paths(st):
@@ -3057,6 +2974,36 @@ ev_agent_ran = _AGENT_EVIDENCE.agent_ran
 ev_agent_or_no_source = _AGENT_EVIDENCE.agent_or_no_source
 ev_review_agent_or_no_code = _AGENT_EVIDENCE.review_agent_or_no_code
 ev_review_snapshot = _AGENT_EVIDENCE.review_snapshot
+
+
+_DELIVERY_EVIDENCE = DeliveryEvidenceRules(DeliveryEvidencePorts(
+    moonlight=_moonlight,
+    development_review=_development_review,
+    source_changed_since=_source_changed_since,
+    review_before_commit=_review_before_commit,
+    final_review_delta=_final_review_delta,
+    archive_delivery_paths=_archive_delivery_paths,
+    shell_output=sh,
+    argv_output=argv_out,
+    committed_initial_carryover=_committed_initial_carryover,
+    committed_delivery_paths=_committed_delivery_paths,
+    trusted_harness_commit_path=_trusted_harness_commit_path,
+    dirty_paths=_dirty_paths,
+    path_fingerprint=_path_fingerprint,
+    repo_path_identity=_repo_path_identity,
+    agent_written_paths=_agent_written_paths,
+    read_text_replace=lambda path: read_text(path, errors="replace"),
+    agent_ran=_AGENT_EVIDENCE.agent_ran,
+))
+
+ev_checkpoint_plan = _DELIVERY_EVIDENCE.checkpoint_plan
+ev_checkpoint_plan_complete = _DELIVERY_EVIDENCE.checkpoint_plan_complete
+ev_final_review_clear = _DELIVERY_EVIDENCE.final_review_clear
+ev_archive_paths_clean = _DELIVERY_EVIDENCE.archive_paths_clean
+ev_pushed = _DELIVERY_EVIDENCE.pushed
+ev_commit_tagged = _DELIVERY_EVIDENCE.commit_tagged
+ev_commit_tagged_after_entry = _DELIVERY_EVIDENCE.commit_tagged_after_entry
+ev_review_fix_committed = _DELIVERY_EVIDENCE.review_fix_committed
 
 
 _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(

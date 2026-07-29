@@ -34,6 +34,7 @@ class _TmpDir:
 
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
+from mae_flow_core.workflow.definition import definition_errors
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 fails = []
@@ -54,6 +55,9 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/foundation/fingerprints.py",
           "scripts/mae_flow_core/foundation/source_paths.py",
           "scripts/mae_flow_core/foundation/git_intent.py",
+          "scripts/mae_flow_core/workflow/__init__.py",
+          "scripts/mae_flow_core/workflow/definition.py",
+          "scripts/mae_flow_core/workflow/transitions.py",
           "scripts/mae_flow_core/__init__.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
@@ -69,6 +73,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_task_scope.py",
+          "scripts/tests/test_workflow_definition.py",
           "scripts/tests/test_differential_harness.py",
           "scripts/tests/test_architecture.py",
           "scripts/tests/architecture_rules.py",
@@ -136,6 +141,12 @@ lightcheck_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("轻量编码预检跨语言与安全降级回归", lightcheck_tests.returncode == 0,
       (lightcheck_tests.stdout + lightcheck_tests.stderr)[-5000:])
+workflow_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_workflow_definition.py")],
+    text=True, capture_output=True, timeout=180)
+check("Workflow 定义与转移策略回归", workflow_tests.returncode == 0,
+      (workflow_tests.stdout + workflow_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py")):
@@ -180,6 +191,11 @@ for f in ("flow/flow.json", "hooks/hooks.json", "runtime/vendor/manifest.json"):
 if flow:
     steps = flow["steps"]
     # 3. 流程图连通 + 步骤文档
+    flow_errors = definition_errors(
+        flow,
+        os.path.join(ROOT, "flow", "steps"),
+    )
+    check("流程定义结构有效", not flow_errors, str(flow_errors))
     bad = []
     for sid, s in steps.items():
         nxt = s.get("next")

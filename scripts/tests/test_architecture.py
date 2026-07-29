@@ -15,7 +15,9 @@ if TESTS not in sys.path:
 
 from architecture_rules import (  # noqa: E402
     assert_foundation_dependencies,
+    assert_policy_dependencies,
     line_count,
+    new_module_size_violations,
 )
 
 
@@ -23,13 +25,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 class ArchitectureTests(unittest.TestCase):
-    def _write_foundation_fixture(self, source):
+    def _write_core_fixture(self, package, source):
         temporary = tempfile.TemporaryDirectory()
         path = os.path.join(
             temporary.name,
             "scripts",
             "mae_flow_core",
-            "foundation",
+            package,
             "fixture.py",
         )
         os.makedirs(os.path.dirname(path))
@@ -37,6 +39,9 @@ class ArchitectureTests(unittest.TestCase):
             stream.write(source)
         self.addCleanup(temporary.cleanup)
         return temporary.name
+
+    def _write_foundation_fixture(self, source):
+        return self._write_core_fixture("foundation", source)
 
     def test_existing_monoliths_do_not_grow(self):
         baseline_path = os.path.join(
@@ -82,6 +87,38 @@ class ArchitectureTests(unittest.TestCase):
                 "forbidden call subprocess.run"
             ],
             assert_foundation_dependencies(root),
+        )
+
+    def test_workflow_policy_has_no_direct_side_effects(self):
+        self.assertEqual([], assert_policy_dependencies(ROOT))
+
+    def test_workflow_rejects_aliased_process_calls(self):
+        root = self._write_core_fixture(
+            "workflow",
+            "import subprocess as sp\nsp.run(['git', 'status'])\n",
+        )
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/workflow/fixture.py:2: "
+                "forbidden call subprocess.run"
+            ],
+            assert_policy_dependencies(root),
+        )
+
+    def test_refactored_core_modules_stay_within_size_limit(self):
+        self.assertEqual([], new_module_size_violations(ROOT))
+
+    def test_new_core_module_rejects_more_than_500_lines(self):
+        root = self._write_core_fixture(
+            "workflow",
+            "value = 1\n" * 501,
+        )
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/workflow/fixture.py: "
+                "501 lines exceeds 500"
+            ],
+            new_module_size_violations(root),
         )
 
     def test_selftest_runs_refactor_safety_suites(self):

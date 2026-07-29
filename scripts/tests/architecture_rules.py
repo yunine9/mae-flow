@@ -19,6 +19,11 @@ FORBIDDEN_CALLS = {
     "subprocess.Popen",
     "subprocess.call",
 }
+LEGACY_OVERSIZED_CORE_MODULES = {
+    "scripts/mae_flow_core/capabilities.py",
+    "scripts/mae_flow_core/lightcheck.py",
+    "scripts/mae_flow_core/specengine.py",
+}
 
 
 def line_count(path):
@@ -144,3 +149,47 @@ def assert_foundation_dependencies(root):
                     "%s:%d: forbidden call %s" % (
                         relative, node.lineno, name))
     return sorted(violations)
+
+
+def assert_policy_dependencies(root):
+    root_path = Path(root)
+    workflow = root_path / "scripts" / "mae_flow_core" / "workflow"
+    violations = []
+    if not workflow.exists():
+        return violations
+    for path in sorted(workflow.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        tree = _parse(os.fspath(path))
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _resolved_call_name(node.func, aliases)
+            if name in FORBIDDEN_CALLS:
+                violations.append(
+                    "%s:%d: forbidden call %s"
+                    % (relative, node.lineno, name)
+                )
+    return sorted(violations)
+
+
+def new_module_size_violations(root, maximum=500):
+    root_path = Path(root)
+    core = root_path / "scripts" / "mae_flow_core"
+    violations = []
+    if not core.exists():
+        return violations
+    for path in sorted(core.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        if (
+            path.name == "__init__.py"
+            or relative in LEGACY_OVERSIZED_CORE_MODULES
+        ):
+            continue
+        count = line_count(os.fspath(path))
+        if count > maximum:
+            violations.append(
+                "%s: %d lines exceeds %d"
+                % (relative, count, maximum)
+            )
+    return violations

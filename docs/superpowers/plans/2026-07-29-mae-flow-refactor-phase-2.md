@@ -518,9 +518,12 @@ Expected: import failure or missing functions for the two new rules.
 - [ ] **Step 3: Implement reusable AST and size checks**
 
 Reuse `_import_aliases` and `_resolved_call_name`. Scan
-`scripts/mae_flow_core/workflow/**/*.py` for `FORBIDDEN_CALLS`. Scan all
-production files under `scripts/mae_flow_core/`, excluding `__init__.py`, and
-return deterministic line-limit diagnostics.
+`scripts/mae_flow_core/workflow/**/*.py` for `FORBIDDEN_CALLS`. Scan production
+files under `scripts/mae_flow_core/`, excluding `__init__.py` and the explicit
+pre-refactor oversized allowlist (`capabilities.py`, `lightcheck.py`,
+`specengine.py`), and return deterministic line-limit diagnostics. The
+allowlist only prevents this phase from absorbing old debt; no new file may be
+added to it.
 
 - [ ] **Step 4: Wire Workflow checks into selftest**
 

@@ -84,12 +84,29 @@ def decide_checkpoint(
     updated = deepcopy(review)
     final = updated.get("final_review") or {}
     if current == "delivery_review":
-        if final.get("status") == "review_pending":
-            return _decide_final_review(
-                updated, final, choice, ack, expected, now, ports)
-        if final.get("status") == "commit_recovery":
-            return _decide_final_recovery(
-                updated, final, choice, ack, ports)
+        final_result = _decide_delivery_review(
+            updated, final, choice, ack, expected, now, ports)
+        if final_result is not None:
+            return final_result
+    return _decide_intermediate(
+        updated, current, choice, ack, expected,
+        now, ports, config or {})
+
+
+def _decide_delivery_review(
+        review, final, choice, ack, expected, now, ports):
+    if final.get("status") == "review_pending":
+        return _decide_final_review(
+            review, final, choice, ack, expected, now, ports)
+    if final.get("status") == "commit_recovery":
+        return _decide_final_recovery(
+            review, final, choice, ack, ports)
+    return None
+
+
+def _decide_intermediate(
+        updated, current, choice, ack, expected,
+        now, ports, config):
     item = _current_item(updated)
     if item and item.get("status") == "commit_recovery":
         return _decide_checkpoint_recovery(
@@ -106,7 +123,7 @@ def decide_checkpoint(
             updated, item, current, ack, now)
     if updated.get("review_before_commit"):
         return _confirm_worktree(
-            updated, item, current, choice, ack, now, config or {}, ports)
+            updated, item, current, choice, ack, now, config, ports)
     if choice == "continuous":
         return _switch_continuous(
             updated, item, current, ack, now, ports)

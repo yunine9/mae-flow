@@ -252,23 +252,27 @@ def assert_quality_dependencies(root):
 
 def assert_delivery_dependencies(root):
     root_path = Path(root)
-    delivery = root_path / "scripts" / "mae_flow_core" / "delivery"
     violations = []
-    if not delivery.exists():
-        return violations
-    for path in sorted(delivery.rglob("*.py")):
-        relative = path.relative_to(root_path).as_posix()
-        tree = _parse(os.fspath(path))
-        aliases = _import_aliases(tree)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = _resolved_call_name(node.func, aliases)
-            if name in FORBIDDEN_CALLS:
-                violations.append(
-                    "%s:%d: forbidden call %s"
-                    % (relative, node.lineno, name)
-                )
+    directories = (
+        root_path / "scripts" / "mae_flow_core" / "delivery",
+        root_path / "scripts" / "mae_flow_core" / "application" / "delivery",
+    )
+    for delivery in directories:
+        if not delivery.exists():
+            continue
+        for path in sorted(delivery.rglob("*.py")):
+            relative = path.relative_to(root_path).as_posix()
+            tree = _parse(os.fspath(path))
+            aliases = _import_aliases(tree)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                name = _resolved_call_name(node.func, aliases)
+                if name in FORBIDDEN_CALLS:
+                    violations.append(
+                        "%s:%d: forbidden call %s"
+                        % (relative, node.lineno, name)
+                    )
     return sorted(violations)
 
 
@@ -441,19 +445,27 @@ def quality_complexity_violations(root, maximum=15):
 
 def delivery_complexity_violations(root, maximum=15):
     root_path = Path(root)
-    delivery = root_path / "scripts" / "mae_flow_core" / "delivery"
     violations = []
-    if not delivery.exists():
-        return violations
-    for path in sorted(delivery.rglob("*.py")):
-        relative = path.relative_to(root_path).as_posix()
-        for node in ast.walk(_parse(os.fspath(path))):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            complexity = _node_complexity(node)
-            if complexity > maximum:
-                violations.append(
-                    "%s:%d: %s complexity %d exceeds %d"
-                    % (relative, node.lineno, node.name, complexity, maximum)
-                )
+    directories = (
+        root_path / "scripts" / "mae_flow_core" / "delivery",
+        root_path / "scripts" / "mae_flow_core" / "application" / "delivery",
+    )
+    for delivery in directories:
+        if not delivery.exists():
+            continue
+        for path in sorted(delivery.rglob("*.py")):
+            relative = path.relative_to(root_path).as_posix()
+            for node in ast.walk(_parse(os.fspath(path))):
+                if not isinstance(
+                        node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                complexity = _node_complexity(node)
+                if complexity > maximum:
+                    violations.append(
+                        "%s:%d: %s complexity %d exceeds %d"
+                        % (
+                            relative, node.lineno, node.name,
+                            complexity, maximum,
+                        )
+                    )
     return violations

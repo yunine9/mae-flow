@@ -160,13 +160,34 @@ def ready_checkpoint(
         review, current, workflow, moonlight, checkpoint_id,
         agent_tasks, ports):
     """Close compilation for the current checkpoint."""
+    failure, index = _ready_request_failure(
+        review, current, workflow, moonlight, checkpoint_id)
+    if failure:
+        return failure
+    updated = deepcopy(review)
+    item = updated.get("checkpoints", [])[index]
+    base = str(item.get("fixed_base") or updated.get("delivery_base") or "")
+    head = ports.head()
+    history_failure = _ready_history_failure(base, head, ports)
+    if history_failure:
+        return history_failure
+    mode = updated.get("mode")
+    if mode == "staged" and bool(updated.get("review_before_commit")):
+        return _ready_precommit(
+            updated, item, base, head, agent_tasks, ports)
+    return _ready_committed(
+        updated, item, base, head, mode, agent_tasks, ports)
+
+
+def _ready_request_failure(
+        review, current, workflow, moonlight, checkpoint_id):
     if not review or review.get("status") != "active":
         return _failure(
             "当前没有已确认的开发检查点方案；"
-            "旧版在途流程继续按原有 review 节点执行。")
+            "旧版在途流程继续按原有 review 节点执行。"), -1
     if moonlight:
         return _failure(
-            "月光宝盒不执行人工检查点；继续按当前质量链无人值守推进。")
+            "月光宝盒不执行人工检查点；继续按当前质量链无人值守推进。"), -1
     expected_step = {
         "full": "build",
         "hotfix": "build",
@@ -176,35 +197,29 @@ def ready_checkpoint(
     if current != expected_step:
         return _failure(
             "checkpoint ready 只允许在本工作流编码步骤 %s 执行；当前为 %s。"
-            % (expected_step or "(未知)", current))
-
-    updated = deepcopy(review)
-    items = updated.get("checkpoints") or []
-    index = int(updated.get("current_index", 0) or 0)
+            % (expected_step or "(未知)", current)), -1
+    items = review.get("checkpoints") or []
+    index = int(review.get("current_index", 0) or 0)
     item = items[index] if 0 <= index < len(items) else None
     if not item or item.get("id") != checkpoint_id:
         return _failure(
             "当前应处理 %s，不是 %s。先执行 checkpoint status 查看计划。"
-            % ((item or {}).get("id", "无剩余检查点"), checkpoint_id))
+            % ((item or {}).get("id", "无剩余检查点"), checkpoint_id)), -1
     if item.get("status") not in ("coding",):
         return _failure(
             "%s 当前状态为 %s，不能重复 ready；"
             "执行 checkpoint status 查看下一步。"
-            % (item["id"], item.get("status", "未知")))
+            % (item["id"], item.get("status", "未知"))), -1
+    return None, index
 
-    base = str(item.get("fixed_base") or updated.get("delivery_base") or "")
-    head = ports.head()
+
+def _ready_history_failure(base, head, ports):
     if (not base or ports.object_type(base) != "commit"
             or ports.merge_base(base, head) != base):
         return _failure(
             "检查点固定基点不在当前历史上，可能发生 rebase/reset；"
             "不能用改写后的历史冒充原检查点。")
-    mode = updated.get("mode")
-    if mode == "staged" and bool(updated.get("review_before_commit")):
-        return _ready_precommit(
-            updated, item, base, head, agent_tasks, ports)
-    return _ready_committed(
-        updated, item, base, head, mode, agent_tasks, ports)
+    return None
 
 
 def _ready_precommit(review, item, base, head, agent_tasks, ports):

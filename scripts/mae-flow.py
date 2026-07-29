@@ -98,6 +98,7 @@ from mae_flow_core.delivery.evidence import (
 )
 from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
+from mae_flow_core.guard.gate import EditGateContext, decide_edit
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,
@@ -7144,50 +7145,35 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
     p = intent.subject
     rel = _repo_rel_for_match(p)
     pm = rel if rel is not None else p
-    if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
-        die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
-    if re.search(r"\.mae-flow\.json(?:\.[\w-]+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
-                 r"|(^|/)\.mae-flow-work/moonlight-report\.md$", p, re.I):
-        die("流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
-            "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
-    if re.search(r"(^|/)\.mae-flow-defaults\.json$", p, re.I):
-        die("流程运行期间禁止修改 .mae-flow-defaults.json:它决定源码/测试路径的判定口径,"
-            "改它等于改门禁规则。团队预设请在流程外走正常评审提交。", 2)
-    if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I) and not re.search(
-            r"\.env\.(example|sample|template|dist|defaults)$", p, re.I):
-        die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
-    if sid == "config_confirm" and re.search(r"(^|/)docs/req/", pm, re.I):
-        jdie("edit-docs-req",
-             "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
-             "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
-             "已有文本用 requirement-record --source。")
     plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
-    if norm(os.path.abspath(p)).lower().startswith(plugin_root + "/"):
-        die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
-    if re.search(flow["specs_truth"], pm, re.I) and not step.get("allow_specs_write"):
-        jdie("edit-specs",
-             f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
-    if _is_source_path(p, st, flow):
-        if _checkpoint_review_locked(st):
-            item = _checkpoint_locked_item(st) or {}
-            jdie(
-                "edit-checkpoint-review",
-                "检查点 %s 的检视快照已经冻结，Agent 不能继续改源码。"
-                "用户选择“需要调整代码”后执行 checkpoint decide revise，"
-                "状态回到 coding 才能修改。"
-                % item.get("id", item.get("title", "最终检视")))
-        if not step.get("allow_source_edit"):
-            jdie("edit-source",
-                 f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
-        tp = _effective_test_patterns(st) if step.get("tests_only") else []
-        ul = (st or {}).get("unlock") or {}
-        unlocked = ul.get("scope") == "source" and ul.get("step") == sid
-        if tp and not unlocked and not any(re.search(t, pm, re.I) for t in tp):
-            jdie("edit-tests-only",
-                 f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
-                 "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
-                 "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
-                 "禁止未经用户裁决自行改源码。")
+    item = _checkpoint_locked_item(st) or {}
+    patterns = (
+        tuple(_effective_test_patterns(st))
+        if step.get("tests_only") else ())
+    unlock = (st or {}).get("unlock") or {}
+    decision = decide_edit(EditGateContext(
+        path=p,
+        match_path=pm,
+        step=sid or "",
+        step_title=step.get("title", ""),
+        inside_plugin=norm(os.path.abspath(p)).lower().startswith(
+            plugin_root + "/"),
+        specs_truth=flow["specs_truth"],
+        allow_specs_write=bool(step.get("allow_specs_write")),
+        is_source=_is_source_path(p, st, flow),
+        checkpoint_locked=_checkpoint_review_locked(st),
+        checkpoint_label=item.get(
+            "id", item.get("title", "最终检视")),
+        allow_source_edit=bool(step.get("allow_source_edit")),
+        tests_only_patterns=patterns,
+        source_unlocked=(
+            unlock.get("scope") == "source"
+            and unlock.get("step") == sid),
+    ))
+    if decision.kind == "absolute":
+        die(decision.message, 2)
+    if decision.kind == "block":
+        jdie(decision.rule, decision.message)
     sys.exit(0)
 
 

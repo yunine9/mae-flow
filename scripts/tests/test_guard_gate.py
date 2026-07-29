@@ -12,7 +12,9 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.guard.gate import (  # noqa: E402
+    BashWriteContext,
     EditGateContext,
+    decide_bash_write,
     decide_edit,
 )
 
@@ -74,6 +76,66 @@ class EditGateTests(unittest.TestCase):
             ("allow", "", ""),
             tuple(decide_edit(self.context())),
         )
+
+
+class BashWriteGateTests(unittest.TestCase):
+    def context(self, **overrides):
+        values = {
+            "command": "echo ok",
+            "tokens": (),
+            "writeish": False,
+            "strong_write": False,
+            "weak_write": False,
+            "hits_requirement": False,
+            "hits_internal_state": False,
+            "hits_specs_truth": False,
+            "step": "build",
+            "allow_specs_write": False,
+            "offenders": (),
+            "source_tokens": (),
+            "checkpoint_locked": False,
+            "checkpoint_label": "",
+            "allow_source_edit": True,
+            "tests_only_patterns": (),
+            "source_unlocked": False,
+            "bad_test_sources": (),
+        }
+        values.update(overrides)
+        return BashWriteContext(**values)
+
+    def test_retired_engine_and_internal_state_are_absolute(self):
+        retired = decide_bash_write(self.context(
+            command="COMET_FORCE_PHASE=verify tool"))
+        self.assertEqual("absolute", retired.kind)
+        self.assertIn("已退役", retired.message)
+        internal = decide_bash_write(self.context(
+            writeish=True, hits_internal_state=True))
+        self.assertEqual("absolute", internal.kind)
+        self.assertIn("流程状态", internal.message)
+
+    def test_requirement_specs_and_source_are_permit_blocks(self):
+        requirement = decide_bash_write(self.context(
+            step="config_confirm", writeish=True,
+            hits_requirement=True))
+        self.assertEqual(("block", "bash-docs-req"),
+                         (requirement.kind, requirement.rule))
+        specs = decide_bash_write(self.context(
+            writeish=True, hits_specs_truth=True))
+        self.assertEqual(("block", "bash-specs"),
+                         (specs.kind, specs.rule))
+        source = decide_bash_write(self.context(
+            offenders=("src/main.py",), allow_source_edit=False))
+        self.assertEqual(("block", "bash-source"),
+                         (source.kind, source.rule))
+
+    def test_weak_source_reference_is_advisory(self):
+        result = decide_bash_write(self.context(
+            weak_write=True,
+            source_tokens=("src/main.py",),
+            allow_source_edit=False,
+        ))
+        self.assertEqual("advisory", result.kind)
+        self.assertIn("软提醒", result.message)
 
 
 if __name__ == "__main__":

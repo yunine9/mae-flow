@@ -98,7 +98,12 @@ from mae_flow_core.delivery.evidence import (
 )
 from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
-from mae_flow_core.guard.gate import EditGateContext, decide_edit
+from mae_flow_core.guard.gate import (
+    BashWriteContext,
+    EditGateContext,
+    decide_bash_write,
+    decide_edit,
+)
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,
@@ -7261,64 +7266,55 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
     strong_write = bool(re.search(WRITEISH_STRONG, c, re.I))
     weak_write = bool(re.search(WRITEISH_WEAK, c, re.I))
     writeish = strong_write or weak_write or bool(redirects)
-    if writeish and any(t.lower().endswith((".comet.yaml", ".openspec.yaml"))
-                        for t in toks):
-        die("comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护(黑名单#4),"
-            "直写等同伪造阶段/验证证据。", 2)
-    if re.search(r"COMET_FORCE_PHASE", c, re.I):
-        die("COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
-            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。", 2)
-    if re.search(r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*\.(sh|mjs|js)\b"
-                 r"|runtime/bin/openspec\b", c, re.I):
-        die("禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec 路由等环境,"
-            "退落到机器全局版本(版本锁失效)。请使用 current 给出的 capability 命令。", 2)
-    if re.search(r"(?:^|[;&|(])\s*openspec\b", c):
-        die("禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,全局版本随"
-            "上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染仓库。"
-            "请使用 current 给出的 capability openspec 命令。", 2)
-    if (sid == "config_confirm" and writeish
-            and guard_intent.hits_path(intent, r"(^|/)docs/req/")):
-        jdie("bash-docs-req",
-             "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
-             "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。")
-    if writeish and guard_intent.hits_path(
-            intent, r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
-            r"|\.mae-flow-work/moonlight-report\.md"):
-        die("流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
-            "(待重启标记只能靠重启会话清;仓库预设决定门禁口径,流程外走正常评审提交)。", 2)
-    if (writeish and guard_intent.hits_path(intent, flow["specs_truth"])
-            and not step.get("allow_specs_write")):
-        jdie("bash-specs",
-             f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。")
     source_toks = [t for t in toks if _is_source_path(t, st, flow)]
     redirect_sources = [t for t in redirects if _is_source_path(t, st, flow)]
     offenders = list(dict.fromkeys(
         redirect_sources + (source_toks if strong_write else [])))
-    if offenders:
-        if _checkpoint_review_locked(st):
-            item = _checkpoint_current(st) or {}
-            jdie(
-                "bash-checkpoint-review-source",
-                "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
-                "先由用户选择继续或调整。" % item.get("id", "?"))
-        if not step.get("allow_source_edit"):
-            jdie("bash-source",
-                 f"当前步骤 {sid} 禁止经 Bash 写源码文件(命中: {'、'.join(offenders[:3])});"
-                 "先 mae-flow current 查看该做什么。")
-        tp = _effective_test_patterns(st) if step.get("tests_only") else []
-        ul = (st or {}).get("unlock") or {}
-        if tp and not (ul.get("scope") == "source" and ul.get("step") == sid):
-            bad = [t2 for t2 in offenders
-                   if not any(re.search(t, (_repo_rel_for_match(t2) or t2), re.I)
-                              for t in tp)]
-            if bad:
-                jdie("bash-tests-only",
-                     f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
-                     f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。")
-    elif weak_write and source_toks and not step.get("allow_source_edit"):
-        print(f"[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径({source_toks[0]})。"
-              "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
-              "启发式不拦截(误报率高),真正校验在 done 证据层。", file=sys.stderr)
+    patterns = (
+        tuple(_effective_test_patterns(st))
+        if step.get("tests_only") else ())
+    unlock = (st or {}).get("unlock") or {}
+    source_unlocked = (
+        unlock.get("scope") == "source"
+        and unlock.get("step") == sid)
+    bad = [
+        path for path in offenders
+        if not any(re.search(
+            pattern, (_repo_rel_for_match(path) or path), re.I)
+            for pattern in patterns)
+    ] if patterns and not source_unlocked else []
+    item = _checkpoint_current(st) or {}
+    decision = decide_bash_write(BashWriteContext(
+        command=c,
+        tokens=tuple(toks),
+        writeish=writeish,
+        strong_write=strong_write,
+        weak_write=weak_write,
+        hits_requirement=guard_intent.hits_path(
+            intent, r"(^|/)docs/req/"),
+        hits_internal_state=guard_intent.hits_path(
+            intent,
+            r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
+            r"|\.mae-flow-work/moonlight-report\.md"),
+        hits_specs_truth=guard_intent.hits_path(
+            intent, flow["specs_truth"]),
+        step=sid or "",
+        allow_specs_write=bool(step.get("allow_specs_write")),
+        offenders=tuple(offenders),
+        source_tokens=tuple(source_toks),
+        checkpoint_locked=_checkpoint_review_locked(st),
+        checkpoint_label=item.get("id", "?"),
+        allow_source_edit=bool(step.get("allow_source_edit")),
+        tests_only_patterns=patterns,
+        source_unlocked=source_unlocked,
+        bad_test_sources=tuple(bad),
+    ))
+    if decision.kind == "absolute":
+        die(decision.message, 2)
+    if decision.kind == "block":
+        jdie(decision.rule, decision.message)
+    if decision.kind == "advisory":
+        print(decision.message, file=sys.stderr)
     sys.exit(0)
 
 

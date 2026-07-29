@@ -31,6 +31,28 @@ class EditGateContext:
     source_unlocked: bool
 
 
+@dataclass(frozen=True)
+class BashWriteContext:
+    command: str
+    tokens: tuple
+    writeish: bool
+    strong_write: bool
+    weak_write: bool
+    hits_requirement: bool
+    hits_internal_state: bool
+    hits_specs_truth: bool
+    step: str
+    allow_specs_write: bool
+    offenders: tuple
+    source_tokens: tuple
+    checkpoint_locked: bool
+    checkpoint_label: str
+    allow_source_edit: bool
+    tests_only_patterns: tuple
+    source_unlocked: bool
+    bad_test_sources: tuple
+
+
 def _absolute(message):
     return GateDecision("absolute", message=message)
 
@@ -140,6 +162,128 @@ def decide_edit(context):
         _protected_file_decision,
         _repository_edit_decision,
         _source_edit_decision,
+    ):
+        decision = evaluator(context)
+        if decision is not None:
+            return decision
+    return GateDecision("allow")
+
+
+def _bash_absolute_decision(context):
+    command = context.command
+    if (
+        context.writeish
+        and any(token.lower().endswith(
+            (".comet.yaml", ".openspec.yaml"))
+            for token in context.tokens)
+    ):
+        return _absolute(
+            "comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护"
+            "(黑名单#4),直写等同伪造阶段/验证证据。")
+    if re.search(r"COMET_FORCE_PHASE", command, re.I):
+        return _absolute(
+            "COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
+            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。")
+    if re.search(
+        r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*"
+        r"\.(sh|mjs|js)\b|runtime/bin/openspec\b",
+        command,
+        re.I,
+    ):
+        return _absolute(
+            "禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec "
+            "路由等环境,退落到机器全局版本(版本锁失效)。请使用 current 给出的 "
+            "capability 命令。")
+    if re.search(r"(?:^|[;&|(])\s*openspec\b", command):
+        return _absolute(
+            "禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,"
+            "全局版本随上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染"
+            "仓库。请使用 current 给出的 capability openspec 命令。")
+    if context.writeish and context.hits_internal_state:
+        return _absolute(
+            "流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow "
+            "维护,禁止经 Bash 改写/删除(待重启标记只能靠重启会话清;"
+            "仓库预设决定门禁口径,流程外走正常评审提交)。")
+    return None
+
+
+def _bash_repository_decision(context):
+    if (
+        context.step == "config_confirm"
+        and context.writeish
+        and context.hits_requirement
+    ):
+        return _block(
+            "bash-docs-req",
+            "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
+            "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。",
+        )
+    if (
+        context.writeish
+        and context.hits_specs_truth
+        and not context.allow_specs_write
+    ):
+        return _block(
+            "bash-specs",
+            "openspec/specs/ 为真相源,当前步骤 %s 禁止经 Bash 写入(黑名单#3)。"
+            % (context.step or "未初始化"),
+        )
+    return None
+
+
+def _bash_source_decision(context):
+    if context.offenders and context.checkpoint_locked:
+        return _block(
+            "bash-checkpoint-review-source",
+            "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
+            "先由用户选择继续或调整。"
+            % (context.checkpoint_label or "?"),
+        )
+    if context.offenders and not context.allow_source_edit:
+        return _block(
+            "bash-source",
+            "当前步骤 %s 禁止经 Bash 写源码文件(命中: %s);"
+            "先 mae-flow current 查看该做什么。"
+            % (context.step, "、".join(context.offenders[:3])),
+        )
+    if (
+        context.offenders
+        and context.tests_only_patterns
+        and not context.source_unlocked
+        and context.bad_test_sources
+    ):
+        return _block(
+            "bash-tests-only",
+            "当前步骤 %s 仅允许写测试路径(当前生效规则: %s);"
+            "命中非测试源码: %s。经用户裁决确为代码缺陷时用 unlock source 解锁。"
+            % (
+                context.step,
+                "|".join(context.tests_only_patterns),
+                "、".join(context.bad_test_sources[:3]),
+            ),
+        )
+    if (
+        not context.offenders
+        and context.weak_write
+        and context.source_tokens
+        and not context.allow_source_edit
+    ):
+        return GateDecision(
+            "advisory",
+            message=(
+                "[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径(%s)。"
+                "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
+                "启发式不拦截(误报率高),真正校验在 done 证据层。"
+                % context.source_tokens[0]),
+        )
+    return None
+
+
+def decide_bash_write(context):
+    for evaluator in (
+        _bash_absolute_decision,
+        _bash_repository_decision,
+        _bash_source_decision,
     ):
         decision = evaluator(context)
         if decision is not None:

@@ -86,14 +86,17 @@ REMAINING 豁免、UT 判断源码缺陷、承担风险、强制回流属于异�
 skills/mae-flow/SKILL.md   触发条件 + 5 条铁律(工具管不住、靠模型自守的部分)
 flow/flow.json              流程定义:步骤图、证据、权限、环境检查项
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
-scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
-scripts/mae_flow_core/      CLI/Hook 共用内核：foundation/workflow/guard/quality/delivery 纯规则、命令路由、运行模式与状态存储
-scripts/mae_flow_core/capabilities.py  固定能力包加载、内嵌 CLI/脚本路由、CodeCheck 首用安装
+scripts/mae-flow.py         CLI 协议入口（只调用公共 cli_runtime.main）
+scripts/mae_flow_core/cli_commands/  按领域拆分的命令适配器、证据装配与公共路由
+scripts/mae_flow_core/      CLI/Hook 共用内核：foundation/workflow/guard/quality/delivery 纯规则、运行模式与状态存储
+scripts/mae_flow_core/capabilities.py  稳定门面；实现按能力包/宿主运行时/CodeCheck 拆分
+scripts/mae_flow_core/lightcheck.py    稳定门面；实现按扫描/匹配/分析/报告拆分
+scripts/mae_flow_core/specengine.py    稳定门面；实现按解析/校验/生命周期/归档拆分
 runtime/vendor/             流程实际读取的固定方法/schema/模板，以及仍对外承诺的兼容执行器与许可证
 runtime/bin/openspec        Comet 归档脚本调用内嵌 OpenSpec 的稳定入口
 scripts/comet_compat.py     只兼容旧项目残留的 Comet Hook；新项目不会创建项目级 Hook
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
-hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
+hooks/dispatch.py           Hook 协议入口(防卡死 + 项目根定位 + application/adapters 装配)
 agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
 commands/mae-flow.md        /mae-flow:mae-flow 的完整流程、独立任务、月光宝盒与诊断入口
 skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
@@ -207,7 +210,10 @@ flow.json 步骤字段语义：
 | `agent_or_no_source` | 本轮没有源码、测试或构建文件改动时自动过；只要有改动就强制指定 agent 的成功状态。适用于主流程、小改和评审返工，不再只认 C++/Java |
 | `review_codecheck` | 三条流程统一先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警才允许派一轮 CODECHECK agent，首检 0 后源码变化会令扫描过期。CLEAN/REMAINING/无源码改动的工具 FAIL 均留痕收口，不再调用 `codecheck_clean` 重跑；输出无法解析时保存绑定 HEAD 的诊断并继续，源码变化后重新尝试 |
 
-**新增证据类型**：在 mae-flow.py 写 `ev_xxx(spec, st) -> (bool, 失败原因)`，注册进 `EVIDENCE` 字典，flow.json 里引用。失败原因要写"怎么补救"，它会原样回传给模型。
+**新增证据类型**：纯裁决优先放进 `workflow/`、`quality/` 或 `delivery/`，平台事实由
+`cli_commands/` 适配；在 `cli_commands/evidence_registry.py` 注册
+`ev_xxx(spec, st) -> (bool, 失败原因)`，再由 flow.json 引用。失败原因要写
+"怎么补救"，它会原样回传给模型。禁止把规则重新塞回 `scripts/mae-flow.py`。
 
 ### 3.3 gate（PreToolUse 拦截）
 
@@ -287,7 +293,10 @@ CodeCheck 时执行一次公司 npm 安装，registry 用命令行一次性参�
 ②**分批小实例**——复杂工作切批逐实例（UT 每批 3-5 方法带收口批、codecheck >30 告警按文件分批、编译按模块），单实例马拉松 60-80 轮后被上下文裁剪拖垮，加轮次预算救不了；
 ③**长间隔轮询**——等待类动作单次调用内 sleep 再看结果，严禁秒级高频轮询烧预算。
 maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0.7 持续校准）。
-新增 agent 时：契约文件放 agents/，且必须把 agent 名加进 dispatch.py `ev_subagentstop` 的识别正则和标记正则，否则契约校验不生效。
+新增 agent 时：契约文件放 agents/，并在
+`application/hooks/agent_completion.py` 声明纯契约、在
+`adapters/hook_active_events.py` 装配平台证据与路由；`hooks/dispatch.py` 只保留协议入口，
+禁止把识别正则和验签状态机加回入口。
 
 ## 四、comet 思想源合同（v3 后 comet 不再是运行组件，方法约定内化到这些落点）
 
@@ -343,8 +352,12 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **加一个步骤** → flow.json 加节点（接好上下游 next）+ 建同名 steps md + 若需新证据见 3.2。跑 `python -c "json.load(...)"` 和流程图连通性检查。
 - **加内嵌能力** → 固定源码进 `runtime/vendor`，登记 manifest/NOTICE/LICENSE；在 `CAPABILITY_PACKS`
   选择需要的上游原文章节并补生命周期测试。禁止复制到用户 Skill 目录。
-- **改 gate 规则** → mae-flow.py `cmd_gate`。记住 Edit/Bash 两路都要改，路径匹配带 `re.I`，改完必须跑冒烟用例（见第七节）。
-- **动 dispatch.py** → 任何新增 IO 都要问：会阻塞吗？超时了吗？失败会留日志吗？
+- **改 gate 规则** → 纯命令/路径裁决改 `mae_flow_core/guard/`，平台事实装配改
+  `cli_commands/gate.py`。Edit/Bash 两路都要覆盖，路径匹配带 `re.I`，并跑 Gate
+  单测、一次性 permit 入口测试和冒烟探针。
+- **动 Hook 行为** → 先选 `application/hooks/` 的纯用例或 `adapters/` 的平台装配；
+  只有 stdin/stdout、超时、看门狗和顶层 fail-open 才能动 `hooks/dispatch.py`。任何新增
+  IO 都要问：会阻塞吗？超时了吗？失败会留日志吗？
 - **发版/打包前必跑 `python scripts/selftest.py`** → 语法/JSON/流程图/证据注册/占位符/agent 同步/关键文件自检，任何 ❌ 禁止发布。
 
 ### 发版收口

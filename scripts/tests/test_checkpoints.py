@@ -14,6 +14,8 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
+from mae_flow_core.foundation import fingerprints
+
 SPEC = importlib.util.spec_from_file_location(
     "mae_flow_checkpoint_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
@@ -440,6 +442,20 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(
             mf._review_path_fingerprint(path),
             dispatch._review_path_fingerprint(path))
+
+    def test_main_and_hook_delegate_to_shared_fingerprints(self):
+        path = os.path.join(self.repo, "src", "main.cpp")
+        shared = fingerprints.review_path_fingerprint(path)
+        self.assertEqual(shared, mf._review_path_fingerprint(path))
+        self.assertEqual(shared, dispatch._review_path_fingerprint(path))
+        self.assertIs(
+            mf._review_path_fingerprint.__wrapped__,
+            fingerprints.review_path_fingerprint,
+        )
+        self.assertIs(
+            dispatch._review_path_fingerprint.__wrapped__,
+            fingerprints.review_path_fingerprint,
+        )
 
     def test_precommit_scope_does_not_blame_existing_test_change(self):
         test_path = "src/main_test.cpp"

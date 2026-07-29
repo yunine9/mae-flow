@@ -80,6 +80,10 @@ from mae_flow_core.lightcheck import (
     analyze_changed_with_timeout,
     render_markdown,
 )
+from mae_flow_core.foundation.fingerprints import (
+    path_fingerprint as _shared_path_fingerprint,
+    review_path_fingerprint as _shared_review_path_fingerprint,
+)
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -723,61 +727,18 @@ def _dirty_paths():
 
 def _path_fingerprint(path):
     """记录初始化时脏文件的内容，防止同一路径后来被本单继续修改却仍冒充“原有脏文件”。"""
-    h = hashlib.sha256()
-    p = os.path.abspath(path)
-    try:
-        if os.path.isfile(p):
-            h.update(b"file\0")
-            with open(p, "rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    h.update(chunk)
-        elif os.path.isdir(p):
-            h.update(b"dir\0")
-            # git status 可能把整棵未跟踪目录折叠成一个路径。这里只做浅层指纹，避免初始化时
-            # 递归扫描巨大的构建目录；源码目录另有任务卡前“工作区必须干净”的硬检查。
-            for name in sorted(os.listdir(p)):
-                fp = os.path.join(p, name)
-                s = os.stat(fp)
-                h.update((name + "\0" + str(s.st_size) + "\0" + str(s.st_mtime_ns)).encode(
-                    "utf-8", errors="replace"))
-        else:
-            h.update(b"missing\0")
-    except OSError as e:
-        h.update(("error:" + str(e)).encode("utf-8", errors="replace"))
-    return h.hexdigest()
+    return _shared_path_fingerprint(path)
 
 
-def _update_review_hash(h, absolute, path_stat):
-    git_mode = path_stat.st_mode & 0o170000
-    # Git's regular-file mode only tracks the owner's executable bit.
-    executable = bool(path_stat.st_mode & 0o100)
-    h.update(("type:%o\0exec:%d\0" % (
-        git_mode, executable)).encode("ascii"))
-    if os.path.islink(absolute):
-        h.update(b"symlink\0")
-        h.update(os.readlink(absolute).encode(
-            "utf-8", errors="surrogateescape"))
-        return
-    if os.path.isfile(absolute):
-        h.update(b"file\0")
-        with open(absolute, "rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                h.update(chunk)
-        return
-    h.update(b"dir\0" if os.path.isdir(absolute) else b"other\0")
+_path_fingerprint.__wrapped__ = _shared_path_fingerprint
 
 
 def _review_path_fingerprint(path):
     """Hash the Git-relevant worktree state without changing legacy dirt IDs."""
-    h = hashlib.sha256()
-    absolute = os.path.abspath(path)
-    try:
-        _update_review_hash(h, absolute, os.lstat(absolute))
-    except FileNotFoundError:
-        h.update(b"missing\0")
-    except OSError as exc:
-        h.update(("error:" + str(exc)).encode("utf-8", errors="replace"))
-    return h.hexdigest()
+    return _shared_review_path_fingerprint(path)
+
+
+_review_path_fingerprint.__wrapped__ = _shared_review_path_fingerprint
 
 
 def _step_entered_at(st):

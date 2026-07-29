@@ -42,6 +42,10 @@ from mae_flow_core import (
     update_json,
     update_versioned_json,
 )
+from mae_flow_core.foundation.fingerprints import (
+    path_fingerprint as _shared_path_fingerprint,
+    review_path_fingerprint as _shared_review_path_fingerprint,
+)
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -1995,59 +1999,17 @@ def _changed_paths_since(head):
 
 
 def _path_fingerprint(path):
-    h = hashlib.sha256()
-    p = os.path.abspath(path)
-    try:
-        if os.path.isfile(p):
-            h.update(b"file\0")
-            with open(p, "rb") as f:
-                for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                    h.update(chunk)
-        elif os.path.isdir(p):
-            h.update(b"dir\0")
-            for name in sorted(os.listdir(p)):
-                fp = os.path.join(p, name)
-                stat = os.stat(fp)
-                h.update((name + "\0" + str(stat.st_size) + "\0" + str(stat.st_mtime_ns)).encode(
-                    "utf-8", errors="replace"))
-        else:
-            h.update(b"missing\0")
-    except OSError as exc:
-        h.update(("error:" + str(exc)).encode("utf-8", errors="replace"))
-    return h.hexdigest()
+    return _shared_path_fingerprint(path)
 
 
-def _update_review_hash(h, absolute, path_stat):
-    git_mode = path_stat.st_mode & 0o170000
-    executable = bool(path_stat.st_mode & 0o100)
-    h.update(("type:%o\0exec:%d\0" % (
-        git_mode, executable)).encode("ascii"))
-    if os.path.islink(absolute):
-        h.update(b"symlink\0")
-        h.update(os.readlink(absolute).encode(
-            "utf-8", errors="surrogateescape"))
-        return
-    if os.path.isfile(absolute):
-        h.update(b"file\0")
-        with open(absolute, "rb") as stream:
-            for chunk in iter(
-                    lambda: stream.read(1024 * 1024), b""):
-                h.update(chunk)
-        return
-    h.update(b"dir\0" if os.path.isdir(absolute) else b"other\0")
+_path_fingerprint.__wrapped__ = _shared_path_fingerprint
 
 
 def _review_path_fingerprint(path):
-    h = hashlib.sha256()
-    absolute = os.path.abspath(path)
-    try:
-        _update_review_hash(h, absolute, os.lstat(absolute))
-    except FileNotFoundError:
-        h.update(b"missing\0")
-    except OSError as exc:
-        h.update(("error:" + str(exc)).encode(
-            "utf-8", errors="replace"))
-    return h.hexdigest()
+    return _shared_review_path_fingerprint(path)
+
+
+_review_path_fingerprint.__wrapped__ = _shared_review_path_fingerprint
 
 
 def _unchanged_initial_dirty(path, st):

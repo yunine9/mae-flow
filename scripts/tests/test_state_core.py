@@ -246,6 +246,89 @@ class RuntimeAndStateTests(unittest.TestCase):
             self.assertEqual(
                 0, direct_bash_gate.returncode, direct_bash_gate.stderr)
 
+    def test_namespaced_slash_exit_and_terminal_exit_are_safe(self):
+        env = dict(os.environ)
+
+        def fixture(current):
+            td = tempfile.TemporaryDirectory()
+            root = td.name
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "mae-flow@test.invalid"],
+                cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.name", "MAE Flow Test"],
+                cwd=root, check=True)
+            source = os.path.join(root, "biz.cpp")
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "fixture"], cwd=root, check=True)
+            save_versioned_json(
+                os.path.join(root, ".mae-flow.json"),
+                {"current": current, "config": {"单号": "REQ-EXIT"},
+                 "choices": {}, "history": [],
+                 "started": "2026-07-29 10:00:00"},
+                "flow", project_root=root)
+            return td
+
+        def hook(root):
+            payload = json.dumps({
+                "cwd": root,
+                "prompt": "/mae-flow:mae-flow exit",
+            }, ensure_ascii=False) + "\n"
+            child_env = dict(env)
+            child_env["PYTHONPYCACHEPREFIX"] = os.path.join(
+                root, "pycache")
+            return subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "hooks", "dispatch.py"), "userprompt"],
+                cwd=root, input=payload, text=True, capture_output=True,
+                env=child_env, timeout=15)
+
+        # 公司宿主实际使用插件命名空间形式。它必须与短形式
+        # `/mae-flow exit` 一样，由用户消息 Hook 直接完成退出。
+        active = fixture("config_confirm")
+        try:
+            result = hook(active.name)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(
+                os.path.exists(os.path.join(active.name, ".mae-flow.json")))
+            with open(
+                    os.path.join(active.name, ".mae-flow.json.exited"),
+                    encoding="utf-8") as stream:
+                record = json.load(stream)
+            self.assertEqual("userprompt-hook", record["authorization"])
+        finally:
+            active.cleanup()
+
+        # end 已经解除全部门禁。此时 exit 是幂等成功，不应转成需要下次
+        # message-id 重入的 Direct 状态，更不能逼用户去真实终端输入 EXIT。
+        terminal = fixture("end")
+        try:
+            result = hook(terminal.name)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertTrue(
+                os.path.exists(os.path.join(terminal.name, ".mae-flow.json")))
+            self.assertFalse(
+                os.path.exists(os.path.join(
+                    terminal.name, ".mae-flow.json.exited")))
+            self.assertIn("无需再次退出", result.stdout)
+
+            child_env = dict(env)
+            child_env["PYTHONPYCACHEPREFIX"] = os.path.join(
+                terminal.name, "pycache")
+            raw_cli = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"), "exit"],
+                cwd=terminal.name, text=True, capture_output=True,
+                env=child_env, timeout=15)
+            self.assertEqual(0, raw_cli.returncode, raw_cli.stderr)
+            self.assertIn("无需再次退出", raw_cli.stdout)
+        finally:
+            terminal.cleanup()
+
     def test_concurrent_read_modify_write_does_not_lose_updates(self):
         with tempfile.TemporaryDirectory() as td:
             counter = os.path.join(td, "counter.json")

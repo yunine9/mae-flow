@@ -29,7 +29,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 6. **Windows-only**。命令用 `python` 不用 `python3`；子进程 `text=True` 必须显式 `encoding="utf-8"`（中文 Windows 默认 GBK）；路径匹配一律 `re.I`（NTFS 不分大小写）；跨盘符禁用 `relpath`；hook 经 Git Bash 执行。
 7. **用最弱的可用模型压测，用最强的模型生产**。强模型自觉守规则，会掩盖 harness 的洞；弱模型是 harness 的模糊测试器——每个洞都变成立刻可见可修的事故（2026-07-18 用 Haiku 一下午打出八类偏差，全部修复后才算"实战可信"）。改动 harness 后的回归验证同理：拿弱模型跑演习沙箱，别拿强模型的"一次通过"当证据。
 8. **硬禁令必须配裁决出口**。gate 与契约拦的是"未经用户裁决的动作"，不是场景本身——工程现实里被禁动作往往有正当场景（UT 揭出源码真缺陷、既有用例被规格演进淘汰、实现揭出设计/spec 有误、AskUserQuestion 客观不可用）。每条禁令都要回答"该场景的正规出口是什么"：unlock source（UT 缺陷修复）、SUSPECTED_BUGS 呈报（agent 自查后升级）、goto --ack 回流（设计/spec 修订）、accept-risk（宿主/收尾异常导致单个 Agent 令牌无法签发）。禁令没有出口，弱模型只剩"卡死"或"作弊绕过"两个选项，都是事故（ImpossibleBench 实证：给正规弃权通道，作弊率 54%→9%）。新加任何禁令前先写出口，出口必须带用户裁决与留痕。
-9. **安装不是授权，逃生不能复用故障链**。没有 `.mae-flow.json` 时所有工具 Hook 必须旁路；仅安装插件绝不能阻止普通改码。`/mae-flow exit` 由 UserPromptSubmit 用户事件直接签发短时凭据并原子退出，不再依赖 `.usermsg` ack；若整个 Hook 通道损坏，真实 TTY 的 `exit --interactive` 是独立最后出口。任何新增门禁都必须证明这两条出口仍可用。
+9. **安装不是授权，逃生不能复用故障链**。没有 `.mae-flow.json` 时所有工具 Hook 必须旁路；仅安装插件绝不能阻止普通改码。`/mae-flow:mae-flow exit` 由 UserPromptSubmit 用户事件直接签发短时凭据并原子退出，不再依赖 `.usermsg` ack；若整个 Hook 通道损坏，真实 TTY 的 `exit --interactive` 是独立最后出口。任何新增门禁都必须证明这两条出口仍可用。
 10. **单项能力不是缩水版完整流程**。UT、CodeCheck、Grill 使用 `.mae-flow-work/standalone-action.json`
     轻量控制层，不创建 `.mae-flow.json`，也不启用阶段源码门禁。三类任务共享任务卡、指纹、契约和报告机制；
     只有匹配当前任务卡的 SubagentStop 会被校验，普通 Edit/Bash/子 Agent 继续放行。独立任务默认不 commit，
@@ -93,7 +93,7 @@ scripts/comet_compat.py     只兼容旧项目残留的 Comet Hook；新项目�
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
 hooks/dispatch.py           hook 分发器(防卡死 + 项目根定位 + 契约校验 + 日志)
 agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
-commands/mae-flow.md        /mae-flow 的完整流程、独立任务、月光宝盒与诊断入口
+commands/mae-flow.md        /mae-flow:mae-flow 的完整流程、独立任务、月光宝盒与诊断入口
 skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 ```
 
@@ -112,7 +112,7 @@ skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 输出唯一模式：`inactive / flow / direct / standalone / corrupt`。安全优先级是：
 有效完整流程 > 有效独立任务 > 退出标记 > 未启用；过期独立任务忽略。完整流程与其他标记共存时仍执行完整
 流程门禁，并把冲突交给 doctor 展示，避免历史上“陈旧 standalone 指针让完整流程 Edit 直接放行”的事故。
-损坏主状态进入 `corrupt`，Hook fail-open 保普通开发，但保留 `/mae-flow exit` 的独立逃生路径。
+损坏主状态进入 `corrupt`，Hook fail-open 保普通开发，但保留 `/mae-flow:mae-flow exit` 的独立逃生路径。
 终态后 `init` 先把本单摘要（耗时/goto/摩擦统计）追加进 `.mae-flow-history.jsonl`
 （gitignored + gate 防篡改；`report --all` 聚合展示，团队度量数据出口），再自动备份为 `.last` 开新档；非终态 `init` 拒绝。
 Direct 模式重入使用退出记录中的真实消息 ID：`init --message-id` 恢复原断点，
@@ -420,10 +420,10 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
   `--ack`；若宿主只给 ASKUSER 令牌而不回传选项正文，允许信任本步真实交互和 Agent 提交的合法 choice，
   避免逼用户复读。goto / unlock / 豁免 / accept-risk 会改变流程或放宽约束，
   仍只接受当前步骤捕获到的用户原话，不能跨关复用。
-- **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow exit`：
+- **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow:mae-flow exit`：
   用户事件授权、现场快照、项目标记和 Comet Hook 兼容一次完成，代码不回滚；Hook 故障时使用真实 TTY
   `exit --interactive`。禁止重新引入“手删状态文件”的假逃生口，也禁止让 exit 再依赖普通 ack。
-- **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
+- **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow:mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧流程的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。
 - **SubagentStop 二次失败对宿主返回 0**——这是防打回死循环的必要权衡；真实拒签原因已持久化并由 `done/doctor` 展示，返回 0 不再等于静默丢失诊断。

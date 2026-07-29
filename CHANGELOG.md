@@ -1,5 +1,13 @@
 # 更新记录
 
+## 2026-07-29：真实 Slash 命令退出与终态幂等
+
+- UserPrompt Hook 按宿主真实协议识别 `/mae-flow:mae-flow exit`，同时保留
+  `/mae-flow exit` 作为旧宿主兼容；命名空间形式不再漏签退出凭据后逼用户转真实终端；
+- `end` 已经解除全部门禁，此时 Hook 或裸 CLI 再执行 exit 均幂等成功并保留终态，
+  避免无意义转成 Direct 模式、导致下一单额外要求 message-id 重入；
+- `exit --interactive` 继续只作为非终态 Hook/状态同时损坏时的最后逃生口。
+
 ## 2026-07-28：交付终态立即解除全部 Hook
 
 - 修复正常完成停在 `end` 时，因 `.mae-flow.json` 为审计和下一单滚动继续保留，

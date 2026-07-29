@@ -405,7 +405,8 @@ def ev_inject(d, session_start=False):
         elif session_start and (os.path.isdir("openspec") or os.path.isdir(".comet")):
             # 交付项目 + 无在途单:给新用户一行发现入口(仅会话启动时,不打扰后续消息)
             print(f"[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说「交付 <单号> + SE 文档」"
-                  f"或敲 /mae-flow;新手指南敲 /mae-flow help。(流程脚本: python \"{me}\";"
+                  f"或敲 /mae-flow:mae-flow;新手指南敲 /mae-flow:mae-flow help。"
+                  f"(流程脚本: python \"{me}\";"
                   f"用户问用法/流程类问题时,先读 \"{readme}\" 再作答,禁止凭记忆即兴)")
     sys.exit(0)
 
@@ -789,7 +790,12 @@ def _capture_usermsg(text):
 def _explicit_exit_prompt(text):
     """只识别没有歧义的退出指令；询问“能不能退出”不应误触发。"""
     value = re.sub(r"\s+", " ", (text or "").strip())
-    if re.search(r"^/mae-flow\s+(?:exit|direct)(?:\s|$)", value, re.I):
+    # 宿主真实插件命令是 `/插件:命令 参数`；保留短形式只为兼容旧宿主和
+    # 已有测试。命名空间形式若漏掉，Hook 不会签发退出 intent，Agent 随后
+    # 只能调用无凭据 CLI，最终错误地逼用户去真实终端执行 --interactive。
+    if re.search(
+            r"^/mae-flow(?::mae-flow)?\s+(?:exit|direct)(?:\s|$)",
+            value, re.I):
         return True
     lower = value.lower()
     names_flow = "mae-flow" in lower or "mae flow" in lower or "这个工作流" in value
@@ -2620,7 +2626,7 @@ def main():
             if ev in ("userprompt", "sessionstart") and _session_notice_due("corrupt", d, ev):
                 if os.path.isfile(STATE):
                     print("[mae-flow] ⚠ 完整流程状态损坏，Hook 已按 fail-open 放行普通开发。"
-                          "发送 `/mae-flow exit` 可保存坏现场并解除流程；不要手删状态。")
+                          "发送 `/mae-flow:mae-flow exit` 可保存坏现场并解除流程；不要手删状态。")
                 elif os.path.isfile(ACTION_STATE):
                     print("[mae-flow] ⚠ 独立任务状态损坏，Hook 已按 fail-open 放行普通开发。"
                           "执行 `mae-flow action cancel` 可保存坏现场并清理控制指针。")
@@ -2639,9 +2645,14 @@ def main():
             if ev == "userprompt":
                 prompt = d.get("prompt") or ""
                 if _explicit_exit_prompt(prompt):
-                    # “已完成”与“显式退出”仍是两个可见生命周期状态；保留用户
-                    # 主动要求 exit 的既有控制入口，但它不属于普通开发门禁。
-                    ev_inject(d)
+                    # end 已经完全解除门禁；再转成 .exited 只会让下一单平白多出
+                    # message-id 重入授权。终态 exit 因此是幂等成功，且明确阻止
+                    # Agent 继续调用裸 CLI / --interactive。
+                    print("[mae-flow] 流程已经完成且 Hook 门禁已解除，无需再次退出；"
+                          "终态记录会保留给 current/status/report 和下一单自动滚动。"
+                          "不要再执行 mae-flow.py exit 或 exit --interactive。")
+                    _log("terminal flow: idempotent exit")
+                    raise SystemExit(0)
                 elif re.search(r"月光宝盒|moonlight", prompt, re.I):
                     # 终态直接开启下一单月光模式仍需真实用户原话验真。只捕获这类
                     # 明确控制意图，不把普通开发消息继续写进上一单账本。
@@ -2669,7 +2680,7 @@ def main():
                     _capture_direct_prompt(d.get("prompt") or "")
                 if _session_notice_due("direct", d, ev):
                     print("[mae-flow] 本项目已退出交付流程，按用户的普通开发请求执行；"
-                          "不要运行 current/done。用户明确要求恢复原流程或执行 /mae-flow review-fix 时，"
+                          "不要运行 current/done。用户明确要求恢复原流程或执行 /mae-flow:mae-flow review-fix 时，"
                           "先运行 messages 取得真实消息 ID，再按命令说明执行 init；"
                           ".mae-flow.json.exited 是退出指针，不是主状态，禁止移动或改名。")
             elif ev == "posttooluse" and d.get("tool_name") == "AskUserQuestion":

@@ -1619,6 +1619,15 @@ if flow:
                   and mf._explicit_direct_reentry(
                       "/mae-flow:mae-flow review-fix 不要按字节长度判断，请改用version")
                   and mf._explicit_direct_reentry("确认重新启用"))
+            check("命名空间 Slash 入口统一分流且独立任务不误启完整流程",
+                  mf._moonlight_activation_decision(
+                      "/mae-flow:mae-flow moonlight REQ-NEW") == "allow"
+                  and mf._direct_reentry_decision(
+                      "/mae-flow:mae-flow") == "allow"
+                  and mf._direct_reentry_decision(
+                      "/mae-flow:mae-flow review-fix 修复意见") == "allow"
+                  and mf._direct_reentry_decision(
+                      "/mae-flow:mae-flow ut 补测试") == "neutral")
             revoked_auth, revoked_why = mf._direct_reentry_authorization({
                 "direct_messages": [{
                     "id": "older-positive", "text": "重新启用 mae-flow",
@@ -3132,6 +3141,9 @@ check("dispatch 在直接模式完整停止旧流程接管",
       "direct mode: bypass" in dp and "不要运行 current/done" in dp)
 check("明确自然语言退出会触发、询问退出不会误触发",
       dispatch._explicit_exit_prompt("不想用这个工作流了，后面直接让 AI 补 UT")
+      and dispatch._explicit_exit_prompt("/mae-flow:mae-flow exit")
+      and dispatch._explicit_exit_prompt("/mae-flow:mae-flow direct")
+      and dispatch._explicit_exit_prompt("/mae-flow exit")
       and not dispatch._explicit_exit_prompt("这个工作流能不能退出？"))
 
 # 插件全局安装不得接管未 init 的普通项目；Windows 控制台代码页也不得污染 Hook 的 UTF-8 JSON。

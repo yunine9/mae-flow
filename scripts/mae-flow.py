@@ -443,7 +443,7 @@ def save_state(st):
         save_versioned_json(STATE_PATH, st, "flow")
     except StateStoreError as exc:
         die("流程状态存在并发更新或不可读，已拒绝覆盖：" + str(exc)
-            + "。重新执行 current 获取最新状态；若仍失败可直接 `/mae-flow exit` 保存现场并退出。", 2)
+            + "。重新执行 current 获取最新状态；若仍失败可直接 `/mae-flow:mae-flow exit` 保存现场并退出。", 2)
 
 
 def _drop_agent_token(kind):
@@ -3552,7 +3552,7 @@ def _action_task_card(action, kind, stage=""):
 def cmd_action_start(flow, st, args):
     if st is not None:
         die("当前有完整交付流程正在运行，不能叠加独立任务。"
-            "若确定只做单项工作，先发送 `/mae-flow exit`，退出后重试。", 2)
+            "若确定只做单项工作，先发送 `/mae-flow:mae-flow exit`，退出后重试。", 2)
     current = _load_action()
     if current:
         die("已有独立任务 %s(%s) 未收尾。它不会拦普通开发；"
@@ -3876,7 +3876,7 @@ def cmd_direct_messages(args):
         rows = [item for item in rows if item.get("id") == args.id]
     if not rows:
         die("退出后尚未捕获到用户消息。让用户直接发送恢复 Mae-Flow、"
-            "执行 /mae-flow review-fix 或开启另一流程的真实请求；"
+            "执行 /mae-flow:mae-flow review-fix 或开启另一流程的真实请求；"
             "不要让 Agent 自行生成授权，也不要移动 .mae-flow.json.exited。", 2)
     print("[mae-flow] Direct 模式捕获到的用户消息：")
     for m in rows:
@@ -3917,7 +3917,7 @@ def cmd_requirement_record(st, args):
         bad = _text_corruption_reason(text)
         if bad:
             die("捕获的用户原话疑似已经乱码：" + bad
-                + "。不要落盘；执行 doctor 检查 Hook 输入编码，或 `/mae-flow exit` 退出。", 2)
+                + "。不要落盘；执行 doctor 检查 Hook 输入编码，或 `/mae-flow:mae-flow exit` 退出。", 2)
         source_desc = "用户消息 " + args.message_id
     else:
         src = os.path.abspath(args.source)
@@ -4314,7 +4314,7 @@ def cmd_init(flow, args):
             "若原本要恢复旧现场，请先用 doctor 查明退出指针为何不存在。", 2)
     if getattr(args, "new", False) and live_before:
         die("当前仍有完整流程状态，init --new 不会覆盖它。先查看 current/status；"
-            "确需放弃时走 /mae-flow exit 留存现场，再用 Direct 模式的 messages + "
+            "确需放弃时走 /mae-flow:mae-flow exit 留存现场，再用 Direct 模式的 messages + "
             "init --new --message-id。禁止删除或改名状态文件。", 2)
     if getattr(args, "new", False):
         _previous, new_exit_snapshot = _start_new_from_direct(
@@ -4355,7 +4355,7 @@ def cmd_init(flow, args):
                   f"旧状态备份为 {STATE_PATH}.last,开启新流程。")
         else:
             die(f"流程已存在(进行中,当前步骤 {sid}),查看用 status。"
-                "不要删除或改名状态文件；确要放弃并开启另一流程，先执行 /mae-flow exit "
+                "不要删除或改名状态文件；确要放弃并开启另一流程，先执行 /mae-flow:mae-flow exit "
                 "留存现场，再按 Direct 模式 messages 输出使用 init --new。", 2)
     if not prepared:
         try:
@@ -7116,7 +7116,7 @@ def _localize_story(ticket):
 
 
 def cmd_story_localize(args):
-    """Cleanup command for standalone `/mae-flow story`."""
+    """Cleanup command for standalone `/mae-flow:mae-flow story`."""
     return _localize_story((args.ticket or "").strip())
 
 
@@ -8045,6 +8045,14 @@ def _print_exit_preview(flow, st):
 
 def cmd_exit(flow, st, args):
     """保留现场并解除项目接管；确认链损坏时仍必须有独立出口。"""
+    if flow.get("steps", {}).get(st.get("current", ""), {}).get("terminal"):
+        # end 已经由 Hook 全面旁路，保留主状态是为了报告和下一单 init 自动
+        # 滚动。终态再转 Direct 不增加自由，只会让下一次启动多一道 message-id
+        # 授权；即使 Agent 忽略 Hook 提示又调用裸 CLI，也必须幂等成功。
+        print("[mae-flow] 流程已经完成且 Hook 门禁已解除，无需再次退出；"
+              "终态记录会保留给 current/status/report 和下一单自动滚动。"
+              "不要执行 exit --interactive。")
+        return
     ack = args.ack or ""
     reason = args.reason or ""
     auth = "ack"
@@ -8073,7 +8081,7 @@ def cmd_exit(flow, st, args):
         except OSError:
             pass
         if not valid:
-            die("退出事件凭据已过期、步骤不符或内容损坏。重新发送 `/mae-flow exit`，"
+            die("退出事件凭据已过期、步骤不符或内容损坏。重新发送 `/mae-flow:mae-flow exit`，"
                 "或在真实终端执行 exit --interactive；不要再次要求用户说“我确认”。", 2)
         ack = str(intent.get("text", ""))
         reason = reason or "用户通过明确退出指令切换为普通开发"
@@ -8090,7 +8098,7 @@ def cmd_exit(flow, st, args):
         reason = reason or "用户通过真实终端紧急退出"
         auth = "interactive-tty"
     elif not ack:
-        print("\n直接发送 `/mae-flow exit` 即可退出，UserPromptSubmit Hook 会把该用户事件作为授权，"
+        print("\n直接发送 `/mae-flow:mae-flow exit` 即可退出，UserPromptSubmit Hook 会把该用户事件作为授权，"
               "不再要求二次确认。")
         print("若 Hook 已损坏，请用户在真实终端手动执行：")
         print('python "%s" exit --interactive --reason "切换为普通开发"'
@@ -8099,11 +8107,11 @@ def cmd_exit(flow, st, args):
 
     if auth == "ack":
         if not reason:
-            die("exit 必须 --reason 记录为什么退出。也可让用户直接发送 `/mae-flow exit`。", 2)
+            die("exit 必须 --reason 记录为什么退出。也可让用户直接发送 `/mae-flow:mae-flow exit`。", 2)
         ok, why = _ack_verified(st, ack, exact=True)
         if not ok:
             die("exit 对话授权验真失败:" + why
-                + "。不要让用户重复确认；请直接发送 `/mae-flow exit`，"
+                + "。不要让用户重复确认；请直接发送 `/mae-flow:mae-flow exit`，"
                 "或在真实终端执行 exit --interactive。", 2)
 
     # 兼容补丁尽力完成，但绝不能反过来把逃生通道卡死。退出标记仍会原子落盘；
@@ -8161,7 +8169,7 @@ def cmd_exit(flow, st, args):
         # 运行模式裁决是「完整流程优先于退出标记」:主状态还在=门禁仍然生效。
         # 此时宣布"退出标记已生效"是谎报,用户会以为退了却继续被拦。
         die("退出未生效:主状态文件 %s 未能删除(可能被杀软/编辑器占用),完整流程门禁仍在。"
-            "请关闭占用后重新发送 /mae-flow exit;现场已保存到 %s。清理失败明细: %s"
+            "请关闭占用后重新发送 /mae-flow:mae-flow exit;现场已保存到 %s。清理失败明细: %s"
             % (STATE_PATH, norm(snapshot), "；".join(cleanup_errors)), 2)
 
     print("\n[mae-flow] 已退出流程。代码、提交和文档均已保留；流程现场已保存到 " + norm(snapshot))
@@ -8196,7 +8204,7 @@ def cmd_runtime_doctor(runtime, args, state_error=""):
     for error in runtime.errors:
         print("   - " + error)
     if os.path.isfile(STATE_PATH):
-        print("完整流程状态损坏。发送 `/mae-flow exit` 可保存坏现场并退出；"
+        print("完整流程状态损坏。发送 `/mae-flow:mae-flow exit` 可保存坏现场并退出；"
               "Hook 同时损坏时由用户在真实终端执行 exit --interactive。")
         if getattr(args, "repair_state", False):
             die("完整流程状态包含唯一断点，doctor 不会自动覆盖。"
@@ -8269,7 +8277,7 @@ def cmd_exit_corrupt_state(args, state_error):
             die("输入不匹配，未退出。", 2)
         ack, auth = "TTY:EXIT", "interactive-tty-corrupt-state"
     else:
-        die("流程状态已损坏，普通 ack 无法可靠验真。请重新发送 `/mae-flow exit`；"
+        die("流程状态已损坏，普通 ack 无法可靠验真。请重新发送 `/mae-flow:mae-flow exit`；"
             "若 Hook 也异常，在真实终端执行 exit --interactive。原状态不会删除。", 2)
 
     found, patched, errors = ensure_direct_mode_compat(os.getcwd())
@@ -8326,7 +8334,7 @@ def main():
         if args.cmd == "doctor":
             return cmd_runtime_doctor(runtime, args, state_error)
         die("流程状态文件损坏，不能安全判断当前步骤：%s。不要删除或手改状态；"
-            "用户可直接发送 `/mae-flow exit`，Hook 会保存坏文件并退出；"
+            "用户可直接发送 `/mae-flow:mae-flow exit`，Hook 会保存坏文件并退出；"
             "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
     if args.cmd == "envcheck":
         return cmd_envcheck(flow, args)

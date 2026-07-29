@@ -1,4 +1,4 @@
-# /mae-flow
+# /mae-flow:mae-flow
 
 你已进入 mae-flow 交付工作流。**全程使用简体中文与用户交流。不要自由发挥,严格按以下步骤执行:**
 
@@ -17,10 +17,12 @@
        build 只有实现 tasks 全部完成并提交后才能 defer；push 后停在晨间检查，不自动定稿规格；
      - 需求材料、权限或外部依赖客观缺失且无法自行补齐时，执行 current 给出的 `moonlight blocked`
        保存完整现场后结束；禁止反复重试或编造输入。主 Agent 在其他步骤提前结束会被 Stop Hook 打回。
-   - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。用户输入 `/mae-flow exit` 本身就是
-     明确授权，UserPromptSubmit Hook 会直接保存现场并退出，**禁止再追问一次确认**。若 Hook 已异常，
-     先且只重试一次
-     `mae-flow.py exit --reason "用户明确执行 /mae-flow exit" --ack "/mae-flow exit"`；
+   - **exit** — 退出当前在途流程、保留现有代码并改为普通开发。用户输入 `/mae-flow:mae-flow exit` 本身就是
+     明确授权，UserPromptSubmit Hook 会直接保存现场并退出，**禁止再追问一次确认**。如果流程已经到
+     `end`，Hook 门禁本来就已全部解除；看到“无需再次退出”即视为成功并停止本命令处理，保留终态供
+     `current/status/report` 和下一单自动归档，**不得再调用 CLI 或要求真实终端操作**。只有非终态且
+     Hook 未完成退出时，才先且只重试一次
+     `mae-flow.py exit --reason "用户明确执行 /mae-flow:mae-flow exit" --ack "/mae-flow:mae-flow exit"`；
      仍失败就将 `python "<插件>/scripts/mae-flow.py" exit --interactive --reason "切换为普通开发"`
      原样交给用户在真实终端手动运行，禁止再次询问。Agent 不得用 Bash 管道代答。
      成功后禁止继续 current/done。
@@ -34,7 +36,7 @@
      两者都没有 → **不要接管普通开发**；仅当用户明确要求 mae-flow 交付且已给出单号/需求时 `init`,
      否则照常执行用户的直接改码/补 UT 请求，不得为了使用插件而 init。
    - **ut** — 只补并执行单元测试，**不 init 完整流程**。如果项目还有 `.mae-flow.json` 在途状态，
-     先说明不能叠加两套控制状态，让用户发送 `/mae-flow exit` 后重试；禁止自行退出。
+     先说明不能叠加两套控制状态，让用户发送 `/mae-flow:mae-flow exit` 后重试；禁止自行退出。
      从命令剩余文字提取目标文件/功能和验收说明；若用户只说了功能，先定向查找并定位至少一个被测
      业务文件。用重复的 `--files` 明确传入业务文件（可同时带相关测试文件），完整用户描述用
      `--request` 原样传入。执行：
@@ -98,7 +100,7 @@
      CodeCheck 缺失只提示“首次使用时会尽力安装”，不把插件判成不可用；禁止引导用户运行 setup、
      迁移 `.claude/.cac`、执行 reload 或全局初始化。
    - **story** — 仅补生成 STORY,**不 init 流程**。单号按此顺序确定,拿不到就问,禁止瞎猜:
-     ① 命令参数里带了单号(如 `/mae-flow story REQ2026071801`)→ 直接用;
+     ① 命令参数里带了单号(如 `/mae-flow:mae-flow story REQ2026071801`)→ 直接用;
      ② 没带,但项目根 .mae-flow.json(或 .mae-flow.json.last)里有单号 → 向用户确认"是给 <单号> 补吗?";
      ③ 都没有 → 问用户要单号。
      确定后先执行 `mae-flow template` 拿模板绝对路径,再启动 story-generator-agent
@@ -113,7 +115,7 @@
      由机器把文档移入 Git 本地排除的 `.mae-flow-work/story/`，再展示最终本地路径与章节概览收尾。
    - **review-fix** — 处理评审意见:本单已交付(MR 已建),处理评审/走读/流水线门禁意见。
      单号确定同 story 模式(参数带→直接用;.mae-flow.json 或 .last 里有→向用户确认;都没有→问)。
-     用户本条 `/mae-flow review-fix ...` 已经是明确使用 Mae-Flow 开启评审修复轮的授权，禁止再问
+     用户本条 `/mae-flow:mae-flow review-fix ...` 已经是明确使用 Mae-Flow 开启评审修复轮的授权，禁止再问
      “是否重新启用”。若项目有 `.mae-flow.json.exited`，执行 `messages` 找到本条命令的 ID，再执行
      `init --new --message-id <ID>`；旧退出现场会保留。禁止把 `.exited` 改名成主状态文件。
      确认后走标准 init(上一单终态自动备份;存在**非终态**在途单则先问用户续跑还是放弃,禁止直接覆盖),
@@ -122,4 +124,4 @@
      涉及行为/规格变更的意见在 rf_triage 分诊转 hotfix/full 轮次。
      用户开场粘贴的意见清单先留存,进 rf_triage 步时原文照录进 REVIEW 文档。
 3. 此后所有流程动作只来自 `mae-flow current` 的输出,禁止预判、禁止跳步。
-4. 进入流程后的**第一条回复**末尾附一句:「新手可随时敲 /mae-flow help 查看使用指南」(全程仅提示这一次)。
+4. 进入流程后的**第一条回复**末尾附一句:「新手可随时敲 /mae-flow:mae-flow help 查看使用指南」(全程仅提示这一次)。

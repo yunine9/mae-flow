@@ -68,12 +68,14 @@ done 会回流完整质量链。分支推送后停在 `moonlight_review`，不�
 暂停或普通修改指令**，也不要继续执行 current。最可靠的做法是让用户直接发送：
 
 ```
-/mae-flow exit
+/mae-flow:mae-flow exit
 ```
 
 UserPromptSubmit Hook 会把这条真实用户事件直接作为授权，原子保存现场并退出，不再二次确认，也不依赖
 可能已经损坏的 ack 账本。明确的“退出 mae-flow，保留现场，后面直接开发”同样可以一次退出；
 “能不能退出/退出会怎样”只是询问，不得误触发。
+如果流程已经到 `end`，所有 Hook 门禁本来就已解除；再次 exit 是幂等成功并保留终态。看到“无需再次退出”
+后立即停止本命令处理，不得继续调用裸 CLI，更不得要求用户去真实终端执行 `exit --interactive`。
 若 Hook/中文捕获本身已坏，把下面命令原样交给用户在**真实终端手动运行**（Agent 的 Bash 管道会被拒）：
 
 ```
@@ -89,7 +91,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
 
 ## 独立能力（明确点名时不启动完整流程）
 
-用户明确使用 `/mae-flow ut`、`/mae-flow codecheck` 或 `/mae-flow grill` 时，走
+用户明确使用 `/mae-flow:mae-flow ut`、`/mae-flow:mae-flow codecheck` 或 `/mae-flow:mae-flow grill` 时，走
 `mae-flow.py action ...` 轻量任务控制层，**禁止执行 init**。独立任务只保护自己的任务卡和结果记录，
 不启用阶段源码门禁；普通改码始终放行。任务状态位于 `.mae-flow-work/standalone-action.json`，
 24 小时自动失效，用户随时可用 `action cancel` 结束，取消只保留现场、不回滚代码。
@@ -99,7 +101,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
 - Grill：主 Agent 与用户逐题交互，只读 critic 在备课后和收尾前各查一次遗漏，不进入设计或编码。
 
 三者默认不 commit、不 push，支持带着未提交工作区开始，任务卡用 HEAD + 初始文件指纹区分用户原有改动
-和专项 Agent 新改动。存在完整流程状态时不得叠加；由用户先 `/mae-flow exit`，Agent 不得代替用户退出。
+和专项 Agent 新改动。存在完整流程状态时不得叠加；由用户先 `/mae-flow:mae-flow exit`，Agent 不得代替用户退出。
 其中独立 UT/CodeCheck 使用两段式启动：`action start` 只解析并冻结文件范围，必须把完整清单展示给用户
 二次确认；用户明确选择「确认以上范围」后才执行 `action confirm-scope`。UT 范围至少包含一个被测业务
 文件，空范围或只有测试文件直接拒绝；CodeCheck 自动排除测试文件。确认前不得运行检查、生成测试或派
@@ -125,7 +127,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
    **停止重复执行相同命令，但流程没有锁死，也禁止退出重开来“清故障”**：执行 messages 查看实际提取答案；
    AskUserQuestion 没回传时，让用户发送当前页面要求的一条普通确认消息即可恢复。配置确认必须先执行
    `config-review` 生成绑定完整配置与需求文档指纹的确认单，单项“确认 master”不能给整份配置背书。
-   用户确实不想排障仍可走 `/mae-flow exit`；Hook 也坏时用真实终端 `exit --interactive`，任何关卡都不得
+   用户确实不想排障仍可走 `/mae-flow:mae-flow exit`；Hook 也坏时用真实终端 `exit --interactive`，任何关卡都不得
    以“保护质量”为由剥夺退出能力。若失败项明确是
    COMPILE/CODECHECK/UT/STORY/ASKUSER 等 **Agent 令牌**，报错会同时给出“用户承担风险继续”命令；
    必须先把具体风险展示给用户并让用户二选一（重试 / 承担风险继续），只有用户明确选后者才能按提示执行

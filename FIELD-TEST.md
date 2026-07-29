@@ -30,15 +30,15 @@
   「尸检线索」——把那份尸检发维护人,弱模型自行了断 vs maxTurns 硬切 vs API 中断,一看便知。
   **轮次预算校准**(2026-07-20 实锤:UT agent 25 轮烧完仍在读文件,已调 UT=200/compile=100/codecheck=100):
   观察调后 UT agent 实际用多少轮收尾(尸检/日志 query_depth),200 不够或严重富余都回报,下版校准。
-- [ ] **0.8 三个独立入口**：在未 init 的普通仓分别试 `/mae-flow ut`、`/mae-flow codecheck`、
-  `/mae-flow grill`。均不得出现 `.mae-flow.json`；UT/CodeCheck 启动后必须先展示实际文件清单并等待二次
+- [ ] **0.8 三个独立入口**：在未 init 的普通仓分别试 `/mae-flow:mae-flow ut`、`/mae-flow:mae-flow codecheck`、
+  `/mae-flow:mae-flow grill`。均不得出现 `.mae-flow.json`；UT/CodeCheck 启动后必须先展示实际文件清单并等待二次
   确认，确认前不能运行工具或派 Agent；空范围、UT 只有测试文件、CodeCheck 只有测试文件都必须拒绝。
   额外输入“我还没确认以上范围”或“确认以上范围是什么意思？”，都不得启动任务；
   用户选“需要调整范围”后应取消重开，不能由 Agent 原地扩张。确认后 UT 必须真实运行且不自动 commit，
   CodeCheck 0 告警不得派修复 Agent，Grill 完成 prep/final 两次 critic 后只留下澄清文档。
   任务进行中另让 AI 修改普通源码必须放行；
-  `/mae-flow cancel` 后任务卡和报告保留、控制指针消失。再在有完整流程的仓调用任一入口，应提示先由用户
-  `/mae-flow exit`，不得自行退出或叠加状态。
+  `/mae-flow:mae-flow cancel` 后任务卡和报告保留、控制指针消失。再在有完整流程的仓调用任一入口，应提示先由用户
+  `/mae-flow:mae-flow exit`，不得自行退出或叠加状态。
 - [ ] **0.6 六事件实弹确认(hook 数据真到手的判定,~10 分钟)**——fail-open 设计下 payload 丢失不报错只降级,
   必须逐事件看"数据依赖行为"真实发生,日志干净不算数:
   - **PreToolUse**:先在演练仓明确 init，再在禁止改源码的步骤让 AI"在 src/ 下随便加一行"→ 必须被拦；
@@ -123,11 +123,11 @@
   放行 CODECHECK Agent 令牌，现场仍有告警时仍必须被 `codecheck_clean` 拦住，证明没有把整步机器检查一起关掉。
 - [ ] **2.5 弱模型压测**:换最弱可用模型跑一单局部修改,记录全部偏差(话术跑偏/跳步尝试/报错后的自愈质量)。
 - [ ] **2.6 会话卫生**:改插件后不重启会话的行为漂移确认一次(应复现,验证文档警告属实)。
-- [ ] **2.7 中途退出**:在 open/design 这类原本禁止改源码的步骤直接发送 `/mae-flow exit` → 不得二次确认，
+- [ ] **2.7 中途退出**:在 open/design 这类原本禁止改源码的步骤直接发送 `/mae-flow:mae-flow exit` → 不得二次确认，
   状态栏立即显示“mae-flow 已退出│普通开发”，Edit 一处源码和一处 UT 均应放行，
   `.mae-flow-work/exited/` 有完整现场，业务文件/提交没有被回滚。重启会话后仍保持普通开发；明确说“重新接回原流程”时
   init 应恢复旧断点，若期间改过源码则回退质量链，旧 COMPILE/CODECHECK/UT 令牌不得复用。再把状态 JSON 故意截断，
-  `/mae-flow exit` 仍应成功并保留坏文件；最后临时禁用 UserPromptSubmit Hook，在真实终端执行
+  `/mae-flow:mae-flow exit` 仍应成功并保留坏文件；最后临时禁用 UserPromptSubmit Hook，在真实终端执行
   `exit --interactive`，Agent 管道调用应拒绝、用户输入 EXIT 应成功。
 - [ ] **2.8 月光宝盒端到端**:分别从全新项目子目录、普通在途步骤、已退出的直接开发模式说
   “开启月光宝盒”——三种入口都应一次生效且不弹 AskUserQuestion。人为制造一条 CodeCheck/UT 环境失败，

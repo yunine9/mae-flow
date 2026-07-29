@@ -61,18 +61,18 @@ Get-Content "$env:TEMP\mae-flow-hook.log" -Tail 50
 
 ## 4. 做一次最小实跑
 
-在临时 Git 仓库中发送一句小需求并启动 `/mae-flow`。初始化后应直接进入配置确认，只生成
+在临时 Git 仓库中发送一句小需求并启动 `/mae-flow:mae-flow`。初始化后应直接进入配置确认，只生成
 `openspec/config.yaml` 和 Mae-Flow 状态（v4 后不再有 `.comet/` 目录），不得创建
 `.cac/.claude/.cursor/.windsurf`。
 
 再分别试一次：
 
 ```text
-/mae-flow codecheck
-/mae-flow ut
+/mae-flow:mae-flow codecheck
+/mae-flow:mae-flow ut
 ```
 
 CodeCheck 和 UT 都必须先展示文件范围、等待二次确认；CodeCheck 只检查业务代码，UT 必须真实调用内网
 AutoUT/java-autout 并运行测试。任一子 Agent 令牌异常时应提供风险出口，不能无限重跑。
 
-最后在流程中途发送 `/mae-flow exit`，退出后普通源码修改必须立即放行。以上全部通过，才说明干净环境验证完成。
+最后在流程中途发送 `/mae-flow:mae-flow exit`，退出后普通源码修改必须立即放行。以上全部通过，才说明干净环境验证完成。

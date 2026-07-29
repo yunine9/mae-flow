@@ -1,6 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CODECHECK_LINE_SLACK, CodeCheckRunPorts, STATE_PATH, append_codecheck_event,
+    capability_diagnostics, codecheck_log_path, ensure_codecheck, execute_codecheck,
+    json, load_json, os, quality_codecheck, re, read_text, save_codecheck_artifact,
+    shutil, subprocess, sys, time, write_text,
+)
 from .wiring import api
 
 def _hunk_targets_for_diff(diff, files):

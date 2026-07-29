@@ -171,6 +171,26 @@ class ArchitectureTests(unittest.TestCase):
     def test_business_tests_do_not_import_cli_private_policy(self):
         self.assertEqual([], private_cli_import_violations(ROOT))
 
+    def test_cli_command_modules_use_explicit_shared_dependencies(self):
+        commands = os.path.join(
+            ROOT, "scripts", "mae_flow_core", "cli_commands")
+        violations = []
+        for name in sorted(os.listdir(commands)):
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(commands, name)
+            with open(path, encoding="utf-8") as stream:
+                tree = ast.parse(stream.read(), filename=path)
+            if any(
+                isinstance(node, ast.ImportFrom)
+                and node.module == "shared"
+                and node.level == 1
+                and any(alias.name == "*" for alias in node.names)
+                for node in ast.walk(tree)
+            ):
+                violations.append(name)
+        self.assertEqual([], violations)
+
     def test_delivery_functions_stay_within_complexity_limit(self):
         self.assertEqual([], delivery_complexity_violations(ROOT))
 

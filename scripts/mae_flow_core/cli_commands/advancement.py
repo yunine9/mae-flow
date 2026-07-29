@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CONFIG_CONFIRM_ACK, EXIT_PATH, HISTORY_PATH, hashlib, json, os, re, read_lines,
+    read_text, review_status_count, review_statuses, sys, tempfile, time,
+    workflow_advancement, write_text,
+)
 from .wiring import api
 
 def _gitignore():

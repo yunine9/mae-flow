@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    ACTION_PATH, EXIT_INTENT_PATH, EXIT_PATH, HISTORY_PATH, PACE_STEPS, STATE_PATH,
+    ensure_direct_mode_compat, hashlib, json, load_json, os, read_lines,
+    remove_with_retry, save_versioned_json, shutil, sys, time,
+)
 from .wiring import api
 
 def cmd_report_all():

@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    AGENT_WRITES_PATH, CapabilityError, EXIT_PATH, STATE_PATH, atomic_write_json,
+    capability_diagnostics, ensure_codecheck, json, os, prepare_project,
+    remove_with_retry, run_comet, run_openspec, sys, time,
+)
 from .wiring import api
 
 def cmd_init(flow, args):

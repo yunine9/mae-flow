@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    COMET_COMPAT_BEGIN, FAILURE_PATH, GATE_STRIKES_PATH, GATE_STRIKE_LIMIT, STATE_PATH,
+    capability_diagnostics, comet_guard_paths, globmod, json, load_json, os, read_text,
+    resolve_runtime, subprocess, sys, time,
+)
 from .wiring import api
 
 def _story_source_candidates(ticket):

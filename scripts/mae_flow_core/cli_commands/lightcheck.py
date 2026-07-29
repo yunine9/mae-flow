@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    BytesIO, CODE_EXTS, DEFAULT_TEST_PATS, LIGHTCHECK_REPORT_PATH,
+    analyze_changed_with_timeout, atomic_write_text, os, re, render_markdown,
+    subprocess, sys,
+)
 from .wiring import api
 
 def _is_test_file(path, st):

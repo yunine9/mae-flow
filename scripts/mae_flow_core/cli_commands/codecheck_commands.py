@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CODECHECK_LINE_SLACK, HERE, STATE_PATH, append_codecheck_event, codecheck_log_path,
+    hashlib, load_json, os, quality_codecheck_state, re, read_bytes, sys, time,
+    write_text,
+)
 from .wiring import api
 
 def cmd_codecheck_scan(flow, st, args):

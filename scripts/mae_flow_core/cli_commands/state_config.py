@@ -1,6 +1,14 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    DEFAULTS_PATH, FLOW_PATH, REQ_SHA_MARKER, STATE_PATH, StateStoreError,
+    _BINARY_PREFIXES, _shared_path_fingerprint, _shared_review_path_fingerprint,
+    core_find_project_root, hashlib, load_json, moonlight_can_hard_block,
+    moonlight_data, moonlight_enabled, moonlight_resolve_kind, moonlight_step_kind,
+    moonlight_unresolved, normalize_document, os, re, read_bytes, safe_read_json,
+    save_versioned_json, source_paths, subprocess, sys, time, update_json,
+    workflow_definition,
+)
 from .wiring import api
 
 def find_project_root(start=None):

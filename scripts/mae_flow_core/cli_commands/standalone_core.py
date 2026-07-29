@@ -1,6 +1,14 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    ACTION_SCOPE_ACK, AGENT_WRITES_PATH, CODE_EXTS, DEFAULTS_PATH, EXIT_INTENT_PATH,
+    EXIT_PATH, FAILURE_PATH, GATE_PERMITS_PATH, GATE_STRIKES_PATH,
+    MOONLIGHT_INTENT_PATH, STATE_PATH, StateStoreError, append_codecheck_event,
+    atomic_write_json, atomic_write_text, codecheck_log_path, core_action_work_dir,
+    core_archive_action, core_load_action, core_save_action, load_json, os,
+    quality_task_card_documents, quality_task_card_use_cases, re, remove_with_retry,
+    shutil, sys, time,
+)
 from .wiring import api
 
 def _state_sidecars():

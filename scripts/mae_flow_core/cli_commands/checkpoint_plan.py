@@ -1,6 +1,12 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CHECKPOINT_CODE_STEPS, CHECKPOINT_CONTINUE_ACK, CHECKPOINT_CONTINUOUS_ACK,
+    CHECKPOINT_LOCKED_STATUSES, CHECKPOINT_REVISE_ACK, CheckpointPlanPorts,
+    CheckpointReadyPorts, CheckpointRecoveryPorts, checkpoint_commit_commands,
+    plan_checkpoint, ready_checkpoint, reviewed_worktree_fresh, thaw_delivery_payload,
+    time,
+)
 from .wiring import api
 
 def _activate_checkpoint_plan(st, mode):

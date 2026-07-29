@@ -1,6 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STEPS_DIR, json,
+    load_json, os, re, read_text, render_pack, subst, sys, time, workflow_transitions,
+)
 from .wiring import api
 
 def perms_line(step):

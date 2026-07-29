@@ -1,6 +1,15 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    AGENT_WRITES_PATH, CapabilityError, EXIT_PATH, MOONLIGHT_INTENT_PATH,
+    MOONLIGHT_REPAIR_ENTRY, MOONLIGHT_REPORT_PATH, MoonlightDeferPorts, STATE_PATH,
+    activate_moonlight, atomic_write_json, atomic_write_text, defer_moonlight_quality,
+    disable_moonlight, finalize_moonlight, json, load_json, os, prepare_project, re,
+    read_text, record_blocker, record_push_failure, repair_moonlight,
+    thaw_delivery_payload, time, unlock_moonlight_source, validate_blocker,
+    validate_finalize, validate_finalize_step, validate_push_failure,
+    validate_unlock_source,
+)
 from .wiring import api
 
 def _moonlight_report_text(flow, st):

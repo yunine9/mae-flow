@@ -1,6 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CapabilityError, EXIT_PATH, STATE_PATH, atomic_write_json, load_json, os,
+    prepare_project, re, remove_with_retry, shutil, time,
+)
 from .wiring import api
 
 def _reopen_spec_archive(st):

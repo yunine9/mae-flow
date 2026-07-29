@@ -1,6 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    DEFAULTS_PATH, DEFAULT_TEST_PATS, GATE_PERMITS_PATH, GATE_STRIKES_PATH,
+    GATE_STRIKE_LIMIT, SPEC_PHASES, SPEC_REGISTER_FIELDS, check_permit, json,
+    load_json, os, permit_block_id, re, record_strike, specengine, strike_escalation,
+    sys, time, update_json,
+)
 from .wiring import api
 
 def _test_patterns(st):

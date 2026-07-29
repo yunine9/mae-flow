@@ -1,6 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    CONFIG_CONFIRM_ACK, FAILURE_PATH, STATE_PATH, hashlib, json, re, read_text, time,
+    update_json, workflow_completion,
+)
 from .wiring import api
 
 def _evidence_failure_count(sid, success=False):

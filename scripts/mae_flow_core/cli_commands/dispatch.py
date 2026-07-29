@@ -1,6 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    RuntimeMode, _COMMAND_UNHANDLED, command_dispatch, os, parse_args, resolve_runtime,
+    sys,
+)
 from .wiring import api
 
 def _dispatch_action(flow, state, args):

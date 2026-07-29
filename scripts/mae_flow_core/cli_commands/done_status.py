@@ -1,6 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    PACE_STEPS, WORKFLOW_LABELS, json, os, sys, time, workflow_completion,
+    workflow_transitions,
+)
 from .wiring import api
 
 def _done_handle_legacy_pace(flow, st, sid, step):

@@ -1,6 +1,8 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    delivery_checkpoints, hashlib, os, re, read_text, shlex, specengine, subprocess,
+)
 from .wiring import api
 
 def _risk_acceptance(kind, st):

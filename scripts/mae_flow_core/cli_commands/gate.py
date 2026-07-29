@@ -1,6 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    BashGateContext, BashWriteContext, EditGateContext, HERE, OwnershipFacts,
+    WRITEISH_STRONG, WRITEISH_WEAK, decide_bash_write, decide_commit_branch,
+    decide_edit, decide_ownership, decide_post_commit, decide_pre_commit, guard_intent,
+    os, re, replace, sys,
+)
 from .wiring import api
 
 def _advisory_lightcheck_before_commit(st, snapshot):

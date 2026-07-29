@@ -1,6 +1,13 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    HERE, REQ_SHA_MARKER, STATE_PATH, append_codecheck_event, atomic_write_text,
+    cancel_standalone, codecheck_log_path, confirm_standalone_scope,
+    core_archive_corrupt_action, core_load_action, finish_standalone, hashlib,
+    inspect_standalone, os, prepare_standalone_critic, re, start_standalone,
+    thaw_delivery_payload, time, validate_scope_confirmation,
+    validate_standalone_start,
+)
 from .wiring import api
 
 def cmd_action_start(flow, st, args):

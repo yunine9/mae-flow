@@ -1,6 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    AGENT_WRITES_PATH, BUILD_ARTIFACT_AMBIGUOUS_DIRS,
+    BUILD_ARTIFACT_AMBIGUOUS_SUFFIXES, BUILD_ARTIFACT_STRONG_DIRS,
+    BUILD_ARTIFACT_STRONG_NAMES, BUILD_ARTIFACT_STRONG_SUFFIXES, EXIT_PATH, git_intent,
+    os, re, safe_read_json, source_paths, time,
+)
 from .wiring import api
 
 def norm(p):

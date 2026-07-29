@@ -1,6 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
+    codecheck_log_path, globmod, os, quality_task_card_documents,
+    quality_task_card_use_cases, quality_task_cards, read_text, time, write_text,
+)
 from .wiring import api
 
 def _task_scope(st, diff_override=""):

@@ -1,6 +1,8 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from .shared import *  # noqa: F401,F403
+from .shared import (
+    hashlib, json, re, time,
+)
 from .wiring import api
 
 def _branch_adoption_requested(text):

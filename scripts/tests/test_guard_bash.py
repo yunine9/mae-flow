@@ -13,6 +13,7 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core.guard.bash import (  # noqa: E402
     BashGateContext,
+    decide_commit_branch,
     decide_post_commit,
     decide_pre_commit,
 )
@@ -60,7 +61,7 @@ class BashGatePolicyTests(unittest.TestCase):
             commit_message="bad"))
         self.assertEqual(("block", "bash-commit-format"),
                          (fmt.kind, fmt.rule))
-        branch = decide_pre_commit(self.context(
+        branch = decide_commit_branch(self.context(
             command="git commit -m '[REQ-1][fix]ok'",
             commit_message_present=True,
             commit_message="[REQ-1][fix]ok",

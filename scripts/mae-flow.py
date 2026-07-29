@@ -117,6 +117,7 @@ from mae_flow_core.guard.ownership import (
 )
 from mae_flow_core.guard.bash import (
     BashGateContext,
+    decide_commit_branch,
     decide_post_commit,
     decide_pre_commit,
 )
@@ -7361,9 +7362,9 @@ def cmd_gate(flow, st, args):
                 context,
                 current_branch=sh("git branch --show-current"),
             )
-            pre = decide_pre_commit(context)
-            if pre.kind == "block":
-                jdie(pre.rule, pre.message)
+            branch_decision = decide_commit_branch(context)
+            if branch_decision.kind == "block":
+                jdie(branch_decision.rule, branch_decision.message)
         if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
             _gate_commit_candidates(c, st, jdie)
         post = decide_post_commit(context)

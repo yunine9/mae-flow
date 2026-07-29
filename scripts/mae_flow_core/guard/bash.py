@@ -100,7 +100,7 @@ def _pre_checkpoint(context):
     return None
 
 
-def _pre_commit_message(context):
+def _pre_commit_format(context):
     if not context.commit_message_present:
         return None
     message = context.commit_message
@@ -115,31 +115,36 @@ def _pre_commit_message(context):
             "commit message「%s」不符合 [%s][feat|fix]描述 格式。"
             % (message, context.ticket),
         )
-    if (
-        context.wanted_branch
-        and context.step not in (
-            "config_confirm", "workflow_select", "branch_create")
-        and context.current_branch
-        and context.current_branch != context.wanted_branch
-    ):
-        return _block(
-            "bash-commit-branch",
-            "提交前拦截:当前分支 %s != 本单约定分支 %s。"
-            "先 git checkout %s 再提交;在错分支上积累提交,done 时才发现要整步返工。"
-            % (
-                context.current_branch,
-                context.wanted_branch,
-                context.wanted_branch,
-            ),
-        )
     return None
+
+
+def decide_commit_branch(context):
+    if (
+        not context.commit_message_present
+        or not context.wanted_branch
+        or context.step in (
+            "config_confirm", "workflow_select", "branch_create")
+        or not context.current_branch
+        or context.current_branch == context.wanted_branch
+    ):
+        return GateDecision("allow")
+    return _block(
+        "bash-commit-branch",
+        "提交前拦截:当前分支 %s != 本单约定分支 %s。"
+        "先 git checkout %s 再提交;在错分支上积累提交,done 时才发现要整步返工。"
+        % (
+            context.current_branch,
+            context.wanted_branch,
+            context.wanted_branch,
+        ),
+    )
 
 
 def decide_pre_commit(context):
     for evaluator in (
         _pre_repository,
         _pre_checkpoint,
-        _pre_commit_message,
+        _pre_commit_format,
     ):
         decision = evaluator(context)
         if decision is not None:

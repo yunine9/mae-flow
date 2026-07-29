@@ -37,6 +37,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_guard_ownership.py",), 180, 5000),
     ("Gate 通用 Bash 与 Git 策略回归",
      ("scripts/tests/test_guard_bash.py",), 180, 5000),
+    ("Gate 一次性放行令入口回归",
+     ("scripts/tests/test_guard_permit_integration.py",), 180, 5000),
     ("质量任务卡纯契约回归",
      ("scripts/tests/test_quality_task_cards.py",), 180, 5000),
     ("交付子状态机纯策略回归",

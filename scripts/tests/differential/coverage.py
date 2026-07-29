@@ -31,6 +31,7 @@ VALUES = {
         "foreign-artifact", "protected-requirement", "protected-state",
         "stale-head",
         "authentication", "tool-unavailable", "user-cancelled",
+        "empty-test-run", "missing-tool-evidence", "tampered-task-card",
     },
 }
 FIELDS = {

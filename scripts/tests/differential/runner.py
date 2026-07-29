@@ -20,7 +20,7 @@ from differential.snapshot import Snapshot
 
 
 DEFAULT_GOLDENS = os.path.join(
-    os.path.dirname(__file__), "goldens", "phase14.json")
+    os.path.dirname(__file__), "goldens", "phase15.json")
 
 
 def _capture_files(root, replacements):

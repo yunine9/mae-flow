@@ -217,6 +217,46 @@
       "delivery": "none",
       "fault": "protected-requirement"
     },
+    "hook_compile_missing_execution": {
+      "domain": "hook",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-tool-evidence"
+    },
+    "hook_grill_without_read": {
+      "domain": "hook",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-tool-evidence"
+    },
+    "hook_stop_moonlight_blocks": {
+      "domain": "hook",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "moonlight",
+      "fault": "none"
+    },
+    "hook_task_card_tampered": {
+      "domain": "hook",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "tampered-task-card"
+    },
+    "hook_ut_zero_tests": {
+      "domain": "hook",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "empty-test-run"
+    },
     "inactive_pretooluse_bypass": {
       "domain": "hook",
       "runtime": "inactive",

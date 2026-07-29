@@ -1,0 +1,2691 @@
+{
+  "action_status": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "[mae-flow] 当前没有独立任务；普通开发完全不受 mae-flow 接管。\n"
+  },
+  "active_gate_edit": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "baebdcccdf7a0b701e07da6872fcf25292e9c0b133e6b1d66beed1ed812cf58d",
+        "size": 299
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": ""
+  },
+  "active_pretooluse_edit": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "7718299a5d9eab908cfbf432f30b9b428c364cc92501cca3712e978f5e1f78a5",
+        "size": 297
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": ""
+  },
+  "checkpoint_continuous_ready": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "67494226decedc148d27c46721b690848f117b75a7e3f9372c3e58da421e19ba",
+        "size": 1150
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "notes.md": {
+        "sha256": "02aa2d86aee3d9b63e6218b65e136391e391dbf2cde9b35c1dd73597bd27624e",
+        "size": 18
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "closed_at": "2026-07-29 10:00:00",
+              "compile_head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "compile_skipped_no_source": true,
+              "compile_task_sha256": "",
+              "completed_head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "id": "CP1",
+              "status": "completed",
+              "task_structure_drift": false,
+              "title": "continuous batch"
+            }
+          ],
+          "current_index": 1,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "continuous",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] CP1 已编译并记录范围 9c6b2db726..6251e85aca；连续模式不 push、不等待，直接进入编码收尾。\n"
+  },
+  "checkpoint_final_review": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "1a01b981e14afd198a4bc6fa1b9db75d1870f92657ae86cb077de7b83a55ae22",
+        "size": 1395
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "aecc013c518523ca22b7e3780f87002f5cae13fabc369f2f59a1faf7058f8c76",
+        "size": 28
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "e11a843d4d3373dd7edd0d08ba7295593decd6c2",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "current": "delivery_review",
+        "development_review": {
+          "checkpoints": [
+            {
+              "completed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "completed",
+              "title": "completed batch"
+            }
+          ],
+          "current_index": 1,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "final_review": {
+            "ack_cursor": [],
+            "at": "2026-07-29 10:00:00",
+            "base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "changed": [
+              "src/main.py"
+            ],
+            "head": "e11a843d4d3373dd7edd0d08ba7295593decd6c2",
+            "receipt": {},
+            "remote_head": "",
+            "remote_ref": "",
+            "requires_commit": false,
+            "requires_quality_rerun": false,
+            "status": "review_pending",
+            "title": "最终检视增量"
+          },
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "continuous",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "🔎 最终未检视代码增量\n  范围: 9c6b2db726..e11a843d4d\n  提交:\n    e11a843 [REQ-DIFF][feat]final delta\n  文件:\n    A\tsrc/main.py\n  统计: 1 file changed, 2 insertions(+)\n  完整差异命令: git diff 9c6b2db726f49b708a5876d0b5a1c51c773e083b e11a843d4d3373dd7edd0d08ba7295593decd6c2\n  模式说明:中途策略是不 push；确认最终整体代码后才进入正式 push。\n\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：\n  - 我已认真检视并完成自验证，继续\n  - 需要调整代码\n点选后执行 checkpoint decide continue|revise --ack \"用户选择原文\"。\n"
+  },
+  "checkpoint_plan_creation": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "5b4a4918e8aaf15b5607a6564e96f5ddfae7d0ac929c5ce193ace6ff3ea6b30f",
+        "size": 1091
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_pace",
+        "development_review": {
+          "ack_cursor": [],
+          "checkpoints": [
+            {
+              "id": "CP1",
+              "status": "planned",
+              "title": "core behavior"
+            },
+            {
+              "id": "CP2",
+              "status": "planned",
+              "title": "regression coverage"
+            }
+          ],
+          "created_at": "2026-07-29 10:00:00",
+          "no_code_plan": false,
+          "plan_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "plan_sha256": "466523fa74c456ee93531b6c6fd1bc6bb16cc1b73062a86ca7983087d45d053a",
+          "plan_step": "tw_pace",
+          "review_before_commit": true,
+          "status": "plan_pending",
+          "task_count": 0,
+          "task_structure_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 开发检查点方案（确认前尚未开始写码）\n  代码基点: 9c6b2db726\n  实现/评审任务数: 0（勾选状态和备注不计入结构指纹）\n  CP1 — core behavior\n  CP2 — regression coverage\n\n用 AskUserQuestion 提供三个固定选项：\n  - 按检查点分阶段开发、检视确认后提交并推送\n  - 一次完成全部代码，最终统一检视\n  - 调整检查点划分\n用户点选后执行 done --choice staged|continuous|adjust；月光宝盒不会进入此确认。\n"
+  },
+  "checkpoint_revise_decision": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "f336d3b7505396573c055382a7f43deebd396b34b8c57c85b05cc7b8645eefff",
+        "size": 955
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      ".mae-flow.json.tokens": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      ".mae-flow.json.usermsg": {
+        "sha256": "2a1747e3c796e95af1a03611bd50604b1b4f01bf6bee49b1ac0f934992eb8762",
+        "size": 103
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.tokens\n?? .mae-flow.json.usermsg"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "attempt": 2,
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "coding",
+              "title": "revise batch"
+            }
+          ],
+          "current_index": 0,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "staged",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "需要调整代码",
+            "result": "checkpoint:revise:CP1",
+            "step": "tw_change"
+          }
+        ],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {},
+      ".mae-flow.json.tokens": {},
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "9999-12-31 23:59:59",
+          "step": "tw_change",
+          "text": "需要调整代码"
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] CP1 返回修改；固定基点仍为 9c6b2db726，修复后会重新展示整批组合差异。\n"
+  },
+  "checkpoint_staged_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "1712356f2503881b1116f64cf181d5b9569ff8a4dbbffed2ce3204bac1d6bb6f",
+        "size": 915
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "compile_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "push_pending",
+              "title": "staged batch"
+            }
+          ],
+          "current_index": 0,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "staged",
+          "review_before_commit": false,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 当前分支没有上游；执行 git push -u origin HEAD\n",
+    "stdout": "[mae-flow] 开发节奏: staged；计划状态: active\n  CP1 [push_pending] staged batch\n"
+  },
+  "checkpoint_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "caffabe6dd679b28db1b9b8c7ae3145bc6300dc880db43a737f0ca5ad783a930",
+        "size": 747
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "coding",
+              "title": "core behavior"
+            }
+          ],
+          "current_index": 0,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "staged",
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 开发节奏: staged；计划状态: active\n  CP1 [coding] core behavior\n当前正在编码 CP1；完成提交和绑定本批的 compile-agent 后执行 checkpoint ready CP1。\n"
+  },
+  "combined_git_add_flags": {
+    "files": {
+      ".mae-flow-work/lightcheck/latest.md": {
+        "sha256": "e3ff9fdcb2e594c13122f2c3d89f0502ec07df5fcc20d55dc201e6cf5eca5881",
+        "size": 637
+      },
+      ".mae-flow.json": {
+        "sha256": "baebdcccdf7a0b701e07da6872fcf25292e9c0b133e6b1d66beed1ed812cf58d",
+        "size": 299
+      },
+      "README.md": {
+        "sha256": "f1cc3c4dd9724d592f06473025f2c619b454ba29605b4c18c63731b5555f22f3",
+        "size": 38
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "M README.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] ⚠ 提交提示:以下文件不在 Agent 通过 Write/Edit/MultiEdit 实际改写的候选范围内，可能是编译、格式化或生成命令的副作用；也可能是必要的移动/删除，因此本次不阻断。请逐个确认: README.md\n",
+    "stdout": ""
+  },
+  "compile_task_card": {
+    "files": {
+      ".mae-flow-work/agent-tasks/build-compile.md": {
+        "sha256": "2baad398ee50c6ad788d26ca00d79876a8bc85dd5c4c13f24223cb426c8e2290",
+        "size": 1771
+      },
+      ".mae-flow-work/lightcheck/latest.md": {
+        "sha256": "c7a9bd4f0355d848436c78fce23b020466d502b1f6ec33ad90bb8a75741dfdd3",
+        "size": 624
+      },
+      ".mae-flow.json": {
+        "sha256": "cbc6f85d659857e5ecba9185342e1ebd4fe5acc6aaf6db5b2e3bad8aea653641",
+        "size": 1379
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "aecc013c518523ca22b7e3780f87002f5cae13fabc369f2f59a1faf7058f8c76",
+        "size": 28
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
+      "status": "?? .mae-flow-work/agent-tasks/build-compile.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "agent_tasks": {
+          "COMPILE": {
+            "allowed_files": [],
+            "at": "2026-07-29 10:00:00",
+            "checkpoint": "",
+            "execution_roots": [
+              "src"
+            ],
+            "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
+            "initial_compile_net": 0,
+            "lightcheck": {
+              "findings": 0,
+              "report_path": "<PROJECT>/.mae-flow-work/lightcheck/latest.md",
+              "status": "CLEAN"
+            },
+            "path": "<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md",
+            "precommit_review": false,
+            "scope": "",
+            "sha256": "<TASK_CARD_SHA256>",
+            "source_snapshot": {},
+            "step": "build",
+            "task_files": [
+              "src/main.py"
+            ],
+            "unchanged_initial_dirty": [],
+            "ut_targets": {}
+          }
+        },
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "UT生成方式": "existing",
+          "UT运行命令": "python -m unittest",
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "baseline",
+          "编译方式": "project command"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] COMPILE 任务卡已生成: <PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\n启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\"；最终报告必须原样带 TASK_CARD_SHA256: <TASK_CARD_SHA256>\n"
+  },
+  "corrupt_exit_repair": {
+    "files": {
+      ".mae-flow-work/state-recovery/20260729-100000/.mae-flow.json.exited.bad": {
+        "sha256": "31992d13c6f43dd382bb6759a4c96e6ae7bc8513278bf4413a34e3eb81b3fc8f",
+        "size": 12
+      },
+      ".mae-flow.json.exited": {
+        "sha256": "72ceac618ca87b6f176e688e817f25026c0fd52c892def5e032fa8397395456d",
+        "size": 381
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/state-recovery/20260729-100000/.mae-flow.json.exited.bad\n?? .mae-flow.json.exited"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json.exited": {
+        "at": "2026-07-29 10:00:00",
+        "reason": "doctor 修复损坏退出标记",
+        "recovered_bad_marker": "<PROJECT>/.mae-flow-work/state-recovery/20260729-100000/.mae-flow.json.exited.bad",
+        "revision": 1,
+        "schema_version": 2,
+        "snapshot": "",
+        "status": "exited",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "项目根(状态文件所在): <PROJECT>\n❌ 运行模式: corrupt（Hook 已 fail-open，普通改码不受阻）\n   - .mae-flow.json.exited(JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))\n退出标记损坏；普通开发已放行，但重新接回流程前需要修复。可执行 doctor --repair-state 保存坏文件并重建退出标记。\n[mae-flow] 损坏退出标记已保存到 <PROJECT>/.mae-flow-work/state-recovery/20260729-100000/.mae-flow.json.exited.bad，并重建普通开发模式标记。\n"
+  },
+  "corrupt_state_doctor": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "be302461cda285db3ed2d45fb767b23e08ca8808b35a638009937df22b332d73",
+        "size": 7
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "__unreadable__": "JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+      }
+    },
+    "stderr": "",
+    "stdout": "项目根(状态文件所在): <PROJECT>\n❌ 运行模式: corrupt（Hook 已 fail-open，普通改码不受阻）\n   - .mae-flow.json(JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))\n完整流程状态损坏。发送 `/mae-flow:mae-flow exit` 可保存坏现场并退出；Hook 同时损坏时由用户在真实终端执行 exit --interactive。\n"
+  },
+  "dangerous_gate_bash": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "baebdcccdf7a0b701e07da6872fcf25292e9c0b133e6b1d66beed1ed812cf58d",
+        "size": 299
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 危险命令拦截:对「.」的递归删除。确需执行请用户手动运行。\n",
+    "stdout": ""
+  },
+  "direct_current": {
+    "files": {
+      ".mae-flow.json.exited": {
+        "sha256": "6a3d0f3fc2222614f49901a498234ba67d73dfdb1de7972cbd2f8388816a15b3",
+        "size": 118
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json.exited"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json.exited": {
+        "revision": 1,
+        "schema_version": 2,
+        "snapshot": ".mae-flow-work/exited/REQ-DIFF.json",
+        "status": "exited"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 当前项目已退出流程，正在按普通开发方式工作。\n退出时间: ?  原步骤: ?  原因: ?\n现场保留在: .mae-flow-work/exited/REQ-DIFF.json\n用户明确要求恢复或开启评审修复时，先执行 messages 取得真实消息 ID：恢复原断点用 init --message-id <ID>；保留旧现场开启另一流程用 init --new --message-id <ID>。不同单并行时再另开 worktree。\n"
+  },
+  "evidence_agent_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "367a62313c728f5914b58a9d76c3f588fad83b20248feaab14622b49dfeea734",
+        "size": 377
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "6246b39b14a126e88b71591118a323f90101b2a1bd0d0d3071276eee656f7deb",
+        "size": 83
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+        "size": 10
+      }
+    },
+    "git": {
+      "branch": "feature/evidence",
+      "head": "253b2a3cdaeccad138933c665cd8da6fae6901cb",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "feature/evidence",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_compile",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:tw_compile": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本步内未检测到 COMPILE 子 agent 的合法收尾(最近令牌: 无;本步始于 2026-07-29 10:00:00)。请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。主会话代写或口头汇报不算执行证据。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：没有可验证的编译成功证据，代码可能无法构建。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk compile --reason \"没有可验证的编译成功证据，代码可能无法构建\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stdout": ""
+  },
+  "evidence_archive_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "6ce3ee7787bf184f2d01a55005a0d09353fac7d696a9589c78ac15e79499bcd1",
+        "size": 376
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "f4f2083bfac41228c96906b77961d6621c723873795bf354c41732a0fa174e11",
+        "size": 80
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "archive",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "spec": {},
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:archive": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): openspec/changes/archive/*diff-change*\n  - 交付登记 phase=(空),需要 archived——按本步指引完成动作后用 mae-flow spec 登记,谎报无效\n  - 缺少本次定稿的精确产物清单；重新执行 spec archive，或由维护人核对旧在途状态后再推进\n",
+    "stdout": ""
+  },
+  "evidence_branch_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "2028b449e1d6d19dd58101d75e59b3a63ef50b4ae2fb297d9d8c29a8dc2f2cb4",
+        "size": 346
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "56ebd7afec7d2b5c208d69fd3edf64fcd3b9303b7d4e78f7f28afd80ce10c7e8",
+        "size": 86
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "feature/evidence",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "branch_create",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:branch_create": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 当前分支 main != 约定分支 feature/evidence。请 git checkout -b feature/evidence(已存在则 checkout;错误命名分支用 git branch -m 重命名)\n",
+    "stdout": ""
+  },
+  "evidence_checkpoint_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "c6f808e11f6275c36157f2558c8b116ff79c894e86f559899bfb464873e32303",
+        "size": 513
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "1695f82a3c4fb5c31b9c4b5e987ff52ab82891bd92316bd9dd5c8db96176af99",
+        "size": 80
+      },
+      ".mae-flow.json.usermsg": {
+        "sha256": "d98733c2a9f8de18062687e775bb4df973d46cd1415a5bdf4f59b37d53a361a4",
+        "size": 158
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.usermsg"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "development_pace": "continuous",
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_pace",
+        "development_review": {
+          "ack_cursor": [],
+          "checkpoints": [],
+          "plan_step": "tw_pace",
+          "status": "planning",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:tw_pace": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      },
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "2026-07-29 10:00:00",
+          "id": "evidence-fixture",
+          "step": "tw_pace",
+          "text": "一次完成全部代码，最终统一检视"
+        }
+      ]
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 尚未生成开发检查点方案。先按本步指令执行 checkpoint plan --item ...，让用户看到具体批次后再选择开发节奏\n",
+    "stdout": ""
+  },
+  "evidence_codecheck_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "cd544648b235e56d47e5086dadf9e58434df18efc692594a9db80c4a6ff1224f",
+        "size": 379
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "edd334f9730abc33897ecec3c8aa6782dcbd6a8a3dedfc8413cf244c2a01b5b5",
+        "size": 85
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+        "size": 10
+      }
+    },
+    "git": {
+      "branch": "feature/evidence",
+      "head": "253b2a3cdaeccad138933c665cd8da6fae6901cb",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "feature/evidence",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_codecheck",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:tw_codecheck": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复\n",
+    "stdout": ""
+  },
+  "evidence_push_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "283d85704b7d6d49120ede02c40fef7c45c38380a95b0241741e115282bc2c1c",
+        "size": 371
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "c40f84ad33bba05f8bb86dd05ff7d3c79a1b3ea25f26ababfae3d085dc34e0fd",
+        "size": 77
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+        "size": 10
+      }
+    },
+    "git": {
+      "branch": "feature/evidence",
+      "head": "253b2a3cdaeccad138933c665cd8da6fae6901cb",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "feature/evidence",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "push",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:push": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 分支无上游跟踪——用 git push -u origin HEAD 推送并建立跟踪\n",
+    "stdout": ""
+  },
+  "evidence_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "964ab03beccced0024e88eb97670c0a3ae4e53d8835b97a1df094e319718c9ea",
+        "size": 299
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "6f0f663bd8697eaea11af88f8f2d9b985b06610493a5166f1ebc97b676106e43",
+        "size": 82
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "rf_triage",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:rf_triage": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      }
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stdout": ""
+  },
+  "evidence_review_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "83bd997fd90a6d6fd4a34d538c36746e18976dcbddf5d253587500efe68e48a5",
+        "size": 414
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "2f208a5080c7f5066537d0ff3b301b34da90b323fe03c8383b3ee82dd0659c54",
+        "size": 82
+      },
+      ".mae-flow.json.usermsg": {
+        "sha256": "1a1918fb2f06437179bb2769b4539f522bd2cf7784a9aeec970d2d491fcd7dea",
+        "size": 160
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+        "size": 10
+      }
+    },
+    "git": {
+      "branch": "feature/evidence",
+      "head": "253b2a3cdaeccad138933c665cd8da6fae6901cb",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.usermsg"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "tw_review_decision": "continue",
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "feature/evidence",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_review",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:tw_review": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      },
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "2026-07-29 10:00:00",
+          "id": "evidence-fixture",
+          "step": "tw_review",
+          "text": "我已认真检视并完成自验证，继续"
+        }
+      ]
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 缺少 tw_review 的检视入口 HEAD，无法确定用户看到的是哪版代码\n",
+    "stdout": ""
+  },
+  "evidence_spec_rejection": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "2b32d9719ee720ef238d0262c1f930ffe8a74d470306fabbbf2d84d7871aa4f8",
+        "size": 376
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "dfbd0226cb632b4211b93b6e226fe94a20a81fa5cbd7f72af8de3cc2c011de2d",
+        "size": 80
+      },
+      ".mae-flow.json.usermsg": {
+        "sha256": "8e4bd2abea951f64584199d14583f3e246003b51bc75fe4e38b6da995cb315d1",
+        "size": 134
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.usermsg"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_open",
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "spec": {},
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {
+        "evidence:tw_open": {
+          "at": "2026-07-29 10:00:00",
+          "count": 1
+        }
+      },
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "2026-07-29 10:00:00",
+          "id": "evidence-fixture",
+          "step": "tw_open",
+          "text": "确认范围并继续"
+        }
+      ]
+    },
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 交付登记 phase 为空——本步产物尚未登记;完成后执行 mae-flow spec set phase \"<路径>\"\n  - 规格校验无法执行: change 'diff-change' 不存在；当前没有任何活跃 change\n",
+    "stdout": ""
+  },
+  "guard_expired_permit": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "fcbaeed10ffc525de53b8383c6ccaa041f8500ca89ec3ad266c7db560fd55b2a",
+        "size": 364
+      },
+      ".mae-flow.json.gate-permits": {
+        "sha256": "138ddf629ad1f6b6b05851e8adf22445fef6dbabb7b13a8776aee812a0097564",
+        "size": 271
+      },
+      ".mae-flow.json.gate-strikes": {
+        "sha256": "5662280e92c75843666b35a0435bb1e41add3421eb7065cab4b3c54f8d8e895a",
+        "size": 322
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.gate-permits\n?? .mae-flow.json.gate-strikes"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "config_confirm",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.gate-permits": {
+        "c5c7463462": {
+          "ack": "同意本次操作",
+          "created_at": "2026-07-29 10:00:00",
+          "head": "0000000000000000000000000000000000000000",
+          "rule": "edit-docs-req",
+          "sample": "docs/req/REQ-DIFF.md",
+          "step": "config_confirm",
+          "used": false
+        }
+      },
+      ".mae-flow.json.gate-strikes": {
+        "counts": {
+          "edit-docs-req": {
+            "count": 1,
+            "last_at": "2026-07-29 10:00:00",
+            "step": "config_confirm"
+          }
+        },
+        "recent": {
+          "c5c7463462": {
+            "at": "2026-07-29 10:00:00",
+            "rule": "edit-docs-req",
+            "sample": "docs/req/REQ-DIFF.md",
+            "step": "config_confirm"
+          }
+        }
+      }
+    },
+    "stderr": "[mae-flow] 已有放行令 c5c7463462 因代码版本变化作废(签发于 00000000)。需重新征得用户同意后 allow 重签。配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 requirement-record --message-id；已有文本用 requirement-record --source。\n",
+    "stdout": ""
+  },
+  "guard_internal_state_edit": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "5cb2b63ff796b326565822a0b91ada10223db41cd1919bd93810182156c65451",
+        "size": 355
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。\n",
+    "stdout": ""
+  },
+  "guard_requirement_bash_write": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "fcbaeed10ffc525de53b8383c6ccaa041f8500ca89ec3ad266c7db560fd55b2a",
+        "size": 364
+      },
+      ".mae-flow.json.gate-strikes": {
+        "sha256": "32d5f8e4acde2bd8959b6f7df7aa998879cc3f0aec738f6fed81854e69cf48dd",
+        "size": 343
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.gate-strikes"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "config_confirm",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.gate-strikes": {
+        "counts": {
+          "bash-docs-req": {
+            "count": 1,
+            "last_at": "2026-07-29 10:00:00",
+            "step": "config_confirm"
+          }
+        },
+        "recent": {
+          "e3115d5a7d": {
+            "at": "2026-07-29 10:00:00",
+            "rule": "bash-docs-req",
+            "sample": "printf requirement > docs/req/REQ-DIFF.md",
+            "step": "config_confirm"
+          }
+        }
+      }
+    },
+    "stderr": "[mae-flow] 配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。\n",
+    "stdout": ""
+  },
+  "hook_compile_missing_execution": {
+    "files": {
+      ".mae-flow-work/tasks/compile-task.md": {
+        "sha256": "1b484252a4b464cec198ab166cbf3e4d2998545de48e0c8e262316cde09e56e6",
+        "size": 106
+      },
+      ".mae-flow-work/transcripts/compile.jsonl": {
+        "sha256": "adb9ce3261cec258815ea1b7899aa5bb8295eb0dca20d1e4658d125682dc8d02",
+        "size": 223
+      },
+      ".mae-flow.json": {
+        "sha256": "f8be38101e9735aada13ae0c961aed06b277089c21e766ad9934f470b0447b60",
+        "size": 684
+      },
+      ".mae-flow.json.agent-rejections": {
+        "sha256": "bf71bf1e9be7a46e6c40ba5ef8a5582438bfacd61e4a910e59f752ff89efbb8d",
+        "size": 330
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/tasks/compile-task.md\n?? .mae-flow-work/transcripts/compile.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-rejections"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "agent_tasks": {
+          "COMPILE": {
+            "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "path": "<PROJECT>/.mae-flow-work/tasks/compile-task.md",
+            "sha256": "<TASK_CARD_SHA256>",
+            "step": "tw_compile"
+          }
+        },
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "编译方式": "python build.py"
+        },
+        "current": "tw_compile",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.agent-rejections": {
+        "COMPILE": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reason": "transcript 中没有真实执行配置的编译命令；echo/文字提及不算执行。",
+          "step": "tw_compile",
+          "task_sha256": "<TASK_CARD_SHA256>"
+        }
+      }
+    },
+    "stderr": "[mae-flow] COMPILE 契约违规:transcript 中没有真实执行配置的编译命令；echo/文字提及不算执行。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stdout": ""
+  },
+  "hook_grill_without_read": {
+    "files": {
+      ".mae-flow-work/tasks/grill-task.md": {
+        "sha256": "2cd9802d9ce3cf4511acd24cd6138a9e74af53b2069f1a33c23c98c31f5f6bd0",
+        "size": 104
+      },
+      ".mae-flow-work/transcripts/grill.jsonl": {
+        "sha256": "25dc284826c622eca5b400cd9764744a5e278e7d863b3aab9220608a5b720bc9",
+        "size": 204
+      },
+      ".mae-flow.json": {
+        "sha256": "6fca3508b06dc88c625f9be4f78f9755695248052197c9a006f5bd89689f2421",
+        "size": 662
+      },
+      ".mae-flow.json.agent-rejections": {
+        "sha256": "5dde6be0ad8531577c02163a7705138b1b4d15925628cd3ff7f5d6fc8a780a0b",
+        "size": 507
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/tasks/grill-task.md\n?? .mae-flow-work/transcripts/grill.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-rejections"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "agent_tasks": {
+          "GRILL": {
+            "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "path": "<PROJECT>/.mae-flow-work/tasks/grill-task.md",
+            "sha256": "<TASK_CARD_SHA256>",
+            "stage": "design",
+            "step": "tw_grill"
+          }
+        },
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_grill",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.agent-rejections": {
+        "GRILL": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reason": "grill critic 报 CLEAR 但 transcript 无任何成功的 Read/Grep/Glob 调用——'没有遗漏'的结论必须建立在真读过需求/代码材料之上,而非样板输出。若宿主确未暴露子会话工具调用,主会话展示风险后用 accept-risk grill。",
+          "step": "tw_grill",
+          "task_sha256": "<TASK_CARD_SHA256>"
+        }
+      }
+    },
+    "stderr": "[mae-flow] GRILL 契约违规:grill critic 报 CLEAR 但 transcript 无任何成功的 Read/Grep/Glob 调用——'没有遗漏'的结论必须建立在真读过需求/代码材料之上,而非样板输出。若宿主确未暴露子会话工具调用,主会话展示风险后用 accept-risk grill。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stdout": ""
+  },
+  "hook_stop_moonlight_blocks": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "7b46f406090f5141bd3b4d2d6142a5a2084088f5c33b6a9ee56b466e1e765c51",
+        "size": 378
+      },
+      ".mae-flow.json.stop-guard": {
+        "sha256": "5725caafaa763666e9c9b5d026f1bb53f99fa9005d3e04673a9ef88503cd1803",
+        "size": 66
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.stop-guard"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "history": [],
+        "moonlight": {
+          "cycle": 1,
+          "enabled": true,
+          "issues": []
+        },
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.stop-guard": {
+        "at": "2026-07-29 10:00:00",
+        "blocks": 1,
+        "revision": 1
+      }
+    },
+    "stderr": "[mae-flow] 月光宝盒仍在执行，当前步骤 tw_change，禁止提前结束回复或等待用户。继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，确实缺少需求/权限/外部条件而无法继续时用 moonlight blocked --reason 留痕后再停止。\n",
+    "stdout": ""
+  },
+  "hook_task_card_tampered": {
+    "files": {
+      ".mae-flow-work/tasks/compile-task.md": {
+        "sha256": "24dd1b972246857eef08552b998918c9d85e9a90b75e216aa62521d4fdd1a827",
+        "size": 136
+      },
+      ".mae-flow-work/transcripts/compile.jsonl": {
+        "sha256": "adb9ce3261cec258815ea1b7899aa5bb8295eb0dca20d1e4658d125682dc8d02",
+        "size": 223
+      },
+      ".mae-flow.json": {
+        "sha256": "f8be38101e9735aada13ae0c961aed06b277089c21e766ad9934f470b0447b60",
+        "size": 684
+      },
+      ".mae-flow.json.agent-rejections": {
+        "sha256": "47113214569aa1d8d5dcd36d3b7c3ec1a40b353e9caf046e65d5aea4e5f75c02",
+        "size": 309
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/tasks/compile-task.md\n?? .mae-flow-work/transcripts/compile.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-rejections"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "agent_tasks": {
+          "COMPILE": {
+            "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "path": "<PROJECT>/.mae-flow-work/tasks/compile-task.md",
+            "sha256": "<TASK_CARD_SHA256>",
+            "step": "tw_compile"
+          }
+        },
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "编译方式": "python build.py"
+        },
+        "current": "tw_compile",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.agent-rejections": {
+        "COMPILE": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reason": "任务卡内容被修改过,必须重新执行 agent-task 生成。",
+          "step": "tw_compile",
+          "task_sha256": "<TASK_CARD_SHA256>"
+        }
+      }
+    },
+    "stderr": "[mae-flow] COMPILE 契约违规:任务卡内容被修改过,必须重新执行 agent-task 生成。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stdout": ""
+  },
+  "hook_ut_zero_tests": {
+    "files": {
+      ".mae-flow-work/tasks/ut-task.md": {
+        "sha256": "2c3bdde15ff4e6938a1493933c40a34fa24f12321de17a767977c69f6902bc17",
+        "size": 101
+      },
+      ".mae-flow-work/transcripts/ut.jsonl": {
+        "sha256": "e07fb65bd618d403e49660a67cbd29df5919c1100bbf9b6a37efbd4b53cfd595",
+        "size": 656
+      },
+      ".mae-flow.json": {
+        "sha256": "11ecffdc9f5941103c1f9189265aabcbe479405e7163175dc05f3fb1af77def4",
+        "size": 701
+      },
+      ".mae-flow.json.agent-evidence": {
+        "sha256": "96a856214b1c86207a783f9e4c5554d567cfe1d84cb8026bc6b4afae4b847b6f",
+        "size": 429
+      },
+      ".mae-flow.json.agent-rejections": {
+        "sha256": "3a326bb8aa84388fb2d6ee0fd6c47299ec9ddba3670497237d0b6bdb9ddcf8da",
+        "size": 376
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/tasks/ut-task.md\n?? .mae-flow-work/transcripts/ut.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-evidence\n?? .mae-flow.json.agent-rejections"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "agent_tasks": {
+          "UT": {
+            "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "path": "<PROJECT>/.mae-flow-work/tasks/ut-task.md",
+            "sha256": "<TASK_CARD_SHA256>",
+            "step": "tw_ut"
+          }
+        },
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "UT生成方式": "manual",
+          "UT运行命令": "python -m unittest",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_ut",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.agent-evidence": {
+        "UT_RUN": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reported_counts": {
+            "failed": 0,
+            "passed": 0,
+            "total": 0
+          },
+          "result_sha256": "6147092c488355c85b5115db6856e088131c6a0a5170a5ba55be537b806adf90",
+          "step": "tw_ut",
+          "task_sha256": "<TASK_CARD_SHA256>",
+          "value": "python -m unittest"
+        }
+      },
+      ".mae-flow.json.agent-rejections": {
+        "UT": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reason": "UT PASS 要求至少运行 1 个测试(TESTS_TOTAL>=1);0 条=空跑,不能证明任何回归保证。收口批跑全量,真实仓库恒成立。",
+          "step": "tw_ut",
+          "task_sha256": "<TASK_CARD_SHA256>"
+        }
+      }
+    },
+    "stderr": "[mae-flow] UT 契约违规:UT PASS 要求至少运行 1 个测试(TESTS_TOTAL>=1);0 条=空跑,不能证明任何回归保证。收口批跑全量,真实仓库恒成立。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stdout": ""
+  },
+  "inactive_pretooluse_bypass": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": ""
+  },
+  "moonlight_finalize": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "7578ca30e9f7b71e053095a4f57e8a7f77df09d92193efdba510e208e11040f6",
+        "size": 870
+      },
+      ".mae-flow.json": {
+        "sha256": "4d5a4a24444826b2b41e3533acff534fd0dea35198e2e90c0dcb24a9078f4aee",
+        "size": 619
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "分支名": "",
+          "单号": "REQ-DIFF"
+        },
+        "current": "end",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "晨间检查完成",
+            "result": "moonlight:finalize",
+            "step": "moonlight_review"
+          }
+        ],
+        "moonlight": {
+          "cycle": 1,
+          "enabled": false,
+          "finalized_at": "2026-07-29 10:00:00",
+          "issues": []
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "end": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
+  },
+  "moonlight_finalize_clean": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "80a88f09acba99550d502621968bc82913674ea58f3187b93855340f527bae92",
+        "size": 844
+      },
+      ".mae-flow.json": {
+        "sha256": "32554f2eb8c7af82193e63c18aaa522272055e099ed6e8d32cf1bb6d57c55815",
+        "size": 805
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "end",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "晨间检查完成",
+            "result": "moonlight:finalize",
+            "step": "moonlight_review"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 1,
+          "enabled": false,
+          "finalized_at": "2026-07-29 10:00:00",
+          "issues": [],
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "end": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
+  },
+  "moonlight_push_failure": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "e3d8cba0b69f9a1f9a90423d5602c1d890bf7f9bf7e0bfda3f53c4651542ac9b",
+        "size": 1079
+      },
+      ".mae-flow.json": {
+        "sha256": "e76068b7c99437b2b687187588d990ebfafaa499ff6964611705a6c1f4d52288",
+        "size": 984
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "push",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "ML-001 remote authentication failed after two bounded retries",
+            "result": "moonlight:push-failed",
+            "step": "push"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 1,
+          "enabled": true,
+          "issues": [
+            {
+              "at": "2026-07-29 10:00:00",
+              "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "ML-001",
+              "kind": "push",
+              "reason": "remote authentication failed after two bounded retries",
+              "step": "push"
+            }
+          ],
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] push 失败已写入月光宝盒报告。保持在 push，不伪造远端成功；早晨处理认证/网络/冲突后重新 push，再执行 done。\n"
+  },
+  "moonlight_quality_defer": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "136426736fc8093795bd7cf0616720a285845d37680206e4bf0a95e351c487ee",
+        "size": 1100
+      },
+      ".mae-flow.json": {
+        "sha256": "2abe1786b219815ae9a4be97bb83327d392086c48e8f5045c138f11dbc7b087e",
+        "size": 1241
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "rf_ut",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "ML-001 CodeCheck tool unavailable after two verified retries",
+            "result": "moonlight:defer",
+            "step": "rf_codecheck"
+          },
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "ML-001",
+            "result": "moonlight-deferred",
+            "step": "rf_codecheck"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 1,
+          "enabled": true,
+          "issues": [
+            {
+              "at": "2026-07-29 10:00:00",
+              "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "ML-001",
+              "kind": "codecheck",
+              "reason": "CodeCheck tool unavailable after two verified retries",
+              "rejection": "",
+              "step": "rf_codecheck"
+            }
+          ],
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 3,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "rf_ut": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] rf_codecheck moonlight-deferred → 进入 rf_ut\n\n═══ 当前步骤: rf_ut — 处理评审意见 — 增量单元测试 ═══\n🌙 月光宝盒运行中（第 1 轮）：禁止询问用户；能从需求、代码和仓库规则判断的直接采用保守结论并留痕。\n目标：尽力完成并推送当前分支。质量问题先真实修复；有限尝试后仍失败则登记遗留并继续，禁止伪装通过、删除测试、缩小测试范围或自动豁免。\n覆盖规则：下方普通步骤文字里的“询问用户 / AskUserQuestion / 等用户拍板”在本模式下一律不执行。分析和配置从用户原话、仓库预设、当前分支及代码事实中保守推断；质量裁决拿不准时不得替用户选择豁免，走本步的 moonlight defer。\n──── 月光宝盒启动需求（已持久化，断点恢复以此为准） ────\n开启月光宝盒继续开发\n──── 当前遗留（修复轮必须优先处理） ────\n- ML-001 [codecheck] CodeCheck tool unavailable after two verified retries\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n⚠ UT 写入边界:仓库未配置「测试路径」，当前使用内置保守规则硬拦非测试源码。若本仓测试目录不符合 tests/、test/、src/test/、*_test.*、*Test.java，请先在 .mae-flow-defaults.json 配置「测试路径」，禁止用 unlock 把长期目录差异当单次源码缺陷处理。\n──── 执行指令 ────\n评审意见处理阶段的独立增量 UT 步骤。harness 已冻结本轮基点，任务卡只列本轮文件。\n\n先直接尝试 done：本轮没有业务代码改动时机器自动放行；有业务代码改动则必须拿到 UT PASS。\n需要 UT 时：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task ut`；\n2. 把命令输出的**唯一一句启动话术原样**交给 ut-generator-agent，禁止自行拼任务；\n3. Agent 必须读取任务卡并按其中 `UT生成方式` 调用 Mae-Flow 插件自带的\n   AutoUT/java-autout Skill 或既有写法，参考 `UT运行命令` 真实执行测试；\n   该项写“随生成方式自带”时由对应 Skill 按项目决定；\n4. 只有 `UT_RESULT: PASS`、TASK_CARD_SHA256 和 GENERATOR_USED 合法，且 EXECUTED_UT 能对应到\n   本轮真实成功的测试调用，done 才放行。NEEDS_INPUT/FAIL 不能当通过。\n\nPENDING_QUESTIONS / SUSPECTED_BUGS 仍按主流程协议呈用户裁决；未经用户确认，UT agent 和主会话都不得修改被测源码。源码经 unlock 修复后执行 done，harness 会自动回流 rf_compile，强制重跑编译 → CodeCheck → UT；不接受仅重跑 UT 就推送。未经 unlock 却检测到被测源码变化会直接判越权。\n\n本仓未配「测试路径」时也不再放开任意源码写入：harness 使用 tests/、test/、src/test/、*_test.*、*Test.java 等保守默认规则。本仓是非标准测试目录时，先在 `.mae-flow-defaults.json` 补「测试路径」，不要用 unlock 长期绕过。\n\n──── 轻量编码预防（建议层，不新增门禁） ────\n写每个函数时主动控制：正式入参≤5（Python self/cls 不计）、有效代码行≤50（空行/纯注释/仅括号分隔行不计）、McCabe 圈复杂度≤5、本次新增/修改代码行≤120字符。长行禁止机械切字符串：优先仓库 formatter 配置，否则参考同文件附近同类参数列表/条件/链式调用的换行方式。\n提交 Hook 会自动执行轻量检查，无需主动调用或向用户展示 CLEAN 结果；只修 Hook 提示中高置信且属于本次范围的建议，最多修复并复查两轮。工具异常、超时、解析不确定或仅为基线旧债时直接留痕继续，不得扩大需求、不得让用户确认、不得把它当正式 CodeCheck。\n──── 尽力而为出口 ────\n先真实执行本步并尝试修复；确认继续尝试只会重复消耗后，提交当前有效改动，然后执行：\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight defer --reason \"<遗留现象、已尝试修复、当前风险>\"\n该命令会把问题写入晨间报告并继续下一阶段，不会把失败伪装成通过。\nUT 若经自查后明确指向被测源码缺陷，不需要等用户：先执行\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight unlock-source --reason \"<失败用例、规格依据、自查结论>\"\n再修源码并提交；done 会自动回流编译、CodeCheck 和 UT。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+  },
+  "moonlight_repair_issue": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "12d274b068b25221a1bce5aa61dc2a1c0e29c66268975d3f23e6d3653b2afcbc",
+        "size": 983
+      },
+      ".mae-flow.json": {
+        "sha256": "31411faa9d1fb1971b9bb2fb1c8fe8e0d679c06704f7cedcd0bb2894aaad7357",
+        "size": 1047
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "rf_compile",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "ML-001",
+            "result": "moonlight:repair",
+            "step": "moonlight_review"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 2,
+          "enabled": true,
+          "issues": [
+            {
+              "at": "2026-07-29 09:00:00",
+              "head": "",
+              "id": "ML-001",
+              "kind": "ut",
+              "reason": "one deterministic test remains unresolved",
+              "repair_cycle": 2,
+              "step": "rf_ut"
+            }
+          ],
+          "repair_started_at": "2026-07-29 10:00:00",
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "rf_compile": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 已根据报告开启第 2 轮修复，从 rf_compile 重新进入。先处理报告遗留，再完整重跑后续质量链并推送。\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n🌙 月光宝盒运行中（第 2 轮）：禁止询问用户；能从需求、代码和仓库规则判断的直接采用保守结论并留痕。\n目标：尽力完成并推送当前分支。质量问题先真实修复；有限尝试后仍失败则登记遗留并继续，禁止伪装通过、删除测试、缩小测试范围或自动豁免。\n覆盖规则：下方普通步骤文字里的“询问用户 / AskUserQuestion / 等用户拍板”在本模式下一律不执行。分析和配置从用户原话、仓库预设、当前分支及代码事实中保守推断；质量裁决拿不准时不得替用户选择豁免，走本步的 moonlight defer。\n──── 月光宝盒启动需求（已持久化，断点恢复以此为准） ────\n开启月光宝盒继续开发\n──── 当前遗留（修复轮必须优先处理） ────\n- ML-001 [ut] one deterministic test remains unresolved\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 尽力而为出口 ────\n先真实执行本步并尝试修复；确认继续尝试只会重复消耗后，提交当前有效改动，然后执行：\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight defer --reason \"<遗留现象、已尝试修复、当前风险>\"\n该命令会把问题写入晨间报告并继续下一阶段，不会把失败伪装成通过。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+  },
+  "moonlight_report_issue": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "f9e60c01ac0e174a2061bb01806804a6d510d0119e14b858da4e49b273e1db98",
+        "size": 899
+      },
+      ".mae-flow.json": {
+        "sha256": "2a2004df43a148d6ee63d5f6bd88e762841384382120d1258d29135524871b05",
+        "size": 686
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "moonlight_review",
+        "history": [],
+        "moonlight": {
+          "activated_at": "2026-07-29 00:00:00",
+          "cycle": 2,
+          "enabled": true,
+          "issues": [
+            {
+              "at": "2026-07-29 01:00:00",
+              "head": "",
+              "id": "ML-001",
+              "kind": "environment",
+              "reason": "deterministic fixture failure",
+              "step": "rf_ut"
+            }
+          ],
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "# 月光宝盒执行报告\n\n- 单号：REQ-DIFF\n- 工作流：review\n- 当前步骤：moonlight_review\n- 分支：main\n- HEAD：9c6b2db726f49b708a5876d0b5a1c51c773e083b\n- 上游：未设置\n- 启动时间：2026-07-29 00:00:00\n- 最近推送：尚未完成\n- 无人值守轮次：2\n\n## 启动需求原话\n\n开启月光宝盒继续开发\n\n## 当前结论\n\n夜间执行已经走到推送，规格尚未自动归档。\n\n## 尚未解决的问题\n\n### ML-001 · environment · rf_ut\n\n- 记录时间：2026-07-29 01:00:00\n- 代码版本：\n- 问题与已尝试处理：deterministic fixture failure\n\n## 已在后续复验中解决的问题\n\n无。\n\n## 夜间推进记录\n\n暂无。\n\n## 早晨操作\n\n- 继续修复遗留：`moonlight repair`\n- 重新查看报告：`moonlight report`\n- 结果满意并进入规格定稿：`moonlight finalize`\n\n报告位于 `.mae-flow-work/`，不会进入业务提交。\n\n[mae-flow] 报告已写入: <PROJECT>/.mae-flow-work/moonlight-report.md\n"
+  },
+  "ordinary_advance": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "6bb756624bac9b5a7a10c9ced2b41c0895580d881bc2d3f1d15dca53368e811c",
+        "size": 501
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "rf_compile",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "",
+            "result": "done",
+            "step": "rf_verify"
+          }
+        ],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "rf_compile": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {}
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+  },
+  "ownership_foreign_openspec": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "5cb2b63ff796b326565822a0b91ada10223db41cd1919bd93810182156c65451",
+        "size": 355
+      },
+      ".mae-flow.json.gate-strikes": {
+        "sha256": "c96a735f64932f711bd00a7d0aed92301f4e5d1295c4c00ae01e93387feee118",
+        "size": 349
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "openspec/changes/other-change/change.md": {
+        "sha256": "41dd89894f7a08ddf914562d24d00f7061488c8bb19cd2b4a8cdc094a935ebe3",
+        "size": 17
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "A  openspec/changes/other-change/change.md\n?? .mae-flow.json\n?? .mae-flow.json.gate-strikes"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.gate-strikes": {
+        "counts": {
+          "bash-foreign-openspec": {
+            "count": 1,
+            "last_at": "2026-07-29 10:00:00",
+            "step": "build"
+          }
+        },
+        "recent": {
+          "f68c690a5f": {
+            "at": "2026-07-29 10:00:00",
+            "rule": "bash-foreign-openspec",
+            "sample": "git commit -m '[REQ-DIFF][feat] foreign openspec'",
+            "step": "build"
+          }
+        }
+      }
+    },
+    "stderr": "[mae-flow] 提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec 文件: openspec/changes/other-change/change.md。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，选择不入库后由流程移入 .mae-flow-work/story。\n",
+    "stdout": ""
+  },
+  "quality_agent_task_missing_scan": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "37c74f66f40ba744324453b52b6f3d26afeba59b93163d328b841beabb4c7601",
+        "size": 368
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "quality-diff",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_codecheck",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 先执行 codecheck-scan 冻结首检结果，再生成 CODECHECK 任务卡。\n",
+    "stdout": ""
+  },
+  "quality_codecheck_empty_scan": {
+    "files": {
+      ".mae-flow-work/codecheck-logs/REQ-DIFF-tw_codecheck.md": {
+        "sha256": "ef458fe1f1006ae9adde80091199c198ad31d02642d54c1061cc1f81212088e1",
+        "size": 1218
+      },
+      ".mae-flow.json": {
+        "sha256": "f9d9383544ac7a3de74b2cf9c70079985833986bd57233d4315ebc1d37fc6dcc",
+        "size": 913
+      },
+      ".mae-flow.json.tokens": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.tokens"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "quality-diff",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_codecheck",
+        "history": [],
+        "quality": {
+          "codecheck_scan": {
+            "at": "2026-07-29 10:00:00",
+            "commands": [],
+            "count": 0,
+            "files": [],
+            "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "log_path": "<PROJECT>/.mae-flow-work/codecheck-logs/REQ-DIFF-tw_codecheck.md",
+            "pairs": [],
+            "raw_count": 0,
+            "scope_candidates": [],
+            "scope_pending": false,
+            "scope_reasons": [],
+            "step": "tw_codecheck",
+            "stock_excluded": null
+          }
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.tokens": {}
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] CodeCheck 首检完成:业务文件 0 个,告警 0 条。\n[mae-flow] CodeCheck 详细日志: <PROJECT>/.mae-flow-work/codecheck-logs/REQ-DIFF-tw_codecheck.md\n零告警，不派修复 agent；直接 done（期间源码若变化，证据会过期并要求重扫）。\n"
+  },
+  "quality_codecheck_scope_missing_scan": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "37c74f66f40ba744324453b52b6f3d26afeba59b93163d328b841beabb4c7601",
+        "size": 368
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "CHANGE_NAME": "quality-diff",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "tw_codecheck",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 尚无本步骤的 codecheck-scan 结果；先执行首检。\n",
+    "stdout": ""
+  },
+  "quality_standalone_finish_missing_token": {
+    "files": {
+      ".mae-flow-work/standalone-action.json": {
+        "sha256": "961fb41e97d949e81fdd89a22de74f38f9b72834b6fc68b8d95e1a278bc0041d",
+        "size": 317
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/standalone-action.json"
+    },
+    "returncode": 2,
+    "state": {},
+    "stderr": "[mae-flow] 尚未收到专项 Agent 的合法收尾。继续修正 Agent 报告，或执行 action cancel 结束独立任务；无论哪种情况都不会拦普通开发。\n",
+    "stdout": ""
+  },
+  "standalone_action_cancel": {
+    "files": {
+      ".mae-flow-work/standalone/delivery-diff/action.json": {
+        "sha256": "1a882d189c5fbba2c45e637c69a6030600c70f7cb7b9c27e670a6e1191ecb553",
+        "size": 439
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/standalone/delivery-diff/action.json"
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "[mae-flow] 独立任务已取消，现场保留在 <PROJECT>/.mae-flow-work/standalone/delivery-diff；代码未回滚，普通开发继续放行。\n"
+  },
+  "standalone_action_status": {
+    "files": {
+      ".mae-flow-work/standalone-action.json": {
+        "sha256": "45c4376a6193c8855a71a0d91ce57772ffb559117977b4d1da65ec56e2d19567",
+        "size": 293
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/standalone-action.json"
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "{\n  \"expires_epoch\": 4102444800,\n  \"id\": \"diff-action\",\n  \"kind\": \"ut\",\n  \"quality\": {},\n  \"rejections\": {},\n  \"revision\": 1,\n  \"schema_version\": 2,\n  \"tokens\": {},\n  \"work_dir\": \"<PROJECT>/.mae-flow-work/standalone/diff-action\"\n}\n"
+  },
+  "standalone_scope_confirmation": {
+    "files": {
+      ".mae-flow-work/standalone-action.json": {
+        "sha256": "cda24cb9bbeb7fc413f35896acdd9b131be895276e7e9fdb061a02a75b99bbf4",
+        "size": 1445
+      },
+      ".mae-flow-work/standalone/delivery-scope/ut-task.md": {
+        "sha256": "438960a6d84f973ba5841fec95d41da60766d025e198e959e42cb01436bcf36d",
+        "size": 1788
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "aecc013c518523ca22b7e3780f87002f5cae13fabc369f2f59a1faf7058f8c76",
+        "size": 28
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/standalone-action.json\n?? .mae-flow-work/standalone/delivery-scope/ut-task.md\n?? src/main.py"
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "[mae-flow] 独立 UT 任务卡已生成: <PROJECT>/.mae-flow-work/standalone/delivery-scope/ut-task.md\n启动 ut-generator-agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/standalone/delivery-scope/ut-task.md\"；最终报告必须原样带 TASK_CARD_SHA256: <TASK_CARD_SHA256>\n"
+  },
+  "subagentstop_missing_task_card": {
+    "files": {
+      ".mae-flow-work/agent-compile.jsonl": {
+        "sha256": "5b8fe1f0ab6bbfe9d3b43dc613c272b4c2cf8a10611bf911b8ddd88ebc57c27a",
+        "size": 215
+      },
+      ".mae-flow.json": {
+        "sha256": "7718299a5d9eab908cfbf432f30b9b428c364cc92501cca3712e978f5e1f78a5",
+        "size": 297
+      },
+      ".mae-flow.json.agent-rejections": {
+        "sha256": "0e303b672ff2801b0d554f29ad7bcb833e3ae53477672ffc3d3227173e1fb84e",
+        "size": 251
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/agent-compile.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-rejections"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "full"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "build",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.agent-rejections": {
+        "COMPILE": {
+          "at": "2026-07-29 10:00:00",
+          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "reason": "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。",
+          "step": "build",
+          "task_sha256": ""
+        }
+      }
+    },
+    "stderr": "[mae-flow] COMPILE 契约违规:未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stdout": ""
+  },
+  "terminal_pretooluse_bypass": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "abeb7a6b80e41f8178c6f6bf76a4b25b65c32523f9c95743278de18210ca52ec",
+        "size": 268
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF"
+        },
+        "current": "end",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": ""
+  },
+  "terminal_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "abeb7a6b80e41f8178c6f6bf76a4b25b65c32523f9c95743278de18210ca52ec",
+        "size": 268
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF"
+        },
+        "current": "end",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "{\n  \"choices\": {\n    \"workflow\": \"tweak\"\n  },\n  \"config\": {\n    \"分支名\": \"main\",\n    \"单号\": \"REQ-DIFF\"\n  },\n  \"current\": \"end\",\n  \"history\": [],\n  \"revision\": 1,\n  \"schema_version\": 2,\n  \"started\": \"2026-07-29 10:00:00\",\n  \"updated_at\": \"2026-07-29 10:00:00\"\n}\n"
+  },
+  "workflow_steps": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill_ask 需求澄清询问             [可选环节:需求质询(流程内询问决定)、用户确认] (无硬证据)\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,clean_paths,content_free,glob\n   open 提案与规格                   证据:agent_ran,clean_paths,glob,spec_field,spec_validate\n   design 方案设计                  证据:clean_paths,spec_field,spec_validate\n   story_ask STORY 生成询问         [可选环节:STORY(流程内询问决定)、用户确认] (无硬证据)\n   story 生成 STORY               [随「STORY」询问可选] 证据:agent_ran,content_free,glob\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:spec_field,spec_validate\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:spec_field,spec_validate\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,clean_paths,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
+  }
+}

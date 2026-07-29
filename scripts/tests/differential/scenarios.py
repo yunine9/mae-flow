@@ -497,6 +497,7 @@ from differential import stage1_evidence_scenarios  # noqa: E402
 from differential import stage2_guard_scenarios  # noqa: E402
 from differential import stage3_delivery_scenarios  # noqa: E402
 from differential import stage4_quality_scenarios  # noqa: E402
+from differential import stage5_hook_scenarios  # noqa: E402
 
 
 def direct_current(project, implementation_root):
@@ -701,6 +702,36 @@ def quality_standalone_finish_missing_token(
     )
 
 
+def _stage5_hook(name, project, implementation_root):
+    return getattr(stage5_hook_scenarios, name)(
+        project, implementation_root, _prepare_repository)
+
+
+def hook_compile_missing_execution(project, implementation_root):
+    return _stage5_hook(
+        "hook_compile_missing_execution", project, implementation_root)
+
+
+def hook_ut_zero_tests(project, implementation_root):
+    return _stage5_hook(
+        "hook_ut_zero_tests", project, implementation_root)
+
+
+def hook_grill_without_read(project, implementation_root):
+    return _stage5_hook(
+        "hook_grill_without_read", project, implementation_root)
+
+
+def hook_task_card_tampered(project, implementation_root):
+    return _stage5_hook(
+        "hook_task_card_tampered", project, implementation_root)
+
+
+def hook_stop_moonlight_blocks(project, implementation_root):
+    return _stage5_hook(
+        "hook_stop_moonlight_blocks", project, implementation_root)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
@@ -728,6 +759,11 @@ SCENARIOS = {
     "guard_expired_permit": guard_expired_permit,
     "guard_internal_state_edit": guard_internal_state_edit,
     "guard_requirement_bash_write": guard_requirement_bash_write,
+    "hook_compile_missing_execution": hook_compile_missing_execution,
+    "hook_grill_without_read": hook_grill_without_read,
+    "hook_stop_moonlight_blocks": hook_stop_moonlight_blocks,
+    "hook_task_card_tampered": hook_task_card_tampered,
+    "hook_ut_zero_tests": hook_ut_zero_tests,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
     "moonlight_report_issue": moonlight_report_issue,

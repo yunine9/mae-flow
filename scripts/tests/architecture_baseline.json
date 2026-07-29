@@ -5,7 +5,8 @@
   },
   "max_complexity": {
     "scripts/mae-flow.py": {
-      "advance": 17
+      "advance": 17,
+      "cmd_done": 6
     }
   }
 }

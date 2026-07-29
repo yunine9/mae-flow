@@ -185,6 +185,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_differential_harness.py", text)
         self.assertIn("test_architecture.py", text)
         self.assertIn("test_workflow_advancement.py", text)
+        self.assertIn("test_workflow_completion.py", text)
 
 
 if __name__ == "__main__":

@@ -115,6 +115,11 @@ class HookContractsMixin:
 
         task = self._task_card_contract("UT", report, soft)
         changed = self._enforce_agent_scope("UT", task, bail)
+        if status not in ("PASS", "NEEDS_INPUT", "FAIL"):
+            bail("未知结果状态 " + status)
+            return
+        if status != "PASS":
+            return
         require_baseline = bool(changed)
         self._record_ut_receipts(
             task, report, tool_calls, require_baseline)
@@ -232,5 +237,4 @@ class HookContractsMixin:
         ))
         if not decision.accepted:
             bail(decision.reason)
-
 

@@ -18,6 +18,9 @@ from mae_flow_core.quality.tool_transcript import ToolCall  # noqa: E402
 from mae_flow_core.quality.unit_test_contract import (  # noqa: E402
     evaluate_unit_test_contract,
 )
+from mae_flow_core.adapters.hook_runtime_contracts import (  # noqa: E402
+    HookContractsMixin,
+)
 
 
 def tool(name, value, result="", error=False, seen=True):
@@ -216,6 +219,52 @@ class UnitTestContractTests(unittest.TestCase):
         unknown = evaluate_unit_test_contract(self.context(
             "tool unavailable", status="CLEAR"))
         self.assertIn("未知结果状态 CLEAR", unknown.reason)
+
+
+class UnitTestContractAdapterTests(unittest.TestCase):
+    class Runtime(HookContractsMixin):
+        def __init__(self):
+            self.events = []
+
+        def _contract_bail(self, _kind, message, _soft):
+            self.events.append(("bail", message))
+
+        def _task_card_contract(self, _kind, _report, _soft):
+            self.events.append(("task",))
+            return {"step": "tw_ut", "sha256": "task", "head": "a" * 40}
+
+        def _enforce_agent_scope(self, _kind, _task, _bail):
+            self.events.append(("scope",))
+            return ["tests/test_feature.py"]
+
+        def _record_ut_receipts(self, *_args):
+            self.events.append(("receipt",))
+
+        def _state_config(self):
+            self.events.append(("config",))
+            return {}
+
+    def test_nonpass_status_does_not_persist_or_reuse_ut_receipts(self):
+        for status in ("NEEDS_INPUT", "FAIL"):
+            with self.subTest(status=status):
+                runtime = self.Runtime()
+                runtime._ut_contract(status, "tool unavailable")
+                self.assertEqual(
+                    [("task",), ("scope",)],
+                    runtime.events,
+                )
+
+    def test_unknown_status_bails_before_touching_receipts(self):
+        runtime = self.Runtime()
+        runtime._ut_contract("CLEAR", "tool unavailable")
+        self.assertEqual(
+            [
+                ("task",),
+                ("scope",),
+                ("bail", "未知结果状态 CLEAR"),
+            ],
+            runtime.events,
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "max_lines": {
-    "hooks/dispatch.py": 2860,
+    "hooks/dispatch.py": 326,
     "scripts/mae-flow.py": 8620
   },
   "max_complexity": {

@@ -179,3 +179,34 @@
 - Resolution: initialize the shared Flow fixture through a context manager
 - Regression: the complete suite is run under strict ResourceWarning handling
 - Product behavior: unchanged; only the test fixture lifecycle changed
+
+## MF-RF-011: Selftest searched dispatch for migrated active-event policy
+
+- Status: resolved during Stage 5 verification
+- Classification: refactor safety-net defect
+- Trigger: run `python scripts/selftest.py` after active event handling moves
+  from `hooks/dispatch.py` to application policy and platform adapters
+- Evidence: six static publication checks failed while all corresponding unit,
+  process and Phase-15 differential scenarios passed
+- Root cause: template, Moonlight question and Stop checks remained coupled to
+  the old physical entrypoint after the final assembly extraction
+- Resolution: inspect `event_policies.py` for template routing and
+  `hook_active_events.py` for active platform behavior; include the new adapter
+  in the syntax release gate
+- Product behavior: unchanged
+
+## MF-RF-012: Completion contract rejected an already-achieved target
+
+- Status: resolved during Stage 5 closeout
+- Classification: refactor safety-net lifecycle defect
+- Trigger: tighten the Hook architecture baseline from 2860 to its achieved
+  326 lines while the approved final target remains 800
+- Evidence: contract validation required every final target to remain strictly
+  below the current architecture baseline, so surpassing the target made the
+  completion test fail
+- Root cause: the bootstrap assertion distinguished a future target from a
+  permissive baseline but had no achieved-state semantics
+- Resolution: the immutable approved target equality remains the anti-inflation
+  guard; baseline validation now requires the target to be a positive integer
+  and allows the current baseline to be stricter
+- Product behavior: unchanged

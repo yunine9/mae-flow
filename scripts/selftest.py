@@ -103,6 +103,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/application/hooks/receipts.py",
           "scripts/mae_flow_core/application/hooks/agent_completion.py",
           "scripts/mae_flow_core/adapters/__init__.py",
+          "scripts/mae_flow_core/adapters/hook_active_events.py",
           "scripts/mae_flow_core/adapters/hook_events.py",
           "scripts/mae_flow_core/adapters/hook_runtime.py",
           "scripts/mae_flow_core/adapters/hook_runtime_state.py",
@@ -2442,6 +2443,18 @@ hook_events_adapter = open(
         ROOT, "scripts", "mae_flow_core", "adapters", "hook_events.py"),
     encoding="utf-8",
 ).read()
+hook_active_adapter = open(
+    os.path.join(
+        ROOT, "scripts", "mae_flow_core", "adapters",
+        "hook_active_events.py"),
+    encoding="utf-8",
+).read()
+hook_event_policies = open(
+    os.path.join(
+        ROOT, "scripts", "mae_flow_core", "application", "hooks",
+        "event_policies.py"),
+    encoding="utf-8",
+).read()
 for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
     if f.endswith(".md"):
         name = f[:-3]
@@ -2780,9 +2793,9 @@ check("外部引擎透传只保留在 capability 子命令里且不再扩张",
       len(engine_hits.get("scripts/mae-flow.py", [])) <= 3,
       str(engine_hits.get("scripts/mae-flow.py", [])))
 
-# 6.5 模板与 dispatch 章节校验同步(posttooluse 路由里必须引用同名模板)
+# 6.5 模板与 Hook 应用策略同步(posttooluse 路由必须引用同名模板)
 for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):
-    check(f"dispatch 模板校验引用 {tpl}", tpl in dp)
+    check(f"Hook 模板校验引用 {tpl}", tpl in hook_event_policies)
 
 # 6.6 PostToolUse matcher 必须覆盖令牌/校验所需工具(漏了 = ASKUSER/UTRUN 令牌静默失效)
 if hooks:
@@ -2795,10 +2808,13 @@ if hooks:
         h.get("matcher", "") or ""
         for h in (hooks.get("hooks", {}).get("PreToolUse", []) or []))
     check("月光宝盒可在工具层禁止 AskUserQuestion",
-          "AskUserQuestion" in pre and "月光宝盒处于无人值守模式" in dp)
+          "AskUserQuestion" in pre
+          and "月光宝盒处于无人值守模式" in hook_active_adapter)
     stop_hooks = hooks.get("hooks", {}).get("Stop", []) or []
     check("月光宝盒注册主Agent安全停点Stop Hook",
-          bool(stop_hooks) and "def ev_stop" in dp and "moonlight blocked" in dp)
+          bool(stop_hooks)
+          and "def stop" in hook_active_adapter
+          and "moonlight blocked" in hook_active_adapter)
 
 # 7. 关键文件
 for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md",

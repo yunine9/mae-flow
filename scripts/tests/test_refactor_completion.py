@@ -66,16 +66,15 @@ class RefactorCompletionContractTests(unittest.TestCase):
             item["id"] for item in contract["stages"]])
         self.assertEqual([], validate_contract(ROOT, contract))
 
-    def test_contract_rejects_target_above_current_monolith_baseline(self):
+    def test_contract_rejects_nonpositive_entrypoint_target(self):
         with open(
                 os.path.join(TESTS, "refactor_completion_contract.json"),
                 encoding="utf-8") as stream:
             contract = json.load(stream)
         contract["final_targets"]["max_entrypoint_lines"][
-            "scripts/mae-flow.py"] = 20000
+            "scripts/mae-flow.py"] = 0
         self.assertIn(
-            "scripts/mae-flow.py: final target 20000 must be below "
-            "current architecture baseline 8620",
+            "scripts/mae-flow.py: final target 0 must be a positive integer",
             validate_contract(ROOT, contract),
         )
 

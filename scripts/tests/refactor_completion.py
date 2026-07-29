@@ -73,10 +73,10 @@ def validate_contract(root, contract):
         current = baseline.get("max_lines", {}).get(relative)
         if current is None:
             errors.append(relative + ": missing current architecture baseline")
-        elif not isinstance(maximum, int) or maximum >= current:
+        elif not isinstance(maximum, int) or maximum <= 0:
             errors.append(
-                "%s: final target %s must be below current architecture "
-                "baseline %s" % (relative, maximum, current))
+                "%s: final target %s must be a positive integer"
+                % (relative, maximum))
 
     required_domains = {
         "runtime", "workflow", "evidence", "gate", "ownership",

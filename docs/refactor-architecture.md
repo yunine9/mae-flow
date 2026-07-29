@@ -272,3 +272,37 @@ Stage 4 不改变 CodeCheck 非零退出码语义、900 秒超时、报告/JSON 
 事件顺序、范围候选用户停点、月光模式保守全纳入、人工诊断的 HEAD/文件/SHA256
 绑定、任务卡正文或 Standalone 的禁止提交边界。Stage 5 将继续迁移
 `hooks/dispatch.py` 的 Agent transcript 与最终报告验签。
+
+## Stage 5：Hook Contracts 与协议入口完成证据
+
+Stage 5 将 Hook 的运行模式路由、活跃事件策略、Agent transcript 解析、任务卡与源码
+范围验签、质量收据、COMPILE/CODECHECK/UT/GRILL 最终报告契约和 SubagentStop 编排迁入
+`mae_flow_core.application.hooks`。平台文件、Git、进程、状态和 Hook 响应映射集中在
+`mae_flow_core.adapters`；`hooks/dispatch.py` 只保留字节协议解码、stdin 超时、看门狗、
+项目根定位、运行时与端口装配以及顶层 fail-open。
+
+Phase-15 在 Phase-14 上追加 Hook Agent 契约与 Stop 安全点场景；完整 oracle 比较
+stdout、stderr、退出码、状态 sidecar、文件摘要和 Git 状态。架构门禁禁止已迁移的
+事件处理器与契约函数回流入口，业务测试不能动态导入 Hook 私有策略；Hook application
+函数复杂度不得超过 15，新模块不得超过 500 行。入口防回增长上限从 2860 行收紧到
+326 行。
+
+2026-07-30 在 Stage 5 最终实现上取得的新鲜验证结果：
+
+- 完整严格 `unittest discover`：485 项通过，启用
+  `-W error::ResourceWarning`；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-15 differential runner：零差分；
+- 严格 Hook 套件：74 项通过；
+- refactor completion：8 项通过，fault injection 与架构门禁通过；
+- `hooks/dispatch.py` 为 326 行；新增最大适配器
+  `hook_active_events.py` 为 390 行，其余新 Hook 模块均不超过 500 行；
+- Hook application 全函数复杂度不超过 15，入口已无活跃事件策略和 Agent 契约实现；
+- 独立复审最初发现 1 项 Critical 与 3 项 Important；修复后复审 76 项聚焦测试及
+  Phase-15 通过并给出 `APPROVED`；
+- `git diff --check` 通过。
+
+本阶段额外发现并修复 MF-RF-008 至 MF-RF-011：Standalone 应答路由遗漏、UT 非 PASS
+收据顺序、测试夹具文件句柄和迁移后静态检查耦合。前两项均以独立 `fix:` 提交恢复
+重构前语义。Stage 5 不改变 Hook 事件 matcher、fail-open、输出文案、任务卡与收据
+schema、Agent 写入边界、Stop 三次无进展保护或 Direct/Terminal/Corrupt 优先级。

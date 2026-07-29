@@ -82,6 +82,9 @@ from mae_flow_core.quality.agent_contracts import (
 from mae_flow_core.quality.compile_contract import (
     evaluate_compile_contract as _evaluate_compile_contract,
 )
+from mae_flow_core.quality.codecheck_contract import (
+    evaluate_codecheck_contract as _evaluate_codecheck_contract,
+)
 from mae_flow_core.quality.grill_contract import (
     evaluate_grill_contract as _evaluate_grill_contract,
 )
@@ -2047,166 +2050,98 @@ def _enforce_agent_scope(kind, task, bail):
 
 
 def _codecheck_contract(status, report, tool_calls=None, soft=False):
-    """codecheck 报告的硬校验:fullcheck 实际执行 + 三数对账(FOUND=FIXED+REMAINING_COUNT)。
-    遗漏告警最常见的形态是马虎吞掉,算术对不上当场打回;CLEAN 必须遗留为 0。
-    soft=重答路径:违规不再 exit 2(防死循环),但直接 exit 0 不发令牌,由 done 的 agent_ran 拦截。"""
+    """Validate CodeCheck through the pure contract and persist its effects."""
     def bail(msg):
         _contract_bail("CODECHECK", msg, soft)
 
     task = _task_card_contract("CODECHECK", report, soft)
     changed = _enforce_agent_scope("CODECHECK", task, bail)
-    # 先记真实编译调用：后续哪怕只因报告字段写法被打回，也无需把十几分钟编译重跑一遍。
     _record_codecheck_build_receipt(task, tool_calls)
-    # FAIL 早退必须先于字段对账(与 compile/grill/UT 契约排序一致——校准实锤:
-    # CLI 不可用时 agent 写不出真实 fullcheck 命令,旧排序逼诚实者编造字段)。
-    if status == "FAIL":
+
+    state = _contract_state()
+    scan = (state.get("quality", {}) or {}).get(
+        "codecheck_scan", {})
+    command_count = (
+        len(scan.get("commands") or [])
+        if scan.get("step") == state.get("current") else 1
+    )
+    command_count = max(1, command_count)
+    reusable = {}
+    fullcheck_calls = _bash_calls(
+        tool_calls, "codecheck fullcheck")
+    if soft and not fullcheck_calls:
+        receipt = _reusable_codecheck_fullcheck_receipt(
+            task, command_count, scan)
+        if receipt:
+            reusable["CODECHECK_FULLCHECK"] = receipt
+    build_cfg = _state_config().get("编译方式", "")
+    current_build = _codecheck_build_call(tool_calls, build_cfg)
+    if soft and not current_build:
+        receipt = _reusable_codecheck_build_receipt(task)
+        if receipt:
+            reusable["CODECHECK_BUILD"] = receipt
+
+    decision = _evaluate_codecheck_contract(_contract_context(
+        "CODECHECK",
+        status,
+        report,
+        task,
+        tool_calls,
+        changed,
+        reusable_receipts=reusable,
+        facts={
+            "current": state.get("current", ""),
+            "scan": scan,
+            "soft": bool(soft),
+        },
+    ))
+    details = dict(decision.details)
+    receipt = details.get("fullcheck_receipt")
+    if receipt:
+        _record_codecheck_fullcheck_receipt(
+            task,
+            receipt["command_count"],
+            receipt["raw_counts"],
+            receipt["scan"],
+            receipt.get("expected_raw"),
+            result_hashes=receipt.get("result_hashes"),
+        )
+    if details.get("reused_fullcheck"):
+        reused = reusable.get("CODECHECK_FULLCHECK", {})
+        _log("CODECHECK 重答复用完整 fullcheck 凭证 @"
+             + reused.get("head", "")[:9])
+    if details.get("reused_build"):
+        reused = reusable.get("CODECHECK_BUILD", {})
+        _log("CODECHECK 重答复用编译凭证 @"
+             + reused.get("head", "")[:9])
+    if details.get("build_summary_inaccurate"):
+        _log("CODECHECK EXECUTED_BUILD 摘要不准确,"
+             "以 transcript 的真实编译调用为准")
+    if not decision.accepted:
+        bail(decision.reason)
+
+    if details.get("result") == "accepted-honest-failure":
         _codecheck_log_event("agent.contract_validated", {
-            "status": status, "task_sha256": task.get("sha256", ""),
+            "status": status,
+            "task_sha256": task.get("sha256", ""),
             "task_head": task.get("head", ""),
             "changed_source_paths": changed,
             "result": "accepted-honest-failure",
         })
-        return   # FAIL 是诚实上报,不再苛求对账字段
-    if not re.search(r"EXECUTED_COMMAND.*fullcheck", report, re.I):
-        bail("必须包含 EXECUTED_COMMAND 字段且实际执行的是 fullcheck(用 increcheck 或未执行 = FAIL)。")
-    nums = {}
-    for k in ("FOUND", "FIXED", "REMAINING_COUNT"):
-        mm = re.search(r"^\s*" + k + r":\s*(\d+)\s*$", report, re.M)
-        if not mm:
-            bail(f"缺少机器对账字段 {k}: <数字>。")
-        nums[k] = int(mm.group(1))
-    st = _contract_state()
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
-    if scan.get("step") == st.get("current"):
-        if nums["FOUND"] != scan.get("count"):
-            bail(f"FOUND({nums['FOUND']})与 harness 首检({scan.get('count')})不一致。"
-                 "禁止主会话先修后让 agent 补手续；回到首检状态并由 agent 处理原告警。")
-    if nums["FOUND"] != nums["FIXED"] + nums["REMAINING_COUNT"]:
-        bail(f"对账不平:FOUND({nums['FOUND']}) != FIXED({nums['FIXED']}) + REMAINING_COUNT({nums['REMAINING_COUNT']})"
-             ",有告警被吞掉或数字失实。")
-    if status == "CLEAN" and nums["REMAINING_COUNT"] != 0:
-        bail(f"标记 CLEAN 但 REMAINING_COUNT={nums['REMAINING_COUNT']},自相矛盾。")
-    if status == "REMAINING" and nums["REMAINING_COUNT"] == 0:
-        bail("标记 REMAINING 但 REMAINING_COUNT=0,自相矛盾。")
-    # 复验可能因 Windows 命令行长度限制拆成多批；首检窗口外告警只有经
-    # 用户确认不涉及本次修改后才能排除。真实 CLI 原始数应为各批次之和，
-    # 并与“本单遗留 + 用户确认不涉及”对拍，不能只看最后一批或拿 raw 对 scoped。
-    command_count = len(scan.get("commands") or []) if scan.get("step") == st.get("current") else 1
-    command_count = max(1, command_count)
-    all_fullcheck_calls = _bash_calls(tool_calls, "codecheck fullcheck")
-    selected, invocations = [], 0
-    receipt = None
-    real_counts = []
-    result_hashes = []
-    if all_fullcheck_calls:
-        for call, count in reversed(all_fullcheck_calls):
-            selected.append((call, count))
-            invocations += count
-            if invocations >= command_count:
-                break
-        if invocations < command_count:
-            bail(f"最终一轮 CodeCheck 只找到 {invocations}/{command_count} 个 fullcheck 分批调用；"
-                 "不能跳过前面批次后只拿最后一批收尾。")
-        for call, count in reversed(selected):
-            inp = call.get("input", {}) or {}
-            raw_command = inp.get("command", "") if isinstance(inp, dict) else str(inp)
-            if _command_swallows_failure(raw_command):
-                bail("CodeCheck 命令使用了 || true / ; exit 0 等方式吞掉失败退出码。")
-            if not call.get("result_seen"):
-                bail("最终一轮 CodeCheck 分批调用缺少 tool_result，不能报告成功。")
-            hits = _codecheck_counts_from_text(call.get("result"))
-            # CodeCheckCLI 发现告警时可能返回非零码；可信机器计数比通用 Bash
-            # 退出状态更能表达该工具是否完成。没有计数时仍按失败状态阻断。
-            if _call_failed(call) and not hits:
-                bail("最终一轮 CodeCheck 分批调用失败，且 tool_result 没有可验证的"
-                     "告警计数，不能报告成功。")
-            result_hashes.append(hashlib.sha256(
-                str(call.get("result") or "").encode(
-                    "utf-8", errors="replace")).hexdigest())
-            real_counts.extend(hits[-count:])
-        if len(real_counts) < command_count:
-            _record_codecheck_fullcheck_receipt(
-                task, command_count, [], scan,
-                result_hashes=result_hashes)
-    elif soft:
-        receipt = _reusable_codecheck_fullcheck_receipt(
-            task, command_count, scan)
-        if receipt:
-            real_counts = list(receipt.get("raw_counts") or [])
-            _log("CODECHECK 重答复用完整 fullcheck 凭证 @"
-                 + receipt.get("head", "")[:9])
-    if not all_fullcheck_calls and not receipt:
-        bail("transcript 中没有完整执行本轮 CodeCheck fullcheck，且没有同任务卡、"
-             "同源码版本、同分批口径的可复用机器凭证。")
-    if len(real_counts) >= command_count:
-        real_counts = real_counts[-command_count:]
-        real_raw = sum(real_counts)
-        stock = scan.get("stock_excluded")
-        expected_raw = nums["REMAINING_COUNT"] + stock if isinstance(stock, int) \
-            else nums["REMAINING_COUNT"]
-        if real_raw != expected_raw:
-            bail(f"真实 fullcheck 最终 {command_count} 批合计 {real_raw} 条告警，"
-                 f"但本单遗留({nums['REMAINING_COUNT']})"
-                 + (f"+用户确认不涉及({stock})={expected_raw}" if isinstance(stock, int)
-                    else f"={expected_raw}")
-                 + "；复验摘录不能自说自话，修完或如实上报后重答。")
-        if all_fullcheck_calls:
-            _record_codecheck_fullcheck_receipt(
-                task, command_count, real_counts, scan, expected_raw,
-                result_hashes=result_hashes)
-    if nums["FIXED"] > 0:
-        build = _field(report, "EXECUTED_BUILD")
-        build_cfg = _state_config().get("编译方式", "")
-        current_call = _codecheck_build_call(tool_calls, build_cfg)
-        reused = _reusable_codecheck_build_receipt(task) if soft and not current_call else None
-        if current_call:
-            # 工具调用是事实，字段只是摘要；不因摘要写成“无需”等小格式问题重跑长编译。
-            if not _build_summary_matches(build, build_cfg):
-                _log("CODECHECK EXECUTED_BUILD 摘要不准确,以 transcript 的真实编译调用为准")
-        elif reused:
-            _log("CODECHECK 重答复用编译凭证 @" + reused.get("head", "")[:9])
-        else:
-            need = _required_skill(build_cfg)
-            if need:
-                call = _skill_call(tool_calls, need)
-                if call and _call_failed(call):
-                    bail(f"{need} Skill 的工具结果明确失败，不能把本轮修复计为已编译。")
-                bail(f"编译配置要求 {need} Skill，但本轮 transcript 中没有成功调用，"
-                     "也没有同任务卡、同源码版本的可复用编译凭证。")
-            else:
-                call = _build_call(tool_calls, build_cfg)
-                if call and _call_failed(call):
-                    bail("配置的编译命令明确失败，不能把本轮修复计为已编译。")
-                bail("本轮 transcript 中没有成功执行配置的编译命令，"
-                     "也没有同任务卡、同源码版本的可复用编译凭证。")
-    # 与复验摘录对账:契约要求附「共有 N 条告警」原文,取最后一处(复验)与 REMAINING_COUNT 比对
-    ex = re.findall(r"共有\s*(\d+)\s*条告警", report)
-    stock = scan.get("stock_excluded")
-    excerpt_expected = nums["REMAINING_COUNT"] + stock if isinstance(stock, int) \
-        else nums["REMAINING_COUNT"]
-    excerpt_actual = (
-        sum(int(x) for x in ex[-command_count:])
-        if command_count > 1 and len(ex) >= command_count
-        else int(ex[-1]) if ex else None)
-    if excerpt_actual is not None and excerpt_actual != excerpt_expected:
-        bail(f"复验摘录合计 {excerpt_actual} 条告警与真实对账口径"
-             f"（本单遗留 {nums['REMAINING_COUNT']}"
-             + (f" + 用户确认不涉及 {stock}" if isinstance(stock, int) else "")
-             + f" = {excerpt_expected}）矛盾。")
+        return
     _codecheck_log_event("agent.contract_validated", {
         "status": status,
         "task_sha256": task.get("sha256", ""),
         "task_head": task.get("head", ""),
         "changed_source_paths": changed,
-        "found": nums["FOUND"],
-        "fixed": nums["FIXED"],
-        "remaining": nums["REMAINING_COUNT"],
-        "fullcheck_raw_counts": real_counts,
-        "fullcheck_expected_raw": excerpt_expected,
-        "fullcheck_command_count": command_count,
+        "found": details["found"],
+        "fixed": details["fixed"],
+        "remaining": details["remaining"],
+        "fullcheck_raw_counts": details["fullcheck_raw_counts"],
+        "fullcheck_expected_raw": details["fullcheck_expected_raw"],
+        "fullcheck_command_count": details["command_count"],
         "result": "accepted",
     })
-
 
 def _ac_coverage_has_mapping(coverage):
     """Accept either arrow mappings or a real Markdown EARS/test table.

@@ -35,8 +35,13 @@ def accept(receipt_plans=(), details=None):
     )
 
 
-def reject(reason):
-    return ContractDecision(accepted=False, reason=reason)
+def reject(reason, receipt_plans=(), details=None):
+    return ContractDecision(
+        accepted=False,
+        reason=reason,
+        receipt_plans=tuple(receipt_plans),
+        details=details or {},
+    )
 
 
 def same_config(actual, expected):

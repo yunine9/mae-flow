@@ -537,3 +537,24 @@ def delivery_complexity_violations(root, maximum=15):
                         )
                     )
     return violations
+
+
+def hook_complexity_violations(root, maximum=15):
+    root_path = Path(root)
+    hooks = (
+        root_path / "scripts" / "mae_flow_core" / "application" / "hooks")
+    violations = []
+    if not hooks.exists():
+        return violations
+    for path in sorted(hooks.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        for node in ast.walk(_parse(os.fspath(path))):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            complexity = _node_complexity(node)
+            if complexity > maximum:
+                violations.append(
+                    "%s:%d: %s complexity %d exceeds %d"
+                    % (relative, node.lineno, node.name, complexity, maximum)
+                )
+    return violations

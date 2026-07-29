@@ -132,39 +132,9 @@ def _run_marked_contract(
     return HookResponse()
 
 
-def handle_agent_completion(payload, ports):
-    """Handle one SubagentStop payload and return its protocol response."""
-    retry = bool(payload.get("stop_hook_active"))
-    path = _transcript_path(payload, ports)
-    ports.log(
-        "subagentstop transcript: "
-        + (os.path.basename(path) or "?"))
-    try:
-        lines = ports.load_transcript(path)
-    except Exception:
-        return HookResponse()
-    transcript = parse_transcript(lines)
-    users = transcript.user_texts
-    assistants = transcript.assistant_texts
-    prompt = users[0] if users else ""
-    last = (assistants[-1] if assistants else "").strip()
-    marker = select_contract_marker(last)
-    _log_marker_tolerance(last, marker, ports)
-    rejection = marker.error
-    if rejection:
-        ports.record_rejection("SUBAGENT", rejection)
-
-    state = ports.contract_state()
-    standalone = _standalone_expected(state)
-    if marker.kind and standalone and marker.kind != standalone:
-        ports.log(
-            "standalone action ignores unrelated contract agent: "
-            + marker.kind)
-        return HookResponse()
-    if marker.kind:
-        return _run_marked_contract(
-            marker, last, transcript, path, retry, ports)
-
+def _handle_unmarked_completion(
+        retry, path, prompt, last, transcript, assistants, rejection,
+        standalone, ports):
     if retry:
         ports.autopsy(path, assistants)
         ports.record_rejection(
@@ -205,4 +175,49 @@ def handle_agent_completion(payload, ports):
     return HookResponse(
         exit_code=2,
         stderr=_missing_marker_message(rejection, clue) + "\n",
+    )
+
+
+def handle_agent_completion(payload, ports):
+    """Handle one SubagentStop payload and return its protocol response."""
+    retry = bool(payload.get("stop_hook_active"))
+    path = _transcript_path(payload, ports)
+    ports.log(
+        "subagentstop transcript: "
+        + (os.path.basename(path) or "?"))
+    try:
+        lines = ports.load_transcript(path)
+    except Exception:
+        return HookResponse()
+    transcript = parse_transcript(lines)
+    users = transcript.user_texts
+    assistants = transcript.assistant_texts
+    prompt = users[0] if users else ""
+    last = (assistants[-1] if assistants else "").strip()
+    marker = select_contract_marker(last)
+    _log_marker_tolerance(last, marker, ports)
+    rejection = marker.error
+    if rejection:
+        ports.record_rejection("SUBAGENT", rejection)
+
+    state = ports.contract_state()
+    standalone = _standalone_expected(state)
+    if marker.kind and standalone and marker.kind != standalone:
+        ports.log(
+            "standalone action ignores unrelated contract agent: "
+            + marker.kind)
+        return HookResponse()
+    if marker.kind:
+        return _run_marked_contract(
+            marker, last, transcript, path, retry, ports)
+    return _handle_unmarked_completion(
+        retry,
+        path,
+        prompt,
+        last,
+        transcript,
+        assistants,
+        rejection,
+        standalone,
+        ports,
     )

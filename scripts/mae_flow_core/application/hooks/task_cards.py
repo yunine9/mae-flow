@@ -157,6 +157,10 @@ def verify_dispatch_task(kind, state, ports):
             % (kind, head[:10], current[:10], remedy),
             task,
         )
+    return _verify_dispatch_source_freshness(kind, state, task, head, ports)
+
+
+def _verify_dispatch_source_freshness(kind, state, task, head, ports):
     if task.get("precommit_review") and head:
         if ports.source_snapshot(head) != (
                 task.get("source_snapshot") or {}):
@@ -184,70 +188,80 @@ def verify_dispatch_task(kind, state, ports):
     return accepted(task)
 
 
+def _current_source_change(path, task, state, ports):
+    if task.get("standalone"):
+        initial = task.get("initial_source_fingerprints", {}) or {}
+        return initial.get(path) != ports.path_fingerprint(path)
+    if task.get("precommit_review"):
+        initial = task.get("source_snapshot", {}) or {}
+        return initial.get(path) != ports.review_path_fingerprint(path)
+    initial_dirty = set(state.get("initial_dirty", []) or [])
+    fingerprints = state.get("initial_dirty_fingerprints", {}) or {}
+    return not (
+        path in initial_dirty
+        and fingerprints.get(path) == ports.path_fingerprint(path)
+    )
+
+
 def _changed_source_paths(task, state, ports):
     changed = tuple(
         path for path in ports.changed_paths_since(task.get("head", ""))
         if ports.source_like(path)
     )
-    if task.get("standalone"):
-        initial = task.get("initial_source_fingerprints", {}) or {}
-        return tuple(
-            path for path in changed
-            if initial.get(path) != ports.path_fingerprint(path)
-        )
-    if task.get("precommit_review"):
-        initial = task.get("source_snapshot", {}) or {}
-        return tuple(
-            path for path in changed
-            if initial.get(path) != ports.review_path_fingerprint(path)
-        )
-    initial_dirty = set(state.get("initial_dirty", []) or [])
-    fingerprints = state.get("initial_dirty_fingerprints", {}) or {}
     return tuple(
         path for path in changed
-        if not (
-            path in initial_dirty
-            and fingerprints.get(path) == ports.path_fingerprint(path)
+        if _current_source_change(path, task, state, ports)
+    )
+
+
+def _compile_scope_rejection(changed, ports):
+    bad = [path for path in changed if ports.test_like(path)]
+    return (
+        "compile-agent 越权修改了测试文件: " + "、".join(bad[:5])
+        if bad else ""
+    )
+
+
+def _codecheck_scope_rejection(task, changed):
+    allowed = {
+        str(path).replace("\\", "/").lower()
+        for path in task.get("allowed_files", [])
+    }
+    bad = [path for path in changed if path.lower() not in allowed]
+    return (
+        "codecheck-fix-agent 修改了首检范围外文件: "
+        + "、".join(bad[:5])
+        if bad else ""
+    )
+
+
+def _ut_scope_rejection(changed, ports):
+    deleted = [
+        path for path in changed
+        if ports.test_like(path) and not ports.path_exists(path)
+    ]
+    if deleted:
+        return (
+            "ut-generator-agent 删除了既有测试文件: "
+            + "、".join(deleted[:5])
+            + "；不能通过删测试取得 PASS。"
         )
+    bad = [path for path in changed if not ports.test_like(path)]
+    return (
+        "ut-generator-agent 修改了非测试源码: "
+        + "、".join(bad[:5])
+        + "；源码缺陷必须先交用户裁决。"
+        if bad else ""
     )
 
 
 def _scope_rejection(kind, task, changed, ports):
     if kind == "COMPILE":
-        bad = [path for path in changed if ports.test_like(path)]
-        return (
-            "compile-agent 越权修改了测试文件: " + "、".join(bad[:5])
-            if bad else ""
-        )
+        return _compile_scope_rejection(changed, ports)
     if kind == "CODECHECK":
-        allowed = {
-            str(path).replace("\\", "/").lower()
-            for path in task.get("allowed_files", [])
-        }
-        bad = [path for path in changed if path.lower() not in allowed]
-        return (
-            "codecheck-fix-agent 修改了首检范围外文件: "
-            + "、".join(bad[:5])
-            if bad else ""
-        )
+        return _codecheck_scope_rejection(task, changed)
     if kind == "UT":
-        deleted = [
-            path for path in changed
-            if ports.test_like(path) and not ports.path_exists(path)
-        ]
-        if deleted:
-            return (
-                "ut-generator-agent 删除了既有测试文件: "
-                + "、".join(deleted[:5])
-                + "；不能通过删测试取得 PASS。"
-            )
-        bad = [path for path in changed if not ports.test_like(path)]
-        return (
-            "ut-generator-agent 修改了非测试源码: "
-            + "、".join(bad[:5])
-            + "；源码缺陷必须先交用户裁决。"
-            if bad else ""
-        )
+        return _ut_scope_rejection(changed, ports)
     if kind == "GRILL" and changed:
         return (
             "grill-critic-agent 是只读审查角色，却修改了文件: "

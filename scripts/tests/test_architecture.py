@@ -25,6 +25,7 @@ from architecture_rules import (  # noqa: E402
     forbidden_calls,
     function_complexity,
     guard_complexity_violations,
+    hook_complexity_violations,
     line_count,
     module_imports,
     new_module_size_violations,
@@ -139,6 +140,9 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_hook_application_has_no_direct_side_effects(self):
         self.assertEqual([], assert_hook_application_dependencies(ROOT))
+
+    def test_hook_application_functions_stay_within_complexity_limit(self):
+        self.assertEqual([], hook_complexity_violations(ROOT))
 
     def test_hook_entrypoint_is_a_bounded_protocol_adapter(self):
         path = os.path.join(ROOT, "hooks", "dispatch.py")

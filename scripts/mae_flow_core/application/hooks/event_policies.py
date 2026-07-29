@@ -18,18 +18,12 @@ class TemplateDecision:
     missing: tuple = ()
 
 
-def stop_decision(state, stop_hook_active, guard):
-    """Decide whether Moonlight may stop without reading or writing state."""
-    moonlight = state.get("moonlight") or {}
-    revision = int(state.get("revision", 0) or 0)
-    if not moonlight.get("enabled"):
-        return StopDecision(True, revision=revision, reason="inactive")
-    step = state.get("current", "")
+def _moonlight_safe_point(step, moonlight):
     unresolved = [
         issue for issue in (moonlight.get("issues") or [])
         if not issue.get("resolved_at")
     ]
-    safe = (
+    return (
         step in ("moonlight_review", "end")
         or bool(moonlight.get("hard_blocked"))
         or (
@@ -37,19 +31,33 @@ def stop_decision(state, stop_hook_active, guard):
             and any(issue.get("kind") == "push" for issue in unresolved)
         )
     )
-    if safe:
+
+
+def _stop_blocks(stop_hook_active, guard, revision):
+    if not stop_hook_active:
+        return 1
+    if int(guard.get("revision", -1) or -1) != revision:
+        return 1
+    return int(guard.get("blocks", 0) or 0) + 1
+
+
+def stop_decision(state, stop_hook_active, guard):
+    """Decide whether Moonlight may stop without reading or writing state."""
+    moonlight = state.get("moonlight") or {}
+    revision = int(state.get("revision", 0) or 0)
+    if not moonlight.get("enabled"):
+        return StopDecision(True, revision=revision, reason="inactive")
+    step = state.get("current", "")
+    if _moonlight_safe_point(step, moonlight):
         return StopDecision(True, revision=revision, reason="safe-point")
-    blocks = 1
-    if stop_hook_active:
-        if int(guard.get("revision", -1) or -1) == revision:
-            blocks = int(guard.get("blocks", 0) or 0) + 1
-        if blocks > 3:
-            return StopDecision(
-                True,
-                blocks=blocks,
-                revision=revision,
-                reason="retry-limit",
-            )
+    blocks = _stop_blocks(stop_hook_active, guard, revision)
+    if stop_hook_active and blocks > 3:
+        return StopDecision(
+            True,
+            blocks=blocks,
+            revision=revision,
+            reason="retry-limit",
+        )
     return StopDecision(False, blocks=blocks, revision=revision)
 
 

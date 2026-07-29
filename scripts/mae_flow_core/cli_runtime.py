@@ -61,10 +61,28 @@ for _module in _COMMAND_MODULES:
     api.register(_module)
 
 from .cli_commands import evidence_registry as _evidence_registry
-api.register_values({name: value for name, value in vars(_evidence_registry).items() if name == "EVIDENCE" or name.startswith("ev_") or name.startswith("_EVIDENCE")})
+api.register(_evidence_registry)
+_EVIDENCE_COMPAT_NAMES = {
+    "EVIDENCE",
+    "_AGENT_EVIDENCE",
+    "_DELIVERY_EVIDENCE",
+    "_EVIDENCE_REGISTRY",
+    "_QUALITY_EVIDENCE",
+    "_WORKFLOW_EVIDENCE",
+}
+api.register_values({
+    name: value
+    for name, value in vars(_evidence_registry).items()
+    if name in _EVIDENCE_COMPAT_NAMES or name.startswith("ev_")
+})
 globals().update(api.exports())
 
 class _CliRuntimeModule(types.ModuleType):
+    def __getattribute__(self, name):
+        if name == "FLOW":
+            return api.FLOW
+        return super().__getattribute__(name)
+
     def __setattr__(self, name, value):
         super().__setattr__(name, value)
         if not name.startswith("__"):

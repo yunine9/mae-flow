@@ -53,6 +53,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_delivery_policies.py",), 180, 5000),
     ("CLI 命令路由契约回归",
      ("scripts/tests/test_command_dispatch.py",), 180, 5000),
+    ("CLI 公共门面兼容回归",
+     ("scripts/tests/test_cli_runtime_facade.py",), 180, 5000),
     ("行为差分安全网",
      ("scripts/tests/test_differential_harness.py",), 180, 5000),
     ("完整 Phase-10 行为差分",

@@ -256,3 +256,24 @@
   engine-call audits include the semantic command modules and permit only the
   named capability handler
 - Product behavior: unchanged
+
+## MF-RF-016: Public CLI facade omitted live compatibility state
+
+- Status: resolved during final independent review
+- Classification: refactor-introduced in-process API regression
+- Trigger: import `mae_flow_core.cli_runtime` and inspect the legacy evidence
+  rule objects, or read `FLOW` after the composition registry loads a new flow
+- Evidence: the four `_AGENT/_DELIVERY/_QUALITY/_WORKFLOW_EVIDENCE` attributes
+  raised `AttributeError`; `cli_runtime.FLOW` retained its import-time snapshot
+  while command modules used the newly loaded registry value
+- Impact: CLI subprocess behavior was unchanged, but Python callers and tests
+  using the supported public runtime facade could observe missing or stale state
+- Root cause: evidence registration filtered only names beginning
+  `_EVIDENCE`, and the facade copied `FLOW` once instead of forwarding reads
+- Resolution: register an explicit compatibility allowlist, enroll the evidence
+  module in override propagation, and make facade `FLOW` reads resolve the live
+  composition value
+- Regression: `test_cli_runtime_facade.py` covers all four rule objects,
+  evidence override propagation and bidirectional live Flow visibility;
+  Phase-15 remains zero-diff
+- Product behavior: restored to the historical in-process API

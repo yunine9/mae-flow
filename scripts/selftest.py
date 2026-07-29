@@ -34,6 +34,9 @@ class _TmpDir:
 
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
+from mae_flow_core.quality.task_cards import (
+    EXPECTED_STEPS as TASK_CARD_EXPECTED_STEPS,
+)
 from mae_flow_core.workflow.definition import definition_errors
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -62,6 +65,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/delivery/__init__.py",
           "scripts/mae_flow_core/delivery/checkpoints.py",
           "scripts/mae_flow_core/delivery/moonlight.py",
+          "scripts/mae_flow_core/command_dispatch.py",
           "scripts/mae_flow_core/workflow/__init__.py",
           "scripts/mae_flow_core/workflow/advancement.py",
           "scripts/mae_flow_core/workflow/completion.py",
@@ -84,6 +88,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_guard_intent.py",
           "scripts/tests/test_quality_task_cards.py",
           "scripts/tests/test_delivery_policies.py",
+          "scripts/tests/test_command_dispatch.py",
           "scripts/tests/test_task_scope.py",
           "scripts/tests/test_workflow_advancement.py",
           "scripts/tests/test_workflow_completion.py",
@@ -193,6 +198,14 @@ delivery_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("交付子状态机纯策略回归", delivery_tests.returncode == 0,
       (delivery_tests.stdout + delivery_tests.stderr)[-5000:])
+command_dispatch_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_command_dispatch.py")],
+    text=True, capture_output=True, timeout=180)
+check("CLI 命令路由契约回归",
+      command_dispatch_tests.returncode == 0,
+      (command_dispatch_tests.stdout
+       + command_dispatch_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py")):
@@ -3491,7 +3504,11 @@ check("CodeCheck 解析失败有绑定现场的恢复入口",
       and "代码一变自动失效" in mf_src)
 check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
       'st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck")' in mf_src
-      and 'expected_steps = {"COMPILE"' in mf_src)
+      and {
+          "verify_codecheck",
+          "tw_codecheck",
+          "rf_codecheck",
+      } <= TASK_CARD_EXPECTED_STEPS["CODECHECK"])
 check("Bash 任意解释器不能直碰流程状态文件",
       "禁止经 Bash 直接访问" in mf_src and "mae-flow status/current/doctor" in mf_src)
 check("带短横线的一次性退出凭据也在状态黑名单内",

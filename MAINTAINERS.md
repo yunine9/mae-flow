@@ -1,6 +1,8 @@
 # Mae-Flow 维护者手册
 
 读者：维护、扩展、排障本插件的人。使用者请看 [README.md](README.md)。
+重构后的模块边界、依赖方向和扩展步骤见
+[docs/refactor-architecture.md](docs/refactor-architecture.md)。
 
 ---
 
@@ -85,7 +87,7 @@ skills/mae-flow/SKILL.md   触发条件 + 5 条铁律(工具管不住、靠模�
 flow/flow.json              流程定义:步骤图、证据、权限、环境检查项
 flow/steps/<step>.md        每步的执行指令(改流程行为优先改这里,无需动代码)
 scripts/mae-flow.py         状态机驱动器(init/current/done/skip/gate/status/doctor/report/envcheck/goto/accept-risk/template/exit)
-scripts/mae_flow_core/      CLI/Hook 共用内核：运行模式裁决、带锁状态存储、独立任务生命周期、月光策略
+scripts/mae_flow_core/      CLI/Hook 共用内核：foundation/workflow/guard/quality/delivery 纯规则、命令路由、运行模式与状态存储
 scripts/mae_flow_core/capabilities.py  固定能力包加载、内嵌 CLI/脚本路由、CodeCheck 首用安装
 runtime/vendor/             流程实际读取的固定方法/schema/模板，以及仍对外承诺的兼容执行器与许可证
 runtime/bin/openspec        Comet 归档脚本调用内嵌 OpenSpec 的稳定入口

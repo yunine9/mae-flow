@@ -76,6 +76,7 @@ from mae_flow_core.moonlight import (
     unresolved as moonlight_unresolved,
 )
 from mae_flow_core.cli_parser import parse_args
+from mae_flow_core import command_dispatch
 from mae_flow_core.lightcheck import (
     analyze_changed_with_timeout,
     render_markdown,
@@ -10269,76 +10270,73 @@ def cmd_exit_corrupt_state(args, state_error):
         print("⚠ 兼容提示：" + "；".join(errors), file=sys.stderr)
 
 
-def main():
-    args = parse_args()
+_COMMAND_UNHANDLED = object()
 
-    root, _ = find_project_root()
-    if root != os.getcwd():
-        os.chdir(root)
-        if args.cmd != "gate":   # gate 保持输出纯净(stderr 会回传模型)
-            print(f"[mae-flow] 调用目录非项目根,已定位到: {root}", file=sys.stderr)
 
-    global FLOW
-    flow = load_flow()
-    FLOW = flow
-    runtime = resolve_runtime(os.getcwd())
-    try:
-        st = load_state()
-    except Exception as state_error:
-        if args.cmd == "exit":
-            return cmd_exit_corrupt_state(args, state_error)
-        if args.cmd == "doctor":
-            return cmd_runtime_doctor(runtime, args, state_error)
-        die("流程状态文件损坏，不能安全判断当前步骤：%s。不要删除或手改状态；"
-            "用户可直接发送 `/mae-flow:mae-flow exit`，Hook 会保存坏文件并退出；"
-            "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
+def _dispatch_action(flow, state, args):
+    route = command_dispatch.action_route(args.action)
+    if route is None:
+        return _COMMAND_UNHANDLED
+    return command_dispatch.invoke(
+        route, globals(), flow=flow, state=state, args=args)
+
+
+def _dispatch_story_localize(flow, state, runtime, args):
+    if runtime.mode == RuntimeMode.STANDALONE:
+        die("当前有 UT/CodeCheck/Grill 独立任务正在运行，"
+            "先 finish/cancel 后再整理 STORY。", 2)
+    if (
+        state is not None
+        and not flow.get("steps", {}).get(
+            state.get("current", ""), {}).get("terminal")
+    ):
+        die("完整流程中的 STORY 不入库由 story 步 done 自动处理，"
+            "无需手工执行 story-localize。", 2)
+    return cmd_story_localize(args)
+
+
+def _dispatch_init(flow, runtime, args):
+    if runtime.mode == RuntimeMode.STANDALONE:
+        die("当前有独立任务正在运行，不能同时初始化完整流程。"
+            "先执行 action finish 或 action cancel。", 2)
+    return cmd_init(flow, args)
+
+
+def _dispatch_moonlight_start(flow, state, runtime, args):
+    if runtime.mode == RuntimeMode.STANDALONE:
+        die("当前有独立任务正在运行，不能叠加月光宝盒。"
+            "先执行 action finish 或 action cancel。", 2)
+    return cmd_moonlight(flow, state, args)
+
+
+def _dispatch_global_command(flow, state, runtime, args):
     if args.cmd == "envcheck":
         return cmd_envcheck(flow, args)
     if args.cmd == "steps":
-        return cmd_steps(flow, st, args)
+        return cmd_steps(flow, state, args)
     if args.cmd == "capability":
         return cmd_capability(args)
     if args.cmd == "template":
         return cmd_template(flow, args)
     if args.cmd == "story-localize":
-        if runtime.mode == RuntimeMode.STANDALONE:
-            die("当前有 UT/CodeCheck/Grill 独立任务正在运行，"
-                "先 finish/cancel 后再整理 STORY。", 2)
-        if (st is not None
-                and not flow.get("steps", {}).get(
-                    st.get("current", ""), {}).get("terminal")):
-            die("完整流程中的 STORY 不入库由 story 步 done 自动处理，"
-                "无需手工执行 story-localize。", 2)
-        return cmd_story_localize(args)
+        return _dispatch_story_localize(flow, state, runtime, args)
     if args.cmd == "init":
-        if runtime.mode == RuntimeMode.STANDALONE:
-            die("当前有独立任务正在运行，不能同时初始化完整流程。"
-                "先执行 action finish 或 action cancel。", 2)
-        return cmd_init(flow, args)
+        return _dispatch_init(flow, runtime, args)
     if args.cmd == "moonlight" and args.action in ("on", "continue"):
-        if runtime.mode == RuntimeMode.STANDALONE:
-            die("当前有独立任务正在运行，不能叠加月光宝盒。"
-                "先执行 action finish 或 action cancel。", 2)
-        return cmd_moonlight(flow, st, args)
+        return _dispatch_moonlight_start(
+            flow, state, runtime, args)
     if args.cmd == "lightcheck":
-        return cmd_lightcheck(st, args)
+        return cmd_lightcheck(state, args)
     if args.cmd == "gate":
-        return cmd_gate(flow, st, args)
+        return cmd_gate(flow, state, args)
     if args.cmd == "action":
-        if args.action == "start":
-            return cmd_action_start(flow, st, args)
-        if args.action == "confirm-scope":
-            return cmd_action_confirm_scope(flow, args)
-        if args.action == "status":
-            return cmd_action_status()
-        if args.action == "critic":
-            return cmd_action_critic(args)
-        if args.action == "finish":
-            return cmd_action_finish(args)
-        if args.action == "cancel":
-            return cmd_action_cancel()
+        return _dispatch_action(flow, state, args)
     if args.cmd == "report" and args.all:
         return cmd_report_all()   # 账本聚合是无状态命令,不要求存在在途单
+    return _COMMAND_UNHANDLED
+
+
+def _dispatch_runtime_mode(runtime, args):
     if runtime.mode == RuntimeMode.DIRECT:
         if args.cmd == "messages":
             return cmd_direct_messages(args)
@@ -10354,54 +10352,56 @@ def main():
             "执行 action status 查看，或 action finish/action cancel 结束。", 2)
     if runtime.mode == RuntimeMode.CORRUPT and args.cmd in ("current", "status", "doctor"):
         return cmd_runtime_doctor(runtime, args)
-    if st is None:
+    return _COMMAND_UNHANDLED
+
+
+def _dispatch_flow_command(flow, state, args):
+    if state is None:
         die("流程未初始化,先执行 init。")
-    if args.cmd == "exit":
-        return cmd_exit(flow, st, args)
-    if args.cmd == "messages":
-        return cmd_messages(st, args)
-    if args.cmd == "config-review":
-        return cmd_config_review(flow, st, args)
-    if args.cmd == "requirement-record":
-        return cmd_requirement_record(st, args)
-    if args.cmd == "moonlight":
-        return cmd_moonlight(flow, st, args)
-    if args.cmd == "current":
-        return print_current(flow, st)
-    if args.cmd == "checkpoint":
-        return cmd_checkpoint(flow, st, args)
-    if args.cmd == "agent-task":
-        return cmd_agent_task(flow, st, args)
-    if args.cmd == "codecheck-scan":
-        return cmd_codecheck_scan(flow, st, args)
-    if args.cmd == "codecheck-scope":
-        return cmd_codecheck_scope(flow, st, args)
-    if args.cmd == "codecheck-record":
-        return cmd_codecheck_record(flow, st, args)
-    if args.cmd == "approve-exemption":
-        return cmd_approve_exemption(flow, st, args)
-    if args.cmd == "accept-risk":
-        return cmd_accept_risk(flow, st, args)
-    if args.cmd == "allow":
-        return cmd_allow(flow, st, args)
-    if args.cmd == "spec":
-        return cmd_spec(flow, st, args)
-    if args.cmd == "done":
-        return cmd_done(flow, st, args)
-    if args.cmd == "skip":
-        return cmd_skip(flow, st, args)
-    if args.cmd == "status":
-        return cmd_status(flow, st, args)
-    if args.cmd == "goto":
-        return cmd_goto(flow, st, args)
-    if args.cmd == "unlock":
-        return cmd_unlock(flow, st, args)
-    if args.cmd == "reloaded":
-        return cmd_reloaded(flow, st, args)
-    if args.cmd == "doctor":
-        return cmd_doctor(flow, st, args)
-    if args.cmd == "report":
-        return cmd_report(flow, st, args)
+    route = command_dispatch.flow_route(args.cmd)
+    if route is None:
+        return _COMMAND_UNHANDLED
+    return command_dispatch.invoke(
+        route, globals(), flow=flow, state=state, args=args)
+
+
+def _load_dispatch_state(runtime, args):
+    try:
+        return load_state(), _COMMAND_UNHANDLED
+    except Exception as state_error:
+        if args.cmd == "exit":
+            return None, cmd_exit_corrupt_state(args, state_error)
+        if args.cmd == "doctor":
+            return None, cmd_runtime_doctor(runtime, args, state_error)
+        die("流程状态文件损坏，不能安全判断当前步骤：%s。不要删除或手改状态；"
+            "用户可直接发送 `/mae-flow:mae-flow exit`，Hook 会保存坏文件并退出；"
+            "Hook 也异常时在真实终端执行 exit --interactive。" % state_error, 2)
+
+
+def main():
+    args = parse_args()
+
+    root, _ = find_project_root()
+    if root != os.getcwd():
+        os.chdir(root)
+        if args.cmd != "gate":   # gate 保持输出纯净(stderr 会回传模型)
+            print(f"[mae-flow] 调用目录非项目根,已定位到: {root}", file=sys.stderr)
+
+    global FLOW
+    flow = load_flow()
+    FLOW = flow
+    runtime = resolve_runtime(os.getcwd())
+    state, state_result = _load_dispatch_state(runtime, args)
+    if state_result is not _COMMAND_UNHANDLED:
+        return state_result
+
+    result = _dispatch_global_command(flow, state, runtime, args)
+    if result is not _COMMAND_UNHANDLED:
+        return result
+    result = _dispatch_runtime_mode(runtime, args)
+    if result is not _COMMAND_UNHANDLED:
+        return result
+    return _dispatch_flow_command(flow, state, args)
 
 
 if __name__ == "__main__":

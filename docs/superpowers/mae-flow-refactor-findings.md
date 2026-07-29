@@ -37,3 +37,17 @@
 - Refactor action: none; the shared parser preserves baseline behavior
 - Required next step: add a failing black-box Gate regression, then fix in a
   dedicated `fix:` commit after explicit classification
+
+## MF-RF-004: Selftest searched for an extracted task-card variable
+
+- Classification: refactor safety-net defect
+- Baseline: introduced by phase 6 extraction, reproduced during phase 8 closeout
+- Trigger: run `python scripts/selftest.py`
+- Evidence: the CodeCheck routing check searched `scripts/mae-flow.py` for
+  `expected_steps = {"COMPILE"` after that contract had moved to
+  `mae_flow_core.quality.task_cards.EXPECTED_STEPS`
+- Impact: selftest reported one false failure even though the three CodeCheck
+  handlers and their task-card routes remained intact
+- Refactor action: corrected the selftest to inspect the exported
+  routing contract while retaining the CLI handler check
+- Product behavior: unchanged

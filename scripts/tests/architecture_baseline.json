@@ -1,7 +1,7 @@
 {
   "max_lines": {
     "hooks/dispatch.py": 2860,
-    "scripts/mae-flow.py": 10418
+    "scripts/mae-flow.py": 10408
   },
   "max_complexity": {
     "scripts/mae-flow.py": {
@@ -17,7 +17,21 @@
       "_moonlight_blocked": 8,
       "_moonlight_push_failed": 4,
       "_moonlight_unlock_source": 4,
-      "_moonlight_finalize": 7
+      "_moonlight_finalize": 7,
+      "main": 6,
+      "_load_dispatch_state": 4,
+      "_dispatch_global_command": 14,
+      "_dispatch_story_localize": 4,
+      "_dispatch_init": 2,
+      "_dispatch_moonlight_start": 2,
+      "_dispatch_action": 2,
+      "_dispatch_runtime_mode": 8,
+      "_dispatch_flow_command": 3
+    },
+    "scripts/mae_flow_core/command_dispatch.py": {
+      "action_route": 1,
+      "flow_route": 1,
+      "invoke": 3
     }
   }
 }

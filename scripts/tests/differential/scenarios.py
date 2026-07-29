@@ -148,6 +148,21 @@ def workflow_steps(project, implementation_root):
     }, {}
 
 
+def action_status(project, implementation_root):
+    env = _prepare_repository(project)
+    return {
+        "argv": [
+            sys.executable,
+            os.path.join(
+                implementation_root, "scripts", "mae-flow.py"),
+            "action",
+            "status",
+        ],
+        "stdin": "",
+        "env": env,
+    }, {}
+
+
 def ordinary_advance(project, implementation_root):
     env = _prepare_repository(project)
     state = {
@@ -445,6 +460,7 @@ def moonlight_finalize(project, implementation_root):
 
 
 SCENARIOS = {
+    "action_status": action_status,
     "active_gate_edit": active_gate_edit,
     "compile_task_card": compile_task_card,
     "dangerous_gate_bash": dangerous_gate_bash,

@@ -20,6 +20,7 @@ from architecture_rules import (  # noqa: E402
     assert_policy_dependencies,
     assert_quality_dependencies,
     delivery_complexity_violations,
+    forbidden_calls,
     function_complexity,
     guard_complexity_violations,
     line_count,
@@ -118,6 +119,11 @@ class ArchitectureTests(unittest.TestCase):
     def test_delivery_functions_stay_within_complexity_limit(self):
         self.assertEqual([], delivery_complexity_violations(ROOT))
 
+    def test_command_dispatch_has_no_direct_side_effects(self):
+        path = os.path.join(
+            ROOT, "scripts", "mae_flow_core", "command_dispatch.py")
+        self.assertEqual([], forbidden_calls(path))
+
     def test_workflow_rejects_aliased_process_calls(self):
         root = self._write_core_fixture(
             "workflow",
@@ -213,6 +219,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_guard_intent.py", text)
         self.assertIn("test_quality_task_cards.py", text)
         self.assertIn("test_delivery_policies.py", text)
+        self.assertIn("test_command_dispatch.py", text)
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ from mae_flow_core.moonlight import (
     unresolved as moonlight_unresolved,
 )
 from mae_flow_core.cli_parser import parse_args
-from mae_flow_core import command_dispatch
+from mae_flow_core import command_dispatch, specengine
 from mae_flow_core.lightcheck import (
     analyze_changed_with_timeout,
     render_markdown,
@@ -95,6 +95,11 @@ from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.workflow import advancement as workflow_advancement
 from mae_flow_core.workflow import completion as workflow_completion
 from mae_flow_core.workflow import definition as workflow_definition
+from mae_flow_core.workflow.evidence_rules import (
+    WorkflowEvidencePorts,
+    WorkflowEvidenceRules,
+    substitute as subst,
+)
 from mae_flow_core.workflow import transitions as workflow_transitions
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
@@ -903,22 +908,6 @@ def _scope_diff(st):
 
 # ---------------- 证据校验 ----------------
 
-def subst(p, st):
-    """将 pattern 中的 {配置键} 替换为已确认的配置值(如 {CHANGE_NAME}、{单号})。"""
-    for k, v in st.get("config", {}).items():
-        p = p.replace("{" + k + "}", v)
-    return p
-
-
-def ev_glob(spec, st):
-    pats = [subst(p, st) for p in spec.get("any", [])]
-    if any("{" in p and "}" in p for p in pats):
-        return False, "证据 pattern 含未解析占位符(对应配置未 --set): " + " | ".join(pats)
-    for p in pats:
-        if globmod.glob(p):
-            return True, ""
-    return False, "未找到证据文件(任一即可): " + " | ".join(pats)
-
 
 def _branch_adoption_requested(text):
     """Whether the user explicitly chose to keep working on the current branch."""
@@ -974,174 +963,6 @@ def _adopt_current_branch(st, ack):
         "用户明确选择沿用现有分支；本单分支由 %s 调整为 %s，"
         "裁决时 HEAD=%s" % (previous or "(未配置)", current, head[:10])
     )
-
-
-def ev_branch_ok(spec, st):
-    want = st["config"].get("分支名", "")
-    base = st["config"].get("基线分支", "")
-    cur = sh("git branch --show-current")
-    if not want:
-        return False, "配置中无分支名(config_confirm 未 --set 分支名?)"
-    if cur != want:
-        return False, f"当前分支 {cur or '未知'} != 约定分支 {want}。请 git checkout -b {want}(已存在则 checkout;错误命名分支用 git branch -m 重命名)"
-    if not base:
-        return False, "配置中无基线分支，无法证明工作分支从正确位置切出"
-    base_head = argv_out(["git", "rev-parse", "--verify", base + "^{commit}"])
-    head = argv_out(["git", "rev-parse", "--verify", "HEAD"])
-    if not base_head:
-        return False, f"基线分支 {base} 不可解析；先 fetch/checkout 确认基线存在"
-    if not head or head != base_head:
-        resolution = st.get("branch_resolution") or {}
-        if resolution.get("mode") == "adopt-current":
-            if (resolution.get("branch") == cur
-                    and resolution.get("head") == head
-                    and resolution.get("base") == base
-                    and resolution.get("base_head") == base_head):
-                return True, ""
-            return False, (
-                "用户沿用现有分支的裁决已过期：裁决绑定 %s@%s、基线 %s，"
-                "当前为 %s@%s、基线 HEAD %s。请展示变化后重新裁决，"
-                "旧回答不能复用。"
-                % (resolution.get("branch", "?"),
-                   str(resolution.get("head", ""))[:10],
-                   str(resolution.get("base_head", ""))[:10],
-                   cur or "未知", head[:10] if head else "未知",
-                   base_head[:10]))
-        return False, (
-            f"工作分支 {want} 的起点 {head[:10] if head else '未知'} != "
-            f"基线 {base} 当前 HEAD {base_head[:10]}。branch_create 尚未开始实现，"
-            "不能静默带入其他分支的提交。已有工作时先展示分支与提交差异，"
-            "让用户选择迁移到约定分支或沿用当前非基线分支；选择沿用后按"
-            "本步骤 current 输出的 goto 命令登记裁决。"
-        )
-    return True, ""
-
-
-def ev_tasks_checked(spec, st):
-    """实现清单全勾。清单从哪来由引擎统一裁决(v5=change.md 的"# 实现清单"节,
-    legacy=tasks.md);宽松缩进的计数正则是本证据的历史语义,保持不变。"""
-    cn = st["config"].get("CHANGE_NAME", "")
-    if not cn:
-        return False, "未找到本 change 的实现清单: CHANGE_NAME 未设置"
-    from mae_flow_core import specengine
-    try:
-        label, txt = specengine.tasks_source(os.getcwd(), cn)
-    except Exception as exc:  # 宽兜底:证据不 traceback,拒+指引可重试
-        return False, "实现清单无法读取(%s): %s" % (type(exc).__name__, exc)
-    if txt is None:
-        return False, "未找到本 change 的实现清单: " + label
-    n = len(re.findall(r"^\s*[-*]\s*\[\s\]", txt, re.M))
-    return (n == 0, "" if n == 0 else f"{label} 还有 {n} 个未勾选任务")
-
-
-def ev_spec_field(spec, st):
-    """读本单交付登记字段作证据(由 `mae-flow spec` 子命令机器写入,并现场复核指针有效性)。
-
-    v3 取代 yaml_field:数据源从 comet 的 .comet.yaml 换成 .mae-flow.json 的 spec 段——
-    同一把锁、同一份 gate 保护,且登记时就校验过文件真实存在(比读外部 YAML 更可信)。
-    spec: {"field": 名, "equals": 期望值} 或 {"field": 名}(非空即过)。"""
-    field = spec["field"]
-    data = _spec_data(st)
-    val = str(data.get(field, "") or "")
-    expected = spec.get("equals", spec.get("value"))
-    if expected is not None:
-        if val == expected:
-            return True, ""
-        return False, (f"交付登记 {field}={val or '(空)'},需要 {expected}"
-                       "——按本步指引完成动作后用 mae-flow spec 登记,谎报无效")
-    if val in ("", "null", "~"):
-        return False, (f"交付登记 {field} 为空——本步产物尚未登记;"
-                       f"完成后执行 mae-flow spec set {field} \"<路径>\"")
-    # 指针类字段现场复核:登记后文件被删/改名不能继续算证据
-    if field in SPEC_REGISTER_FIELDS and not os.path.isfile(val):
-        return False, (f"交付登记 {field} 指向 {val},但该文件现在不存在(被删或改名);"
-                       "重新生成产物并重新登记")
-    return True, ""
-
-
-# 轻量档的文件数升级阈值(与 hf_open/tw_open 步骤文档的升级条件一致)。
-# 此前升级条件是纯提示词约束零机器锚点——模型不自查就静默滑过(审计定性)。
-TIER_FILE_LIMITS = {"tweak": 5, "hotfix": 3}
-
-
-def ev_tier_scope(spec, st):
-    """轻量档范围硬校验:改动业务文件数超档位阈值时拒绝推进,呈用户裁决。
-
-    出口两条(禁令必配出口):①升级工作流(hotfix 正规升级/goto design --force);
-    ②用户确认确属轻量档 → accept-risk tier_scope(绑 HEAD,再改文件即失效)。
-    full/review 不限。"""
-    wf = (st.get("choices", {}) or {}).get("workflow", "")
-    limit = TIER_FILE_LIMITS.get(wf)
-    if not limit:
-        return True, ""
-    accepted, _why = _risk_acceptance("TIER_SCOPE", st)
-    if accepted:
-        return True, ""
-    invalidated = ("已有 tier_scope 放行已失效(%s)。" % _why) if _why else ""
-    files, err = _biz_changed_files(st)
-    if err:
-        return False, err
-    if len(files) <= limit:
-        return True, ""
-    return False, (
-        invalidated +
-        "本单已改 %d 个业务文件,超过 %s 档升级阈值(%d):%s%s。这是步骤文档里的"
-        "升级条件,现在由机器亲数。两条出路呈用户裁决:①升级工作流(展示原因,"
-        "确认后按步骤指引正规升级/goto design --force);②确属轻量修改(如批量"
-        "重命名)则 accept-risk tier_scope --reason --ack \"用户原话\" 继续,"
-        "代码再变化即失效"
-        % (len(files), wf, limit, "、".join(files[:6]),
-           "…" if len(files) > 6 else ""))
-
-
-def ev_spec_validate(spec, st):
-    """规格结构校验作硬证据:调内置引擎对本 change 跑 validate。
-
-    spec 可带 {"allow_empty": true}(hotfix/tweak 档):change 未声明任何规格
-    变化时直接判过(轻量单允许无规格);一旦声明了规格条目/delta,格式必须过
-    全套校验。v5 布局顺带拦骨架占位残留(占位进档案等于没写);查哪些前缀由
-    {"placeholders": [...]} 配置,缺省只查「（待填」——方案节的「（待设计」
-    属设计阶段,由 design 步的证据配置追加。布局混用(change.md 与旧四件套
-    并存)在 has_delta/validate 里就会报错。"""
-    cn = st["config"].get("CHANGE_NAME", "")
-    if not cn:
-        return False, "CHANGE_NAME 未设置,无法校验规格"
-    from mae_flow_core import specengine
-    # 宽兜底:证据函数抛裸异常会让 done 直接 traceback(check_evidence 无全局
-    # 兜底)。核心原则是流畅易用不卡死——任何异常都转成"拒+可执行指引",
-    # done 可重试、连拒两次自动亮 goto --force 用户裁决出口。
-    try:
-        need_validate = True
-        if spec.get("allow_empty") and not specengine.has_delta(os.getcwd(), cn):
-            need_validate = False
-        if need_validate:
-            ok, messages = specengine.validate(os.getcwd(), cn)
-            if not ok:
-                errors = [m for m in messages if m.startswith("[错误]")]
-                shown = "; ".join(errors[:3]) + ("…" if len(errors) > 3 else "")
-                return False, ("规格结构校验未通过: " + shown
-                               + "。跑 spec validate 看全部并逐条修正")
-        doc_path = os.path.join("openspec", "changes", cn, "change.md")
-        if os.path.isfile(doc_path):
-            txt = read_text(doc_path)
-            hit = [p for p in (spec.get("placeholders") or ["（待填"]) if p in txt]
-            if hit:
-                return False, ("change.md 残留「%s…」骨架占位;"
-                               "把占位替换成实际内容后重试" % "、".join(hit))
-        # v5 分档必须节接线(审计实锤:V5_TIER_REQUIRED 曾是零消费死常量,
-        # "full=四节"合同在机器侧未接线,整节删除可静默过全部门禁)。
-        workflow = (st.get("choices", {}) or {}).get("workflow", "")
-        missing = specengine.check_required_sections(os.getcwd(), cn, workflow)
-        if missing:
-            return False, ("change.md 缺少 %s 档必须小节: %s;分档合同见 "
-                           "spec instructions change"
-                           % (workflow, "、".join(missing)))
-    except specengine.SpecEngineError as exc:
-        return False, "规格校验无法执行: " + str(exc)
-    except Exception as exc:
-        return False, ("规格校验异常(%s: %s);按报错修复对应文件(编码须 UTF-8)"
-                       "后重试" % (type(exc).__name__, exc))
-    return True, ""
 
 
 def _unchanged_initial_dirty(path, st):
@@ -1818,49 +1639,6 @@ def ev_final_review_clear(spec, st):
             + "。执行 checkpoint final；所有普通模式都先检视本地增量，"
               "用户确认后才进入最终 push")
     return True, ""
-
-
-def ev_content_free(spec, st):
-    """文件内容不得命中任何禁止 pattern(正则)。用于把'标注协议'变成机器可查的终态校验。"""
-    path = subst(spec["file"], st)
-    if "{" in path and "}" in path:
-        return False, "证据 pattern 含未解析占位符: " + path
-    files = globmod.glob(path)
-    if not files:
-        return False, "未找到文件: " + path
-    txt = read_text(files[0], errors="replace")
-    hit = [p for p in spec["patterns"] if re.search(p, txt)]
-    if not hit:
-        return True, ""
-    return False, spec.get("note", "内容含禁止残留") + "(命中 pattern: " + " | ".join(hit) + ")"
-
-
-def ev_glob_absent(spec, st):
-    """负向存在证据:pattern 必须一个都匹配不到。用于"动作必须留下'消失'这个事实"——
-    如归档=移动,原 change 目录必须从 changes/ 消失;复制式假归档留了原件,在这里骗不过(2026-07-20 僵尸实战)。"""
-    pats = [subst(p, st) for p in spec.get("any", [])]
-    if any("{" in p and "}" in p for p in pats):
-        return False, "证据 pattern 含未解析占位符: " + " | ".join(pats)
-    hit = [p for p in pats if globmod.glob(p)]
-    if not hit:
-        return True, ""
-    return False, spec.get("note", "以下路径必须已不存在(残留=动作未完成,如复制式假归档)") + ": " + "、".join(hit)
-
-
-def ev_clean_paths(spec, st):
-    """指定路径必须已提交且无未提交改动(git 实测)。硬化'产物必须 commit'义务——
-    忘提交的产物不进 MR,spec 白写。"""
-    dirty = []
-    for p in spec["paths"]:
-        p = subst(p, st)
-        if "{" in p and "}" in p:
-            return False, "证据 pattern 含未解析占位符: " + p
-        out = argv_out(["git", "status", "--porcelain", "--", p])
-        if out:
-            dirty.append(f"{p}({out.splitlines()[0][:2].strip()})")
-    if not dirty:
-        return True, ""
-    return False, "以下产物未提交(或有未提交改动),先 git add/commit 再 done: " + "、".join(dirty)
 
 
 def _archive_delivery_paths(st):
@@ -3372,6 +3150,36 @@ def run_env_checks(force_all=False):
     """Compatibility view of self-contained runtime diagnostics."""
     checks = capability_diagnostics(os.getcwd(), include_codecheck=False)
     return [item["name"] for item in checks if not item["ok"]]
+
+
+_WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
+    cwd=os.getcwd,
+    glob_paths=globmod.glob,
+    is_file=os.path.isfile,
+    read_text=read_text,
+    read_text_replace=lambda path: read_text(path, errors="replace"),
+    shell_output=sh,
+    argv_output=argv_out,
+    tasks_source=specengine.tasks_source,
+    spec_has_delta=specengine.has_delta,
+    spec_validate=specengine.validate,
+    spec_required_sections=specengine.check_required_sections,
+    spec_error=specengine.SpecEngineError,
+    spec_data=lambda state: _spec_data(state),
+    risk_acceptance=_risk_acceptance,
+    business_changed_files=_biz_changed_files,
+))
+
+# Compatibility names used by in-flight command handlers and legacy tests.
+ev_glob = _WORKFLOW_EVIDENCE.glob
+ev_branch_ok = _WORKFLOW_EVIDENCE.branch_ok
+ev_tasks_checked = _WORKFLOW_EVIDENCE.tasks_checked
+ev_spec_field = _WORKFLOW_EVIDENCE.spec_field
+ev_tier_scope = _WORKFLOW_EVIDENCE.tier_scope
+ev_spec_validate = _WORKFLOW_EVIDENCE.spec_validate
+ev_content_free = _WORKFLOW_EVIDENCE.content_free
+ev_glob_absent = _WORKFLOW_EVIDENCE.glob_absent
+ev_clean_paths = _WORKFLOW_EVIDENCE.clean_paths
 
 
 EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,

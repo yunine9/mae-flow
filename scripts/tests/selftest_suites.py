@@ -50,6 +50,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_fault_injection.py",), 180, 5000),
     ("Evidence 值对象与注册执行回归",
      ("scripts/tests/test_evidence.py",), 180, 5000),
+    ("Workflow Evidence 通用规则回归",
+     ("scripts/tests/test_evidence_rules.py",), 180, 5000),
 )
 
 

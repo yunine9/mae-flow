@@ -96,6 +96,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_hook_tool_transcript.py",), 180, 5000),
     ("Hook Agent 报告解析回归",
      ("scripts/tests/test_hook_agent_reports.py",), 180, 5000),
+    ("Hook 任务卡与源码范围契约回归",
+     ("scripts/tests/test_hook_task_card_contracts.py",), 180, 5000),
 )
 
 

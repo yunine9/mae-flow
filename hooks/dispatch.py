@@ -48,6 +48,12 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.file_io import load_json, read_lines, read_text, write_text
+from mae_flow_core.application.hooks.task_cards import (
+    TaskCardPorts as _TaskCardPorts,
+    verify_agent_scope as _verify_agent_scope,
+    verify_completion_task as _verify_completion_task,
+    verify_dispatch_task as _verify_dispatch_task,
+)
 from mae_flow_core.quality.agent_reports import (
     ac_coverage_has_mapping as _core_ac_coverage_has_mapping,
     empty_section as _core_empty_section,
@@ -234,6 +240,24 @@ def _chdir_root(d):
         pass
 
 
+def _task_card_ports():
+    return _TaskCardPorts(
+        read_text=read_text,
+        current_head=_git_head,
+        merge_base=lambda head, _current: _git_out(
+            f"git merge-base {head} HEAD").strip(),
+        changed_paths_since=_changed_paths_since,
+        source_changed_since=_source_changed_since_receipt,
+        source_snapshot=_source_snapshot,
+        path_fingerprint=_path_fingerprint,
+        review_path_fingerprint=_review_path_fingerprint,
+        source_like=_source_like,
+        test_like=_test_like,
+        path_exists=os.path.exists,
+        script_path=lambda: os.path.abspath(MAEFLOW),
+    )
+
+
 def _gate_agent_dispatch(ti):
     """质量 agent 派发前验任务卡——拦截时机 = 错误发生时机。
 
@@ -251,70 +275,10 @@ def _gate_agent_dispatch(ti):
         if not kind:
             return
         st = _contract_state()
-        task = (st.get("agent_tasks", {}) or {}).get(kind) or {}
-        me = os.path.abspath(MAEFLOW)
-        if not task:
-            remedy = (
-                f'python "{me}" action status，并按输出执行 action critic 生成 GRILL 任务卡'
-                if kind == "GRILL"
-                else f'python "{me}" agent-task {kind.lower()} 生成并签发任务卡')
-            print("[mae-flow] 派发前拦截:%s 尚无本步任务卡。先执行 "
-                  "%s,再按其输出话术派发。"
-                  "现在拦下只损失一次调用;跑完整只 agent 才被契约打回,重做要上百轮。"
-                  % (kind, remedy), file=sys.stderr)
+        decision = _verify_dispatch_task(kind, st, _task_card_ports())
+        if not decision.accepted:
+            print(decision.reason, file=sys.stderr)
             sys.exit(2)
-        if task.get("step") != st.get("current"):
-            print("[mae-flow] 派发前拦截:%s 任务卡属于旧步骤 %s，当前步骤为 %s。"
-                  "先按 current/action status 生成当前步骤的新任务卡，再派发。"
-                  % (kind, task.get("step", "?"), st.get("current", "?")),
-                  file=sys.stderr)
-            sys.exit(2)
-        try:
-            txt = read_text(task.get("path", ""))
-            body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
-            actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
-        except Exception as exc:
-            print("[mae-flow] 派发前拦截:%s 任务卡不可读(%s)。"
-                  "先重新生成任务卡，避免整只 agent 跑完才发现输入失效。"
-                  % (kind, exc), file=sys.stderr)
-            sys.exit(2)
-        if actual != task.get("sha256"):
-            print("[mae-flow] 派发前拦截:%s 任务卡内容已变化。"
-                  "先重新生成任务卡；旧卡不能代表当前任务。"
-                  % kind, file=sys.stderr)
-            sys.exit(2)
-        head, cur = task.get("head", ""), _git_head()
-        if head and cur and head != cur:
-            remedy = (
-                f'python "{me}" action status，并重新执行当前 action critic'
-                if kind == "GRILL"
-                else f'python "{me}" agent-task {kind.lower()}')
-            print("[mae-flow] 派发前拦截:%s 任务卡签发于 HEAD %s,当前 HEAD %s——源码已变化,"
-                  "旧卡描述的不是现在的代码,跑完也拿不到令牌。先重新执行 %s 再派发。"
-                  % (kind, head[:10], cur[:10], remedy), file=sys.stderr)
-            sys.exit(2)
-        # 完整流程签卡前已强制工作区源码干净（启动前遗留且指纹未变者除外）。
-        # 因此同 HEAD 下出现新的未提交源码变化，必然发生在签卡后；现在拦比
-        # SubagentStop 才拒签便宜得多。独立任务允许带脏工作区执行，仍由其
-        # initial_source_fingerprints 在收尾契约中审计，不能在这里误伤恢复。
-        if task.get("precommit_review") and head:
-            current_snapshot = _source_snapshot(head)
-            if current_snapshot != (task.get("source_snapshot") or {}):
-                print("[mae-flow] 派发前拦截:%s 未提交任务卡签发后代码又发生变化。"
-                      "重新生成任务卡再派发，避免编译的不是即将检视的 diff。"
-                      % kind, file=sys.stderr)
-                sys.exit(2)
-        elif not task.get("standalone") and head:
-            changed, err = _source_changed_since_receipt(head, st)
-            if err:
-                print("[mae-flow] 派发前拦截:%s 无法核对任务卡新鲜度(%s)。"
-                      "先重新生成任务卡。" % (kind, err), file=sys.stderr)
-                sys.exit(2)
-            if changed:
-                print("[mae-flow] 派发前拦截:%s 签卡后源码又发生未提交变化: %s。"
-                      "先提交本单改动并重新生成任务卡；现在拦下可避免整只 agent 白跑。"
-                      % (kind, "、".join(changed[:5])), file=sys.stderr)
-                sys.exit(2)
     except SystemExit:
         raise
     except Exception as e:
@@ -1230,36 +1194,11 @@ def _contract_bail(label, msg, soft):
 def _task_card_contract(kind, report, soft=False):
     """报告必须回传 harness 任务卡指纹；缺配置时不再允许子 agent 边猜边做。"""
     st = _contract_state()
-    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
-    if not task:
-        _contract_bail(kind, "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。", soft)
-    if task.get("step") != st.get("current"):
-        _contract_bail(kind, "任务卡属于旧步骤,禁止拿旧配置执行当前任务。", soft)
-    m = re.search(r"^TASK_CARD_SHA256:\s*([0-9a-f]{64})\s*$", report, re.M | re.I)
-    if not m or m.group(1).lower() != task.get("sha256", "").lower():
-        _contract_bail(kind, "最终报告缺少当前任务卡的 TASK_CARD_SHA256,说明启动信息不完整。", soft)
-    try:
-        txt = read_text(task["path"])
-        body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
-        actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    except Exception as e:
-        _contract_bail(kind, "任务卡不可读:" + str(e), soft)
-    if actual != task.get("sha256"):
-        _contract_bail(kind, "任务卡内容被修改过,必须重新执行 agent-task 生成。", soft)
-    head = task.get("head", "")
-    if not re.fullmatch(r"[0-9a-f]{7,64}", head or ""):
-        _contract_bail(kind, "任务卡缺少可验证的基点 HEAD。", soft)
-    base = _git_out(f"git merge-base {head} HEAD").strip()
-    if base != head and head != _git_head():
-        _contract_bail(kind, "任务卡基点已不在当前提交历史中(amend/rebase/切分支)，请重新生成任务卡。", soft)
-    if task.get("standalone") and _git_head() != head:
-        _contract_bail(kind, "独立任务禁止自动 commit，但当前 HEAD 已变化。"
-                       "保留代码后结束本任务并由用户自行决定是否提交。", soft)
-    if task.get("precommit_review") and _git_head() != head:
-        _contract_bail(
-            kind, "当前检查点要求用户先检视未提交 diff；子 Agent 禁止自动 commit。"
-            "保留工作区代码并重新按真实结果收尾。", soft)
-    return task
+    decision = _verify_completion_task(
+        kind, report, st, _task_card_ports())
+    if not decision.accepted:
+        _contract_bail(kind, decision.reason, soft)
+    return decision.task
 
 
 def _state_config():
@@ -2060,44 +1999,11 @@ def _test_like(path):
 
 
 def _enforce_agent_scope(kind, task, bail):
-    changed = [p for p in _changed_paths_since(task.get("head", "")) if _source_like(p)]
-    if task.get("standalone"):
-        initial = task.get("initial_source_fingerprints", {}) or {}
-        # 独立任务允许用户带着未提交代码开始；只审计任务启动后真正发生变化的路径。
-        changed = [p for p in changed if initial.get(p) != _path_fingerprint(p)]
-    elif task.get("precommit_review"):
-        initial = task.get("source_snapshot", {}) or {}
-        changed = [
-            p for p in changed
-            if initial.get(p) != _review_path_fingerprint(p)
-        ]
-    else:
-        # 完整流程同样可能在 init 前已有未提交源码。它不属于本任务，且只在
-        # 指纹仍与初始快照一致时豁免；本轮再次改动仍会进入越权审计。
-        st = _contract_state()
-        changed = [p for p in changed if not _unchanged_initial_dirty(p, st)]
-    if kind == "COMPILE":
-        bad = [p for p in changed if _test_like(p)]
-        if bad:
-            bail("compile-agent 越权修改了测试文件: " + "、".join(bad[:5]))
-    elif kind == "CODECHECK":
-        allowed = {str(x).replace("\\", "/").lower() for x in task.get("allowed_files", [])}
-        bad = [p for p in changed if p.lower() not in allowed]
-        if bad:
-            bail("codecheck-fix-agent 修改了首检范围外文件: " + "、".join(bad[:5]))
-    elif kind == "UT":
-        deleted = [p for p in changed if _test_like(p) and not os.path.exists(p)]
-        if deleted:
-            bail("ut-generator-agent 删除了既有测试文件: " + "、".join(deleted[:5])
-                 + "；不能通过删测试取得 PASS。")
-        bad = [p for p in changed if not _test_like(p)]
-        if bad:
-            bail("ut-generator-agent 修改了非测试源码: " + "、".join(bad[:5])
-                 + "；源码缺陷必须先交用户裁决。")
-    elif kind == "GRILL":
-        if changed:
-            bail("grill-critic-agent 是只读审查角色，却修改了文件: " + "、".join(changed[:5]))
-    return changed
+    decision = _verify_agent_scope(
+        kind, task, _contract_state(), _task_card_ports())
+    if not decision.accepted:
+        bail(decision.reason)
+    return list(decision.changed_paths)
 
 
 def _codecheck_contract(status, report, tool_calls=None, soft=False):

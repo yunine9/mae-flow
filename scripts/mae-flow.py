@@ -176,6 +176,7 @@ from mae_flow_core.guard.bash import (
     decide_pre_commit,
 )
 from mae_flow_core.quality import task_cards as quality_task_cards
+from mae_flow_core.quality import codecheck as quality_codecheck
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,
     QualityEvidenceRules,
@@ -2405,6 +2406,7 @@ def _run_codecheck(files, st=None, phase="scan"):
             + "、".join(risky[:5])
             + "。请重命名文件或将其移出本次检查范围后重试。")
     total, pairs, commands = 0, [], []
+    parsed_batches = []
     batches = _batches(files)
     for batch_index, batch in enumerate(batches, 1):
         launch, use_shell, cmd = _codecheck_launch(batch, executable=executable)
@@ -2530,21 +2532,31 @@ def _run_codecheck(files, st=None, phase="scan"):
                           f"python \"{me}\" codecheck-record --count <数字> --diagnostic \"{snap}\" "
                           "--reason \"输出格式暂不兼容，已人工核对\" --ack \"用户确认原话\"。"
                           "该记录绑定当前步骤、HEAD、文件清单和诊断内容，代码一变自动失效。")
-        total += count
-        fs = re.findall(r"- \*\*文件\*\*: `([^`]+)`", rtxt)
-        rs = re.findall(r"- \*\*规则\*\*: (\S+)", rtxt)
-        lns = re.findall(r"- \*\*(?:行号|位置|行)\*\*:\s*`?(\d+)", rtxt)
         if json_pairs:
-            raw_pairs = json_pairs
-        elif lns and len(lns) == len(rs) == len(fs):
-            raw_pairs = [(r, f, int(ln)) for (r, f), ln in zip(zip(rs, fs), lns)]
+            warnings = tuple(
+                quality_codecheck.CodeCheckWarning(
+                    rule, file_name, line)
+                for rule, file_name, line in json_pairs
+            )
         else:
-            raw_pairs = [(r, f, None) for r, f in zip(rs, fs)]
-        for rule, file_name, line in raw_pairs:
-            matches = [x for x in batch if norm(x).lower() == norm(file_name).lower()
-                       or os.path.basename(x).lower() == os.path.basename(file_name).lower()]
-            pairs.append((rule, matches[0] if len(matches) == 1 else norm(file_name),
-                          line))
+            warnings = quality_codecheck.extract_report_warnings(
+                rtxt)
+        mapped = quality_codecheck.map_warning_paths(
+            warnings, tuple(batch))
+        parsed_batches.append(
+            quality_codecheck.CodeCheckBatch(
+                count=count,
+                warnings=mapped,
+                command=cmd,
+            ))
+    aggregate = quality_codecheck.aggregate_batches(
+        tuple(parsed_batches))
+    total = aggregate.total
+    pairs = [
+        warning.as_tuple()
+        for warning in aggregate.warnings
+    ]
+    commands = list(aggregate.commands)
     append_codecheck_event(
         os.getcwd(), log_state, "run.completed", {
             "phase": phase, "head": head, "total": total,
@@ -2563,67 +2575,16 @@ def _parse_codecheck_count(console, report):
     1) 提示行「共有 N 条告警」；2) Markdown 汇总表「总计」；
     3) 明确的零告警文案。不能仅凭进程退出码判断（公司 CLI 成功也可能返回 1）。
     """
-    text = (console or "") + "\n" + (report or "")
-    nums = re.findall(r"共有\s*(\d+)\s*条告警", text)
-    if nums:
-        return int(nums[-1])
-    totals = re.findall(r"\|\s*\*{0,2}总计\*{0,2}\s*\|\s*\*{0,2}(\d+)\*{0,2}\s*\|", text)
-    if totals:
-        return int(totals[-1])
-    details = re.findall(r"^###\s+\d+\.\s+\[(?:Critical|Major|Minor|Suggestion|致命级|严重级|一般级|提示级)\]", text, re.M | re.I)
-    if details:
-        return len(details)
-    zero_patterns = (r"未发现(?:任何)?(?:代码)?告警", r"没有发现(?:任何)?(?:代码)?告警",
-                     r"(?:告警|问题)(?:总数)?\s*[:：]?\s*0\b", r"0\s*条告警")
-    completed = ("代码检查完成" in text or "CodeCheck 检查报告" in text or "检查结果汇总" in text)
-    if completed and any(re.search(p, text, re.I) for p in zero_patterns):
-        return 0
-    return None
+    return quality_codecheck.parse_count(console, report)
 
 
 def _parse_codecheck_json(path):
     """兼容 CodeCheckCLI 的 JSON 结果：不依赖固定顶层字段，按带 UUID/规则/文件的告警对象去重。"""
-    data = load_json(path, errors="replace")
-    rows = []
-
-    def walk(v):
-        if isinstance(v, dict):
-            low = {str(k).lower(): x for k, x in v.items()}
-            uid = low.get("uuid") or low.get("id") or low.get("issueid")
-            rule = low.get("rule") or low.get("rulename") or low.get("ruleid")
-            file_name = low.get("file") or low.get("filepath") or low.get("path")
-            if uid and rule and file_name:
-                # 行号:覆盖口径过滤(本次修改的函数)的依据;键名按已见格式宽兜底,
-                # 取不到记 None(过滤层对 None 保守保留)。
-                line = None
-                for lk in ("line", "lineno", "linenumber", "startline",
-                           "beginline", "linenum"):
-                    try:
-                        if low.get(lk) is not None:
-                            line = int(low[lk])
-                            break
-                    except (TypeError, ValueError):
-                        continue
-                rows.append((str(uid), str(rule).split()[0],
-                             norm(str(file_name)), line))
-            for x in v.values():
-                walk(x)
-        elif isinstance(v, list):
-            for x in v:
-                walk(x)
-
-    walk(data)
-    uniq = {}
-    for uid, rule, file_name, line in rows:
-        uniq[uid] = (rule, file_name, line)
-    if uniq:
-        return len(uniq), list(uniq.values())
-    # 某些版本只有明确总数，没有逐条对象；只接受语义清楚的数字字段。
-    if isinstance(data, dict):
-        for k in ("total", "totalCount", "issueCount", "warningCount"):
-            if isinstance(data.get(k), int):
-                return data[k], []
-    return None, []
+    count, warnings = quality_codecheck.parse_json_result(
+        load_json(path, errors="replace"))
+    return count, [
+        warning.as_tuple() for warning in warnings
+    ]
 
 
 def _approval_key(rule, path):

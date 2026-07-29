@@ -41,6 +41,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_guard_permit_integration.py",), 180, 5000),
     ("质量任务卡纯契约回归",
      ("scripts/tests/test_quality_task_cards.py",), 180, 5000),
+    ("CodeCheck 纯策略回归",
+     ("scripts/tests/test_quality_codecheck.py",), 180, 5000),
     ("交付子状态机纯策略回归",
      ("scripts/tests/test_delivery_policies.py",), 180, 5000),
     ("CLI 命令路由契约回归",

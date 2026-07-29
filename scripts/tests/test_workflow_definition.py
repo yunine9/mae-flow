@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Regression tests for workflow definition and pure transition policy."""
 
+import importlib.util
 import json
 import os
 import sys
@@ -18,6 +19,8 @@ from mae_flow_core.workflow.definition import (  # noqa: E402
     definition_errors,
     load_definition,
 )
+from mae_flow_core.workflow import definition as workflow_definition  # noqa: E402
+from mae_flow_core.workflow import transitions as workflow_transitions  # noqa: E402
 from mae_flow_core.workflow.transitions import (  # noqa: E402
     next_step,
     resolved_next,
@@ -244,6 +247,88 @@ class WorkflowDefinitionTests(unittest.TestCase):
                 os.path.join(ROOT, "flow", "steps"),
             ),
         )
+
+
+class WorkflowAdapterDelegationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        spec = importlib.util.spec_from_file_location(
+            "mae_flow_phase2_adapter",
+            path,
+        )
+        cls.mf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mf)
+
+    def test_load_flow_delegates_to_workflow_definition(self):
+        sentinel = object()
+        seen = []
+        original = workflow_definition.load_definition
+        try:
+            workflow_definition.load_definition = (
+                lambda path: seen.append(path) or sentinel
+            )
+            actual = self.mf.load_flow()
+        finally:
+            workflow_definition.load_definition = original
+        self.assertIs(sentinel, actual)
+        self.assertEqual([self.mf.FLOW_PATH], seen)
+
+    def test_next_from_step_delegates_to_transition_policy(self):
+        sentinel = object()
+        seen = []
+        original = workflow_transitions.next_step
+
+        def fake(*args):
+            seen.append(args)
+            return sentinel
+
+        step = {"next": "build"}
+        state = {"choices": {}}
+        try:
+            workflow_transitions.next_step = fake
+            actual = self.mf._next_from_step(step, state, "override")
+        finally:
+            workflow_transitions.next_step = original
+        self.assertIs(sentinel, actual)
+        self.assertEqual([(step, state, "override")], seen)
+
+    def test_resolved_next_delegates_to_transition_policy(self):
+        sentinel = object()
+        seen = []
+        original = workflow_transitions.resolved_next
+
+        def fake(*args):
+            seen.append(args)
+            return sentinel
+
+        flow = {"steps": {}}
+        state = {"choices": {}}
+        try:
+            workflow_transitions.resolved_next = fake
+            actual = self.mf._resolved_next(flow, state, "history-step")
+        finally:
+            workflow_transitions.resolved_next = original
+        self.assertIs(sentinel, actual)
+        self.assertEqual([(flow, state, "history-step")], seen)
+
+    def test_workflow_chain_delegates_to_transition_policy(self):
+        sentinel = object()
+        seen = []
+        original = workflow_transitions.workflow_chain
+
+        def fake(*args):
+            seen.append(args)
+            return sentinel
+
+        flow = {"start": "end", "steps": {"end": {"terminal": True}}}
+        try:
+            workflow_transitions.workflow_chain = fake
+            actual = self.mf._workflow_chain(flow, "review")
+        finally:
+            workflow_transitions.workflow_chain = original
+        self.assertIs(sentinel, actual)
+        self.assertEqual([(flow, "review")], seen)
 
 
 if __name__ == "__main__":

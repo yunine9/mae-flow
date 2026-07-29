@@ -86,6 +86,8 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
+from mae_flow_core.workflow import definition as workflow_definition
+from mae_flow_core.workflow import transitions as workflow_transitions
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -511,8 +513,7 @@ def find_project_root(start=None):
 
 
 def load_flow():
-    with open(FLOW_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    return workflow_definition.load_definition(FLOW_PATH)
 
 
 def load_state():
@@ -3873,22 +3874,12 @@ def _sentinel_lines(sid, st):
 
 def _next_from_step(step, st, choice_override=""):
     """解析步骤去向；月光旁路可显式指定其保守分支而不伪造用户选择。"""
-    nxt = step.get("next")
-    try:
-        if step.get("next_by"):
-            return nxt[st.get("choices", {}).get(step["next_by"])]
-        if isinstance(nxt, dict):
-            choice = choice_override or st.get("choices", {}).get(step.get("choice_key"))
-            return nxt[choice]
-    except Exception:
-        return None
-    return nxt
+    return workflow_transitions.next_step(step, st, choice_override)
 
 
 def _resolved_next(flow, st, sid):
     """按当前 choices 解析某历史步骤的去向，供旧状态恢复入口 HEAD。"""
-    step = flow.get("steps", {}).get(sid, {})
-    return _next_from_step(step, st)
+    return workflow_transitions.resolved_next(flow, st, sid)
 
 
 def _ensure_step_entry_head(flow, st, sid):
@@ -7305,18 +7296,7 @@ WORKFLOW_LABELS = {"full": "完整开发", "hotfix": "已定位问题修复",
 
 def _workflow_chain(flow, wf):
     """按交付方式线性展开步骤链(可选询问步取"做"分支展示完整形态)。"""
-    chain, sid, seen = [], flow["start"], set()
-    while sid and sid not in seen:
-        seen.add(sid)
-        chain.append(sid)
-        step = flow["steps"][sid]
-        nxt = step.get("next")
-        if step.get("next_by"):
-            nxt = nxt.get(wf) if isinstance(nxt, dict) else nxt
-        elif isinstance(nxt, dict):
-            nxt = nxt.get("yes") or next(iter(nxt.values()))
-        sid = nxt
-    return chain
+    return workflow_transitions.workflow_chain(flow, wf)
 
 
 def cmd_steps(flow, st, args):

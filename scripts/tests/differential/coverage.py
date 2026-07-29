@@ -27,6 +27,8 @@ VALUES = {
         "missing-agent-token", "missing-artifact",
         "missing-checkpoint-plan", "missing-codecheck-scan",
         "missing-review-receipt", "missing-upstream",
+        "foreign-artifact", "protected-requirement", "protected-state",
+        "stale-head",
     },
 }
 FIELDS = {

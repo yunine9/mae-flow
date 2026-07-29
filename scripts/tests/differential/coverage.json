@@ -153,6 +153,30 @@
       "delivery": "none",
       "fault": "missing-artifact"
     },
+    "guard_expired_permit": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "stale-head"
+    },
+    "guard_internal_state_edit": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "protected-state"
+    },
+    "guard_requirement_bash_write": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "protected-requirement"
+    },
     "inactive_pretooluse_bypass": {
       "domain": "hook",
       "runtime": "inactive",
@@ -184,6 +208,14 @@
       "transition": "normal",
       "delivery": "none",
       "fault": "none"
+    },
+    "ownership_foreign_openspec": {
+      "domain": "ownership",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "foreign-artifact"
     },
     "standalone_action_status": {
       "domain": "runtime",

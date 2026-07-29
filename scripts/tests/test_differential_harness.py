@@ -32,6 +32,12 @@ STAGE1_EVIDENCE_SCENARIOS = {
     "evidence_review_rejection",
     "evidence_spec_rejection",
 }
+STAGE2_GUARD_SCENARIOS = {
+    "guard_expired_permit",
+    "guard_internal_state_edit",
+    "guard_requirement_bash_write",
+    "ownership_foreign_openspec",
+}
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
@@ -348,6 +354,28 @@ class DifferentialRunnerTests(unittest.TestCase):
                     run_scenario(ROOT, name),
                     goldens,
                 )
+
+    def test_phase12_preserves_every_phase11_snapshot(self):
+        phase11 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase11.json"))
+        phase12 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase12.json"))
+        self.assertEqual(
+            set(phase11), set(phase12) - STAGE2_GUARD_SCENARIOS)
+        for name, expected in phase11.items():
+            with self.subTest(name=name):
+                self.assertEqual(expected, phase12[name])
+
+    def test_phase12_guard_scenarios_match_fixed_baseline(self):
+        goldens = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase12.json"))
+        for name in sorted(STAGE2_GUARD_SCENARIOS):
+            with self.subTest(name=name):
+                assert_matches_golden(
+                    self, name, run_scenario(ROOT, name), goldens)
 
 
 if __name__ == "__main__":

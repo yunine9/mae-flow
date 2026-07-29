@@ -494,6 +494,7 @@ def moonlight_finalize(project, implementation_root):
 
 from differential import stage0_scenarios  # noqa: E402
 from differential import stage1_evidence_scenarios  # noqa: E402
+from differential import stage2_guard_scenarios  # noqa: E402
 
 
 def direct_current(project, implementation_root):
@@ -581,6 +582,31 @@ def evidence_spec_rejection(project, implementation_root):
         "evidence_spec_rejection", project, implementation_root)
 
 
+def _stage2_guard(name, project, implementation_root):
+    return getattr(stage2_guard_scenarios, name)(
+        project, implementation_root, _prepare_repository)
+
+
+def guard_internal_state_edit(project, implementation_root):
+    return _stage2_guard(
+        "guard_internal_state_edit", project, implementation_root)
+
+
+def guard_requirement_bash_write(project, implementation_root):
+    return _stage2_guard(
+        "guard_requirement_bash_write", project, implementation_root)
+
+
+def guard_expired_permit(project, implementation_root):
+    return _stage2_guard(
+        "guard_expired_permit", project, implementation_root)
+
+
+def ownership_foreign_openspec(project, implementation_root):
+    return _stage2_guard(
+        "ownership_foreign_openspec", project, implementation_root)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
@@ -600,6 +626,9 @@ SCENARIOS = {
     "evidence_push_rejection": evidence_push_rejection,
     "evidence_review_rejection": evidence_review_rejection,
     "evidence_spec_rejection": evidence_spec_rejection,
+    "guard_expired_permit": guard_expired_permit,
+    "guard_internal_state_edit": guard_internal_state_edit,
+    "guard_requirement_bash_write": guard_requirement_bash_write,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
     "moonlight_report_issue": moonlight_report_issue,
@@ -610,4 +639,5 @@ SCENARIOS = {
     "corrupt_state_doctor": corrupt_state_doctor,
     "workflow_steps": workflow_steps,
     "ordinary_advance": ordinary_advance,
+    "ownership_foreign_openspec": ownership_foreign_openspec,
 }

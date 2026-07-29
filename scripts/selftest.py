@@ -192,7 +192,11 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/differential/stage4_quality_scenarios.py",
           "scripts/tests/differential/runner.py",
           "scripts/tests/probe_gate_smoke.py",
-          "scripts/tests/probe_spec_semantics.py"):
+          "scripts/tests/probe_spec_semantics.py") + tuple(
+              os.path.relpath(path, ROOT)
+              for path in sorted(glob.glob(os.path.join(
+                  ROOT, "scripts", "mae_flow_core",
+                  "cli_commands", "*.py")))):
     try:
         path = os.path.join(ROOT, f)
         with open(path, encoding="utf-8") as stream:
@@ -2683,10 +2687,13 @@ with _TmpDir() as td:
               direct.returncode, direct.stdout[-200:], direct.stderr[-200:],
               managed.returncode, managed.stderr[-200:]))
 
-mf_src = open(
-    os.path.join(ROOT, "scripts", "mae_flow_core", "cli_runtime.py"),
-    encoding="utf-8",
-).read()
+mf_src = ""
+for mf_path in (
+        os.path.join(ROOT, "scripts", "mae_flow_core", "cli_runtime.py"),
+        *sorted(glob.glob(os.path.join(
+            ROOT, "scripts", "mae_flow_core", "cli_commands", "*.py")))):
+    with open(mf_path, encoding="utf-8") as stream:
+        mf_src += stream.read()
 quality_codecheck_src = open(
     os.path.join(
         ROOT, "scripts", "mae_flow_core", "application",
@@ -2788,12 +2795,18 @@ for source in sorted(glob.glob(
 flow_engine_calls = [
     "%s:%s" % (rel, hit)
     for rel, found in sorted(engine_hits.items()) for hit in found
-    if not (rel == "scripts/mae-flow.py" and hit.endswith("(cmd_capability)"))]
+    if not (
+        rel == "scripts/mae_flow_core/cli_commands/init_capability.py"
+        and hit.endswith("(cmd_capability)")
+    )]
 check("流程代码不再直接驱动外部规格引擎(OpenSpec/Comet)",
       not flow_engine_calls, str(flow_engine_calls))
+capability_calls = engine_hits.get(
+    "scripts/mae_flow_core/cli_commands/init_capability.py", [])
 check("外部引擎透传只保留在 capability 子命令里且不再扩张",
-      len(engine_hits.get("scripts/mae-flow.py", [])) <= 3,
-      str(engine_hits.get("scripts/mae-flow.py", [])))
+      len(capability_calls) <= 3
+      and all(hit.endswith("(cmd_capability)") for hit in capability_calls),
+      str(capability_calls))
 
 # 6.5 模板与 Hook 应用策略同步(posttooluse 路由必须引用同名模板)
 for tpl in ("STORY-TEMPLATE.md", "CHAIN-TEMPLATE.md", "GRILL-PREP-TEMPLATE.md", "REVIEW-TEMPLATE.md"):

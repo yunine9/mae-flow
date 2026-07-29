@@ -11,7 +11,6 @@
 风格同 selftest（check 打印 + 退出码），selftest 点名跑本探针。
 注意：第 2 部分会 os.chdir 进临时仓，探针独立进程跑，不污染调用方。
 """
-import importlib.util
 import json
 import os
 import subprocess
@@ -23,6 +22,7 @@ SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAE = os.path.join(SCRIPTS, "mae-flow.py")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
+from mae_flow_core import cli_runtime as mf
 # 非 UTF-8 控制台(公司 GBK 机器)下中文输出会编码崩——dispatch 同款自愈。
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -180,10 +180,6 @@ def main():
           (r.stdout + r.stderr)[-300:])
 
     # ---------- 2. 证据全路径（importlib 直调，selftest 同款） ----------
-    spec_mod = importlib.util.spec_from_file_location("mf", MAE)
-    mf = importlib.util.module_from_spec(spec_mod)
-    spec_mod.loader.exec_module(mf)
-
     def st(cn="probe-x"):
         return {"config": {"CHANGE_NAME": cn}, "choices": {"workflow": "full"}}
 

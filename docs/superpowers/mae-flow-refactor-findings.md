@@ -210,3 +210,49 @@
   guard; baseline validation now requires the target to be a positive integer
   and allows the current baseline to be stricter
 - Product behavior: unchanged
+
+## MF-RF-013: Extracted CLI dispatch resolved handlers from the wrong namespace
+
+- Status: resolved during Stage 6
+- Classification: refactor-introduced routing regression
+- Trigger: invoke any table-routed action or flow command after splitting the
+  historical CLI into command modules
+- Evidence: Phase-15 reported `unknown Mae-Flow command handler` for action,
+  checkpoint, done, agent-task and CodeCheck routes
+- Root cause: the extracted dispatch module passed its own `globals()` to the
+  public command router, while handlers now live in the composition registry
+- Resolution: both table-routed dispatch paths resolve handlers from the
+  registered public CLI API
+- Regression: the complete Phase-15 subprocess differential suite is zero-diff
+- Product behavior: restored to the pre-split routing semantics
+
+## MF-RF-014: CLI test overrides stopped at the compatibility facade
+
+- Status: resolved during Stage 6
+- Classification: refactor safety-net compatibility defect
+- Trigger: focused tests replace a process, Git, state or command dependency on
+  the public `cli_runtime` facade
+- Evidence: CodeCheck attempted a real installation and Gate executed the real
+  write policy despite their dependencies being patched
+- Root cause: Python star imports copy bindings into each command module; facade
+  assignment updated the registry but not those copied module bindings
+- Resolution: the composition registry tracks registered modules and propagates
+  public compatibility overrides to every module that owns the binding
+- Regression: strict CodeCheck logging and Gate permit integration tests cover
+  imported platform dependencies and same-module command helpers
+- Product behavior: unchanged
+
+## MF-RF-015: Release probes still imported or scanned the historical CLI file
+
+- Status: resolved during Stage 6
+- Classification: refactor safety-net location coupling
+- Trigger: run the complete selftest after the CLI entrypoint becomes a public
+  adapter
+- Evidence: the Gate evidence probe could not find `ev_spec_validate`, and the
+  external-engine audit rejected the relocated `cmd_capability`
+- Root cause: both checks encoded the former physical location instead of the
+  public runtime/module ownership contract
+- Resolution: the probe imports `mae_flow_core.cli_runtime`; static source and
+  engine-call audits include the semantic command modules and permit only the
+  named capability handler
+- Product behavior: unchanged

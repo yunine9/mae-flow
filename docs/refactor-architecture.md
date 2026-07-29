@@ -306,3 +306,31 @@ stdout、stderr、退出码、状态 sidecar、文件摘要和 Git 状态。架�
 收据顺序、测试夹具文件句柄和迁移后静态检查耦合。前两项均以独立 `fix:` 提交恢复
 重构前语义。Stage 5 不改变 Hook 事件 matcher、fail-open、输出文案、任务卡与收据
 schema、Agent 写入边界、Stop 三次无进展保护或 Direct/Terminal/Corrupt 优先级。
+
+## Stage 6：CLI Commands 与公共入口完成证据
+
+Stage 6 将历史 CLI 的运行态检查、生命周期、推进、规格、Checkpoint、Standalone、
+Moonlight、Gate、Agent-task、CodeCheck 与 Lightcheck 命令按语义拆入
+`mae_flow_core.cli_commands`。`scripts/mae-flow.py` 只导入公共 `main`；
+`cli_runtime.py` 负责组装命令模块、证据注册表和兼容测试接口。跨模块调用通过单一的
+后绑定注册表解析，避免命令模块之间形成循环导入；每个命令模块均不超过 500 行。
+
+业务测试和 Gate 探针不再动态加载私有 CLI 文件，架构门会阻止这种耦合回流。自检的
+静态发布规则读取公共运行时与全部命令模块，外部 OpenSpec/Comet 透传只允许存在于
+明确命名的 capability handler。
+
+2026-07-30 在 Stage 6 实现上取得的验证结果：
+
+- 完整严格 `unittest discover`：486 项通过，启用
+  `-W error::ResourceWarning`；
+- Phase-15 differential runner：零差分；
+- Gate 冒烟与证据全路径探针：43 项通过；
+- refactor completion：8 项通过，架构门禁 34 项通过；
+- `scripts/mae-flow.py` 为 9 行，`cli_runtime.py` 为 80 行；
+- 24 个语义命令模块均不超过 500 行，最大模块低于 500 行；
+- CLI 私有入口动态导入违规为零，`git diff --check` 通过。
+
+本阶段发现并修复 MF-RF-013 至 MF-RF-015：拆分后路由命名空间错误、测试替身未传播
+到命令模块，以及发布探针绑定旧文件位置。Phase-15 覆盖前两类真实调用路径，自检覆盖
+发布安全网。本阶段不改变命令参数、stdout/stderr、退出码、状态 schema、文件与 Git
+副作用或用户停点。

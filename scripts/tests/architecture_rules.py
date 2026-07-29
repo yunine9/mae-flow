@@ -21,7 +21,6 @@ FORBIDDEN_CALLS = {
 }
 LEGACY_OVERSIZED_CORE_MODULES = {
     "scripts/mae_flow_core/capabilities.py",
-    "scripts/mae_flow_core/cli_runtime.py",
     "scripts/mae_flow_core/lightcheck.py",
     "scripts/mae_flow_core/specengine.py",
 }

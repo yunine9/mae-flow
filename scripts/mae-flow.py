@@ -34,6 +34,7 @@
 退出码:0 成功;1 参数/状态错误;2 gate 拦截或证据不足。
 """
 import glob as globmod, hashlib, json, os, re, shlex, shutil, subprocess, sys, tempfile, time
+from dataclasses import replace
 from io import BytesIO
 
 from comet_compat import BEGIN as COMET_COMPAT_BEGIN, comet_guard_paths, ensure_direct_mode_compat
@@ -113,6 +114,11 @@ from mae_flow_core.guard.permits import (
 from mae_flow_core.guard.ownership import (
     OwnershipFacts,
     decide_ownership,
+)
+from mae_flow_core.guard.bash import (
+    BashGateContext,
+    decide_post_commit,
+    decide_pre_commit,
 )
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.evidence import (
@@ -7307,122 +7313,64 @@ def cmd_gate(flow, st, args):
         def hits_path(pat):
             return guard_intent.hits_path(intent, pat)
 
-        # Edit/Write 之外，模型也可能用 python -c、node -e 等任意解释器直接碰状态文件。
-        # 与其穷举所有写法，不如禁止 Bash 直接引用这些内部文件；读取统一走 status/current/doctor。
-        if hits_path(r"(^|/)(\.mae-flow\.json(?:\.[\w-]+)*|\.mae-flow-history\.jsonl|\.mae-flow-need-reload"
-                     r"|\.mae-flow-work/moonlight-report\.md)$"):
-            die("流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash 直接访问；"
-                "查看请用 mae-flow status/current/doctor/moonlight report，修改只能走对应子命令。", 2)
-
-        if intent.branch and st:
-            name = intent.branch.name
-            creating = intent.branch.creating
-            want = st["config"].get("分支名", "")
-            base = st["config"].get("基线分支", "")
-            # branch_create 的第一步就是从基线切出约定分支；此时 checkout/switch
-            # 基线必须放行，创建出来后仍只允许约定分支。其他步骤保持原有严格口径。
-            baseline_checkout = (
-                sid == "branch_create" and not creating and base and name == base)
-            if name and want and name != want and not baseline_checkout:
-                jdie("bash-branch-name",
-                     f"分支名 {name} 不符合约定 {want}(内部流程建议的 feature/xx 命名一律拒绝)。")
-        if (_checkpoint_review_locked(st)
-                and re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I)):
-            item = _checkpoint_locked_item(st) or {}
-            if item.get("status") != "commit_pending":
-                jdie(
-                    "bash-checkpoint-review-commit",
-                    "检查点 %s 的检视收据已冻结，当前状态 %s 不允许新增提交。"
-                    "等待检视时先取得用户裁决；待推送时只允许 push。"
-                    % (item.get("id", item.get("title", "最终检视")),
-                       item.get("status", "?")))
-        if (_checkpoint_review_locked(st)
-                and re.search(r"(?:^|[\s;&|(])git\s+push\b", c, re.I)):
-            item = _checkpoint_locked_item(st) or {}
-            if item.get("status") != "push_pending":
-                jdie(
-                    "bash-checkpoint-push-before-verify",
-                    "检查点 %s 当前为 %s；提交内容尚未通过 checkpoint status "
-                    "核验，禁止提前 push 或把 commit/push 合成一条命令。"
-                    % (item.get("id", item.get("title", "最终检视")),
-                       item.get("status", "?")))
-        if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", c):
-            die("禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进交付分支"
-                "(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到文件/明确的产物目录。", 2)
-        m = re.search(r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
-                      r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
-        if m and st:
-            msg = m.group(1) or m.group(2) or m.group(3) or ""
-            dan = st["config"].get("单号", "")
-            if dan and not re.match(r"^\[" + re.escape(dan) + r"\]\[(feat|fix)\]", msg):
-                jdie("bash-commit-format",
-                     f"commit message「{msg}」不符合 [{dan}][feat|fix]描述 格式。")
-            # 分支校验在提交这一刻做——拦截时机 = 错误发生时机。原来只在 done 时查,
-            # 站错分支提交一整步才发现,返工要 cherry-pick;现在错的那一笔就进不去。
-            want = st["config"].get("分支名", "")
-            if want and sid not in ("config_confirm", "workflow_select", "branch_create"):
-                cur_branch = sh("git branch --show-current")
-                if cur_branch and cur_branch != want:
-                    jdie("bash-commit-branch",
-                         f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
-                         f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
+        internal_state = hits_path(
+            r"(^|/)(\.mae-flow\.json(?:\.[\w-]+)*|"
+            r"\.mae-flow-history\.jsonl|\.mae-flow-need-reload"
+            r"|\.mae-flow-work/moonlight-report\.md)$")
+        branch = intent.branch
+        item = _checkpoint_locked_item(st) or {}
+        message_match = re.search(
+            r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
+            r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
+        commit_message = (
+            (message_match.group(1) or message_match.group(2)
+             or message_match.group(3) or "")
+            if message_match else "")
+        wanted = st["config"].get("分支名", "")
+        add_paths, _add_force = _git_add_pathspecs(c)
+        context = BashGateContext(
+            command=c,
+            has_internal_state_path=internal_state,
+            branch_name=branch.name if branch else "",
+            branch_creating=bool(branch.creating) if branch else False,
+            step=sid or "",
+            wanted_branch=wanted,
+            base_branch=st["config"].get("基线分支", ""),
+            checkpoint_locked=_checkpoint_review_locked(st),
+            checkpoint_label=item.get(
+                "id", item.get("title", "最终检视")),
+            checkpoint_status=item.get("status", ""),
+            ticket=st["config"].get("单号", ""),
+            commit_message_present=bool(message_match),
+            commit_message=commit_message,
+            current_branch="",
+            add_paths=tuple(add_paths),
+            recursive_delete_targets=
+                guard_intent.recursive_delete_targets(intent),
+            state_active=bool(st),
+        )
+        pre = decide_pre_commit(context)
+        if pre.kind == "absolute":
+            die(pre.message, 2)
+        if pre.kind == "block":
+            jdie(pre.rule, pre.message)
+        if (message_match and wanted
+                and sid not in (
+                    "config_confirm", "workflow_select", "branch_create")):
+            context = replace(
+                context,
+                current_branch=sh("git branch --show-current"),
+            )
+            pre = decide_pre_commit(context)
+            if pre.kind == "block":
+                jdie(pre.rule, pre.message)
         if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
             _gate_commit_candidates(c, st, jdie)
-        if re.search(r"git\s+push\b.*(--force|-f\b)", c) or re.search(r"git\s+push\b.*\s\+\S+", c):
-            die("禁止 force push(含 +refspec 形式)。", 2)
-        if re.search(r"dispatch\.py", c):
-            die("hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——这是伪造 agent 收尾令牌的通道。", 2)
-        if re.search(r"mae-flow\.py[^;&|]*\bexit\b[^;&|]*--interactive\b", c, re.I):
-            die("exit --interactive 是 Hook/ack 全坏时给用户的真实终端逃生口，"
-                "Agent 的 Bash 禁止调用或代答；把完整命令展示给用户手动执行。", 2)
-        add_paths, _add_force = _git_add_pathspecs(c)
-        if any(re.sub(r"/+$", "", path) == "openspec" for path in add_paths):
-            jdie(
-                "bash-wide-openspec-add",
-                "禁止整目录 git add openspec/：它会把其他单遗留的 change/STORY "
-                "一起卷入提交。open/design 只 add 当前 "
-                "openspec/changes/{CHANGE_NAME}；archive 只 add spec archive "
-                "输出的本次精确产物清单。")
-        # 动词必须命令位锚定且只看它自己的参数:旧写法 `(mkdir|md|new-item)\b` 左侧
-        # 不锚定,`git add openspec/changes/x/proposal.md` 里 "proposal.md" 的结尾
-        # 也命中 "md"——提交规格文件被判成"手动创建",而 clean_paths 证据又要求
-        # 必须提交,门禁与证据互锁卡死(实战黑事件)。
-        m_mk = re.search(r"(?:^|[\s;&|(])(?:mkdir|md|new-item)\b"
-                         r"((?:\s+(?:-\S+|\"[^\"]*\"|'[^']*'|[^\s;|&]+))*)", c, re.I)
-        if m_mk and any(re.search(r"(^|/)openspec/", t, re.I)
-                        for t in re.split(r"""[\s;|&()<>'"]+""", m_mk.group(1) or "")
-                        if t and not t.startswith("-")):
-            jdie("bash-mkdir-openspec",
-                 "禁止手动创建 openspec 目录：change 必须由 `mae-flow spec new` 创建，"
-                 "它会在建目录的同时登记当前单与阶段；手搓空目录没有状态登记，"
-                 "后续证据校验会失败。先执行 current，并照本步骤给出的 spec 命令处理。")
-        if re.search(r"\bcomet\s+init\b", c):
-            die("禁止执行全局 comet init：它会初始化无关平台并污染项目。"
-                "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，无需人工初始化。", 2)
-        # 危险命令 denylist(社区共识高信号项;普通目录的 rm -r 不拦,只拦毁灭性目标)
-        if re.search(r"(curl|wget|iwr|invoke-webrequest)[^|&;]*\|\s*(sudo\s+)?(sh|bash|zsh|iex|powershell)", c, re.I):
-            die("危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。", 2)
-        if re.search(r"git\s+clean\s+-\S*[xX]", c):
-            die("危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。", 2)
-        # 全树不可逆清除(校准实锤:未提交工作区也是磁盘上唯一的现场,一条
-        # reset --hard 蒸发;而系统报错话术恰在诱导"回退改动"类命令)。
-        # 裁决类 jdie:精确到文件的回退照常放行,全树清除三振后有放行令出口。
-        if st and (re.search(r"git\s+reset\s+(-\S+\s+)*--hard\b", c)
-                   or re.search(r"git\s+(checkout|restore)\s+(--\s+)?"
-                                r"(\.|:/)(\s|$)", c)):
-            jdie("bash-wipe-worktree",
-                 "全树不可逆清除拦截(git reset --hard / checkout -- .):未提交的"
-                 "工作区改动会全部蒸发。回退越权改动请精确到文件:"
-                 "git checkout HEAD -- <文件>;确需全树清除,把风险展示给用户裁决。")
-        # 毁灭目标只查 rm/rd 自己的命令段(校准实锤:整条命令 token 混查会把
-        # `rm -rf build && cmake -S . -B build` 的「.」算到 rm 头上——重建编译
-        # 的最高频惯用法被绝对拦且无出路;真阳性的毁灭 token 天然在 rm 段内)。
-        for target in guard_intent.recursive_delete_targets(intent):
-            die(f"危险命令拦截:对「{target}」的递归删除。确需执行请用户手动运行。", 2)
-        if st and re.search(r"git\s+worktree\s+add", c):
-            jdie("bash-worktree",
-                 "本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
-                 "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。")
+        post = decide_post_commit(context)
+        if post.kind == "absolute":
+            die(post.message, 2)
+        if post.kind == "block":
+            jdie(post.rule, post.message)
         return _gate_bash_writes(flow, st, sid, step, intent, jdie)
     die("gate 用法: gate edit <路径> | gate bash <命令>")
 

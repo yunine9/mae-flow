@@ -170,6 +170,34 @@ class ArchitectureTests(unittest.TestCase):
         ]
         self.assertEqual([], evidence_dicts)
 
+    def test_entrypoints_contain_no_extracted_guard_policy(self):
+        forbidden_rules = {
+            "edit-specs",
+            "edit-source",
+            "edit-tests-only",
+            "bash-branch-name",
+            "bash-commit-format",
+            "bash-wipe-worktree",
+            "bash-wide-openspec-add",
+            "bash-cross-delivery-carryover",
+            "bash-foreign-openspec",
+            "bash-build-artifacts",
+        }
+        for relative in ("scripts/mae-flow.py", "hooks/dispatch.py"):
+            with open(os.path.join(ROOT, relative), encoding="utf-8") as stream:
+                tree = ast.parse(stream.read())
+            constants = {
+                node.value for node in ast.walk(tree)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+            }
+            with self.subTest(relative=relative):
+                self.assertEqual(
+                    set(),
+                    forbidden_rules & constants,
+                    "Gate policy rule ids belong in mae_flow_core.guard",
+                )
+
     def test_workflow_functions_stay_within_complexity_limit(self):
         self.assertEqual([], workflow_complexity_violations(ROOT))
 

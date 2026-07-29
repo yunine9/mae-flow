@@ -74,6 +74,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/guard/gate.py",
           "scripts/mae_flow_core/guard/permits.py",
           "scripts/mae_flow_core/guard/ownership.py",
+          "scripts/mae_flow_core/guard/bash.py",
           "scripts/mae_flow_core/quality/__init__.py",
           "scripts/mae_flow_core/quality/task_cards.py",
           "scripts/mae_flow_core/quality/evidence.py",
@@ -108,6 +109,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_guard_gate.py",
           "scripts/tests/test_guard_permits.py",
           "scripts/tests/test_guard_ownership.py",
+          "scripts/tests/test_guard_bash.py",
           "scripts/tests/test_quality_task_cards.py",
           "scripts/tests/test_quality_evidence.py",
           "scripts/tests/test_delivery_policies.py",
@@ -3419,6 +3421,11 @@ with _TmpDir() as td:
               managed.returncode, managed.stderr[-200:]))
 
 mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
+guard_bash_src = open(
+    os.path.join(
+        ROOT, "scripts", "mae_flow_core", "guard", "bash.py"),
+    encoding="utf-8",
+).read()
 check("tests_only 缺配置时仍有默认硬边界",
       "def _effective_test_patterns" in mf_src
       and mf_src.count("_effective_test_patterns(st)") >= 2
@@ -3439,7 +3446,9 @@ check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
           "rf_codecheck",
       } <= TASK_CARD_EXPECTED_STEPS["CODECHECK"])
 check("Bash 任意解释器不能直碰流程状态文件",
-      "禁止经 Bash 直接访问" in mf_src and "mae-flow status/current/doctor" in mf_src)
+      "禁止经 Bash " in guard_bash_src
+      and "直接访问；查看请用" in guard_bash_src
+      and "mae-flow status/current/doctor" in guard_bash_src)
 check("带短横线的一次性退出凭据也在状态黑名单内",
       r"(?:\.[\w-]+)*" in mf_src and "EXIT_INTENT_PATH" in mf_src)
 check("STORY 不入库会在推送前检查提交树",

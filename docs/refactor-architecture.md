@@ -40,6 +40,10 @@ delivery；纯规则模块不得直接 `print`、`chdir` 或启动进程。磁�
 | `mae_flow_core/workflow/evidence_rules.py` | 文件、分支与规格 Evidence 纯裁决 | 直接文件或 Git 操作 |
 | `mae_flow_core/workflow/agent_evidence.py` | Agent 令牌、源码新鲜度与检视快照裁决 | token 文件读取 |
 | `mae_flow_core/guard/intent.py` | Edit/Bash/Git 请求的纯语义 | 用户提示与 exit code |
+| `mae_flow_core/guard/gate.py` | Edit 与 Bash 写入 Gate 裁决 | sidecar、Git 和退出码 |
+| `mae_flow_core/guard/bash.py` | 通用 Bash/Git 安全规则及规则顺序 | 执行命令 |
+| `mae_flow_core/guard/permits.py` | block id、一次性许可和三振升级策略 | sidecar 读写 |
+| `mae_flow_core/guard/ownership.py` | 检视快照、跨单归属和产物候选裁决 | Git 候选采集 |
 | `mae_flow_core/quality/task_cards.py` | 质量任务卡正文、摘要、记录 | Agent 派发和落盘 |
 | `mae_flow_core/quality/evidence.py` | CodeCheck 扫描、缓存和豁免 Evidence 裁决 | 直接执行 CodeCheck |
 | `mae_flow_core/delivery/checkpoints.py` | Checkpoint 导航和锁定判定 | Git push |

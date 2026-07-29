@@ -237,3 +237,38 @@ final review、Standalone scope/cancel，以及 Moonlight defer、push-failed、
 复审。Stage 3 不改变命令参数、状态 schema、用户停点、提交/push 安全顺序、
 Standalone 不自动提交的边界或 Moonlight 的失败留痕语义。后续阶段继续以 Phase-14
 为追加式行为基线。
+
+## Stage 4：Quality Use Cases 完成证据
+
+Stage 4 将 CodeCheck 解析、分批、执行、范围分类、用户范围裁决、人工诊断记录，
+以及完整流程/独立任务的质量任务卡事实、正文和指纹迁入
+`mae_flow_core.quality` 与 `mae_flow_core.application.quality`。应用层通过显式
+ports 获取进程、日志、文件、Git 与时间事实；CLI 保留平台装配、历史 stdout/stderr
+映射和状态持久化。完整流程与独立任务共享文件分组、最近模块执行根和冻结正文模型，
+但继续保留独立任务禁止提交、UT 禁改被测源码等不同安全边界。
+
+Phase-14 在 Phase-13 上追加 CodeCheck 空范围、缺失范围扫描、质量任务卡缺失和独立
+任务完成令牌缺失场景；全部历史 Phase-13 快照保持不变。架构门禁止已迁移的解析、
+分批、范围和任务卡渲染私有入口回流 CLI，并将 `scripts/mae-flow.py` 的防回增长上限
+从 10408 行收紧到 8620 行。
+
+2026-07-30 在 Stage 4 最终实现上取得的新鲜验证结果：
+
+- 完整 `unittest discover`：404 项通过；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-14 differential runner：零差分；
+- fault injection：3 项通过；
+- Quality、CodeCheck、任务卡、日志和真实任务范围测试在
+  `error::ResourceWarning` 下 56 项通过；
+- Quality 依赖、模块大小和函数复杂度门禁全部通过；五个主要新模块分别为
+  387、358、483、287、347 行，全部不超过 500 行、复杂度不超过 15；
+- `scripts/mae-flow.py` 已降至 8620 行，已迁移的 CLI 私有策略入口全部删除；
+- 严格资源测试发现并修复 MF-RF-006（测试夹具未关闭 Flow 文件句柄）；
+- 独立审查覆盖执行/超时/日志、JSON 回退、范围与缓存失效、两类任务卡、
+  Windows 启动和依赖方向；85 项聚焦测试通过，无 Critical/Important 发现；
+- `git diff --check` 通过。
+
+Stage 4 不改变 CodeCheck 非零退出码语义、900 秒超时、报告/JSON 新鲜度回退、
+事件顺序、范围候选用户停点、月光模式保守全纳入、人工诊断的 HEAD/文件/SHA256
+绑定、任务卡正文或 Standalone 的禁止提交边界。Stage 5 将继续迁移
+`hooks/dispatch.py` 的 Agent transcript 与最终报告验签。

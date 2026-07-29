@@ -97,3 +97,20 @@
   signs a valid format permit, verifies exit 0, exactly one consumption and no
   strike sidecar; pure policy tests separately preserve branch failure
 - Product behavior: restored to the pre-refactor one-shot permit semantics
+
+## MF-RF-006: Quality task-scope fixture leaked its Flow file handle
+
+- Status: resolved by `e856501`
+- Classification: test resource lifecycle defect
+- Trigger: run the Stage 4 Quality suites with
+  `-W error::ResourceWarning`
+- Evidence: `test_task_scope.py` loaded `flow/flow.json` through
+  `json.load(open(...))`; the suite reported success but interpreter cleanup
+  emitted an ignored unclosed-file `ResourceWarning`
+- Root cause: the fixture predated the managed-file rule and lived outside the
+  production entrypoint AST boundary
+- Resolution: load the fixture with a context manager so the descriptor closes
+  deterministically at module initialization
+- Regression: all 56 Quality, CodeCheck, task-card, logging, and task-scope
+  tests now run under strict `ResourceWarning` mode without warnings
+- Product behavior: unchanged; only the test fixture lifecycle changed

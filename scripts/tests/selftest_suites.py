@@ -1,5 +1,8 @@
 """Structured subprocess suites executed by the release selftest."""
 
+import os
+import subprocess
+
 
 REFACTOR_SAFETY_SUITES = (
     ("共享状态内核回归",
@@ -46,3 +49,23 @@ REFACTOR_SAFETY_SUITES = (
     ("故障注入与原子写失败回归",
      ("scripts/tests/test_fault_injection.py",), 180, 5000),
 )
+
+
+def execute_refactor_safety_suites(root, python_executable, run=None):
+    """Execute every registered suite and yield its result for reporting."""
+    run = run or subprocess.run
+    for label, command, timeout, output_limit in REFACTOR_SAFETY_SUITES:
+        result = run(
+            [
+                python_executable,
+                os.path.join(root, command[0]),
+                *command[1:],
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+        yield label, result, output_limit

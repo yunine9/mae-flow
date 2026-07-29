@@ -47,7 +47,7 @@ from mae_flow_core.workflow.definition import (
     definition_errors,
     workflow_graph_errors,
 )
-from selftest_suites import REFACTOR_SAFETY_SUITES
+from selftest_suites import execute_refactor_safety_suites
 
 fails = []
 
@@ -131,15 +131,8 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
 
 # 1.5 子测试由结构化清单统一注册；架构门会核对清单和真实执行循环，
 # 避免只在语法列表中保留文件名却悄悄停止运行。
-for label, command, timeout, output_limit in REFACTOR_SAFETY_SUITES:
-    result = subprocess.run(
-        [sys.executable, os.path.join(ROOT, command[0]), *command[1:]],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-        timeout=timeout,
-    )
+for label, result, output_limit in execute_refactor_safety_suites(
+        ROOT, sys.executable):
     check(
         label,
         result.returncode == 0,

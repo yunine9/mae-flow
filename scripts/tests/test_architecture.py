@@ -25,6 +25,7 @@ from architecture_rules import (  # noqa: E402
     function_complexity,
     guard_complexity_violations,
     line_count,
+    module_imports,
     new_module_size_violations,
     quality_complexity_violations,
     unmanaged_runtime_open_violations,
@@ -213,7 +214,10 @@ class ArchitectureTests(unittest.TestCase):
                     )
 
     def test_selftest_runs_refactor_safety_suites(self):
-        from selftest_suites import REFACTOR_SAFETY_SUITES
+        from selftest_suites import (
+            REFACTOR_SAFETY_SUITES,
+            execute_refactor_safety_suites,
+        )
         commands = {
             tuple(command)
             for _label, command, _timeout, _output_limit
@@ -236,16 +240,54 @@ class ArchitectureTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(commands))
 
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(argv, **kwargs):
+            calls.append((tuple(argv), kwargs))
+            return Result()
+
+        results = list(execute_refactor_safety_suites(
+            ROOT, sys.executable, run=fake_run))
+        self.assertEqual(len(REFACTOR_SAFETY_SUITES), len(results))
+        self.assertEqual(len(REFACTOR_SAFETY_SUITES), len(calls))
+        self.assertEqual(commands, {
+            tuple(os.path.relpath(argv[1], ROOT) if index == 0 else value
+                  for index, value in enumerate(argv[1:]))
+            for argv, _kwargs in calls
+        })
+        self.assertTrue(all(
+            kwargs["capture_output"] and not kwargs["check"]
+            for _argv, kwargs in calls
+        ))
+
         with open(
                 os.path.join(ROOT, "scripts", "selftest.py"),
                 encoding="utf-8") as stream:
             tree = ast.parse(stream.read())
         self.assertTrue(any(
             isinstance(node, ast.For)
-            and isinstance(node.iter, ast.Name)
-            and node.iter.id == "REFACTOR_SAFETY_SUITES"
+            and isinstance(node.iter, ast.Call)
+            and isinstance(node.iter.func, ast.Name)
+            and node.iter.func.id == "execute_refactor_safety_suites"
             for node in ast.walk(tree)
-        ), "selftest must execute the structured safety suite manifest")
+        ), "selftest must consume the tested safety suite executor")
+
+    def test_import_expansion_catches_from_package_import_module(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = os.path.join(temporary, "fixture.py")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(
+                    "from scripts import tests\n"
+                    "from scripts.tests import fault_injection\n"
+                )
+            imports = module_imports(path)
+            self.assertIn("scripts.tests", imports)
+            self.assertIn("scripts.tests.fault_injection", imports)
 
     def test_production_code_cannot_import_test_fault_injection(self):
         production = [
@@ -261,14 +303,7 @@ class ArchitectureTests(unittest.TestCase):
                 for name in files if name.endswith(".py"))
         for path in production:
             with self.subTest(path=os.path.relpath(path, ROOT)):
-                with open(path, encoding="utf-8") as stream:
-                    tree = ast.parse(stream.read())
-                imports = []
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        imports.extend(alias.name for alias in node.names)
-                    elif isinstance(node, ast.ImportFrom):
-                        imports.append(node.module or "")
+                imports = module_imports(path)
                 self.assertFalse(any(
                     name == "fault_injection"
                     or name.startswith("scripts.tests")

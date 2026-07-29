@@ -3,8 +3,13 @@
 """Regression tests for pure workflow advancement policy."""
 
 import copy
+import contextlib
+import importlib.util
+import io
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -325,6 +330,166 @@ class WorkflowAdvancementPolicyTests(unittest.TestCase):
         ))
         self.assertEqual(flow_before, flow)
         self.assertEqual(state_before, state)
+
+
+class WorkflowAdvanceAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        spec = importlib.util.spec_from_file_location(
+            "mae_flow_phase3_adapter",
+            path,
+        )
+        cls.mf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mf)
+
+    def test_advance_consumes_policy_events(self):
+        flow = {
+            "steps": {
+                "source": {
+                    "title": "source",
+                    "next": "rf_compile",
+                },
+                "rf_compile": {
+                    "title": "wrong target",
+                    "terminal": True,
+                },
+                "end": {
+                    "title": "policy target",
+                    "terminal": True,
+                },
+            },
+        }
+        state = {
+            "current": "source",
+            "config": {},
+            "choices": {},
+            "history": [],
+            "started": "2026-07-29 10:00:00",
+        }
+
+        def policy_events(_flow, _state, _step_id, _step):
+            yield TransitionEvent(
+                "audit",
+                "compat",
+                "compat:skipped",
+                "literal audit",
+            )
+            yield TransitionEvent("target", "end")
+
+        with tempfile.TemporaryDirectory() as project:
+            previous = os.getcwd()
+            original = (
+                self.mf.workflow_advancement.transition_events
+            )
+            try:
+                os.chdir(project)
+                self.mf.workflow_advancement.transition_events = (
+                    policy_events
+                )
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.mf.advance(
+                        flow,
+                        state,
+                        "source",
+                        flow["steps"]["source"],
+                        "done",
+                    )
+                with open(
+                        self.mf.STATE_PATH,
+                        encoding="utf-8") as stream:
+                    saved = json.load(stream)
+            finally:
+                self.mf.workflow_advancement.transition_events = original
+                os.chdir(previous)
+
+        self.assertEqual("end", saved["current"])
+        self.assertEqual(
+            {
+                "step": "source",
+                "result": "done",
+                "note": "",
+            },
+            {
+                key: saved["history"][0][key]
+                for key in ("step", "result", "note")
+            },
+        )
+        self.assertEqual(
+            {
+                "step": "compat",
+                "result": "compat:skipped",
+                "note": "literal audit",
+            },
+            {
+                key: saved["history"][1][key]
+                for key in ("step", "result", "note")
+            },
+        )
+        self.assertTrue(saved["history"][0]["at"])
+        self.assertTrue(saved["history"][1]["at"])
+        self.assertIn("end", saved["step_heads"])
+        self.assertIn(
+            "[mae-flow] source done → 进入 end\n",
+            output.getvalue(),
+        )
+
+    def test_advance_preserves_unresolved_moonlight_error(self):
+        flow = {
+            "steps": {
+                "source": {
+                    "title": "source",
+                    "next": "broken_review",
+                },
+                "broken_review": {
+                    "title": "broken review",
+                    "skip_in_moonlight": True,
+                    "choice_key": "review",
+                    "next": {"continue": "end"},
+                },
+                "end": {
+                    "title": "end",
+                    "terminal": True,
+                },
+            },
+        }
+        state = {
+            "current": "source",
+            "config": {},
+            "choices": {},
+            "history": [],
+            "started": "2026-07-29 10:00:00",
+            "moonlight": {"enabled": True},
+        }
+        error = io.StringIO()
+        with tempfile.TemporaryDirectory() as project:
+            previous = os.getcwd()
+            try:
+                os.chdir(project)
+                with self.assertRaises(SystemExit) as raised:
+                    with contextlib.redirect_stderr(error):
+                        self.mf.advance(
+                            flow,
+                            state,
+                            "source",
+                            flow["steps"]["source"],
+                            "done",
+                        )
+                state_file_exists = os.path.exists(
+                    self.mf.STATE_PATH)
+            finally:
+                os.chdir(previous)
+
+        self.assertEqual(2, raised.exception.code)
+        self.assertEqual(
+            "[mae-flow] 月光旁路步骤 broken_review "
+            "缺少可解析的 moonlight_choice/next，拒绝卡死流程。\n",
+            error.getvalue(),
+        )
+        self.assertEqual("source", state["current"])
+        self.assertEqual("done", state["history"][0]["result"])
+        self.assertFalse(state_file_exists)
 
 
 if __name__ == "__main__":

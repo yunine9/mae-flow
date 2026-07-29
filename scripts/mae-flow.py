@@ -86,6 +86,7 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
+from mae_flow_core.workflow import advancement as workflow_advancement
 from mae_flow_core.workflow import definition as workflow_definition
 from mae_flow_core.workflow import transitions as workflow_transitions
 
@@ -154,11 +155,10 @@ HISTORY_PATH = ".mae-flow-history.jsonl"   # 交付历史账本:终态 init 时�
 DEFAULTS_PATH = ".mae-flow-defaults.json"  # 仓库预设(团队提交进仓):require_sets 步骤 current 时预填展示
 FLOW = None                      # main() 加载后填充,供证据函数读取 env_checks 等
 MOONLIGHT_REPORT_PATH = os.path.join(".mae-flow-work", "moonlight-report.md")
-PACE_STEPS = {"build_pace", "tw_pace", "rf_pace"}
+PACE_STEPS = workflow_advancement.PACE_STEPS
 CHECKPOINT_CODE_STEPS = {
     "full": "build", "hotfix": "build", "tweak": "tw_change", "review": "rf_fix",
 }
-LEGACY_CODE_REVIEW_STEPS = {"build_review", "tw_review", "rf_review"}
 
 # source_patterns 只适合识别目录，不能承担跨仓源码真相（顶层 include/lib/app 已真实漏过）。
 # 扩展名与构建入口作为保守底座；仓库可用 defaults/config 的「源码路径」补私有布局。
@@ -5657,73 +5657,25 @@ def advance(flow, st, sid, step, tag, note=""):
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
     st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例
     st["history"].append({"step": sid, "result": tag, "note": note, "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    nxt = _next_from_step(step, st)
-    # States created before the checkpoint protocol existed keep the original
-    # route. Merely upgrading the plugin must not add a new human gate to an
-    # in-flight delivery that happens to be just before a pace step.
-    if (nxt in PACE_STEPS and not _development_checkpoints_enabled(st)
-            and not _development_review(st) and not _moonlight(st)):
-        st["history"].append({
-            "step": nxt,
-            "result": "legacy:skipped-development-pace",
-            "note": "旧版在途状态没有检查点协议标记，保持升级前路径",
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        nxt = _next_from_step(flow["steps"][nxt], st, "continuous")
-    # New checkpoint-enabled deliveries already review staged batches themselves,
-    # while continuous mode deliberately waits for delivery_review. Keep the old
-    # review nodes for in-flight states created before this feature.
-    review_state = _development_review(st)
-    if nxt == "delivery_review" and not review_state and not _moonlight(st):
-        st["history"].append({
-            "step": "delivery_review",
-            "result": "legacy:skipped-final-review",
-            "note": "旧版在途状态没有开发节奏收据，保持升级前路径",
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        nxt = _next_from_step(flow["steps"]["delivery_review"], st)
-    while (not _moonlight(st) and review_state
-           and review_state.get("status") == "active"
-           and nxt in LEGACY_CODE_REVIEW_STEPS):
-        bypass = flow["steps"][nxt]
-        st["history"].append({
-            "step": nxt,
-            "result": "checkpoint:replaced-legacy-review",
-            "note": ("分阶段检查点已检视" if review_state.get("mode") == "staged"
-                     else "一次完成模式改在质量链后统一检视"),
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        nxt = _next_from_step(bypass, st, "continue")
-    # 编译后人工检视是普通模式的显式停靠点。月光宝盒必须完全无交互，
-    # 状态机在进入前直接旁路，既不显示步骤也不伪造一条用户确认。
-    seen = set()
-    while (_moonlight(st) and nxt and nxt not in seen
-           and flow.get("steps", {}).get(nxt, {}).get("skip_in_moonlight")):
-        seen.add(nxt)
-        bypass = flow["steps"][nxt]
-        moon_choice = bypass.get("moonlight_choice", "")
-        resolved = _next_from_step(bypass, st, moon_choice)
-        if not resolved:
-            die(f"月光旁路步骤 {nxt} 缺少可解析的 moonlight_choice/next，拒绝卡死流程。", 2)
-        st["history"].append({
-            "step": nxt,
-            "result": "moonlight:skipped-human-review",
-            "note": "无人值守模式不进入编译后用户检视",
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        nxt = resolved
-    if _moonlight(st) and nxt == "archive_confirm":
-        st["history"].append({
-            "step": sid, "result": "moonlight:archive-deferred",
-            "note": "夜间先推送，规格定稿留到晨间 finalize",
-            "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-        nxt = "push"
+    try:
+        for event in workflow_advancement.transition_events(
+                flow, st, sid, step):
+            if event.kind == "audit":
+                st["history"].append({
+                    "step": event.step,
+                    "result": event.result,
+                    "note": event.note,
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+            else:
+                nxt = event.step
+    except workflow_advancement.TransitionResolutionError as exc:
+        die(f"月光旁路步骤 {exc.step_id} 缺少可解析的 moonlight_choice/next，拒绝卡死流程。", 2)
     if _moonlight(st) and sid == "push":
         _moonlight_resolve_kind(st, "push")
         ml = _moonlight_data(st)
         ml["pushed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         ml["pushed_head"] = sh("git rev-parse --verify HEAD")
-        nxt = "moonlight_review"
     st["current"] = nxt
     if nxt:
         st.setdefault("step_heads", {})[nxt] = sh("git rev-parse --verify HEAD")

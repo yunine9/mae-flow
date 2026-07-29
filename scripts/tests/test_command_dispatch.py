@@ -3,7 +3,6 @@
 """Contracts for the side-effect-free CLI command routing table."""
 
 import os
-import importlib.util
 import inspect
 import sys
 import unittest
@@ -21,16 +20,13 @@ from mae_flow_core.command_dispatch import (  # noqa: E402
     flow_route,
     invoke,
 )
+from mae_flow_core import cli_runtime  # noqa: E402
 
 
 class CommandDispatchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(SCRIPTS, "mae-flow.py")
-        spec = importlib.util.spec_from_file_location(
-            "mae_flow_command_dispatch_fixture", path)
-        cls.cli = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.cli)
+        cls.cli = cli_runtime
 
     def test_action_routes_preserve_every_legacy_signature(self):
         self.assertEqual(

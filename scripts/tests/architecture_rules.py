@@ -21,6 +21,7 @@ FORBIDDEN_CALLS = {
 }
 LEGACY_OVERSIZED_CORE_MODULES = {
     "scripts/mae_flow_core/capabilities.py",
+    "scripts/mae_flow_core/cli_runtime.py",
     "scripts/mae_flow_core/lightcheck.py",
     "scripts/mae_flow_core/specengine.py",
 }
@@ -335,6 +336,32 @@ def private_hook_import_violations(root):
             if "dispatch.py" in fragment:
                 violations.append(
                     "%s:%d: private Hook entrypoint import"
+                    % (path.relative_to(root_path).as_posix(), node.lineno)
+                )
+    return sorted(violations)
+
+
+def private_cli_import_violations(root):
+    """Find business tests that dynamically load the CLI entrypoint."""
+    root_path = Path(root)
+    tests = root_path / "scripts" / "tests"
+    violations = []
+    for path in sorted(tests.glob("test_*.py")):
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=os.fspath(path))
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _resolved_call_name(node.func, aliases)
+            if name not in {
+                    "importlib.util.spec_from_file_location",
+                    "runpy.run_path"}:
+                continue
+            fragment = ast.get_source_segment(source, node) or ""
+            if "mae-flow.py" in fragment:
+                violations.append(
+                    "%s:%d: private CLI entrypoint import"
                     % (path.relative_to(root_path).as_posix(), node.lineno)
                 )
     return sorted(violations)

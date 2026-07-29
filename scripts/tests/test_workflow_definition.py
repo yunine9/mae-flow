@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """Regression tests for workflow definition and pure transition policy."""
 
-import importlib.util
 import json
 import os
 import sys
@@ -28,6 +27,7 @@ from mae_flow_core.workflow.transitions import (  # noqa: E402
     transition_targets,
     workflow_chain,
 )
+from mae_flow_core import cli_runtime  # noqa: E402
 
 
 class WorkflowTransitionTests(unittest.TestCase):
@@ -310,13 +310,7 @@ class WorkflowDefinitionTests(unittest.TestCase):
 class WorkflowAdapterDelegationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(ROOT, "scripts", "mae-flow.py")
-        spec = importlib.util.spec_from_file_location(
-            "mae_flow_phase2_adapter",
-            path,
-        )
-        cls.mf = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.mf)
+        cls.mf = cli_runtime
 
     def test_load_flow_delegates_to_workflow_definition(self):
         sentinel = object()

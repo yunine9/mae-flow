@@ -29,6 +29,7 @@ from architecture_rules import (  # noqa: E402
     line_count,
     module_imports,
     new_module_size_violations,
+    private_cli_import_violations,
     private_hook_import_violations,
     quality_complexity_violations,
     unmanaged_runtime_open_violations,
@@ -166,6 +167,9 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_business_tests_do_not_import_hook_private_policy(self):
         self.assertEqual([], private_hook_import_violations(ROOT))
+
+    def test_business_tests_do_not_import_cli_private_policy(self):
+        self.assertEqual([], private_cli_import_violations(ROOT))
 
     def test_delivery_functions_stay_within_complexity_limit(self):
         self.assertEqual([], delivery_complexity_violations(ROOT))

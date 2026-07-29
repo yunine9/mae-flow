@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -15,11 +14,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
-
-SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_task_scope_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
-mf = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(mf)
+from mae_flow_core import cli_runtime as mf
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:

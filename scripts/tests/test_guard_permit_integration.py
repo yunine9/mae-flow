@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """CLI assembly regression for one-shot Gate permits."""
 
-import importlib.util
 import json
 import os
 import sys
@@ -16,20 +15,13 @@ SCRIPTS = os.path.join(ROOT, "scripts")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
-
-def load_cli():
-    path = os.path.join(SCRIPTS, "mae-flow.py")
-    spec = importlib.util.spec_from_file_location(
-        "mae_flow_guard_permit_integration", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from mae_flow_core import cli_runtime
 
 
 class PermitIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mf = load_cli()
+        cls.mf = cli_runtime
 
     def test_valid_format_permit_is_not_replayed_before_branch_check(self):
         command = "git commit -m bad"

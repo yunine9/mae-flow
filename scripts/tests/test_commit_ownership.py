@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -12,11 +11,7 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_commit_ownership_test",
-    os.path.join(ROOT, "scripts", "mae-flow.py"))
-mf = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(mf)
+from mae_flow_core import cli_runtime as mf
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:

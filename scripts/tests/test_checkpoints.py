@@ -1,5 +1,4 @@
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -16,11 +15,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import fingerprints
 from mae_flow_core.adapters.hook_runtime import create_hook_runtime
-
-SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_checkpoint_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
-mf = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(mf)
+from mae_flow_core import cli_runtime as mf
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as stream:

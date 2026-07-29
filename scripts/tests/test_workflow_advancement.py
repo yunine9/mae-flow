@@ -4,7 +4,6 @@
 
 import copy
 import contextlib
-import importlib.util
 import io
 import json
 import os
@@ -23,6 +22,7 @@ from mae_flow_core.workflow.advancement import (  # noqa: E402
     TransitionResolutionError,
     transition_events,
 )
+from mae_flow_core import cli_runtime  # noqa: E402
 
 
 class WorkflowAdvancementPolicyTests(unittest.TestCase):
@@ -335,13 +335,7 @@ class WorkflowAdvancementPolicyTests(unittest.TestCase):
 class WorkflowAdvanceAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(ROOT, "scripts", "mae-flow.py")
-        spec = importlib.util.spec_from_file_location(
-            "mae_flow_phase3_adapter",
-            path,
-        )
-        cls.mf = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.mf)
+        cls.mf = cli_runtime
 
     def test_advance_consumes_policy_events(self):
         flow = {

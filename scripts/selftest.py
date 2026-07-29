@@ -127,6 +127,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/workflow/evidence_rules.py",
           "scripts/mae_flow_core/workflow/transitions.py",
           "scripts/mae_flow_core/__init__.py",
+          "scripts/mae_flow_core/cli_runtime.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
           "scripts/mae_flow_core/state_store.py",
@@ -248,9 +249,7 @@ if flow:
     check("非终态步骤均有指令文档", not miss_md, str(miss_md))
 
     # 4. 证据类型已注册
-    spec = importlib.util.spec_from_file_location("mf", os.path.join(ROOT, "scripts", "mae-flow.py"))
-    mf = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mf)
+    from mae_flow_core import cli_runtime as mf
     used = {e["type"] for s in steps.values() for e in s.get("evidence", [])}
     unreg = used - set(mf.EVIDENCE)
     check("证据类型全部注册", not unreg, str(unreg))
@@ -2684,7 +2683,10 @@ with _TmpDir() as td:
               direct.returncode, direct.stdout[-200:], direct.stderr[-200:],
               managed.returncode, managed.stderr[-200:]))
 
-mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
+mf_src = open(
+    os.path.join(ROOT, "scripts", "mae_flow_core", "cli_runtime.py"),
+    encoding="utf-8",
+).read()
 quality_codecheck_src = open(
     os.path.join(
         ROOT, "scripts", "mae_flow_core", "application",

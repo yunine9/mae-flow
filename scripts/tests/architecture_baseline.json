@@ -1,10 +1,10 @@
 {
   "max_lines": {
     "hooks/dispatch.py": 326,
-    "scripts/mae-flow.py": 8620
+    "scripts/mae-flow.py": 10
   },
   "max_complexity": {
-    "scripts/mae-flow.py": {
+    "scripts/mae_flow_core/cli_runtime.py": {
       "advance": 17,
       "cmd_done": 6,
       "cmd_gate": 59,

@@ -3,7 +3,6 @@
 """Regression tests for pure workflow completion policy."""
 
 import copy
-import importlib.util
 import os
 import sys
 import tempfile
@@ -25,6 +24,7 @@ from mae_flow_core.workflow.completion import (  # noqa: E402
     evidence_failures,
     resolve_choice,
 )
+from mae_flow_core import cli_runtime  # noqa: E402
 
 
 class WorkflowCompletionPolicyTests(unittest.TestCase):
@@ -248,13 +248,7 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
 class WorkflowCompletionAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(ROOT, "scripts", "mae-flow.py")
-        spec = importlib.util.spec_from_file_location(
-            "mae_flow_phase4_adapter",
-            path,
-        )
-        cls.mf = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.mf)
+        cls.mf = cli_runtime
 
     def test_cmd_done_consumes_completion_policy_events(self):
         flow = {

@@ -1,5 +1,4 @@
 import hashlib
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -12,12 +11,7 @@ import unittest
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
-MF_SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_codecheck_logging_test",
-    os.path.join(ROOT, "scripts", "mae-flow.py"))
-mf = importlib.util.module_from_spec(MF_SPEC)
-MF_SPEC.loader.exec_module(mf)
-
+from mae_flow_core import cli_runtime as mf
 from mae_flow_core import codecheck_log as log_core
 from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 

@@ -354,7 +354,7 @@ Stage 8 将最后三个遗留巨型模块拆分为稳定门面与内聚实现模
 
 2026-07-30 在 Stage 7–8 实现上取得的新鲜验证结果：
 
-- 完整严格 `unittest discover`：488 项通过，启用
+- 完整严格 `unittest discover`：491 项通过，启用
   `-W error::ResourceWarning`；
 - 完整 `scripts/selftest.py`：全部通过；
 - Phase-15 differential runner：零差分；
@@ -368,3 +368,23 @@ Stage 8 将最后三个遗留巨型模块拆分为稳定门面与内聚实现模
 
 Stage 7–8 不改变公共导入路径、命令行为、Lightcheck 结果 schema、SpecEngine 文本与
 归档字节、Capabilities 宿主探测顺序，或失败时的回滚/降级语义。
+
+## Stage 9：最终证明与独立审查
+
+最终审查覆盖 Stage 6–8 的 CLI 组合注册、稳定门面、跨平台路径/进程、循环依赖、
+资源生命周期、异常与回滚语义。审查最初复现三个进程内门面兼容回归：四个历史
+Evidence 对象未导出、`FLOW` 读取停在导入快照、Evidence override 未传播到注册模块。
+三项均由 MF-RF-016 的 RED/GREEN 测试修复。
+
+修复后的独立复审结论为 `APPROVED`，无残留 Critical、Important 或 Minor 发现；复审
+确认 491 项严格全量测试通过、CLI facade + architecture 39 项通过、Phase-15 零差分、
+全提交范围 `git diff --check` 干净，且三个稳定门面相对拆分前无顶层绑定名或函数签名
+缺失。
+
+最终架构目标全部达到：
+
+- CLI/Hook 入口分别为 9/326 行，低于 1500/800；
+- 所有生产业务模块不超过 500 行，超大模块豁免表为空；
+- Workflow、Guard、Quality、Delivery 与 Hook application 的策略复杂度均不超过 15；
+- 业务测试动态导入私有单体入口为零；
+- 自检、Phase-15、故障注入、完成合同、语法与两组端到端探针全部通过。

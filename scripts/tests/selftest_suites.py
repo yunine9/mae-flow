@@ -56,6 +56,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_agent_evidence.py",), 180, 5000),
     ("Delivery Evidence 提交与推送回归",
      ("scripts/tests/test_delivery_evidence.py",), 180, 5000),
+    ("Quality Evidence CodeCheck 回归",
+     ("scripts/tests/test_quality_evidence.py",), 180, 5000),
 )
 
 

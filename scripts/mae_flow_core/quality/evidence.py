@@ -1,0 +1,335 @@
+"""CodeCheck Evidence policies with explicit tool and repository ports."""
+
+import hashlib
+from dataclasses import dataclass
+
+from ..foundation.models import EvidenceResult
+from ..workflow.evidence import legacy_result
+
+
+@dataclass(frozen=True)
+class QualityEvidencePorts:
+    business_changed_files: object
+    risk_acceptance: object
+    source_changed_since: object
+    agent_ran: object
+    tokens: object
+    append_event: object
+    git_head: object
+    exists: object
+    is_file: object
+    argv_output: object
+    run_codecheck: object
+    scope_filter: object
+    read_bytes: object
+    read_text_replace: object
+    now: object
+    exemption_text_has_pair: object
+    approved_exemptions: object
+    was_exempt_before_review: object
+    approval_key: object
+
+
+class QualityEvidenceRules:
+    def __init__(self, ports):
+        self.ports = ports
+
+    def _unchanged(self, head, state):
+        changed, error = self.ports.source_changed_since(head, state)
+        return not error and not changed, changed, error
+
+    def _scan_cache_result(self, state, files):
+        scan = (state.get("quality", {}) or {}).get(
+            "codecheck_scan", {})
+        eligible = (
+            scan.get("step") == state.get("current")
+            and scan.get("count") == 0
+            and not scan.get("manual")
+            and scan.get("files") == files
+            and scan.get("head")
+        )
+        if not eligible:
+            return None
+        unchanged, _changed, _error = self._unchanged(
+            scan.get("head"), state)
+        if not unchanged:
+            return None
+        self.ports.append_event(state, "verify.cache_reused", {
+            "kind": "clean-scan",
+            "head": scan.get("head", ""),
+            "files": files,
+            "count": 0,
+        })
+        return EvidenceResult(True, "")
+
+    def _verified_result(self, state, files):
+        verified = (state.get("quality", {}) or {}).get(
+            "codecheck_verify", {})
+        eligible = (
+            verified.get("step") == state.get("current")
+            and verified.get("files") == files
+            and verified.get("head")
+        )
+        if not eligible:
+            return None
+        unchanged, _changed, _error = self._unchanged(
+            verified.get("head"), state)
+        if not unchanged:
+            return None
+        total = int(verified.get("count", 0))
+        pairs = verified.get("pairs", []) or []
+        self.ports.append_event(state, "verify.cache_reused", {
+            "kind": "verification",
+            "head": verified.get("head", ""),
+            "files": files,
+            "count": total,
+            "pairs": pairs,
+        })
+        return total, pairs
+
+    def _manual_zero_result(self, state, files, error):
+        manual = (state.get("quality", {}) or {}).get(
+            "codecheck_manual", {})
+        diagnostic = manual.get("diagnostic", "")
+        try:
+            same_diagnostic = (
+                self.ports.is_file(diagnostic)
+                and hashlib.sha256(
+                    self.ports.read_bytes(diagnostic)).hexdigest()
+                == manual.get("diagnostic_sha256")
+            )
+        except OSError:
+            same_diagnostic = False
+        valid = (
+            manual.get("step") == state.get("current")
+            and manual.get("files") == files
+            and manual.get("head") == self.ports.git_head()
+            and same_diagnostic
+            and manual.get("count") == 0
+        )
+        if valid:
+            return EvidenceResult(True, "")
+        return EvidenceResult(
+            False,
+            error
+            + "；若你已人工看过诊断文件并确认告警数，可使用 current 中给出的 "
+            "codecheck-record 恢复命令，记录会绑定当前 HEAD 和文件清单，"
+            "代码一变即失效",
+        )
+
+    def _execute_verification(self, state, files):
+        result, error = self.ports.run_codecheck(
+            files, state, "harness-verify")
+        if error:
+            return self._manual_zero_result(
+                state, files, error), None
+        result, _stock = self.ports.scope_filter(
+            result, state, files)
+        total, pairs = result["total"], result["pairs"]
+        record = {
+            "step": state.get("current"),
+            "head": self.ports.git_head(),
+            "files": files,
+            "count": total,
+            "pairs": pairs,
+            "log_path": result.get("log_path", ""),
+            "at": self.ports.now(),
+        }
+        state.setdefault("quality", {})["codecheck_verify"] = record
+        self.ports.append_event(state, "verify.completed", {
+            "head": record["head"],
+            "files": files,
+            "count": total,
+            "pairs": pairs,
+        })
+        return None, (total, pairs)
+
+    def _exemption_result(
+            self, state, exemption, total, pairs):
+        if not self.ports.exists(exemption):
+            return EvidenceResult(
+                False,
+                "harness 现场复核实测遗留 %d 条告警,且无豁免清单(%s)。"
+                "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),"
+                "把「规则ID + 文件 + 用户原话」逐行写入 %s 并 commit "
+                "后重试——口头豁免无效"
+                % (total, exemption, exemption),
+            )
+        text = self.ports.read_text_replace(exemption)
+        uncovered = [
+            "%s(%s)" % (rule, path)
+            for rule, path, _line in pairs
+            if not self.ports.exemption_text_has_pair(
+                text, rule, path)
+        ]
+        if len(pairs) < total and not uncovered:
+            uncovered = [
+                "(另有 %d 条未解析出明细,无法核对豁免)"
+                % (total - len(pairs))]
+        if uncovered:
+            return EvidenceResult(
+                False,
+                "实测遗留 %d 条告警,以下未被豁免清单覆盖: %s%s。"
+                "修掉或补齐 %s(须用户裁决原话)后重试"
+                % (
+                    total,
+                    "、".join(uncovered[:5]),
+                    "…" if len(uncovered) > 5 else "",
+                    exemption,
+                ),
+            )
+        approved = self.ports.approved_exemptions(state)
+        unauthorized = [
+            "%s(%s)" % (rule, path)
+            for rule, path, _line in pairs
+            if (
+                self.ports.approval_key(rule, path) not in approved
+                and not self.ports.was_exempt_before_review(
+                    state, exemption, rule, path)
+            )
+        ]
+        if unauthorized:
+            return EvidenceResult(
+                False,
+                "豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: "
+                + "、".join(unauthorized[:5])
+                + "。逐项 AskUserQuestion 后执行 mae-flow "
+                "approve-exemption --rule <规则ID> --file <文件> "
+                "--reason <理由> --ack \"用户原话\"；"
+                "手写豁免文件不再算授权",
+            )
+        return EvidenceResult(True, "")
+
+    def codecheck_clean(self, _spec, state):
+        files, error = self.ports.business_changed_files(state)
+        if error:
+            return EvidenceResult(False, error)
+        if not files:
+            self.ports.append_event(state, "verify.empty", {
+                "head": self.ports.git_head(),
+                "reason": "no-business-code-files",
+            })
+            return EvidenceResult(True, "")
+        cached = self._scan_cache_result(state, files)
+        if cached is not None:
+            return cached
+        exemption = "docs/codecheck-exempt-%s.md" % (
+            state["config"].get("单号", ""))
+        if self.ports.exists(exemption):
+            dirty = self.ports.argv_output([
+                "git", "status", "--porcelain", "--", exemption])
+            if dirty:
+                return EvidenceResult(
+                    False,
+                    "豁免记录 %s 尚未提交；本地文件不能替远端 MR 背书，"
+                    "请精确提交后重试" % exemption,
+                )
+        verified = self._verified_result(state, files)
+        if verified is None:
+            failure, verified = self._execute_verification(
+                state, files)
+            if failure is not None:
+                return failure
+        total, pairs = verified
+        if total == 0:
+            return EvidenceResult(True, "")
+        return self._exemption_result(
+            state, exemption, total, pairs)
+
+    def _review_scan_result(self, state, scan):
+        if scan.get("scope_pending"):
+            return EvidenceResult(
+                False,
+                "CodeCheck 仍有 %d 条机器准备排除的候选，"
+                "尚未经用户确认是否涉及本次修改。按 codecheck-scan 输出使用 "
+                "AskUserQuestion 展示候选，再执行 codecheck-scope；"
+                "确认前不能忽略这些结果。"
+                % len(scan.get("scope_candidates") or []),
+            )
+        if scan.get("status") == "TOOL_ERROR":
+            changed, error = self.ports.source_changed_since(
+                scan.get("head", ""), state)
+            if error:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck 诊断基点失效:" + error
+                    + "；重新执行 codecheck-scan",
+                )
+            if changed:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck 工具诊断后源码发生变化: "
+                    + "、".join(changed[:5])
+                    + "。对新代码重新尝试一次 codecheck-scan",
+                )
+            return EvidenceResult(True, "")
+        if scan.get("count", 0) == 0:
+            changed, error = self.ports.source_changed_since(
+                scan.get("head", ""), state)
+            if error:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck 首检基点失效:" + error
+                    + "；重新执行 codecheck-scan",
+                )
+            if changed:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck 首检为 0 后源码又发生变化: "
+                    + "、".join(changed[:5])
+                    + "。旧首检不背新代码的书,重新执行 codecheck-scan",
+                )
+            return EvidenceResult(True, "")
+        return None
+
+    def _review_agent_result(self, state):
+        result = legacy_result(self.ports.agent_ran({
+            "agent": "CODECHECK",
+            "statuses": ["CLEAN", "REMAINING", "FAIL"],
+        }, state))
+        if not result.passed:
+            return result
+        token = self.ports.tokens().get("CODECHECK", {})
+        if isinstance(token, dict) and token.get("status") == "FAIL":
+            task = (
+                (state.get("agent_tasks", {}) or {}).get(
+                    "CODECHECK", {}))
+            changed, error = self.ports.source_changed_since(
+                task.get("head", ""), state)
+            if error:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck FAIL 后无法核对源码状态:" + error,
+                )
+            if changed:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck Agent 以 FAIL 收尾但留下了源码变化: "
+                    + "、".join(changed[:5])
+                    + "。先回退未验证改动，或完成编译并以 "
+                    "REMAINING/CLEAN 收尾。",
+                )
+        return EvidenceResult(True, "")
+
+    def review_codecheck(self, _spec, state):
+        scan = (state.get("quality", {}) or {}).get(
+            "codecheck_scan", {})
+        files, error = self.ports.business_changed_files(state)
+        if error and scan.get("step") != state.get("current"):
+            return EvidenceResult(False, error)
+        if files == []:
+            return EvidenceResult(True, "")
+        accepted, _why = self.ports.risk_acceptance(
+            "CODECHECK_TOOL", state)
+        if accepted:
+            return EvidenceResult(True, "")
+        if scan.get("step") != state.get("current"):
+            return EvidenceResult(
+                False,
+                "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，"
+                "禁止主会话自行修复",
+            )
+        result = self._review_scan_result(state, scan)
+        if result is not None:
+            return result
+        return self._review_agent_result(state)

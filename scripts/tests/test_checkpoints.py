@@ -15,16 +15,12 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import fingerprints
+from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 
 SPEC = importlib.util.spec_from_file_location(
     "mae_flow_checkpoint_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mf)
-DISPATCH_SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_checkpoint_dispatch_test",
-    os.path.join(ROOT, "hooks", "dispatch.py"))
-dispatch = importlib.util.module_from_spec(DISPATCH_SPEC)
-DISPATCH_SPEC.loader.exec_module(dispatch)
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as stream:
@@ -54,6 +50,10 @@ class CheckpointTests(unittest.TestCase):
         self.base = git(self.repo, "rev-parse", "HEAD")
         self.old_cwd = os.getcwd()
         os.chdir(self.repo)
+        self.hook = create_hook_runtime(
+            os.path.join(ROOT, "scripts", "mae-flow.py"),
+            lambda _message: None,
+        )
 
     def tearDown(self):
         os.chdir(self.old_cwd)
@@ -444,19 +444,19 @@ class CheckpointTests(unittest.TestCase):
         self.assertNotEqual(regular, mf._review_path_fingerprint(path))
         self.assertEqual(
             mf._review_path_fingerprint(path),
-            dispatch._review_path_fingerprint(path))
+            self.hook._review_path_fingerprint(path))
 
     def test_main_and_hook_delegate_to_shared_fingerprints(self):
         path = os.path.join(self.repo, "src", "main.cpp")
         shared = fingerprints.review_path_fingerprint(path)
         self.assertEqual(shared, mf._review_path_fingerprint(path))
-        self.assertEqual(shared, dispatch._review_path_fingerprint(path))
+        self.assertEqual(shared, self.hook._review_path_fingerprint(path))
         self.assertIs(
             mf._review_path_fingerprint.__wrapped__,
             fingerprints.review_path_fingerprint,
         )
         self.assertIs(
-            dispatch._review_path_fingerprint.__wrapped__,
+            self.hook._review_path_fingerprint.__wrapped__,
             fingerprints.review_path_fingerprint,
         )
 
@@ -472,18 +472,18 @@ class CheckpointTests(unittest.TestCase):
         task = {
             "head": task_head,
             "precommit_review": True,
-            "source_snapshot": dispatch._source_snapshot(task_head),
+            "source_snapshot": self.hook._source_snapshot(task_head),
         }
 
         def bail(message):
             raise AssertionError(message)
 
         self.assertEqual(
-            dispatch._enforce_agent_scope("COMPILE", task, bail), [])
+            self.hook._enforce_agent_scope("COMPILE", task, bail), [])
         with open(test_path, "a", encoding="utf-8") as stream:
             stream.write("int compile_agent_test = 3;\n")
         with self.assertRaises(AssertionError):
-            dispatch._enforce_agent_scope("COMPILE", task, bail)
+            self.hook._enforce_agent_scope("COMPILE", task, bail)
 
     def test_main_and_hook_share_root_build_file_classification(self):
         paths = [
@@ -493,19 +493,19 @@ class CheckpointTests(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue(mf._is_source_path(path, {}, FLOW))
-                self.assertTrue(dispatch._source_like(path))
+                self.assertTrue(self.hook._source_like(path))
 
     def test_compile_net_ignores_main_agent_deletion_before_task(self):
         with open("src/main.cpp", "w", encoding="utf-8") as stream:
             stream.write("")
-        baseline = dispatch._compile_net_lines(self.base)
+        baseline = self.hook._compile_net_lines(self.base)
         self.assertEqual(baseline, -1)
         task = {
             "head": self.base,
             "precommit_review": True,
             "initial_compile_net": baseline,
         }
-        self.assertEqual(dispatch._compile_agent_net(task), 0)
+        self.assertEqual(self.hook._compile_agent_net(task), 0)
 
     def test_precommit_compile_token_binds_final_worktree_snapshot(self):
         state = self.state(
@@ -519,7 +519,7 @@ class CheckpointTests(unittest.TestCase):
             "precommit_review": True, "source_snapshot": snapshot,
         }}
         self.save(state)
-        dispatch._record_agent_token("COMPILE", "OK")
+        self.hook._record_agent_token("COMPILE", "OK")
         with open(mf.STATE_PATH + ".tokens", encoding="utf-8") as stream:
             token = json.load(stream)["COMPILE"]
         self.assertEqual(token["head"], self.base)

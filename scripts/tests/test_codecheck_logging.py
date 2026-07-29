@@ -18,13 +18,8 @@ MF_SPEC = importlib.util.spec_from_file_location(
 mf = importlib.util.module_from_spec(MF_SPEC)
 MF_SPEC.loader.exec_module(mf)
 
-DISPATCH_SPEC = importlib.util.spec_from_file_location(
-    "mae_flow_dispatch_logging_test",
-    os.path.join(ROOT, "hooks", "dispatch.py"))
-dispatch = importlib.util.module_from_spec(DISPATCH_SPEC)
-DISPATCH_SPEC.loader.exec_module(dispatch)
-
 from mae_flow_core import codecheck_log as log_core
+from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 
 
 def git(cwd, *args):
@@ -212,13 +207,13 @@ class CodeCheckLoggingTests(unittest.TestCase):
             "CODECHECK_RESULT: CLEAN\n"
             "FIXED_CHANGES:\n"
             "- src/main.cpp | R.ONE | 提取重复值\n")
-        real_state = dispatch._codecheck_log_state
-        try:
-            dispatch._codecheck_log_state = lambda: state
-            dispatch._record_codecheck_agent_trace(
-                "CLEAN", report, tool_calls, transcript, retry=False)
-        finally:
-            dispatch._codecheck_log_state = real_state
+        runtime = create_hook_runtime(
+            os.path.join(ROOT, "scripts", "mae-flow.py"),
+            lambda _message: None,
+        )
+        runtime._codecheck_log_state = lambda: state
+        runtime._record_codecheck_agent_trace(
+            "CLEAN", report, tool_calls, transcript, retry=False)
 
         log_path = log_core.codecheck_log_path(self.repo, state)
         text = read_log(log_path)

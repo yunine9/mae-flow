@@ -20,7 +20,10 @@ SPEC = importlib.util.spec_from_file_location(
     "mae_flow_task_scope_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mf)
-FLOW = json.load(open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8"))
+with open(
+        os.path.join(ROOT, "flow", "flow.json"),
+        encoding="utf-8") as flow_stream:
+    FLOW = json.load(flow_stream)
 mf.FLOW = FLOW
 
 

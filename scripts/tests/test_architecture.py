@@ -15,6 +15,7 @@ if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
 from architecture_rules import (  # noqa: E402
+    LEGACY_OVERSIZED_CORE_MODULES,
     assert_delivery_dependencies,
     assert_foundation_dependencies,
     assert_guard_dependencies,
@@ -214,6 +215,9 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_refactored_core_modules_stay_within_size_limit(self):
         self.assertEqual([], new_module_size_violations(ROOT))
+
+    def test_oversized_core_module_allowlist_is_empty(self):
+        self.assertEqual(set(), LEGACY_OVERSIZED_CORE_MODULES)
 
     def test_cli_contains_no_evidence_policy_or_registry_dict(self):
         path = os.path.join(ROOT, "scripts", "mae-flow.py")

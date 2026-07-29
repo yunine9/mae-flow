@@ -194,9 +194,14 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py") + tuple(
               os.path.relpath(path, ROOT)
+              for pattern in (
+                  "cli_commands/*.py",
+                  "capability_*.py",
+                  "lightcheck_*.py",
+                  "specengine_*.py",
+              )
               for path in sorted(glob.glob(os.path.join(
-                  ROOT, "scripts", "mae_flow_core",
-                  "cli_commands", "*.py")))):
+                  ROOT, "scripts", "mae_flow_core", pattern)))):
     try:
         path = os.path.join(ROOT, f)
         with open(path, encoding="utf-8") as stream:
@@ -2787,8 +2792,11 @@ engine_hits = {}
 for source in sorted(glob.glob(
         os.path.join(ROOT, "scripts", "**", "*.py"), recursive=True)):
     rel = os.path.relpath(source, ROOT).replace(os.sep, "/")
-    if rel in ("scripts/selftest.py", "scripts/mae_flow_core/capabilities.py"):
-        continue                      # 本文件是检查逻辑自身；capabilities 是适配层
+    if rel in (
+            "scripts/selftest.py",
+            "scripts/mae_flow_core/capabilities.py",
+            "scripts/mae_flow_core/capability_runtime.py"):
+        continue  # 本文件是检查逻辑自身；capability runtime 是外部引擎适配层
     found = _engine_call_sites(source)
     if found:
         engine_hits[rel] = found

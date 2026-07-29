@@ -19,11 +19,7 @@ FORBIDDEN_CALLS = {
     "subprocess.Popen",
     "subprocess.call",
 }
-LEGACY_OVERSIZED_CORE_MODULES = {
-    "scripts/mae_flow_core/capabilities.py",
-    "scripts/mae_flow_core/lightcheck.py",
-    "scripts/mae_flow_core/specengine.py",
-}
+LEGACY_OVERSIZED_CORE_MODULES = set()
 RUNTIME_ENTRYPOINTS = (
     "scripts/mae-flow.py",
     "hooks/dispatch.py",

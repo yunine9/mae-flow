@@ -334,3 +334,37 @@ Moonlight、Gate、Agent-task、CodeCheck 与 Lightcheck 命令按语义拆入
 到命令模块，以及发布探针绑定旧文件位置。Phase-15 覆盖前两类真实调用路径，自检覆盖
 发布安全网。本阶段不改变命令参数、stdout/stderr、退出码、状态 schema、文件与 Git
 副作用或用户停点。
+
+## Stage 7–8：显式依赖与遗留巨型模块清零
+
+Stage 7 将全部 CLI 命令模块对平台装配层的通配导入改为精确依赖清单，并新增架构门
+阻止通配依赖回流。跨命令调用仍由组合根注册，历史测试替身兼容集中在同一处；Gate 与
+Moonlight 等适配器的复杂度防回增长基线收紧到当前实际值。
+
+Stage 8 将最后三个遗留巨型模块拆分为稳定门面与内聚实现模块：
+
+- Capabilities：能力包渲染、宿主运行时、CodeCheck 生命周期；
+- Lightcheck：源码扫描、函数匹配、变更分析、进程隔离与报告；
+- SpecEngine：基础/YAML、配置、Markdown、v5 布局、校验、生命周期、合并渲染与
+  原子归档。
+
+三个原模块名继续导出拆分前的完整符号集合，并保留 `_git`、CodeCheck discovery 与
+`_move_directory` 故障注入缝。逐项 API 对比确认 Capabilities 32 个、Lightcheck
+70 个、SpecEngine 120 个顶层符号均无缺失。
+
+2026-07-30 在 Stage 7–8 实现上取得的新鲜验证结果：
+
+- 完整严格 `unittest discover`：488 项通过，启用
+  `-W error::ResourceWarning`；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-15 differential runner：零差分；
+- Capabilities、Lightcheck、SpecEngine 聚焦测试分别为 13、19、66 项通过；
+- fault injection：3 项通过，refactor completion：8 项通过；
+- 架构门禁：36 项通过，超大模块豁免表为空；
+- 所有生产模块均不超过 500 行，最大模块
+  `specengine_lifecycle.py` 为 490 行；
+- `scripts/mae-flow.py` 为 9 行，`hooks/dispatch.py` 为 326 行；
+- `git diff --check` 通过。
+
+Stage 7–8 不改变公共导入路径、命令行为、Lightcheck 结果 schema、SpecEngine 文本与
+归档字节、Capabilities 宿主探测顺序，或失败时的回滚/降级语义。

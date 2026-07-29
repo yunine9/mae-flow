@@ -324,6 +324,39 @@ def dangerous_gate_bash(project, implementation_root):
         project, implementation_root, "bash", "rm -rf .")
 
 
+def combined_git_add_flags(project, implementation_root):
+    invocation, replacements = _active_gate(
+        project,
+        implementation_root,
+        "bash",
+        "git add -fu && git commit -m '[REQ-DIFF][fix]combined flags'",
+    )
+    with open(
+            os.path.join(project, "README.md"),
+            "a",
+            encoding="utf-8",
+            newline="\n") as stream:
+        stream.write("tracked update\n")
+    script = invocation["argv"][1]
+    fixed_time_runner = (
+        "import os,runpy,sys,time;"
+        "path=sys.argv[1];"
+        "sys.path.insert(0,os.path.dirname(path));"
+        "time.strftime=lambda *_args:'2026-07-29 10:00:00';"
+        "time.monotonic=lambda:0.0;"
+        "sys.argv=[path,'gate','bash',sys.argv[2]];"
+        "runpy.run_path(path,run_name='__main__')"
+    )
+    invocation["argv"] = [
+        sys.executable,
+        "-c",
+        fixed_time_runner,
+        script,
+        "git add -fu && git commit -m '[REQ-DIFF][fix]combined flags'",
+    ]
+    return invocation, replacements
+
+
 def compile_task_card(project, implementation_root):
     env = _prepare_repository(project)
     _run_git(project, env, "branch", "baseline")
@@ -463,6 +496,7 @@ SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
     "compile_task_card": compile_task_card,
+    "combined_git_add_flags": combined_git_add_flags,
     "dangerous_gate_bash": dangerous_gate_bash,
     "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,

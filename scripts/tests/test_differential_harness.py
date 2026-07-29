@@ -205,6 +205,24 @@ class DifferentialRunnerTests(unittest.TestCase):
             goldens,
         )
 
+    def test_phase9_combined_git_add_flags_matches_corrected_behavior(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase9.json",
+        )
+        goldens = load_goldens(golden_path)
+        actual = run_scenario(ROOT, "combined_git_add_flags")
+        assert_matches_golden(
+            self,
+            "combined_git_add_flags",
+            actual,
+            goldens,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

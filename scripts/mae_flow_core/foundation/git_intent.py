@@ -72,14 +72,16 @@ def command_pathspecs(tokens, value_options=None):
 
 def git_add_intent(tokens):
     token_set = set(tokens)
+    short_flags = short_option_flags(tokens)
     all_mode = bool(
-        token_set & {"-A", "--all", "--no-ignore-removal"})
-    update = bool(token_set & {"-u", "--update"})
+        "A" in short_flags
+        or token_set & {"--all", "--no-ignore-removal"})
+    update = "u" in short_flags or "--update" in token_set
     paths = command_pathspecs(tokens)
     default_paths = ["."] if all_mode or update else []
     return {
         "pathspecs": paths or default_paths,
-        "force": bool(token_set & {"-f", "--force"}),
+        "force": "f" in short_flags or "--force" in token_set,
         "tracked_only": update,
         "all": all_mode,
     }

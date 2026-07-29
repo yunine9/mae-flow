@@ -187,6 +187,36 @@ class TaskScopeTests(unittest.TestCase):
                     "include": True,
                 },
             ),
+            (
+                "git add -fu",
+                [{
+                    "pathspecs": ["."],
+                    "force": True,
+                    "tracked_only": True,
+                    "all": False,
+                }],
+                {"pathspecs": [], "all": False, "include": False},
+            ),
+            (
+                "git add -uf -- src/a.cpp",
+                [{
+                    "pathspecs": ["src/a.cpp"],
+                    "force": True,
+                    "tracked_only": True,
+                    "all": False,
+                }],
+                {"pathspecs": [], "all": False, "include": False},
+            ),
+            (
+                "git add -Af",
+                [{
+                    "pathspecs": ["."],
+                    "force": True,
+                    "tracked_only": False,
+                    "all": True,
+                }],
+                {"pathspecs": [], "all": False, "include": False},
+            ),
         ]
         for command, add_expected, commit_expected in matrix:
             with self.subTest(command=command):

@@ -32,10 +32,14 @@ class HookEventAdapter:
 
     def _invoke(self, handler, *args, **kwargs):
         try:
-            handler(*args, **kwargs)
+            response = handler(*args, **kwargs)
         except SystemExit as error:
             return HookResponse(exit_code=_exit_code(error))
-        return HookResponse()
+        return (
+            response
+            if isinstance(response, HookResponse)
+            else HookResponse()
+        )
 
     def conflict(self, event, _payload, runtime):
         self.log("runtime conflict: " + ",".join(runtime.conflicts))

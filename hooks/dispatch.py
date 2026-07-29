@@ -17,7 +17,7 @@
   - 每次调用在 %TEMP%/mae-flow-hook.log 记 start/end 与耗时,
     只有 start 没有 end = 该次挂起被看门狗击杀,可据此定位。
 """
-import glob, hashlib, json, locale, os, re, subprocess, sys, tempfile, threading, time
+import hashlib, json, locale, os, subprocess, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
@@ -28,29 +28,17 @@ from mae_flow_core import (
     ACTION_FILE,
     EXIT_FILE,
     FLOW_FILE,
-    atomic_write_json,
     find_project_root,
     resolve_runtime,
 )
-from mae_flow_core.file_io import load_json, read_lines, read_text, write_text
+from mae_flow_core.file_io import read_text, write_text
 from mae_flow_core.application.hooks.task_cards import (
     TaskCardPorts as _TaskCardPorts,
-    verify_dispatch_task as _verify_dispatch_task,
-)
-from mae_flow_core.application.hooks.agent_completion import (
-    AgentCompletionPorts as _AgentCompletionPorts,
-    handle_agent_completion as _handle_agent_completion,
-)
-from mae_flow_core.application.hooks.models import (
-    HookResponse as _HookResponse,
-)
-from mae_flow_core.application.hooks.event_policies import (
-    stop_decision as _stop_decision,
-    template_decision as _template_decision,
 )
 from mae_flow_core.application.hooks.events import (
     handle_hook_event as _handle_hook_event,
 )
+from mae_flow_core.adapters.hook_active_events import ActiveHookEventAdapter
 from mae_flow_core.adapters.hook_events import HookEventAdapter
 from mae_flow_core.adapters.hook_runtime import HookRuntimeAdapter
 
@@ -273,345 +261,28 @@ def _task_card_ports():
     )
 
 
-def _gate_agent_dispatch(ti):
-    """质量 agent 派发前验任务卡——拦截时机 = 错误发生时机。
-
-    卡缺失/过期若留到 SubagentStop/done 才发现,代价是整只 agent 上百轮白跑;
-    在派发这一刻拦下,损失只有一次工具调用。完整流程与独立任务统一从
-    _runtime_adapter()._contract_state 取任务卡；识别不到或状态读不了一律放行(fail-open)。"""
-    try:
-        blob = " ".join(str(ti.get(k, "") or "") for k in
-                        ("subagent_type", "description", "prompt"))
-        kind = next((k for name, k in (("compile-agent", "COMPILE"),
-                                       ("codecheck-fix-agent", "CODECHECK"),
-                                       ("ut-generator-agent", "UT"),
-                                       ("grill-critic-agent", "GRILL"))
-                     if name in blob), None)
-        if not kind:
-            return
-        st = _runtime_adapter()._contract_state()
-        decision = _verify_dispatch_task(kind, st, _task_card_ports())
-        if not decision.accepted:
-            print(decision.reason, file=sys.stderr)
-            sys.exit(2)
-    except SystemExit:
-        raise
-    except Exception as e:
-        _log("agent dispatch gate EXC(fail-open): %s" % e)
-
-
-def ev_pretooluse(d):
-    tool = d.get("tool_name", "")
-    ti = d.get("tool_input") or {}
-    if tool == "Task":
-        _gate_agent_dispatch(ti)
-        sys.exit(0)
-    if tool == "AskUserQuestion":
-        try:
-            st = load_json(STATE)
-            moonlight = bool((st.get("moonlight") or {}).get("enabled"))
-        except Exception:
-            moonlight = False
-        if moonlight:
-            print("[mae-flow] 月光宝盒处于无人值守模式，禁止询问用户。"
-                  "请根据需求、代码和仓库规则采用不扩大范围的保守结论并留痕；"
-                  "质量步骤有限尝试后仍失败，使用 current 输出的 moonlight defer 记录遗留并继续。",
-                  file=sys.stderr)
-            sys.exit(2)
-    if tool in ("Edit", "Write", "MultiEdit"):
-        p = ti.get("file_path", "") or ""
-        if p:
-            sys.exit(maeflow("gate", "edit", p))
-    elif tool == "Bash":
-        c = ti.get("command", "") or ""
-        if c:
-            sys.exit(maeflow("gate", "bash", c))
-    sys.exit(0)
-
-
-def ev_action_pretooluse(d):
-    """独立任务只保护自己的控制文件；普通源码、命令和用户开发行为一律不接管。"""
-    tool = d.get("tool_name", "")
-    ti = d.get("tool_input") or {}
-    if tool == "Task":
-        _gate_agent_dispatch(ti)
-        sys.exit(0)
-
-    def protected(value):
-        path = str(value or "").replace("\\", "/").lower()
-        return (
-            ".mae-flow-work/standalone-action.json" in path
-            or (
-                ".mae-flow-work/standalone/" in path
-                and bool(re.search(r"(?:-task\.md|/action\.json|/result-[^/\s\"']+\.md)", path))
-            )
-        )
-
-    if tool in ("Edit", "Write", "MultiEdit"):
-        if protected(ti.get("file_path") or ti.get("path")):
-            print("[mae-flow] 独立任务状态和任务卡由 harness 维护，禁止直接编辑；"
-                  "普通业务代码不受此限制。", file=sys.stderr)
-            sys.exit(2)
-    if tool == "Bash":
-        cmd = str(ti.get("command", "") or "").replace("\\", "/").lower()
-        if protected(cmd) or "dispatch.py" in cmd:
-            print("[mae-flow] 禁止通过命令修改独立任务状态、任务卡或手工调用 Hook。"
-                  "查看用 action status，退出用 action cancel。", file=sys.stderr)
-            sys.exit(2)
-    sys.exit(0)
-
-
-def ev_inject(d, session_start=False):
-    if session_start:
-        # Plugin-owned capabilities are available with the installed plugin;
-        # no project marker or reload handshake is required.
-        pass
-    else:
-        # 用户消息原文进 ack 验真存储。payload 无 prompt 字段时确认步骤会明确拒绝并要求用户
-        # 再发一条普通消息，不再降级成模型自行填写 ack。
-        prompt = d.get("prompt") or ""
-        _runtime_adapter()._capture_moonlight_intent(prompt)
-        _runtime_adapter()._capture_usermsg(prompt)
-        exit_intent = _runtime_adapter()._capture_exit_intent(prompt)
-        if exit_intent:
-            rc = maeflow("exit", "--intent", exit_intent)
-            # 实测死角修复:宣布"已退出"前必须核实事实(STATE 确已消失)。
-            # 旧逻辑按 rc==0 宣布,而 maeflow() 的 fail-open 会把 CLI crash/
-            # 脚本缺失翻译成 0——按谎话放行,用户以为退了、门禁还在,
-            # 脚本恢复后旧流程还会复活反咬。
-            if rc == 0 and not os.path.exists(STATE):
-                print("[mae-flow] 用户已明确退出，本条消息开始按普通开发请求处理；"
-                      "不要再运行 current/done。")
-                sys.exit(0)
-            print("[mae-flow] 自动退出未完成(流程状态仍在)。不要重复要求用户确认；"
-                  "请执行 doctor 查看原因，用户始终可在真实终端运行 "
-                  "`mae-flow exit --interactive`；若插件脚本本身不可用,恢复插件后"
-                  "重试,或(确认放弃流程时)由用户手动删除项目根的 .mae-flow.json* "
-                  "文件。", file=sys.stderr)
-    me = os.path.abspath(MAEFLOW)
-    readme = os.path.abspath(os.path.join(HERE, "..", "README.md"))
-    if os.path.exists(STATE):
-        maeflow("status", "--inject")
-        if session_start:
-            print(f"[mae-flow] 存在进行中的交付流程。续跑先执行 python \"{me}\" current 获取当前步骤指令。"
-                  f"用户问 mae-flow 用法/流程类问题时,先读 \"{readme}\" 再按其内容作答,禁止凭记忆即兴。")
-    else:
-        action = _runtime_adapter()._load_action()
-        if action:
-            print("[mae-flow] 当前有独立 %s 任务 %s；它不启用完整流程，也不限制普通改码。"
-                  "继续请执行 action status，完成后 action finish，随时可 action cancel。"
-                  % (str(action.get("kind", "")).upper(), action.get("id", "?")))
-            if action.get("status") == "awaiting_scope_confirmation":
-                print("[mae-flow] 当前任务尚未执行，正在等待用户确认已展示的文件范围。"
-                      "用户选择「确认以上范围」后执行 action confirm-scope "
-                      "--ack \"确认以上范围\"；用户要求调整则 action cancel 后按新范围重开。")
-        elif session_start and (os.path.isdir("openspec") or os.path.isdir(".comet")):
-            # 交付项目 + 无在途单:给新用户一行发现入口(仅会话启动时,不打扰后续消息)
-            print(f"[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说「交付 <单号> + SE 文档」"
-                  f"或敲 /mae-flow:mae-flow;新手指南敲 /mae-flow:mae-flow help。"
-                  f"(流程脚本: python \"{me}\";"
-                  f"用户问用法/流程类问题时,先读 \"{readme}\" 再作答,禁止凭记忆即兴)")
-    sys.exit(0)
-
-
-AUTOPSY = os.path.join(tempfile.gettempdir(), "mae-flow-agent-autopsy.log")
-ERR_PAT = re.compile(r"(command not found|is not recognized|No such file|not found|不可用|不存在|无法|失败|"
-                     r"denied|Exception|Traceback|timeout|超时|error[: ])", re.I)
-
-
-def _autopsy(tp, asst):
-    """子 agent 非正常收尾的尸检:留档 + 提炼一行死因线索(嵌进打回消息喂给主 agent)。
-    治"agent 奇奇怪怪自行退出没人知道为什么"——静默失效是最大的敌人。写档失败不影响主流程。"""
-    turns = len(asst)
-    tails = [a.strip().replace("\n", " ")[-160:] for a in asst[-2:] if a.strip()]
-    errs = []
-    try:
-        full = "\n".join(asst[-8:])
-        for m in ERR_PAT.finditer(full):
-            s = full[max(0, m.start() - 40):m.end() + 60].replace("\n", " ")
-            if s not in errs:
-                errs.append(s)
-            if len(errs) >= 3:
-                break
-    except Exception:
-        pass
-    clue = "约 %s 轮" % turns
-    if errs:
-        clue += ";检出报错特征: " + " | ".join(e[:90] for e in errs[:2])
-    if tails:
-        clue += ";临终输出: …" + tails[-1][:120]
-    try:
-        with open(AUTOPSY, "a", encoding="utf-8") as f:
-            f.write("%s %s\n  turns=%s\n  tails=%s\n  errs=%s\n" % (
-                time.strftime("%Y-%m-%d %H:%M:%S"), os.path.basename(tp) or "?", turns, tails, errs))
-    except Exception:
-        pass
-    return clue
-
-
-def _latest_subagent_transcript(main_path):
-    stem = os.path.splitext(main_path)[0]
-    candidates = glob.glob(
-        os.path.join(stem, "subagents", "agent-*.jsonl"))
-    return max(candidates, key=os.path.getmtime) if candidates else ""
-
-
-def _load_agent_transcript(path):
-    return [
-        json.loads(line)
-        for line in read_lines(path)
-        if line.strip()
-    ]
-
-
-def _run_agent_contract(kind, status, report, calls, retry):
-    legacy_calls = [call.to_legacy() for call in calls]
-    validators = {
-        "CODECHECK": _runtime_adapter()._codecheck_contract,
-        "UT": _runtime_adapter()._ut_contract,
-        "COMPILE": _runtime_adapter()._compile_contract,
-        "GRILL": _runtime_adapter()._grill_contract,
-    }
-    validator = validators.get(kind)
-    if validator:
-        validator(status, report, legacy_calls, soft=retry)
-    return _HookResponse()
-
-
-def _agent_completion_ports():
-    return _AgentCompletionPorts(
-        latest_subagent_transcript=_latest_subagent_transcript,
-        load_transcript=_load_agent_transcript,
-        read_transcript_head=lambda path, limit: read_text(
-            path, errors="replace", limit=limit),
-        contract_state=_runtime_adapter()._contract_state,
-        record_codecheck_trace=lambda status, report, calls, path, retry:
-            _runtime_adapter()._record_codecheck_agent_trace(
-                status,
-                report,
-                [call.to_legacy() for call in calls],
-                path,
-                retry=retry,
-            ),
-        run_contract=_run_agent_contract,
-        record_token=_runtime_adapter()._record_agent_token,
-        record_rejection=_runtime_adapter()._record_rejection,
-        autopsy=_autopsy,
+def _hook_event_ports():
+    active = ActiveHookEventAdapter(
+        state=STATE,
+        maeflow_path=MAEFLOW,
+        repository_root=os.path.abspath(os.path.join(HERE, "..")),
+        maeflow=maeflow,
+        runtime_adapter=_runtime_adapter(),
+        task_card_ports=_task_card_ports,
         log=_log,
     )
-
-
-def ev_subagentstop(d):
-    response = _handle_agent_completion(d, _agent_completion_ports())
-    if response.stderr:
-        print(response.stderr, file=sys.stderr, end="")
-    sys.exit(response.exit_code)
-
-
-def ev_posttooluse(d):
-    tool = d.get("tool_name")
-    if tool in ("Write", "Edit", "MultiEdit"):
-        ti = d.get("tool_input") or {}
-        p = ti.get("file_path", "") or ti.get("path", "") or ""
-        if p:
-            _runtime_adapter()._record_agent_write(p)
-    # 真实用户问答的事件令牌:AskUserQuestion 工具真被调用过才有——
-    # "确认发生过"从此是 harness 签发的事实,不是模型可书写的文本
-    if tool == "AskUserQuestion":
-        _runtime_adapter()._capture_usermsg(_runtime_adapter()._text_of(d.get("tool_response")))   # 应答原文进 ack 验真存储
-        _runtime_adapter()._record_agent_token("ASKUSER", "CONFIRMED")
-        sys.exit(0)
-    if tool == "Bash":
-        _runtime_adapter()._maybe_utrun(d)
-        sys.exit(0)
-    p = ((d.get("tool_input") or {}).get("file_path", "") or "").replace("\\", "/")
-    hit = None
-    for pat, tf, label in ((r"docs/story/STORY-.*\.md$", "STORY-TEMPLATE.md", "STORY"),
-                           (r"docs/chain/CHAIN-.*\.md$", "CHAIN-TEMPLATE.md", "CHAIN"),
-                           (r"(^|/)\.mae-flow-work/(?:\S+/)*grill-prep[^/]*\.md$", "GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
-                           (r"docs/review/REVIEW-.*\.md$", "REVIEW-TEMPLATE.md", "REVIEW")):
-        if re.search(pat, p, re.I):
-            hit = (tf, label)
-            break
-    if not hit:
-        sys.exit(0)
-    tpl = os.path.join(HERE, "..", "skills", "mae-flow", "assets", hit[0])
-    if not os.path.exists(tpl):
-        _log(hit[1] + " 模板缺失: " + tpl)
-        sys.exit(0)
-
-    try:
-        document = read_text(p)
-        template = read_text(tpl)
-        decision = _template_decision(template, document)
-    except Exception:
-        sys.exit(0)
-    if not decision.accepted:
-        print(f"[mae-flow] {hit[1]} 结构与模板不符,缺少章节: "
-              + " | ".join(decision.missing)
-              + "。请补齐缺失章节(无内容的章节按约定标注,不可省略标题)。", file=sys.stderr)
-        sys.exit(2)
-    sys.exit(0)
-
-
-def ev_stop(d):
-    """月光宝盒未到安全停点时，阻止主 Agent 提前结束。
-
-    Stop Hook 只补“主模型自行收工”这一处硬洞。真实硬阻塞必须先用 moonlight blocked 留痕；
-    push 失败则由 push-failed 留痕。stop_hook_active 时放行，避免宿主递归触发形成死循环。
-    """
-    try:
-        st = load_json(STATE)
-    except Exception:
-        sys.exit(0)
-    initial = _stop_decision(st, False, {})
-    if initial.allow:
-        sys.exit(0)
-    sid = st.get("current", "")
-    # 反收工护栏必须是「无进展计数」而不是「链级一发」:Claude Code 的 stop_hook_active
-    # 在同一延续链里一直为 true,夜里没有用户消息复位它——旧写法第一次打回后,
-    # 后续任何一次自然收尾都被放行,整夜保护恰好等于一段续命(静默白夜)。
-    # 现在:状态 revision 有推进就继续拦(干活的 Agent 拦到安全停点为止);
-    # 连续 3 次零进展才 fail-open(真卡死的 Agent 不会被无限打回)。
-    guard_path = STATE + ".stop-guard"
-    try:
-        guard = load_json(guard_path)
-    except Exception:
-        guard = {}
-    decision = _stop_decision(
-        st, bool(d.get("stop_hook_active")), guard)
-    if decision.allow:
-        _log("stop guard: revision=%s 连续 %s 次零进展,fail-open 放行(防死循环)"
-             % (decision.revision, decision.blocks - 1))
-        sys.exit(0)
-    try:
-        atomic_write_json(guard_path, {
-            "revision": decision.revision, "blocks": decision.blocks,
-            "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    except Exception:
-        # 护栏自身写不进时退回旧行为(放行),不能让护栏故障卡死会话
-        _log("stop guard write failed — allow")
-        sys.exit(0)
-    print("[mae-flow] 月光宝盒仍在执行，当前步骤 %s，禁止提前结束回复或等待用户。"
-          "继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，"
-          "确实缺少需求/权限/外部条件而无法继续时用 moonlight blocked --reason 留痕后再停止。"
-          % (sid or "未知"), file=sys.stderr)
-    sys.exit(2)
-
-
-def _hook_event_ports():
     return HookEventAdapter(
         state=STATE,
         action_state=ACTION_STATE,
         runtime_adapter=_runtime_adapter(),
         log=_log,
         session_notice_due=_session_notice_due,
-        pretool=ev_pretooluse,
-        standalone_pretool=ev_action_pretooluse,
-        inject=ev_inject,
-        subagentstop=ev_subagentstop,
-        posttool=ev_posttooluse,
-        stop=ev_stop,
+        pretool=active.pretool,
+        standalone_pretool=active.standalone_pretool,
+        inject=active.inject,
+        subagentstop=active.subagentstop,
+        posttool=active.posttool,
+        stop=active.stop,
     ).ports()
 
 

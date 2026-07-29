@@ -157,6 +157,10 @@ class ArchitectureTests(unittest.TestCase):
             "_record_agent_token", "_contract_state", "_record_rejection",
             "_source_snapshot", "_source_like", "_codecheck_contract",
             "_ut_contract", "_grill_contract", "_compile_contract",
+            "_gate_agent_dispatch", "ev_pretooluse",
+            "ev_action_pretooluse", "ev_inject", "ev_subagentstop",
+            "ev_posttooluse", "ev_stop", "_autopsy",
+            "_run_agent_contract", "_agent_completion_ports",
         }
         self.assertEqual(set(), definitions & migrated)
 

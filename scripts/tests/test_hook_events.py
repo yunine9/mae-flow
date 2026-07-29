@@ -14,8 +14,12 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core import RuntimeMode  # noqa: E402
 from mae_flow_core.application.hooks.event_policies import (  # noqa: E402
+    active_pretool_decision,
+    agent_kind,
+    standalone_pretool_decision,
     stop_decision,
     template_decision,
+    template_target,
 )
 from mae_flow_core.application.hooks.events import (  # noqa: E402
     HookEventPorts,
@@ -157,6 +161,64 @@ class HookEventTests(unittest.TestCase):
         decision = template_decision(template, document)
         self.assertFalse(decision.accepted)
         self.assertEqual(("风险",), decision.missing)
+
+    def test_quality_agent_classification_is_application_policy(self):
+        cases = (
+            ("compile-agent", "COMPILE"),
+            ("codecheck-fix-agent", "CODECHECK"),
+            ("ut-generator-agent", "UT"),
+            ("grill-critic-agent", "GRILL"),
+            ("ordinary-agent", ""),
+        )
+        for name, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    expected,
+                    agent_kind({"subagent_type": name}),
+                )
+
+    def test_active_pretool_policy_preserves_gate_order(self):
+        cases = (
+            ("Task", {}, False, ("agent", "")),
+            ("AskUserQuestion", {}, True, ("block-question", "")),
+            ("AskUserQuestion", {}, False, ("allow", "")),
+            ("Edit", {"file_path": "src/a.py"}, False,
+             ("gate-edit", "src/a.py")),
+            ("Bash", {"command": "git commit"}, False,
+             ("gate-bash", "git commit")),
+        )
+        for tool, value, moonlight, expected in cases:
+            with self.subTest(tool=tool, moonlight=moonlight):
+                decision = active_pretool_decision(
+                    tool, value, moonlight)
+                self.assertEqual(expected, (decision.action, decision.value))
+
+    def test_standalone_control_files_and_hook_commands_are_protected(self):
+        edit = standalone_pretool_decision(
+            "Write",
+            {"file_path": ".mae-flow-work/standalone-action.json"},
+        )
+        command = standalone_pretool_decision(
+            "Bash",
+            {"command": "python hooks/dispatch.py stop"},
+        )
+        source = standalone_pretool_decision(
+            "Edit", {"file_path": "src/main.py"})
+        self.assertEqual("block-edit", edit.action)
+        self.assertEqual("block-bash", command.action)
+        self.assertEqual("allow", source.action)
+
+    def test_template_target_selection_is_application_policy(self):
+        self.assertEqual(
+            ("STORY-TEMPLATE.md", "STORY"),
+            template_target("docs/story/STORY-123.md"),
+        )
+        self.assertEqual(
+            ("GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
+            template_target(
+                ".mae-flow-work/standalone/x/grill-prep.md"),
+        )
+        self.assertIsNone(template_target("src/main.py"))
 
 
 if __name__ == "__main__":

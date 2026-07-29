@@ -18,6 +18,99 @@ class TemplateDecision:
     missing: tuple = ()
 
 
+@dataclass(frozen=True)
+class PretoolDecision:
+    action: str
+    value: str = ""
+
+
+_AGENT_KINDS = (
+    ("compile-agent", "COMPILE"),
+    ("codecheck-fix-agent", "CODECHECK"),
+    ("ut-generator-agent", "UT"),
+    ("grill-critic-agent", "GRILL"),
+)
+
+_TEMPLATE_TARGETS = (
+    (r"docs/story/STORY-.*\.md$", "STORY-TEMPLATE.md", "STORY"),
+    (r"docs/chain/CHAIN-.*\.md$", "CHAIN-TEMPLATE.md", "CHAIN"),
+    (
+        r"(^|/)\.mae-flow-work/(?:\S+/)*grill-prep[^/]*\.md$",
+        "GRILL-PREP-TEMPLATE.md",
+        "GRILL-PREP",
+    ),
+    (r"docs/review/REVIEW-.*\.md$", "REVIEW-TEMPLATE.md", "REVIEW"),
+)
+
+
+def agent_kind(tool_input):
+    blob = " ".join(
+        str(tool_input.get(key, "") or "")
+        for key in ("subagent_type", "description", "prompt")
+    )
+    return next(
+        (kind for name, kind in _AGENT_KINDS if name in blob),
+        "",
+    )
+
+
+def active_pretool_decision(tool, tool_input, moonlight):
+    if tool == "Task":
+        return PretoolDecision("agent")
+    if tool == "AskUserQuestion" and moonlight:
+        return PretoolDecision("block-question")
+    if tool in ("Edit", "Write", "MultiEdit"):
+        path = tool_input.get("file_path", "") or ""
+        return PretoolDecision(
+            "gate-edit" if path else "allow", path)
+    if tool == "Bash":
+        command = tool_input.get("command", "") or ""
+        return PretoolDecision(
+            "gate-bash" if command else "allow", command)
+    return PretoolDecision("allow")
+
+
+def _standalone_protected(value):
+    path = str(value or "").replace("\\", "/").lower()
+    return (
+        ".mae-flow-work/standalone-action.json" in path
+        or (
+            ".mae-flow-work/standalone/" in path
+            and bool(re.search(
+                r"(?:-task\.md|/action\.json|/result-[^/\s\"']+\.md)",
+                path,
+            ))
+        )
+    )
+
+
+def standalone_pretool_decision(tool, tool_input):
+    if tool == "Task":
+        return PretoolDecision("agent")
+    if tool in ("Edit", "Write", "MultiEdit"):
+        path = tool_input.get("file_path") or tool_input.get("path")
+        if _standalone_protected(path):
+            return PretoolDecision("block-edit")
+    if tool == "Bash":
+        command = str(
+            tool_input.get("command", "") or "").replace("\\", "/").lower()
+        if _standalone_protected(command) or "dispatch.py" in command:
+            return PretoolDecision("block-bash")
+    return PretoolDecision("allow")
+
+
+def template_target(path):
+    normalized = str(path or "").replace("\\", "/")
+    return next(
+        (
+            (template, label)
+            for pattern, template, label in _TEMPLATE_TARGETS
+            if re.search(pattern, normalized, re.I)
+        ),
+        None,
+    )
+
+
 def _moonlight_safe_point(step, moonlight):
     unresolved = [
         issue for issue in (moonlight.get("issues") or [])

@@ -1,0 +1,81 @@
+{
+  "corrupt_state_doctor": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "be302461cda285db3ed2d45fb767b23e08ca8808b35a638009937df22b332d73",
+        "size": 7
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "__unreadable__": "JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+      }
+    },
+    "stderr": "",
+    "stdout": "项目根(状态文件所在): <PROJECT>\n❌ 运行模式: corrupt（Hook 已 fail-open，普通改码不受阻）\n   - .mae-flow.json(JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))\n完整流程状态损坏。发送 `/mae-flow:mae-flow exit` 可保存坏现场并退出；Hook 同时损坏时由用户在真实终端执行 exit --interactive。\n"
+  },
+  "inactive_pretooluse_bypass": {
+    "files": {
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": ""
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": ""
+  },
+  "terminal_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "abeb7a6b80e41f8178c6f6bf76a4b25b65c32523f9c95743278de18210ca52ec",
+        "size": 268
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF"
+        },
+        "current": "end",
+        "history": [],
+        "revision": 1,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "{\n  \"choices\": {\n    \"workflow\": \"tweak\"\n  },\n  \"config\": {\n    \"分支名\": \"main\",\n    \"单号\": \"REQ-DIFF\"\n  },\n  \"current\": \"end\",\n  \"history\": [],\n  \"revision\": 1,\n  \"schema_version\": 2,\n  \"started\": \"2026-07-29 10:00:00\",\n  \"updated_at\": \"2026-07-29 10:00:00\"\n}\n"
+  }
+}

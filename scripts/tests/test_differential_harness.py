@@ -13,6 +13,11 @@ if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
+from differential.runner import (  # noqa: E402
+    assert_matches_golden,
+    load_goldens,
+    run_scenario,
+)
 from differential.snapshot import Snapshot  # noqa: E402
 
 
@@ -65,6 +70,30 @@ class DifferentialNormalizationTests(unittest.TestCase):
             git={"branch": "main", "head": "deadbeef", "status": ""},
         )
         self.assertEqual(snapshot, Snapshot.from_dict(snapshot.to_dict()))
+
+
+class DifferentialRunnerTests(unittest.TestCase):
+    def test_phase1_scenarios_match_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase1.json",
+        )
+        goldens = load_goldens(golden_path)
+        for name in (
+                "inactive_pretooluse_bypass",
+                "terminal_status",
+                "corrupt_state_doctor"):
+            with self.subTest(name=name):
+                actual = run_scenario(ROOT, name)
+                assert_matches_golden(self, name, actual, goldens)
+
+    def test_unknown_scenario_is_rejected_without_running_process(self):
+        with self.assertRaisesRegex(ValueError, "unknown scenario"):
+            run_scenario(ROOT, "not-registered")
 
 
 if __name__ == "__main__":

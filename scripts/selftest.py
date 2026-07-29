@@ -50,6 +50,10 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/statusline.py", "scripts/mae_flow_core/capabilities.py",
           "scripts/mae_flow_core/codecheck_log.py",
           "scripts/mae_flow_core/lightcheck.py",
+          "scripts/mae_flow_core/foundation/__init__.py",
+          "scripts/mae_flow_core/foundation/fingerprints.py",
+          "scripts/mae_flow_core/foundation/source_paths.py",
+          "scripts/mae_flow_core/foundation/git_intent.py",
           "scripts/mae_flow_core/__init__.py",
           "scripts/mae_flow_core/cli_parser.py",
           "scripts/mae_flow_core/runtime.py",
@@ -65,6 +69,14 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_task_scope.py",
+          "scripts/tests/test_differential_harness.py",
+          "scripts/tests/test_architecture.py",
+          "scripts/tests/architecture_rules.py",
+          "scripts/tests/differential/__init__.py",
+          "scripts/tests/differential/normalize.py",
+          "scripts/tests/differential/snapshot.py",
+          "scripts/tests/differential/scenarios.py",
+          "scripts/tests/differential/runner.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
     try:
@@ -124,6 +136,23 @@ lightcheck_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("轻量编码预检跨语言与安全降级回归", lightcheck_tests.returncode == 0,
       (lightcheck_tests.stdout + lightcheck_tests.stderr)[-5000:])
+for label, filename in (
+        ("行为差分安全网", "test_differential_harness.py"),
+        ("重构架构边界", "test_architecture.py")):
+    result = subprocess.run(
+        [sys.executable, os.path.join(
+            ROOT, "scripts", "tests", filename)],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=180,
+    )
+    check(
+        label,
+        result.returncode == 0,
+        (result.stdout + result.stderr)[-5000:],
+    )
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (

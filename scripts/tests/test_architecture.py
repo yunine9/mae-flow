@@ -35,6 +35,14 @@ class ArchitectureTests(unittest.TestCase):
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
 
+    def test_selftest_runs_refactor_safety_suites(self):
+        with open(
+                os.path.join(ROOT, "scripts", "selftest.py"),
+                encoding="utf-8") as stream:
+            text = stream.read()
+        self.assertIn("test_differential_harness.py", text)
+        self.assertIn("test_architecture.py", text)
+
 
 if __name__ == "__main__":
     unittest.main()

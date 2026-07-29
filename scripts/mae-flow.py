@@ -104,6 +104,12 @@ from mae_flow_core.guard.gate import (
     decide_bash_write,
     decide_edit,
 )
+from mae_flow_core.guard.permits import (
+    block_id as permit_block_id,
+    check_permit,
+    record_strike,
+    strike_escalation,
+)
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,
@@ -6694,8 +6700,7 @@ GATE_STRIKE_LIMIT = 3
 
 
 def _gate_block_id(rule, subject):
-    return hashlib.sha256((rule + "\n" + norm(subject)).encode(
-        "utf-8", errors="replace")).hexdigest()[:10]
+    return permit_block_id(rule, subject)
 
 
 def _gate_die(st, sid, rule, subject, msg):
@@ -6728,13 +6733,14 @@ def _gate_die(st, sid, rule, subject, msg):
     rec = permits.get(bid)
     if rec and not rec.get("used") and rec.get("step") == sid:
         head = sh("git rev-parse --verify HEAD")
-        if rec.get("head") and rec.get("head") != head:
+        permit = check_permit(permits, bid, sid, head)
+        if permit.kind == "stale":
             # 实测:HEAD 变化后放行令静默作废,拦截消息与普通三振无差别,
             # Agent 会误判"放行没生效"盲目循环——显式说明作废原因与恢复路。
             msg = ("已有放行令 %s 因代码版本变化作废(签发于 %s)。需重新征得"
                    "用户同意后 allow 重签。" % (bid, rec.get("head", "")[:8])
                    ) + msg
-        if not rec.get("head") or rec.get("head") == head:
+        if permit.kind == "valid":
             def consume(data):
                 entry = (data or {}).get(bid) or {}
                 entry["used"] = True
@@ -6759,38 +6765,21 @@ def _gate_die(st, sid, rule, subject, msg):
     count = 1
     try:
         def bump(data):
-            data = data or {}
-            counts = data.setdefault("counts", {})
-            entry = counts.get(rule) or {}
-            if entry.get("step") != sid:
-                entry = {"step": sid, "count": 0}
-            entry["count"] = int(entry.get("count", 0) or 0) + 1
-            entry["last_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            counts[rule] = entry
-            recent = data.setdefault("recent", {})
-            recent[bid] = {"rule": rule, "step": sid, "sample": subject[:200],
-                           "at": entry["last_at"]}
-            while len(recent) > 20:
-                oldest = min(recent, key=lambda k: recent[k].get("at", ""))
-                recent.pop(oldest, None)
-            return data
+            result, _count = record_strike(
+                data, rule, sid, bid, subject,
+                time.strftime("%Y-%m-%d %H:%M:%S"))
+            return result
         data = update_json(GATE_STRIKES_PATH, bump, default={}, recover_corrupt=True)
         count = int(((data or {}).get("counts", {}).get(rule) or {}).get("count", 1) or 1)
     except Exception:
         count = 1
-    if count >= GATE_STRIKE_LIMIT:
-        if _moonlight(st or {}):
-            msg += ("\n⚠ 本规则已在本步骤连续拦截 %d 次,可能是误拦。月光宝盒无人值守中"
-                    "不可放行:这属于客观阻塞,按 current 给出的 moonlight blocked"
-                    "(质量步骤用 defer)留痕停止,把拦截编号 %s 写进 reason,早晨由用户裁决。"
-                    % (count, bid))
-        else:
-            msg += ("\n⚠ 本规则已在本步骤连续拦截 %d 次,可能是误拦。停止再试写法变体;"
-                    "若你确认该动作正当且必要:把动作原文和拦截原因展示给用户,用户同意后执行 "
-                    "python \"%s\" allow %s --ack \"用户同意原话\"。"
-                    "放行只对这一个动作生效一次,绑定当前代码版本,用后即废;其余规则不受影响。"
-                    "若动作确属违规,回到 current 指引换正规路径。"
-                    % (count, os.path.abspath(sys.argv[0]), bid))
+    msg += strike_escalation(
+        count,
+        GATE_STRIKE_LIMIT,
+        _moonlight(st or {}),
+        bid,
+        os.path.abspath(sys.argv[0]),
+    )
     die(msg, 2)
 
 

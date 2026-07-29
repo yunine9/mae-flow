@@ -143,6 +143,10 @@ from mae_flow_core.application.delivery.moonlight_defer import (
     MoonlightDeferPorts,
     defer_moonlight_quality,
 )
+from mae_flow_core.application.quality.codecheck import (
+    CodeCheckRunPorts,
+    run_codecheck as execute_codecheck,
+)
 from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
@@ -2361,212 +2365,79 @@ def _codecheck_launch(batch, executable=None, windows=None):
     return display, True, display
 
 
+def _save_codecheck_diagnostic(command, return_code, output, report):
+    directory = os.path.join(
+        ".mae-flow-work", "codecheck-diagnostics")
+    os.makedirs(directory, exist_ok=True)
+    snapshot = os.path.join(
+        directory, time.strftime("%Y%m%d-%H%M%S") + ".txt")
+    content = (
+        "COMMAND: " + command
+        + "\nRETURN_CODE: " + str(return_code)
+        + "\n\n" + output
+    )
+    if report != output:
+        content += "\n\n===== REPORT =====\n" + report
+    write_text(snapshot, content)
+    return snapshot
+
+
 def _run_codecheck(files, st=None, phase="scan"):
-    """执行 CodeCheck 并返回机器结果；scan、done 复核共用，避免两套解析口径漂移。"""
-    log_state = st if isinstance(st, dict) else {}
-    head = sh("git rev-parse --verify HEAD")
-    log_path = append_codecheck_event(
-        os.getcwd(), log_state, "run.started", {
-            "phase": phase, "cwd": os.path.abspath(os.getcwd()),
-            "head": head, "files": list(files), "file_count": len(files),
-        })
-    capability = ensure_codecheck(install=True)
-    append_codecheck_event(
-        os.getcwd(), log_state, "capability.checked", {
-            "phase": phase,
-            "available": bool(capability.get("available")),
-            "path": capability.get("path", ""),
-            "detail": capability.get("detail", ""),
-            "installed": capability.get("installed"),
-        })
-    if not capability.get("available"):
-        detail = str(capability.get("detail", "")).strip()[-1200:]
-        append_codecheck_event(
-            os.getcwd(), log_state, "run.failed", {
-                "phase": phase, "kind": "capability-unavailable",
-                "detail": detail,
-            })
-        return None, (
-            "CodeCheck CLI 当前不可用。Mae-Flow 已按公司内网源尽力自动安装，但没有成功；"
-            "这不会触发重复安装或派修复 Agent。"
-            + (" 诊断: " + detail if detail else "")
-            + "。普通模式请向用户展示风险后使用错误信息给出的恢复通道；"
-            "月光宝盒模式记录为未完成质量项后继续。")
-    executable = capability.get("path") or None
-    # Windows 路走 shell=True:文件名里的 & ^ % 是 cmd 命令语义(a&b.c 会把 b 当命令跑),
-    # 逗号会破坏 -f 的批次列表。这类文件名先拒绝,比"静默检错文件"或注入安全得多。
-    risky = [f for f in files if re.search(r"[&|^%<>;,]", f)]
-    if risky:
-        append_codecheck_event(
-            os.getcwd(), log_state, "run.failed", {
-                "phase": phase, "kind": "unsafe-file-name", "files": risky,
-            })
-        return None, (
-            "以下文件名含 cmd 元字符或逗号,无法安全传入 codecheck -f: "
-            + "、".join(risky[:5])
-            + "。请重命名文件或将其移出本次检查范围后重试。")
-    total, pairs, commands = 0, [], []
-    parsed_batches = []
-    batches = _batches(files)
-    for batch_index, batch in enumerate(batches, 1):
-        launch, use_shell, cmd = _codecheck_launch(batch, executable=executable)
-        commands.append(cmd)
-        started = time.time()
-        append_codecheck_event(
-            os.getcwd(), log_state, "command.started", {
-                "phase": phase, "batch": batch_index,
-                "batch_count": len(batches), "files": batch,
-                "command": cmd, "launch": launch,
-                "shell": use_shell, "executable": executable or "",
-            })
-        try:
-            r = subprocess.run(launch, shell=use_shell, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=900)
-        except subprocess.TimeoutExpired as exc:
-            append_codecheck_event(
-                os.getcwd(), log_state, "command.failed", {
-                    "phase": phase, "batch": batch_index,
-                    "command": cmd, "kind": "timeout",
-                    "timeout_seconds": 900,
-                    "stdout": save_codecheck_artifact(
-                        os.getcwd(), log_state,
-                        "batch-%d-timeout-stdout" % batch_index,
-                        getattr(exc, "stdout", "") or ""),
-                    "stderr": save_codecheck_artifact(
-                        os.getcwd(), log_state,
-                        "batch-%d-timeout-stderr" % batch_index,
-                        getattr(exc, "stderr", "") or ""),
-                })
-            return None, "codecheck 现场检查超时(>15min)——批次过大或服务异常"
-        except OSError as e:
-            append_codecheck_event(
-                os.getcwd(), log_state, "command.failed", {
-                    "phase": phase, "batch": batch_index,
-                    "command": cmd, "kind": "launch-error",
-                    "error": str(e),
-                })
-            return None, "codecheck CLI 无法启动: " + str(e)
-        stdout, stderr = r.stdout or "", r.stderr or ""
-        out = stdout + stderr
-        stdout_artifact = save_codecheck_artifact(
-            os.getcwd(), log_state,
-            "batch-%d-stdout" % batch_index, stdout)
-        stderr_artifact = save_codecheck_artifact(
-            os.getcwd(), log_state,
-            "batch-%d-stderr" % batch_index, stderr)
-        rp = re.search(r"检查报告已保存到:\s*(.+)", out)
-        rtxt = out
-        report_path = ""
-        if rp:
-            report_path = rp.group(1).strip()
-            try:
-                with open(report_path, encoding="utf-8", errors="replace") as stream:
-                    rtxt = stream.read()
-            except OSError:
-                pass
-        report_artifact = (
-            save_codecheck_artifact(
-                os.getcwd(), log_state,
-                "batch-%d-report" % batch_index, rtxt, ".md")
-            if rtxt != out else None)
-        count = _parse_codecheck_count(out, rtxt)
-        json_pairs = []
-        parsed_from = "console-or-report" if count is not None else ""
-        parsed_json_path = ""
-        parsed_json_artifact = None
-        if count is None:
-            candidates = [os.path.join(".codecheckcli", "codecheck-result.json")]
-            if rp:
-                candidates.append(os.path.join(os.path.dirname(rp.group(1).strip()), "codecheck-result.json"))
-            for jp in candidates:
-                try:
-                    if os.path.getmtime(jp) + 2 < started:
-                        continue
-                    count, json_pairs = _parse_codecheck_json(jp)
-                    if count is not None:
-                        parsed_from = "json"
-                        parsed_json_path = os.path.abspath(jp)
-                        try:
-                            with open(jp, encoding="utf-8",
-                                      errors="replace") as stream:
-                                parsed_json_artifact = save_codecheck_artifact(
-                                    os.getcwd(), log_state,
-                                    "batch-%d-result-json" % batch_index,
-                                    stream.read(), ".json")
-                        except OSError:
-                            pass
-                        break
-                except OSError:
-                    continue
-        append_codecheck_event(
-            os.getcwd(), log_state, "command.completed", {
-                "phase": phase, "batch": batch_index,
-                "batch_count": len(batches), "command": cmd,
-                "return_code": r.returncode,
-                "duration_ms": int((time.time() - started) * 1000),
-                "parsed_count": count, "parsed_from": parsed_from,
-                "reported_path": report_path,
-                "parsed_json_path": parsed_json_path,
-                "parsed_json": parsed_json_artifact,
-                "stdout": stdout_artifact, "stderr": stderr_artifact,
-                "report": report_artifact,
-            })
-        if count is None:
-            d = os.path.join(".mae-flow-work", "codecheck-diagnostics")
-            os.makedirs(d, exist_ok=True)
-            snap = os.path.join(d, time.strftime("%Y%m%d-%H%M%S") + ".txt")
-            with open(snap, "w", encoding="utf-8") as f:
-                f.write("COMMAND: " + cmd + "\nRETURN_CODE: " + str(r.returncode) + "\n\n" + out)
-                if rtxt != out:
-                    f.write("\n\n===== REPORT =====\n" + rtxt)
-            append_codecheck_event(
-                os.getcwd(), log_state, "run.failed", {
-                    "phase": phase, "kind": "unparsed-output",
-                    "batch": batch_index, "command": cmd,
-                    "diagnostic": os.path.abspath(snap),
-                })
-            me = os.path.abspath(sys.argv[0])
-            return None, ("codecheck 已返回但告警数无法解析。已尝试控制台、Markdown 汇总/明细和 JSON 结果；"
-                          f"完整现场已保存到 {snap}。这是工具兼容问题，不要派修复 Agent、不要猜 0 条。"
-                          "可重试一次；仍失败时把诊断文件展示给用户人工核对，用户确认实际告警数后执行 "
-                          f"python \"{me}\" codecheck-record --count <数字> --diagnostic \"{snap}\" "
-                          "--reason \"输出格式暂不兼容，已人工核对\" --ack \"用户确认原话\"。"
-                          "该记录绑定当前步骤、HEAD、文件清单和诊断内容，代码一变自动失效。")
-        if json_pairs:
-            warnings = tuple(
-                quality_codecheck.CodeCheckWarning(
-                    rule, file_name, line)
-                for rule, file_name, line in json_pairs
-            )
-        else:
-            warnings = quality_codecheck.extract_report_warnings(
-                rtxt)
-        mapped = quality_codecheck.map_warning_paths(
-            warnings, tuple(batch))
-        parsed_batches.append(
-            quality_codecheck.CodeCheckBatch(
-                count=count,
-                warnings=mapped,
-                command=cmd,
-            ))
-    aggregate = quality_codecheck.aggregate_batches(
-        tuple(parsed_batches))
-    total = aggregate.total
-    pairs = [
-        warning.as_tuple()
-        for warning in aggregate.warnings
-    ]
-    commands = list(aggregate.commands)
-    append_codecheck_event(
-        os.getcwd(), log_state, "run.completed", {
-            "phase": phase, "head": head, "total": total,
-            "pairs": pairs, "commands": commands,
-            "log_path": log_path or codecheck_log_path(os.getcwd(), log_state),
-        })
+    """CLI adapter for the CodeCheck execution application use case."""
+    cwd = os.getcwd()
+    result = execute_codecheck(
+        files,
+        st,
+        phase,
+        CodeCheckRunPorts(
+            cwd=cwd,
+            head=lambda: sh("git rev-parse --verify HEAD"),
+            append_event=lambda state, event, payload: (
+                append_codecheck_event(
+                    cwd, state, event, payload)
+            ),
+            ensure_capability=lambda: ensure_codecheck(install=True),
+            split_batches=_batches,
+            build_launch=lambda batch, executable: (
+                _codecheck_launch(
+                    batch, executable=executable)
+            ),
+            clock=time.time,
+            run_process=lambda launch, use_shell: subprocess.run(
+                launch,
+                shell=use_shell,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=900,
+            ),
+            is_timeout=lambda error: isinstance(
+                error, subprocess.TimeoutExpired),
+            save_artifact=lambda state, label, content, suffix=".txt": (
+                save_codecheck_artifact(
+                    cwd, state, label, content, suffix)
+            ),
+            read_text=lambda path: read_text(
+                path, encoding="utf-8", errors="replace"),
+            modified_time=os.path.getmtime,
+            parse_json_file=_parse_codecheck_json,
+            log_path=lambda state: codecheck_log_path(cwd, state),
+            save_diagnostic=_save_codecheck_diagnostic,
+            program_path=os.path.abspath(sys.argv[0]),
+        ),
+    )
+    if result.scan is None:
+        return None, result.error
     return {
-        "total": total, "pairs": pairs, "commands": commands,
-        "log_path": log_path or codecheck_log_path(os.getcwd(), log_state),
-    }, ""
+        "total": result.scan.total,
+        "pairs": [
+            warning.as_tuple()
+            for warning in result.scan.warnings
+        ],
+        "commands": list(result.scan.commands),
+        "log_path": result.log_path,
+    }, result.error
 
 
 def _parse_codecheck_count(console, report):

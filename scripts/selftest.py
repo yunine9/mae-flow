@@ -89,6 +89,8 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/application/delivery/standalone.py",
           "scripts/mae_flow_core/application/delivery/moonlight.py",
           "scripts/mae_flow_core/application/delivery/moonlight_defer.py",
+          "scripts/mae_flow_core/application/quality/__init__.py",
+          "scripts/mae_flow_core/application/quality/codecheck.py",
           "scripts/mae_flow_core/delivery/__init__.py",
           "scripts/mae_flow_core/delivery/checkpoints.py",
           "scripts/mae_flow_core/delivery/evidence.py",
@@ -125,6 +127,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_guard_permit_integration.py",
           "scripts/tests/test_quality_task_cards.py",
           "scripts/tests/test_quality_codecheck.py",
+          "scripts/tests/test_quality_codecheck_use_cases.py",
           "scripts/tests/test_quality_evidence.py",
           "scripts/tests/test_delivery_policies.py",
           "scripts/tests/test_delivery_evidence.py",
@@ -3446,6 +3449,12 @@ with _TmpDir() as td:
               managed.returncode, managed.stderr[-200:]))
 
 mf_src = open(os.path.join(ROOT, "scripts", "mae-flow.py"), encoding="utf-8").read()
+quality_codecheck_src = open(
+    os.path.join(
+        ROOT, "scripts", "mae_flow_core", "application",
+        "quality", "codecheck.py"),
+    encoding="utf-8",
+).read()
 guard_bash_src = open(
     os.path.join(
         ROOT, "scripts", "mae_flow_core", "guard", "bash.py"),
@@ -3462,7 +3471,7 @@ check("旧版 UT 在途状态可安全恢复入口 HEAD",
       and "禁止拿当前 HEAD 补位" in mf_src)
 check("CodeCheck 解析失败有绑定现场的恢复入口",
       "def cmd_codecheck_record" in mf_src and "diagnostic_sha256" in mf_src
-      and "代码一变自动失效" in mf_src)
+      and "代码一变自动失效" in quality_codecheck_src)
 check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
       'st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck")' in mf_src
       and {

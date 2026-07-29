@@ -116,6 +116,19 @@ class ArchitectureTests(unittest.TestCase):
     def test_quality_policy_has_no_direct_side_effects(self):
         self.assertEqual([], assert_quality_dependencies(ROOT))
 
+    def test_quality_application_rejects_direct_process_calls(self):
+        root = self._write_core_fixture(
+            "application/quality",
+            "import subprocess as sp\nsp.run(['codecheck'])\n",
+        )
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/application/quality/fixture.py:2: "
+                "forbidden call subprocess.run"
+            ],
+            assert_quality_dependencies(root),
+        )
+
     def test_quality_functions_stay_within_complexity_limit(self):
         self.assertEqual([], quality_complexity_violations(ROOT))
 

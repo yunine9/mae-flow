@@ -225,6 +225,8 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_delivery_policies.py", text)
         self.assertIn("test_command_dispatch.py", text)
         self.assertIn("test_file_io.py", text)
+        self.assertIn("test_refactor_completion.py", text)
+        self.assertIn("test_fault_injection.py", text)
 
 
 if __name__ == "__main__":

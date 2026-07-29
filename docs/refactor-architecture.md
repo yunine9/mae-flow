@@ -116,6 +116,16 @@ Phase-9 相比行为保持型 phase-8 只允许 `combined_git_add_flags` 这一�
 `git add -fu`、`-uf`、`-Af` 必须按 Git 的组合短参数语义展开。新增差分阶段时，既有
 场景值必须完全相同，只能增加经过明确分类的新场景。
 
+Phase-10 只在 Phase-9 上增加 Stage-0 characterization 场景；测试会逐项比较所有
+Phase-9 快照，旧值有任何变化都直接失败。`scripts/tests/differential/coverage.json`
+必须为每个注册场景声明领域、Runtime、Workflow、Transition、Delivery 和故障类型，
+同时 Phase-10 golden 必须与场景注册表一一对应。
+
+`scripts/tests/refactor_completion_contract.json` 保存最终入口行数、业务模块大小、复杂度
+和迁移阶段。它是完成目标，不是当前代码的宽松基线：不得为了让现状通过而提高目标。
+`scripts/tests/fault_injection.py` 只属于测试基础设施，生产代码不得导入；它用于在迁移
+适配器前固定文件、Git、进程和状态存储的失败语义。
+
 发版前入口仍是：
 
 ```bash

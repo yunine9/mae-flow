@@ -100,11 +100,17 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_differential_harness.py",
           "scripts/tests/test_architecture.py",
           "scripts/tests/test_file_io.py",
+          "scripts/tests/test_refactor_completion.py",
+          "scripts/tests/test_fault_injection.py",
           "scripts/tests/architecture_rules.py",
+          "scripts/tests/refactor_completion.py",
+          "scripts/tests/fault_injection.py",
           "scripts/tests/differential/__init__.py",
+          "scripts/tests/differential/coverage.py",
           "scripts/tests/differential/normalize.py",
           "scripts/tests/differential/snapshot.py",
           "scripts/tests/differential/scenarios.py",
+          "scripts/tests/differential/stage0_scenarios.py",
           "scripts/tests/differential/runner.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
@@ -214,7 +220,9 @@ check("CLI 命令路由契约回归",
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py"),
-        ("受管文件句柄", "test_file_io.py")):
+        ("受管文件句柄", "test_file_io.py"),
+        ("重构完成契约与覆盖清单", "test_refactor_completion.py"),
+        ("故障注入与原子写失败回归", "test_fault_injection.py")):
     result = subprocess.run(
         [sys.executable, os.path.join(
             ROOT, "scripts", "tests", filename)],

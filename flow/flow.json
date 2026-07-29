@@ -629,7 +629,7 @@
           "type": "commit_tagged_after_entry"
         },
         {
-          "type": "agent_ran",
+          "type": "agent_or_no_source",
           "agent": "COMPILE",
           "statuses": [
             "OK"
@@ -682,7 +682,7 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "agent_ran",
+          "type": "agent_or_no_source",
           "agent": "COMPILE",
           "statuses": [
             "OK"
@@ -696,7 +696,7 @@
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "agent_ran",
+          "type": "agent_or_no_source",
           "agent": "COMPILE",
           "statuses": [
             "OK"
@@ -722,7 +722,7 @@
       "source_change_recheck": "verify_recompile",
       "evidence": [
         {
-          "type": "agent_ran",
+          "type": "agent_or_no_source",
           "agent": "UT",
           "statuses": [
             "PASS"

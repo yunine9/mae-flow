@@ -162,7 +162,17 @@ SOURCE_FILENAMES = {
     "cmakelists.txt", "makefile", "gnumakefile", "pom.xml", "build.gradle", "settings.gradle",
     "gradle.properties", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
     "cargo.toml", "cargo.lock", "go.mod", "go.sum", "meson.build", "build.ninja",
+    "cmakepresets.json", "cmakeuserpresets.json", "vcpkg.json", "conanfile.py",
+    "conanfile.txt", "pyproject.toml", "setup.py", "setup.cfg", "tox.ini", "pipfile",
+    "pipfile.lock", "poetry.lock", "requirements.txt", "workspace", "workspace.bazel",
+    "module.bazel", "build", "build.bazel", "gemfile", "rakefile", "composer.json",
+    "composer.lock",
 }
+BUILD_DESCRIPTOR_EXTS = (
+    ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
+    ".mk", ".gn", ".gni", ".bzl",
+)
+BUILD_SCRIPT_EXTS = (".sh", ".bash", ".bat", ".cmd", ".ps1")
 
 # 只把“几乎不可能是源码/交付物”的中间文件做提交硬拦。build/dist/out/target
 # 与 jar/dll/so 等可能是项目约定的发布件，只提示不阻断，避免为了防误提交反而漏交付。
@@ -753,6 +763,17 @@ def _repo_rel_for_match(path):
     return None
 
 
+def _is_build_path(path):
+    """识别会改变构建/依赖结果的入口；供源码范围和任务卡分类共用。"""
+    low = norm(path).strip().strip('"\'').lower()
+    base = os.path.basename(low)
+    return bool(
+        base in SOURCE_FILENAMES
+        or (base.startswith("requirements") and base.endswith(".txt"))
+        or low.endswith(BUILD_DESCRIPTOR_EXTS + BUILD_SCRIPT_EXTS)
+    )
+
+
 def _is_source_path(path, st=None, flow=None):
     """跨仓统一源码判定：扩展名/构建文件 + 通用目录 + 仓库私有路径，任一命中即算。
 
@@ -771,7 +792,7 @@ def _is_source_path(path, st=None, flow=None):
     # 已知源码/构建文件名单先判(CMakeLists.txt 以 .txt 结尾,不能被文档排除
     # 误放);再排除文档——src/ 目录 pattern 曾把 README.md 一行改动判成源码,
     # 触发整条质量链重跑(校准实锤)。
-    if base in SOURCE_FILENAMES or low.endswith(SOURCE_EXTS):
+    if _is_build_path(p) or low.endswith(SOURCE_EXTS):
         return True
     if low.endswith((".md", ".rst", ".adoc", ".txt")):
         return False
@@ -1249,17 +1270,22 @@ def ev_agent_ran(spec, st):
                    "主会话代写或口头汇报不算执行证据。")
 
 
-def _changed_source_files(st, include_tests=True):
-    """当前交付范围内所有源码/构建入口变化，包含删除项，不把语言范围写死成 C++/Java。"""
-    diff, err = _scope_diff(st)
-    if err:
-        return None, err
+def _source_files_for_diff(diff, st, include_tests=True):
+    """指定 Git 范围内所有源码/构建入口变化，包含删除项。"""
     out = argv_out([
         "git", "-c", "core.quotepath=false", "diff", "--name-only", diff])
     files = [f for f in out.splitlines() if f and _is_source_path(f, st)]
     if not include_tests:
         files = [f for f in files if not _is_test_file(f, st)]
     return files, ""
+
+
+def _changed_source_files(st, include_tests=True):
+    """当前交付范围内所有源码/构建入口变化，不把语言范围写死成 C++/Java。"""
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    return _source_files_for_diff(diff, st, include_tests)
 
 
 def ev_agent_or_no_source(spec, st):
@@ -1831,7 +1857,10 @@ def ev_review_fix_committed(spec, st):
     return ev_commit_tagged_after_entry(spec, st)
 
 
-CODE_EXTS = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp", ".java")
+CODE_EXTS = (
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
+    ".java", ".js", ".jsx", ".ts", ".tsx", ".py", ".pyi",
+)
 DEFAULT_TEST_PATS = [
     r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/", r"(^|/)src/test/",
     r"(^|/)test_[^/]+\.py$",
@@ -1887,13 +1916,181 @@ def _changed_lines(st, files):
     return result, ""
 
 
+def _hunk_targets_for_diff(diff, files):
+    """从指定 Git diff 提取函数级定位线索：新增行范围 + hunk 函数上下文。"""
+    result = {}
+    pattern = re.compile(
+        r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@(?:\s*(.*))?$", re.M)
+    for path in files:
+        out = argv_out([
+            "git", "-c", "core.quotepath=false",
+            "diff", "-U0", diff, "--", path,
+        ])
+        targets = []
+        for match in pattern.finditer(out):
+            start = int(match.group(1))
+            count = int(match.group(2) if match.group(2) is not None else "1")
+            end = start + max(count, 1) - 1
+            context = re.sub(r"\s+", " ", (match.group(3) or "").strip())
+            if len(context) > 180:
+                context = context[:177] + "..."
+            targets.append({
+                "start": start, "end": end, "context": context,
+                "deletion_only": count == 0,
+            })
+        result[norm(path)] = targets
+    return result
+
+
+def _changed_hunk_targets(st, files):
+    """提取完整流程 UT 的函数级定位线索。"""
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    return _hunk_targets_for_diff(diff, files), ""
+
+
+def _looks_like_function_context(context):
+    """只接受明确的方法/函数 hunk，避免把 Java class/namespace 整块当成本次函数。"""
+    value = re.sub(r"\s+", " ", str(context or "").strip())
+    if not value:
+        return False
+    if re.search(r"\b(class|struct|interface|enum|namespace|module)\b", value):
+        return False
+    return bool(
+        ("(" in value and ")" in value)
+        or re.search(r"\b(def|func|fn)\s+[A-Za-z_$][\w$]*", value)
+    )
+
+
+def _lexical_function_range(path, line_number):
+    """Git 无函数驱动时的保守兜底，仅识别常见 Python 与花括号语言函数。"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as stream:
+            source_lines = stream.read().splitlines()
+    except OSError:
+        return None
+    if not source_lines or line_number < 1 or line_number > len(source_lines):
+        return None
+    low = path.lower()
+    if low.endswith((".py", ".pyi")):
+        for index in range(line_number - 1, -1, -1):
+            match = re.match(
+                r"^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", source_lines[index])
+            if not match:
+                continue
+            indent = len(match.group(1).replace("\t", "    "))
+            end = len(source_lines)
+            for cursor in range(index + 1, len(source_lines)):
+                raw = source_lines[cursor]
+                if not raw.strip():
+                    continue
+                current_indent = len(raw) - len(raw.lstrip(" \t"))
+                if current_indent <= indent and not raw.lstrip().startswith(("#", "@")):
+                    end = cursor
+                    break
+            if index + 1 <= line_number <= end:
+                return {
+                    "start": index + 1, "end": end,
+                    "context": source_lines[index].strip()[:180],
+                }
+        return None
+    if not low.endswith((
+            ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+            ".java", ".js", ".jsx", ".ts", ".tsx")):
+        return None
+    control = re.compile(
+        r"^(?:if|for|while|switch|catch|else|do|try|synchronized)\b")
+    for index in range(line_number - 1, max(-1, line_number - 80), -1):
+        header = source_lines[index].strip()
+        if not header or control.match(header) or re.search(
+                r"\b(class|struct|interface|enum|namespace|module)\b", header):
+            continue
+        if "(" not in header:
+            continue
+        joined = " ".join(
+            part.strip() for part in source_lines[index:min(len(source_lines), index + 6)])
+        before_brace = joined.split("{", 1)[0]
+        if "{" not in joined or "(" not in before_brace or ")" not in before_brace:
+            continue
+        if control.match(before_brace.strip()) or before_brace.rstrip().endswith(";"):
+            continue
+        depth = 0
+        opened = False
+        for cursor in range(index, len(source_lines)):
+            # 去掉常见字符串和 // 注释后再数括号；无法可靠解析时宁可不返回。
+            code = re.sub(
+                r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+                "", source_lines[cursor]).split("//", 1)[0]
+            depth += code.count("{") - code.count("}")
+            opened = opened or "{" in code
+            if opened and depth == 0:
+                end = cursor + 1
+                if index + 1 <= line_number <= end:
+                    return {
+                        "start": index + 1, "end": end,
+                        "context": before_brace.strip()[:180],
+                    }
+                break
+            if opened and depth < 0:
+                break
+    return None
+
+
+def _changed_function_ranges(st, files):
+    """用 Git function-context 识别本次实际改到的函数新文件行范围。
+
+    识别不可靠时返回空范围，调用方仍以变更行窗口 + 用户确认兜底，绝不把整文件
+    自动算成本次修改。
+    """
+    diff, err = _scope_diff(st)
+    if err:
+        return None, err
+    changed, err = _changed_lines(st, files)
+    if err or changed is None:
+        return None, err or "无法读取变更行"
+    pattern = re.compile(
+        r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@(?:\s*(.*))?$", re.M)
+    result = {}
+    for path in files:
+        out = argv_out([
+            "git", "-c", "core.quotepath=false", "diff",
+            "--function-context", "--unified=0", diff, "--", path,
+        ])
+        ranges = []
+        changed_lines = changed.get(norm(path), set())
+        for line in sorted(changed_lines):
+            fallback = _lexical_function_range(path, line)
+            if fallback and not any(
+                    item["start"] == fallback["start"] and item["end"] == fallback["end"]
+                    for item in ranges):
+                ranges.append(fallback)
+        for match in pattern.finditer(out):
+            start = int(match.group(1))
+            count = int(match.group(2) if match.group(2) is not None else "1")
+            context = re.sub(r"\s+", " ", (match.group(3) or "").strip())
+            if count <= 0 or not _looks_like_function_context(context):
+                continue
+            end = start + count - 1
+            hunk_changes = [
+                line for line in changed_lines if start <= line <= end
+                and not any(item["start"] <= line <= item["end"] for item in ranges)
+            ]
+            if not hunk_changes:
+                continue
+            ranges.append({"start": start, "end": end, "context": context[:180]})
+        ranges.sort(key=lambda item: (item["start"], item["end"]))
+        result[norm(path)] = ranges
+    return result, ""
+
+
 def _scope_classify_codecheck(result, st, files):
     """把告警预分类为“机器判定相关”和“待用户确认是否涉及”。
 
     返回 (filtered_result, excluded_pairs_or_None)。None = 无法分类——
     告警明细缺行号(纯计数输出/JSON 无行号)或明细与总数对不上时保守全算,
-    宁可多报也不静默漏掉真告警。机器只能按变更行±SLACK 预分类，不能再
-    单方面把窗口外结果定性为存量；excluded_pairs 必须交用户确认。"""
+    宁可多报也不静默漏掉真告警。机器先认变更行±SLACK，再认同一变更函数；
+    两者都无法证明的结果不能单方面定性为存量，必须交用户确认。"""
     pairs = result.get("pairs") or []
     if not pairs or result.get("total") != len(pairs) \
             or any(p[2] is None for p in pairs):
@@ -1901,21 +2098,45 @@ def _scope_classify_codecheck(result, st, files):
     changed, err = _changed_lines(st, files)
     if err or changed is None:
         return result, None
+    function_ranges, range_err = _changed_function_ranges(st, files)
+    if range_err or function_ranges is None:
+        function_ranges = {}
     kept, excluded = [], []
+    reasons = []
     for rule, wfile, line in pairs:
         window = changed.get(norm(wfile))
         if window is None:
             # 报告里的路径没还原成清单文件(多义 basename 等):保守保留
             kept.append((rule, wfile, line))
+            reasons.append({
+                "rule": rule, "file": wfile, "line": line,
+                "reason": "报告路径无法映射，保守纳入",
+            })
             continue
         if any(abs(line - c) <= CODECHECK_LINE_SLACK for c in window):
             kept.append((rule, wfile, line))
+            reasons.append({
+                "rule": rule, "file": wfile, "line": line,
+                "reason": "命中本次变更行±%d" % CODECHECK_LINE_SLACK,
+            })
+        elif any(item["start"] <= line <= item["end"]
+                 for item in function_ranges.get(norm(wfile), [])):
+            target = next(
+                item for item in function_ranges.get(norm(wfile), [])
+                if item["start"] <= line <= item["end"])
+            kept.append((rule, wfile, line))
+            reasons.append({
+                "rule": rule, "file": wfile, "line": line,
+                "reason": "位于本次变更函数 %s（行%d-%d）"
+                % (target["context"], target["start"], target["end"]),
+            })
         else:
             excluded.append((rule, wfile, line))
     return {
         "total": len(kept), "pairs": kept,
         "commands": result.get("commands", []),
         "log_path": result.get("log_path", ""),
+        "scope_reasons": reasons,
     }, excluded
 
 
@@ -2379,13 +2600,20 @@ def ev_codecheck_clean(spec, st):
 
 def ev_review_codecheck(spec, st):
     """统一规范检查协议：真实尝试一次；结果透明，但工具自身不成为硬阻塞源。"""
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    files, err = _biz_changed_files(st)
+    if err and scan.get("step") != st.get("current"):
+        return False, err
+    if files == []:
+        # 文档、台账、测试和纯构建配置都不属于 CodeCheck 的业务代码输入。
+        # 在证据层直接放行，避免弱模型仍照步骤说明生成一次空扫描。
+        return True, ""
     accepted, _ = _risk_acceptance("CODECHECK_TOOL", st)
     if accepted:
         # CodeCheck is the one optional company CLI. A real user may explicitly
         # accept its absence after seeing the risk; otherwise an internal npm or
         # PATH outage would dead-lock the whole delivery.
         return True, ""
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if scan.get("step") != st.get("current"):
         return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
     if scan.get("scope_pending"):
@@ -3396,13 +3624,16 @@ def _action_target_files(values, kind, config, flow):
     source_files = [p for p in values if _is_source_path(p, {}, flow)]
     if kind == "codecheck":
         return [p for p in source_files
-                if not _is_test_file(p, {"config": config})]
+                if p.lower().endswith(CODE_EXTS)
+                and not _is_test_file(p, {"config": config})]
     if kind == "ut":
         business = [p for p in source_files
-                    if not _is_test_file(p, {"config": config})]
+                    if not _is_build_path(p)
+                    and not _is_test_file(p, {"config": config})]
         if not business:
             die("独立 UT 范围至少要包含一个被测业务文件；"
-                "空范围或只有测试文件不能启动。请先定位被测源码，再用 --files 明确传入。", 2)
+                "空范围、只有测试文件或只有构建文件都不能启动。"
+                "请先定位被测源码，再用 --files 明确传入。", 2)
         return source_files
     return values
 
@@ -3465,6 +3696,7 @@ def _action_task_card(action, kind, stage=""):
     head = sh("git rev-parse --verify HEAD")
     sid = "standalone_" + action["kind"]
     files = action.get("files", [])
+    groups = _task_file_groups(files, {"config": config})
     scan = action.get("quality", {}).get("codecheck_scan", {})
     lines = [
         f"# Mae-Flow Standalone {label} TASK CARD",
@@ -3488,10 +3720,13 @@ def _action_task_card(action, kind, stage=""):
     lines.extend("- " + os.path.abspath(x) for x in sources)
     if not sources:
         lines.append("- 用户未提供独立文档；以任务说明和点名代码为依据，不得发明业务要求")
-    lines.append("本轮文件清单:")
-    lines.extend("- " + x for x in files)
-    if not files:
-        lines.append("- （按任务说明定向查找，不得全仓无目的扩张）")
+    lines.append("任务相关文件（独立任务只允许使用以下冻结范围）:")
+    _append_task_files(lines, "被测/业务源码", groups["business"])
+    _append_task_files(lines, "测试文件", groups["tests"])
+    _append_task_files(lines, "构建/依赖文件", groups["build"])
+    if label in ("UT", "CODECHECK"):
+        execution_files = groups["business"] or groups["tests"] or groups["build"]
+        _append_execution_context(lines, execution_files, label)
     if label == "CODECHECK":
         lines += [
             f"Harness首检告警数: {scan.get('count', '未执行')}",
@@ -3501,8 +3736,24 @@ def _action_task_card(action, kind, stage=""):
             "职责:仅处理首检范围内业务代码告警；修复后按配置编译并重新 fullcheck；禁止自动豁免。",
         ]
     elif label == "UT":
+        standalone_targets = _hunk_targets_for_diff(
+            action.get("base_head", "HEAD"), groups["business"])
+        lines.append("UT覆盖目标（硬边界，不等于整个文件）:")
+        for business_file in groups["business"]:
+            targets = standalone_targets.get(norm(business_file), [])
+            if not targets:
+                lines.append("- %s | 当前工作区无可定位 diff；只覆盖任务说明点名的函数/行为，"
+                             "若任务说明也未点明则 NEEDS_INPUT，禁止给整个文件补存量覆盖"
+                             % business_file)
+            for target in targets:
+                span = ("%d" % target["start"] if target["start"] == target["end"]
+                        else "%d-%d" % (target["start"], target["end"]))
+                context = target.get("context") or "按该行附近确认所属函数/行为"
+                lines.append("- %s | 行 %s | %s" % (
+                    business_file, span, context))
         lines += [
             "职责:仅新增/修改测试代码；按配置调用 UT 生成能力并真实运行测试；"
+            "覆盖对象仅限上面的函数/行为与任务说明，禁止扩成整个文件；"
             "疑似源码问题完成自查后上报，禁止自行改被测源码。",
             "独立任务默认不 commit；PASS 不以 commit 为条件，但测试必须真实全绿。",
         ]
@@ -3527,6 +3778,9 @@ def _action_task_card(action, kind, stage=""):
     action.setdefault("agent_tasks", {})[label] = {
         "step": sid, "path": path, "sha256": digest, "head": head,
         "scope": action.get("request", ""), "allowed_files": scan.get("files", []) if label == "CODECHECK" else [],
+        "task_files": files,
+        "execution_roots": [root for root, _reason in _task_execution_roots(
+            groups["business"] or groups["tests"] or groups["build"])[0]],
         "initial_source_fingerprints": initial, "standalone": True, "stage": stage,
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -6530,13 +6784,119 @@ def cmd_gate(flow, st, args):
     die("gate 用法: gate edit <路径> | gate bash <命令>")
 
 
-def _task_scope(st):
-    diff, err = _scope_diff(st)
-    if err:
-        return "", [], err
+def _task_scope(st, diff_override=""):
+    if diff_override:
+        diff, err = diff_override, ""
+    else:
+        diff, err = _scope_diff(st)
+        if err:
+            return "", [], err
     out = argv_out([
         "git", "-c", "core.quotepath=false", "diff", "--name-status", diff])
     return diff, [x for x in out.splitlines() if x.strip()], ""
+
+
+def _task_file_groups(files, st):
+    """把子任务范围拆成业务源码、测试、构建三组；文档根本不应传进来。"""
+    groups = {"business": [], "tests": [], "build": []}
+    for path in files:
+        if _is_build_path(path):
+            key = "build"
+        elif _is_test_file(path, st):
+            key = "tests"
+        else:
+            key = "business"
+        if path not in groups[key]:
+            groups[key].append(path)
+    return groups
+
+
+def _build_root_marker(directory):
+    """返回目录中的显式构建入口；只读一层，避免为了定位模块递归扫大仓。"""
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return ""
+    for name in sorted(names, key=str.lower):
+        low = name.lower()
+        full = os.path.join(directory, name)
+        if (os.path.isfile(full)
+                and (low in SOURCE_FILENAMES
+                or (low.startswith("requirements") and low.endswith(".txt"))
+                or low.endswith(BUILD_DESCRIPTOR_EXTS))):
+            return name
+    return ""
+
+
+def _execution_root_for_file(path):
+    """从相关代码向上找最近构建根；找不到时只回退到源码目录，绝不猜仓库根。"""
+    repo = os.path.abspath(os.getcwd())
+    absolute = os.path.abspath(path)
+    directory = absolute if os.path.isdir(absolute) else os.path.dirname(absolute)
+    if _is_build_path(path):
+        rel = norm(os.path.relpath(directory, repo))
+        return (rel if rel != "." else "."), "变更文件本身是构建入口"
+    current = directory
+    while current == repo or current.startswith(repo + os.sep):
+        marker = _build_root_marker(current)
+        if marker:
+            rel = norm(os.path.relpath(current, repo))
+            return (rel if rel != "." else "."), "检测到 " + marker
+        if current == repo:
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    if directory != repo and directory.startswith(repo + os.sep):
+        return norm(os.path.relpath(directory, repo)), "未找到构建入口，按相关源码所在目录定位"
+    return "", "未找到可证明的模块目录"
+
+
+def _task_execution_roots(files):
+    """生成去重的模块执行目录和依据，供任务卡阻止根目录意外全量构建。"""
+    roots = []
+    seen = set()
+    unresolved = []
+    for path in files:
+        root, reason = _execution_root_for_file(path)
+        if not root:
+            unresolved.append(path)
+            continue
+        if root not in seen:
+            roots.append((root, reason))
+            seen.add(root)
+    return roots, unresolved
+
+
+def _append_task_files(lines, title, files):
+    lines.append(title + ":")
+    if files:
+        lines.extend("- " + path for path in files)
+    else:
+        lines.append("- （无）")
+
+
+def _append_execution_context(lines, files, kind):
+    """把代码范围翻译成 Agent 可直接使用的 cwd；CodeCheck 扫描仍固定在项目根。"""
+    roots, unresolved = _task_execution_roots(files)
+    label = "修复后编译执行目录" if kind == "CODECHECK" else "编译/UT执行目录"
+    lines.append(label + ":")
+    for root, reason in roots:
+        lines.append("- %s（%s）" % (root, reason))
+    if unresolved:
+        lines.append("- 未确定（相关文件: %s）" % "、".join(unresolved))
+    if not roots:
+        lines.append("- 未确定")
+    if len(roots) > 1:
+        lines.append("执行目录策略: 涉及多个模块，按上述目录分别定向验证；"
+                     "禁止退回项目根执行一次全仓构建来代替分模块验证。")
+    elif unresolved:
+        lines.append("执行目录策略: 无法确定模块目录时按 NEEDS_INPUT/FAIL 如实上报；"
+                     "禁止默认在项目根执行全量构建。")
+    else:
+        lines.append("执行目录策略: 从上述目录执行任务卡配置的编译/UT入口；"
+                     "不得自行扩大为项目根全量构建。")
 
 
 def _requirement_sources(st):
@@ -6569,6 +6929,7 @@ def cmd_agent_task(flow, st, args):
                       "UT": {"verify_ut", "rf_ut", "tw_ut", "rf_verify"}}
     sid = st["current"]
     checkpoint_id = str(getattr(args, "checkpoint", "") or "")
+    task_diff_override = ""
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if sid not in expected_steps[kind]:
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
@@ -6590,11 +6951,27 @@ def cmd_agent_task(flow, st, args):
         if item.get("status") != "coding":
             die("检查点 %s 当前状态为 %s，不能重复生成编译任务卡。"
                 % (checkpoint_id, item.get("status", "未知")), 2)
+        checkpoint_base = item.get("fixed_base", "")
+        if checkpoint_base and argv_out(
+                ["git", "cat-file", "-t", checkpoint_base]) == "commit":
+            task_diff_override = checkpoint_base + "..HEAD"
     dirty_source = _blocking_dirty_source_paths(st, flow)
     inherited_dirty = _unchanged_initial_dirty_source_paths(st, flow)
     if dirty_source:
         die("生成任务卡前仍有未提交源码/测试/构建文件: " + "、".join(dirty_source[:8])
             + "。任务卡只信 Git 可追踪范围；先按单号格式精确提交，或回退不属于本单的改动。", 2)
+    diff, changes, err = _task_scope(st, task_diff_override)
+    if err:
+        die(err, 2)
+    source_files, source_err = (
+        _source_files_for_diff(diff, st) if diff
+        else (None, "无法计算任务卡 Git 范围"))
+    if source_err:
+        die(source_err, 2)
+    if kind in ("COMPILE", "UT") and not source_files:
+        die("本轮只有文档/台账等非代码变更，无需生成 %s 任务卡；直接 done。"
+            "Harness 在证据层会自动放行，不要启动专项 Agent。" % kind, 2)
+    ut_targets = {}
     if kind == "CODECHECK":
         scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
         if scan.get("step") != sid:
@@ -6607,15 +6984,18 @@ def cmd_agent_task(flow, st, args):
                 "不派修复 Agent，直接 done。", 2)
         if scan.get("count", 0) == 0:
             die("机器首检为 0 告警，不应派 codecheck-fix-agent；直接 done。", 2)
+        if not scan.get("files"):
+            die("CodeCheck 首检没有业务代码文件却记录了告警，状态自相矛盾；"
+                "重新执行 codecheck-scan，禁止把文档或全仓当修复范围。", 2)
         changed, why = _source_changed_since(scan.get("head", ""), st)
         if why:
             die("CodeCheck 首检基点失效:" + why + "；重新执行 codecheck-scan", 2)
         if changed:
             die("首检后、修复 Agent 启动前源码已变化: " + "、".join(changed[:5])
                 + "。禁止主会话先修再补手续；回退这些改动后重扫。", 2)
-    diff, changes, err = _task_scope(st)
-    if err:
-        die(err, 2)
+    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
+    task_files = list(scan.get("files", [])) if kind == "CODECHECK" else list(source_files)
+    groups = _task_file_groups(task_files, st)
     cfg = st.get("config", {})
     task_head = sh("git rev-parse --verify HEAD")
     lines = [
@@ -6641,11 +7021,19 @@ def cmd_agent_task(flow, st, args):
     sources = _requirement_sources(st)
     lines.extend("- " + x for x in sources)
     if not sources:
-        lines.append("- （未找到；UT agent 必须 FAIL，禁止对着实现猜测试）")
-    lines.append("本轮文件清单:")
-    lines.extend("- " + x for x in changes)
-    if not changes:
-        lines.append("- （无代码变更）")
+        if kind == "UT":
+            lines.append("- （未找到；UT agent 必须 FAIL，禁止对着实现猜测试）")
+        else:
+            lines.append("- （未找到；本任务不据此扩大代码范围）")
+    lines.append("任务相关文件（已排除 Markdown、规格历史、评审记录和其他过程文档）:")
+    _append_task_files(lines, "被测/业务源码", groups["business"])
+    _append_task_files(lines, "测试文件", groups["tests"])
+    _append_task_files(lines, "构建/依赖文件", groups["build"])
+    ignored_count = max(0, len(changes) - len(task_files))
+    lines.append("未传给子 Agent 的非任务变更: %d 项" % ignored_count)
+    execution_files = (task_files if kind == "COMPILE"
+                       else (groups["business"] or groups["tests"] or groups["build"]))
+    _append_execution_context(lines, execution_files, kind)
     # compound 沉淀统一在任务卡装载:一处注入,主流程/评审/小改三条质量链全部受益
     # (原先只有主流程 build/verify 的步骤文引用,rf/tw 的 agent 拿不到踩坑经验)。
     notes_path = os.path.join("docs", "delivery-notes.md")
@@ -6659,7 +7047,6 @@ def cmd_agent_task(flow, st, args):
         if note_lines:
             lines.append("本仓沉淀经验(按需参考;与本任务卡指令冲突时以任务卡为准):")
             lines.extend("- " + x.lstrip("- ") for x in note_lines)
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     if kind == "CODECHECK":
         lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
                   "用户已确认不涉及本次修改的告警数: "
@@ -6668,35 +7055,54 @@ def cmd_agent_task(flow, st, args):
                      else "无法区分（本轮按 raw 全量计入）"),
                   "Harness首检分批数: %d（复验保持相同文件分批，禁止漏批或只跑最后一批）"
                   % max(1, len(scan.get("commands") or [])),
-                  "Harness首检文件: " + "、".join(scan.get("files", [])),
+                  "Harness首检文件（仅是 CLI 扫描输入，不代表整文件都可修）: "
+                  + "、".join(scan.get("files", [])),
                   "Harness首检告警(规则|文件): " + _render_warning_pairs(scan.get("pairs", [])),
-                  "职责:只处理任务卡范围内首检告警；主会话不得代修；修复后按任务卡编译方式验证并复验。"]
+                  "CodeCheck修复目标（硬边界，仅以下告警）:"]
+        reason_rows = scan.get("scope_reasons") or []
+        for pair in scan.get("pairs", []):
+            rule, warning_file = pair[0], pair[1]
+            warning_line = pair[2] if len(pair) > 2 else None
+            reason = next((
+                item.get("reason", "") for item in reason_rows
+                if item.get("rule") == rule and item.get("file") == warning_file
+                and item.get("line") == warning_line
+            ), "缺少可细分行号/归属信息，按 Harness 保守纳入")
+            lines.append("- %s | %s:%s | %s" % (
+                rule, warning_file,
+                warning_line if warning_line is not None else "?", reason))
+        lines.append("职责:只修上列精确告警；即使同一文件还有其他告警也不得顺手处理。"
+                     "主会话不得代修；修复后按任务卡编译方式验证并复验。")
     elif kind == "UT":
         # 覆盖口径(用户拍板):测试对象=本次修改的函数,不为文件中未修改的
         # 存量函数补测——范围蔓延等于每单背整个文件的测试债。
-        biz_files, _scope_err = _biz_changed_files(st)
-        changed_map, _cl_err = (_changed_lines(st, biz_files)
-                                if biz_files else ({}, ""))
-        if changed_map:
-            spans = []
-            for f in biz_files:
-                nums = sorted(changed_map.get(norm(f), set()))
-                if not nums:
+        ut_targets, target_err = _changed_hunk_targets(st, groups["business"])
+        if target_err:
+            die("无法计算 UT 函数级范围：" + target_err, 2)
+        lines.append("UT覆盖目标（硬边界，不等于整个文件）:")
+        if groups["business"]:
+            for business_file in groups["business"]:
+                targets = ut_targets.get(norm(business_file), [])
+                if not targets:
+                    lines.append("- %s | 无新增行范围（删除/重命名场景）；"
+                                 "只验证本次移除或迁移行为，不给其他存量函数补测"
+                                 % business_file)
                     continue
-                ranges, start, prev = [], nums[0], nums[0]
-                for n in nums[1:]:
-                    if n > prev + 1:
-                        ranges.append((start, prev))
-                        start = n
-                    prev = n
-                ranges.append((start, prev))
-                spans.append(f + ": " + ",".join(
-                    ("%d" % a) if a == b else ("%d-%d" % (a, b))
-                    for a, b in ranges))
-            if spans:
-                lines.append("本次修改行范围(测试对象所在处): " + "; ".join(spans))
+                for target in targets:
+                    span = ("删除位置" if target.get("deletion_only")
+                            else ("%d" % target["start"]
+                                  if target["start"] == target["end"]
+                                  else "%d-%d" % (target["start"], target["end"])))
+                    context = target.get("context") or "Git 未识别函数名，按该行附近确认所属函数/行为"
+                    suffix = ("（纯删除 hunk；只验证本次移除或迁移行为）"
+                              if target.get("deletion_only") else "")
+                    lines.append("- %s | 行 %s | %s%s" % (
+                        business_file, span, context, suffix))
+        else:
+            lines.append("- 本轮无业务源码修改；只验证已变更测试/构建入口，"
+                         "禁止为任意存量业务函数新增覆盖")
         lines += ["职责:只对任务卡范围补/改测试；**测试对象=本次修改的函数/行为"
-                  "(上面行范围所在函数)+规格条目 EARS 条目,禁止为文件中未修改的"
+                  "(上面硬边界所在函数)+规格条目 EARS 条目,禁止为文件中未修改的"
                   "存量函数补测**；必须调用任务卡指定的 Mae-Flow 自带"
                   " AutoUT/java-autout Skill（或明确配置的既有写法），并真实执行测试。"
                   "写“随生成方式自带”时由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。",
@@ -6717,6 +7123,10 @@ def cmd_agent_task(flow, st, args):
         "head": task_head, "scope": args.scope or "",
         "checkpoint": checkpoint_id,
         "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
+        "task_files": task_files,
+        "execution_roots": [root for root, _reason in _task_execution_roots(
+            execution_files)[0]],
+        "ut_targets": ut_targets if kind == "UT" else {},
         "unchanged_initial_dirty": inherited_dirty,
         "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     if kind == "CODECHECK":
@@ -6814,7 +7224,8 @@ def cmd_codecheck_scan(flow, st, args):
         result, excluded_pairs = _scope_classify_codecheck(result, st, files)
     candidates = [
         {"id": "W%d" % (i + 1), "rule": pair[0], "file": pair[1],
-         "line": pair[2]}
+         "line": pair[2],
+         "reason": "未命中本次变更行或机器可识别的变更函数，需确认是否存在间接影响"}
         for i, pair in enumerate(excluded_pairs or [])
     ]
     if candidates and _moonlight(st):
@@ -6823,6 +7234,10 @@ def cmd_codecheck_scan(flow, st, args):
         result["pairs"] = list(result.get("pairs") or []) + [
             (item["rule"], item["file"], item["line"]) for item in candidates
         ]
+        result["scope_reasons"] = list(result.get("scope_reasons") or []) + [{
+            "rule": item["rule"], "file": item["file"], "line": item["line"],
+            "reason": "月光模式无法人工裁决，保守纳入",
+        } for item in candidates]
         result["total"] = len(result["pairs"])
         print("[mae-flow] 🌙 月光模式无法进行用户范围裁决；%d 条疑似范围外告警"
               "已保守全部计入本次修复范围。" % len(candidates))
@@ -6832,6 +7247,7 @@ def cmd_codecheck_scan(flow, st, args):
         "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
         "files": files, "pairs": result["pairs"], "commands": result["commands"],
+        "scope_reasons": result.get("scope_reasons", []),
         "log_path": result.get("log_path", codecheck_log_path(os.getcwd(), st)),
         "raw_count": result["total"] + len(candidates),
         "scope_candidates": candidates,
@@ -6844,6 +7260,7 @@ def cmd_codecheck_scan(flow, st, args):
             "raw_count": st["quality"]["codecheck_scan"]["raw_count"],
             "kept_count": result["total"],
             "kept_pairs": result["pairs"],
+            "scope_reasons": result.get("scope_reasons", []),
             "scope_candidates": candidates,
             "scope_pending": bool(candidates),
             "moonlight": _moonlight(st),
@@ -6855,12 +7272,13 @@ def cmd_codecheck_scan(flow, st, args):
             print("  A%d | %s | %s:%s" % (
                 i, pair[0], pair[1], pair[2] if pair[2] is not None else "?"))
     if candidates:
-        print("[mae-flow] ⚠ 机器按变更行±%d 预分类出 %d 条“疑似范围外”告警；"
+        print("[mae-flow] ⚠ 机器按变更行±%d/变更函数预分类出 %d 条“归属不确定”告警；"
               "它们尚未被排除，必须先让用户确认是否涉及本次修改。"
               % (CODECHECK_LINE_SLACK, len(candidates)))
         for item in candidates:
-            print("  %s | %s | %s:%s" % (
-                item["id"], item["rule"], item["file"], item["line"]))
+            print("  %s | %s | %s:%s | %s" % (
+                item["id"], item["rule"], item["file"], item["line"],
+                item["reason"]))
         print("用 AskUserQuestion 分批展示上述候选，让用户选择“涉及本次修改”的编号。")
         print("确认后执行以下二选一命令（--ack 必须复制用户确认原话）：")
         print('  python "%s" codecheck-scope --include W1,W3 --ack "<用户原话>"'
@@ -6941,6 +7359,10 @@ def cmd_codecheck_scope(flow, st, args):
     ]
     original = list(scan.get("pairs") or [])
     scan["pairs"] = original + selected
+    scan["scope_reasons"] = list(scan.get("scope_reasons") or []) + [{
+        "rule": item.get("rule", ""), "file": item.get("file", ""),
+        "line": item.get("line"), "reason": "用户确认涉及本次修改（%s）" % item.get("id", ""),
+    } for item in candidates if str(item.get("id", "")).upper() in include]
     scan["count"] = len(scan["pairs"])
     scan["stock_excluded"] = len(candidates) - len(selected)
     scan["scope_pending"] = False

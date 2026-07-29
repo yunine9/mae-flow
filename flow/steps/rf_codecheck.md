@@ -1,7 +1,8 @@
 评审意见处理阶段的独立规范检查。主会话只负责触发机器首检和呈报裁决，**禁止亲自修告警**。
 
-1. 执行 `python "{MAEFLOW_PATH}" codecheck-scan`。该命令按返工基点只检查本轮业务代码，并记录首检 HEAD/告警数。
-   若列出 W1/W2 等“疑似范围外”候选，必须用 AskUserQuestion 分批让用户确认哪些涉及本轮返工，
+1. 先直接尝试 done；没有业务代码变更时机器自动放行，不运行 CodeCheck。若提示需要首检，
+   再执行 `python "{MAEFLOW_PATH}" codecheck-scan`。该命令按返工基点只检查本轮业务代码，并记录首检 HEAD/告警数。
+   若列出 W1/W2 等“归属不确定”候选，必须用 AskUserQuestion 分批让用户确认哪些涉及本轮返工，
    再按输出执行 `codecheck-scope --include ...` 或 `codecheck-scope --none`；机器不得自行排除。
 2. 首检 0 告警 → 不派 agent，直接 done；首检后源码若变化，done 会判首检过期并要求重扫。
 3. 首检有告警 → 执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 codecheck-fix-agent。禁止主会话代修；任务卡已包含范围、配置和编译方式。

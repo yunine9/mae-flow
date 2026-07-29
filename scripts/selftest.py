@@ -62,6 +62,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_checkpoints.py",
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
+          "scripts/tests/test_task_scope.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):
     try:
@@ -109,6 +110,12 @@ codecheck_logging_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("CodeCheck 全链路诊断日志回归", codecheck_logging_tests.returncode == 0,
       (codecheck_logging_tests.stdout + codecheck_logging_tests.stderr)[-5000:])
+task_scope_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_task_scope.py")],
+    text=True, capture_output=True, timeout=180)
+check("质量任务范围、函数边界与执行目录回归", task_scope_tests.returncode == 0,
+      (task_scope_tests.stdout + task_scope_tests.stderr)[-5000:])
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (
@@ -420,7 +427,8 @@ if flow:
                   reviewed["count"] == 2 and reviewed["stock_excluded"] == 0
                   and not reviewed["scope_pending"]
                   and reviewed["scope_review"]["included"] == ["W1"]
-                  and reviewed["scope_review"]["ack"] == scope_ack)
+                  and reviewed["scope_review"]["ack"] == scope_ack
+                  and "用户确认涉及" in reviewed["scope_reasons"][-1]["reason"])
 
             moon_scope_state = {
                 "current": "verify_codecheck", "started": now, "history": [],
@@ -3493,6 +3501,7 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "scripts/tests/test_specengine.py",
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
+          "scripts/tests/test_task_scope.py",
           "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
           "runtime/vendor/ponytail/LICENSE",

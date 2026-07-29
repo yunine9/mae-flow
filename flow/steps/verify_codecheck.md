@@ -1,10 +1,11 @@
 **本步结构是"先检查、后按结果分岔"——codecheck-fix-agent 是修复工,不是检查工,没告警就别派它。**
 
-第 0 步执行 `python "{MAEFLOW_PATH}" codecheck-scan`，由 harness 统一计算文件并运行检查：
+先直接尝试 done：没有业务代码变更时证据层会自动放行，不执行 CodeCheck。
+若 done 提示存在业务代码，再执行 `python "{MAEFLOW_PATH}" codecheck-scan`，由 harness 统一计算文件并运行检查：
 - 算「变更业务代码文件清单」:git diff --name-only 基线...HEAD 过滤代码文件、排除测试文件;
   **清单为空(本单没改业务代码)→ 无需检查,直接 done**;
 - harness 在项目根执行 `codecheck fullcheck -f <清单>`(禁 increcheck),随后**按覆盖口径过滤**:
-  变更行±3 内的告警由机器直接判为本次相关；窗口外的只能标作“疑似范围外”，**不得自动排除**。
+  变更行±3 或同一变更函数内的告警由机器直接判为本次相关；其余只能标作“归属不确定”，**不得自动排除**。
   scan 会为这些候选编号并逐条展示；用 AskUserQuestion 分批让用户选择哪些涉及本次修改，
   再执行输出中的 `codecheck-scope --include ...` 或 `codecheck-scope --none`。
   用户确认前禁止生成修复任务卡，也不能 done。告警明细缺行号时无法安全预分类，保守全算并明示;

@@ -159,3 +159,24 @@ CLI 中与内核同名或相近的薄函数是有意保留的兼容桥接：旧�
 重构期间的问题及处置证据记录在
 `docs/superpowers/mae-flow-refactor-findings.md`。缺陷修复必须使用独立测试和 `fix:`
 提交，不能混入行为保持型重构。
+
+## Stage 1：Evidence 完成证据
+
+Stage 1 已将通用、Agent、Delivery 和 Quality 共 24 个历史注册名（23 个规则名及
+`yaml_field` 别名）的裁决迁出 CLI。`EvidenceRegistry` 是唯一注册和有序执行源；
+历史 `EVIDENCE` 名称仅暴露同一个不可变只读映射，CLI 中不存在 `def ev_*` 或第二份
+字典注册。
+
+2026-07-30 在 Stage 1 最终提交上取得的新鲜验证结果：
+
+- 完整 `unittest discover`：308 项通过；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-11 differential runner：零差分；
+- State、Checkpoint 及五组 Evidence 测试在
+  `error::ResourceWarning` 下全部通过；
+- Evidence 业务模块均不超过 500 行，策略复杂度门禁通过；
+- Phase-10 golden 与 Stage 0 通过点逐字节一致；
+- `git diff --check` 通过。
+
+Stage 1 只降低职责耦合，不调整证据名称、失败文案、执行顺序、状态字段、文件副作用
+或 Git 行为。后续阶段继续以 Phase-11 为当前追加式行为基线。

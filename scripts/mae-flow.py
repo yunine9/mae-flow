@@ -86,6 +86,7 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
+from mae_flow_core.guard import intent as guard_intent
 from mae_flow_core.workflow import advancement as workflow_advancement
 from mae_flow_core.workflow import completion as workflow_completion
 from mae_flow_core.workflow import definition as workflow_definition
@@ -7819,6 +7820,57 @@ def _redirect_targets(c):
     return out
 
 
+def _gate_edit(flow, st, sid, step, intent, jdie):
+    p = intent.subject
+    rel = _repo_rel_for_match(p)
+    pm = rel if rel is not None else p
+    if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
+        die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
+    if re.search(r"\.mae-flow\.json(?:\.[\w-]+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
+                 r"|(^|/)\.mae-flow-work/moonlight-report\.md$", p, re.I):
+        die("流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
+            "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
+    if re.search(r"(^|/)\.mae-flow-defaults\.json$", p, re.I):
+        die("流程运行期间禁止修改 .mae-flow-defaults.json:它决定源码/测试路径的判定口径,"
+            "改它等于改门禁规则。团队预设请在流程外走正常评审提交。", 2)
+    if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I) and not re.search(
+            r"\.env\.(example|sample|template|dist|defaults)$", p, re.I):
+        die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
+    if sid == "config_confirm" and re.search(r"(^|/)docs/req/", pm, re.I):
+        jdie("edit-docs-req",
+             "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
+             "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
+             "已有文本用 requirement-record --source。")
+    plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
+    if norm(os.path.abspath(p)).lower().startswith(plugin_root + "/"):
+        die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
+    if re.search(flow["specs_truth"], pm, re.I) and not step.get("allow_specs_write"):
+        jdie("edit-specs",
+             f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
+    if _is_source_path(p, st, flow):
+        if _checkpoint_review_locked(st):
+            item = _checkpoint_locked_item(st) or {}
+            jdie(
+                "edit-checkpoint-review",
+                "检查点 %s 的检视快照已经冻结，Agent 不能继续改源码。"
+                "用户选择“需要调整代码”后执行 checkpoint decide revise，"
+                "状态回到 coding 才能修改。"
+                % item.get("id", item.get("title", "最终检视")))
+        if not step.get("allow_source_edit"):
+            jdie("edit-source",
+                 f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
+        tp = _effective_test_patterns(st) if step.get("tests_only") else []
+        ul = (st or {}).get("unlock") or {}
+        unlocked = ul.get("scope") == "source" and ul.get("step") == sid
+        if tp and not unlocked and not any(re.search(t, pm, re.I) for t in tp):
+            jdie("edit-tests-only",
+                 f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
+                 "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
+                 "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
+                 "禁止未经用户裁决自行改源码。")
+    sys.exit(0)
+
+
 def cmd_gate(flow, st, args):
     # 全局安装只是提供能力，不代表用户授权接管当前仓库。没有状态时必须 fail-open；
     # 真正启用流程只认 init 创建的 .mae-flow.json。
@@ -7832,71 +7884,22 @@ def cmd_gate(flow, st, args):
     if step.get("terminal"):
         sys.exit(0)
 
+    intent = guard_intent.parse_intent(args.what, args.arg)
+
     def jdie(rule, msg):
         # 裁决类规则统一走 break-glass 出口(放行令+三振熔断);绝对类仍用裸 die
-        _gate_die(st, sid, rule, args.arg, msg)
+        _gate_die(st, sid, rule, intent.subject, msg)
     # NTFS 不区分大小写:所有路径匹配一律 re.I
     if args.what == "edit":
-        p = norm(args.arg)
-        # 目录类模式(docs/req、specs 真相源、源码/测试路径)必须用项目根相对路径匹配;
-        # 精确文件名类黑名单在绝对/相对路径上都成立,维持原样。
-        rel = _repo_rel_for_match(p)
-        pm = rel if rel is not None else p
-        if p.lower().endswith((".comet.yaml", ".openspec.yaml")):
-            die("禁止手动编辑 comet/openspec 状态文件(.comet.yaml/.openspec.yaml),它们由 comet-state 维护(黑名单#4)。", 2)
-        if re.search(r"\.mae-flow\.json(?:\.[\w-]+)*$|\.mae-flow-history\.jsonl$|\.mae-flow-need-reload$"
-                     r"|(^|/)\.mae-flow-work/moonlight-report\.md$", p, re.I):
-            die("流程状态/令牌/历史账本/待重启标记/月光宝盒报告由 mae-flow 与 hook 维护,禁止直接编辑或删除。"
-                "待重启标记只能靠**重启会话**清除(SessionStart 自动删),不许手动绕过——绕过 = skill 没加载就往下走。", 2)
-        if re.search(r"(^|/)\.mae-flow-defaults\.json$", p, re.I):
-            die("流程运行期间禁止修改 .mae-flow-defaults.json:它决定源码/测试路径的判定口径,"
-                "改它等于改门禁规则。团队预设请在流程外走正常评审提交。", 2)
-        if re.search(r"(^|/)\.env(\.[\w.-]+)?$", p, re.I) and not re.search(
-                r"\.env\.(example|sample|template|dist|defaults)$", p, re.I):
-            # 公认模板后缀放行(校准实锤:.env.example 是提交进仓的无密钥模板,
-            # 新配置项都要同步它,按真密钥绝对拦=每次打断用户且零保护价值)
-            die(".env 类密钥文件禁止写入(凭据保护);确需修改请用户手动操作。", 2)
-        if sid == "config_confirm" and re.search(r"(^|/)docs/req/", pm, re.I):
-            jdie("edit-docs-req",
-                 "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。"
-                 "用户口述先执行 mae-flow messages，再用 requirement-record --message-id；"
-                 "已有文本用 requirement-record --source。")
-        plugin_root = norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
-        if norm(os.path.abspath(args.arg)).lower().startswith(plugin_root + "/"):
-            die("禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。", 2)
-        if re.search(flow["specs_truth"], pm, re.I) and not step.get("allow_specs_write"):
-            jdie("edit-specs",
-                 f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止写入(黑名单#3)。")
-        if _is_source_path(p, st, flow):
-            if _checkpoint_review_locked(st):
-                item = _checkpoint_locked_item(st) or {}
-                jdie(
-                    "edit-checkpoint-review",
-                    "检查点 %s 的检视快照已经冻结，Agent 不能继续改源码。"
-                    "用户选择“需要调整代码”后执行 checkpoint decide revise，"
-                    "状态回到 coding 才能修改。"
-                    % item.get("id", item.get("title", "最终检视")))
-            if not step.get("allow_source_edit"):
-                jdie("edit-source",
-                     f"当前步骤 {sid}({step.get('title','')})禁止修改源码;先 mae-flow current 查看该做什么。")
-            tp = _effective_test_patterns(st) if step.get("tests_only") else []
-            ul = (st or {}).get("unlock") or {}
-            unlocked = ul.get("scope") == "source" and ul.get("step") == sid
-            if tp and not unlocked and not any(re.search(t, pm, re.I) for t in tp):
-                jdie("edit-tests-only",
-                     f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)})。"
-                     "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,用户判定确为代码缺陷时执行 "
-                     "mae-flow unlock source --reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
-                     "禁止未经用户裁决自行改源码。")
-        sys.exit(0)
+        return _gate_edit(flow, st, sid, step, intent, jdie)
     if args.what == "bash":
-        c = norm(args.arg)
+        c = intent.subject
         # 按 token 匹配路径类 pattern:整串匹配时 `(^|/)src/` 对空格后的相对路径
         # (如 `sed -i ... src/main.c`)永远不命中
-        toks = [t for t in re.split(r"""[\s;|&()<>'"]+""", c) if t]
+        toks = intent.tokens
 
         def hits_path(pat):
-            return any(re.search(pat, t, re.I) for t in toks)
+            return guard_intent.hits_path(intent, pat)
 
         # Edit/Write 之外，模型也可能用 python -c、node -e 等任意解释器直接碰状态文件。
         # 与其穷举所有写法，不如禁止 Bash 直接引用这些内部文件；读取统一走 status/current/doctor。
@@ -7905,22 +7908,9 @@ def cmd_gate(flow, st, args):
             die("流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash 直接访问；"
                 "查看请用 mae-flow status/current/doctor/moonlight report，修改只能走对应子命令。", 2)
 
-        m = re.search(r"git\s+(?:checkout\s+-[bB]|switch\s+-[cC])\s+(\S+)"
-                      r"|git\s+(?:checkout|switch)\s+(?!-)(\S+)"
-                      r"|git\s+branch\s+(?:-[mM]\s+\S+\s+)?(?!-)(\S+)\s*$", c)
-        if m and st:
-            name = m.group(1) or m.group(2) or m.group(3)
-            creating = bool(m.group(1))
-            # 文件恢复与游离检出不是改分支:`git checkout HEAD -- x` / `checkout .` /
-            # `checkout <sha> -- x` 都曾被当分支名误拦,而系统自己的报错(codecheck-scan
-            # "回退越权改动")恰恰会引导模型执行这类命令。-b/-B/-c/-C 创建分支照常校验。
-            if not creating and (
-                    " -- " in c
-                    or name == "."
-                    or re.fullmatch(r"HEAD([~^]\d*)*|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|@",
-                                    name or "", re.I)
-                    or re.fullmatch(r"[0-9a-f]{7,40}", name or "", re.I)):
-                name = ""
+        if intent.branch and st:
+            name = intent.branch.name
+            creating = intent.branch.creating
             want = st["config"].get("分支名", "")
             base = st["config"].get("基线分支", "")
             # branch_create 的第一步就是从基线切出约定分支；此时 checkout/switch
@@ -8095,16 +8085,8 @@ def cmd_gate(flow, st, args):
         # 毁灭目标只查 rm/rd 自己的命令段(校准实锤:整条命令 token 混查会把
         # `rm -rf build && cmake -S . -B build` 的「.」算到 rm 头上——重建编译
         # 的最高频惯用法被绝对拦且无出路;真阳性的毁灭 token 天然在 rm 段内)。
-        for seg in re.split(r"&&|\|\||[;\n]", c):
-            if not (re.search(r"\brm\s+-\S*r", seg, re.I)
-                    or re.search(r"\b(rd|rmdir)\s+/s", seg, re.I)):
-                continue
-            nuke = {"/", "~", "*", ".", "..", "$home", "%userprofile%"}
-            for t in re.split(r"""[\s'"]+""", seg):
-                tl = t.lower()
-                if t and not t.startswith("-") and (
-                        tl in nuke or re.match(r"^[a-z]:[\\/]*$", tl)):
-                    die(f"危险命令拦截:对「{t}」的递归删除。确需执行请用户手动运行。", 2)
+        for target in guard_intent.recursive_delete_targets(intent):
+            die(f"危险命令拦截:对「{target}」的递归删除。确需执行请用户手动运行。", 2)
         if st and re.search(r"git\s+worktree\s+add", c):
             jdie("bash-worktree",
                  "本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"

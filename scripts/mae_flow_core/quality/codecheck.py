@@ -43,6 +43,40 @@ class CodeCheckScan:
             self, "commands", tuple(self.commands))
 
 
+@dataclass(frozen=True)
+class CodeCheckScopeReason:
+    rule: str
+    file: str
+    line: object
+    reason: str
+
+    def as_record(self):
+        return {
+            "rule": self.rule,
+            "file": self.file,
+            "line": self.line,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class CodeCheckScope:
+    total: int
+    warnings: tuple
+    commands: tuple
+    log_path: str
+    reasons: tuple
+    excluded: tuple
+    classified: bool
+
+    def __post_init__(self):
+        for name in (
+                "warnings", "commands",
+                "reasons", "excluded"):
+            object.__setattr__(
+                self, name, tuple(getattr(self, name)))
+
+
 def parse_count(console, report):
     """Parse only CodeCheck formats that unambiguously state a count."""
     text = (console or "") + "\n" + (report or "")
@@ -213,4 +247,117 @@ def aggregate_batches(batches):
         total=total,
         warnings=tuple(warnings),
         commands=tuple(commands),
+    )
+
+
+def _warning_tuple(value):
+    return CodeCheckWarning(
+        value[0],
+        value[1],
+        value[2] if len(value) > 2 else None,
+    )
+
+
+def _scope_unclassified(result):
+    return CodeCheckScope(
+        total=result.get("total", 0),
+        warnings=tuple(
+            _warning_tuple(pair)
+            for pair in result.get("pairs") or []
+        ),
+        commands=tuple(result.get("commands") or []),
+        log_path=result.get("log_path", ""),
+        reasons=(),
+        excluded=(),
+        classified=False,
+    )
+
+
+def _scope_details_complete(result, pairs, changed_lines):
+    return bool(
+        pairs
+        and result.get("total") == len(pairs)
+        and all(
+            len(pair) >= 3 and pair[2] is not None
+            for pair in pairs
+        )
+        and changed_lines is not None
+    )
+
+
+def scope_is_classifiable(result):
+    """Return whether result details can be safely classified by line."""
+    return _scope_details_complete(
+        result,
+        result.get("pairs") or [],
+        {},
+    )
+
+
+def classify_scope(
+        result, changed_lines, function_ranges, slack):
+    """Classify only warnings provably related to changed lines/functions."""
+    pairs = result.get("pairs") or []
+    if not _scope_details_complete(
+            result, pairs, changed_lines):
+        return _scope_unclassified(result)
+    kept = []
+    excluded = []
+    reasons = []
+    ranges = function_ranges or {}
+    for value in pairs:
+        warning = _warning_tuple(value)
+        normalized = _norm(warning.file)
+        window = changed_lines.get(normalized)
+        if window is None:
+            kept.append(warning)
+            reasons.append(CodeCheckScopeReason(
+                warning.rule,
+                warning.file,
+                warning.line,
+                "报告路径无法映射，保守纳入",
+            ))
+            continue
+        if any(
+                abs(warning.line - changed) <= slack
+                for changed in window):
+            kept.append(warning)
+            reasons.append(CodeCheckScopeReason(
+                warning.rule,
+                warning.file,
+                warning.line,
+                "命中本次变更行±%d" % slack,
+            ))
+            continue
+        target = next((
+            item for item in ranges.get(normalized, [])
+            if (
+                item["start"]
+                <= warning.line
+                <= item["end"]
+            )
+        ), None)
+        if target is None:
+            excluded.append(warning)
+            continue
+        kept.append(warning)
+        reasons.append(CodeCheckScopeReason(
+            warning.rule,
+            warning.file,
+            warning.line,
+            "位于本次变更函数 %s（行%d-%d）"
+            % (
+                target["context"],
+                target["start"],
+                target["end"],
+            ),
+        ))
+    return CodeCheckScope(
+        total=len(kept),
+        warnings=tuple(kept),
+        commands=tuple(result.get("commands") or []),
+        log_path=result.get("log_path", ""),
+        reasons=tuple(reasons),
+        excluded=tuple(excluded),
+        classified=True,
     )

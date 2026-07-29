@@ -153,6 +153,9 @@ from mae_flow_core.application.quality import (
 from mae_flow_core.application.quality import (
     task_card_documents as quality_task_card_documents,
 )
+from mae_flow_core.application.quality import (
+    codecheck_state as quality_codecheck_state,
+)
 from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
@@ -2262,60 +2265,50 @@ def _changed_function_ranges(st, files):
     return result, ""
 
 
-def _scope_classify_codecheck(result, st, files):
-    """把告警预分类为“机器判定相关”和“待用户确认是否涉及”。
-
-    返回 (filtered_result, excluded_pairs_or_None)。None = 无法分类——
-    告警明细缺行号(纯计数输出/JSON 无行号)或明细与总数对不上时保守全算,
-    宁可多报也不静默漏掉真告警。机器先认变更行±SLACK，再认同一变更函数；
-    两者都无法证明的结果不能单方面定性为存量，必须交用户确认。"""
-    pairs = result.get("pairs") or []
-    if not pairs or result.get("total") != len(pairs) \
-            or any(p[2] is None for p in pairs):
-        return result, None
-    changed, err = _changed_lines(st, files)
-    if err or changed is None:
-        return result, None
-    function_ranges, range_err = _changed_function_ranges(st, files)
-    if range_err or function_ranges is None:
+def _codecheck_scope_classification(result, st, files):
+    if not quality_codecheck.scope_is_classifiable(result):
+        return quality_codecheck.classify_scope(
+            result, None, None, CODECHECK_LINE_SLACK)
+    changed, error = _changed_lines(st, files)
+    if error or changed is None:
+        return quality_codecheck.classify_scope(
+            result, None, None, CODECHECK_LINE_SLACK)
+    function_ranges, range_error = _changed_function_ranges(
+        st, files)
+    if range_error or function_ranges is None:
         function_ranges = {}
-    kept, excluded = [], []
-    reasons = []
-    for rule, wfile, line in pairs:
-        window = changed.get(norm(wfile))
-        if window is None:
-            # 报告里的路径没还原成清单文件(多义 basename 等):保守保留
-            kept.append((rule, wfile, line))
-            reasons.append({
-                "rule": rule, "file": wfile, "line": line,
-                "reason": "报告路径无法映射，保守纳入",
-            })
-            continue
-        if any(abs(line - c) <= CODECHECK_LINE_SLACK for c in window):
-            kept.append((rule, wfile, line))
-            reasons.append({
-                "rule": rule, "file": wfile, "line": line,
-                "reason": "命中本次变更行±%d" % CODECHECK_LINE_SLACK,
-            })
-        elif any(item["start"] <= line <= item["end"]
-                 for item in function_ranges.get(norm(wfile), [])):
-            target = next(
-                item for item in function_ranges.get(norm(wfile), [])
-                if item["start"] <= line <= item["end"])
-            kept.append((rule, wfile, line))
-            reasons.append({
-                "rule": rule, "file": wfile, "line": line,
-                "reason": "位于本次变更函数 %s（行%d-%d）"
-                % (target["context"], target["start"], target["end"]),
-            })
-        else:
-            excluded.append((rule, wfile, line))
-    return {
-        "total": len(kept), "pairs": kept,
-        "commands": result.get("commands", []),
-        "log_path": result.get("log_path", ""),
-        "scope_reasons": reasons,
-    }, excluded
+    return quality_codecheck.classify_scope(
+        result,
+        changed_lines=changed,
+        function_ranges=function_ranges,
+        slack=CODECHECK_LINE_SLACK,
+    )
+
+
+def _scope_classify_codecheck(result, st, files):
+    """Classify CodeCheck warnings using repository facts and pure policy."""
+    scoped = _codecheck_scope_classification(
+        result, st, files)
+    if not scoped.classified:
+        return result, None
+    filtered = {
+        "total": scoped.total,
+        "pairs": [
+            warning.as_tuple()
+            for warning in scoped.warnings
+        ],
+        "commands": list(scoped.commands),
+        "log_path": scoped.log_path,
+        "scope_reasons": [
+            reason.as_record()
+            for reason in scoped.reasons
+        ],
+    }
+    excluded = [
+        warning.as_tuple()
+        for warning in scoped.excluded
+    ]
+    return filtered, excluded
 
 
 def _scope_filter_codecheck(result, st, files):
@@ -7073,16 +7066,19 @@ def cmd_codecheck_scan(flow, st, args):
         # 可用性都不稳定；真实尝试一次后把诊断绑定当前源码即可，不让工具故障
         # 把交付流程永久封死，也不要求用户为同一工具问题反复确认。
         head = sh("git rev-parse --verify HEAD")
-        st.setdefault("quality", {})["codecheck_scan"] = {
-            "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "head": head, "count": None, "status": "TOOL_ERROR",
-            "files": files, "pairs": [], "commands": [], "error": err,
-            "log_path": codecheck_log_path(os.getcwd(), st),
-        }
+        tool_error = quality_codecheck_state.build_tool_error_scan(
+            step=sid,
+            at=time.strftime("%Y-%m-%d %H:%M:%S"),
+            head=head,
+            files=tuple(files),
+            error=err,
+            log_path=codecheck_log_path(os.getcwd(), st),
+        )
+        st.setdefault("quality", {})["codecheck_scan"] = (
+            tool_error.as_record())
         append_codecheck_event(
-            os.getcwd(), st, "scan.tool_error", {
-                "head": head, "files": files, "error": err,
-            })
+            os.getcwd(), st, "scan.tool_error",
+            tool_error.event_record())
         st["quality"].pop("codecheck_verify", None)
         _drop_agent_token("CODECHECK")
         (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
@@ -7095,54 +7091,38 @@ def cmd_codecheck_scan(flow, st, args):
               % norm(codecheck_log_path(os.getcwd(), st)))
         print("直接 done；源码若变化，当前诊断会失效并要求重新尝试。")
         return
-    # 机器只做预分类：变更行±3 内直接计入，窗口外不能再自动定性为
-    # “存量债”。逐条保留为候选，交用户确认是否与本次修改有关。
-    excluded_pairs = None
-    if files:
-        result, excluded_pairs = _scope_classify_codecheck(result, st, files)
-    candidates = [
-        {"id": "W%d" % (i + 1), "rule": pair[0], "file": pair[1],
-         "line": pair[2],
-         "reason": "未命中本次变更行或机器可识别的变更函数，需确认是否存在间接影响"}
-        for i, pair in enumerate(excluded_pairs or [])
-    ]
-    if candidates and _moonlight(st):
-        # 月光宝盒禁止询问用户；此时不能沿用旧逻辑自动排除，也不能卡住无人值守链。
-        # 最保守的安全选择是把全部候选计入本次修复范围，宁可多报、不能漏报。
-        result["pairs"] = list(result.get("pairs") or []) + [
-            (item["rule"], item["file"], item["line"]) for item in candidates
-        ]
-        result["scope_reasons"] = list(result.get("scope_reasons") or []) + [{
-            "rule": item["rule"], "file": item["file"], "line": item["line"],
-            "reason": "月光模式无法人工裁决，保守纳入",
-        } for item in candidates]
-        result["total"] = len(result["pairs"])
+    scoped = _codecheck_scope_classification(
+        result, st, files)
+    completed = quality_codecheck_state.build_completed_scan(
+        step=sid,
+        at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        head=sh("git rev-parse --verify HEAD"),
+        files=tuple(files),
+        scoped=scoped,
+        moonlight=_moonlight(st),
+        fallback_log_path=codecheck_log_path(
+            os.getcwd(), st),
+    )
+    if completed.moonlight_included:
         print("[mae-flow] 🌙 月光模式无法进行用户范围裁决；%d 条疑似范围外告警"
-              "已保守全部计入本次修复范围。" % len(candidates))
-        candidates = []
-        excluded_pairs = []
-    st.setdefault("quality", {})["codecheck_scan"] = {
-        "step": sid, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "head": sh("git rev-parse --verify HEAD"), "count": result["total"],
-        "files": files, "pairs": result["pairs"], "commands": result["commands"],
-        "scope_reasons": result.get("scope_reasons", []),
-        "log_path": result.get("log_path", codecheck_log_path(os.getcwd(), st)),
-        "raw_count": result["total"] + len(candidates),
-        "scope_candidates": candidates,
-        "scope_pending": bool(candidates),
-        "stock_excluded": (0 if excluded_pairs is not None else None)}
+              "已保守全部计入本次修复范围。"
+              % completed.moonlight_included)
+    scan_record = completed.as_record()
+    st.setdefault("quality", {})["codecheck_scan"] = (
+        scan_record)
     append_codecheck_event(
-        os.getcwd(), st, "scan.completed", {
-            "head": st["quality"]["codecheck_scan"]["head"],
-            "files": files,
-            "raw_count": st["quality"]["codecheck_scan"]["raw_count"],
-            "kept_count": result["total"],
-            "kept_pairs": result["pairs"],
-            "scope_reasons": result.get("scope_reasons", []),
-            "scope_candidates": candidates,
-            "scope_pending": bool(candidates),
-            "moonlight": _moonlight(st),
-        })
+        os.getcwd(), st, "scan.completed",
+        completed.event_record())
+    result = {
+        "total": scan_record["count"],
+        "pairs": scan_record["pairs"],
+        "commands": scan_record["commands"],
+        "scope_reasons": scan_record["scope_reasons"],
+        "log_path": scan_record["log_path"],
+    }
+    candidates = scan_record["scope_candidates"]
+    excluded_pairs = (
+        [] if scoped.classified else None)
     st["quality"].pop("codecheck_verify", None)
     if result.get("pairs"):
         print("[mae-flow] 机器已直接计入本次修改的告警:")
@@ -7186,81 +7166,28 @@ def cmd_codecheck_scope(flow, st, args):
     """把机器准备排除的 CodeCheck 结果交给用户裁定是否涉及本次修改。"""
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
         die("codecheck-scope 只能在规范检查步骤使用。", 2)
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
-    if scan.get("step") != st["current"]:
-        die("尚无本步骤的 codecheck-scan 结果；先执行首检。", 2)
-    candidates = scan.get("scope_candidates") or []
-    if not candidates:
-        die("本轮没有需要用户判断的疑似范围外告警，不需要 codecheck-scope。", 2)
-    if not scan.get("scope_pending"):
-        die("本轮 CodeCheck 涉及范围已经确认；代码未变化时直接按 current 继续。", 2)
-    changed, why = _source_changed_since(scan.get("head", ""), st)
-    if why:
-        die("CodeCheck 首检基点失效:" + why + "；重新执行 codecheck-scan。", 2)
-    if changed:
-        die("首检后源码发生变化: " + "、".join(changed[:5])
-            + "。旧候选不再代表当前代码，重新执行 codecheck-scan。", 2)
-    include = {
-        value.upper()
-        for value in re.split(r"[\s,，、]+", args.include or "")
-        if value.strip()
-    }
-    if bool(include) == bool(args.none):
-        die("codecheck-scope 必须二选一：--include W1,W3 或 --none。", 2)
-    valid = {str(item.get("id", "")).upper() for item in candidates}
-    unknown = sorted(include - valid)
-    if unknown:
-        die("未知候选编号: " + "、".join(unknown)
-            + "；只能从本轮输出的 " + "、".join(sorted(valid)) + " 中选择。", 2)
-    if not args.ack:
-        die("codecheck-scope 必须携带用户确认原话 --ack。", 2)
-    ok, why = _ack_verified(st, args.ack)
-    if not ok:
-        die("CodeCheck 涉及范围确认验真失败:" + why, 2)
-    ack_upper = str(args.ack).upper()
-    if include:
-        missing = sorted(
-            item for item in include
-            if not re.search(r"(?<![A-Z0-9])" + re.escape(item)
-                             + r"(?![A-Z0-9])", ack_upper))
-        if missing:
-            die("--include 中的 " + "、".join(missing)
-                + " 没有出现在用户确认原话里。必须让用户看到编号并明确选择，"
-                  "不能由 Agent 根据自己的判断补选。", 2)
-    elif not re.search(r"(?:均|都|全部).{0,4}不涉及|没有.{0,4}涉及|无.{0,4}涉及",
-                       args.ack):
-        die("--none 必须对应用户明确表示“全部/均不涉及本次修改”的原话，"
-            "普通的“确认/继续”不能替代范围裁决。", 2)
-    selected = [
-        (item.get("rule", ""), item.get("file", ""), item.get("line"))
-        for item in candidates if str(item.get("id", "")).upper() in include
-    ]
-    original = list(scan.get("pairs") or [])
-    scan["pairs"] = original + selected
-    scan["scope_reasons"] = list(scan.get("scope_reasons") or []) + [{
-        "rule": item.get("rule", ""), "file": item.get("file", ""),
-        "line": item.get("line"), "reason": "用户确认涉及本次修改（%s）" % item.get("id", ""),
-    } for item in candidates if str(item.get("id", "")).upper() in include]
-    scan["count"] = len(scan["pairs"])
-    scan["stock_excluded"] = len(candidates) - len(selected)
-    scan["scope_pending"] = False
-    scan["scope_review"] = {
-        "head": scan.get("head", ""), "included": sorted(include),
-        "ack": args.ack, "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    scan = (st.get("quality", {}) or {}).get(
+        "codecheck_scan", {})
+    decision = quality_codecheck_state.decide_scope_with_ports(
+        scan=scan,
+        current_step=st["current"],
+        include_text=args.include or "",
+        none=bool(args.none),
+        ack=args.ack or "",
+        source_changed_since=lambda head: (
+            _source_changed_since(head, st)
+        ),
+        verify_ack=lambda ack: _ack_verified(st, ack),
+        now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    if decision.error:
+        die(decision.error, 2)
+    scan = decision.as_record()
+    st.setdefault("quality", {})["codecheck_scan"] = scan
     append_codecheck_event(
-        os.getcwd(), st, "scope.decided", {
-            "head": scan.get("head", ""),
-            "candidates": candidates,
-            "included": sorted(include),
-            "excluded": [
-                item.get("id") for item in candidates
-                if str(item.get("id", "")).upper() not in include
-            ],
-            "ack": args.ack,
-            "final_count": scan["count"],
-            "stock_excluded": scan["stock_excluded"],
-        })
+        os.getcwd(), st, "scope.decided",
+        decision.event_record())
+    include = set(decision.included)
     st["quality"].pop("codecheck_verify", None)
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)
@@ -7304,20 +7231,24 @@ def cmd_codecheck_record(flow, st, args):
         die(err, 2)
     digest = hashlib.sha256(read_bytes(diag)).hexdigest()
     head = sh("git rev-parse --verify HEAD")
-    rec = {"step": st["current"], "head": head, "files": files, "count": args.count,
-           "diagnostic": diag, "diagnostic_sha256": digest, "reason": args.reason,
-           "ack": args.ack, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
-    st.setdefault("quality", {})["codecheck_manual"] = rec
-    st["quality"]["codecheck_scan"] = {"step": st["current"], "head": head,
-        "files": files, "pairs": [], "commands": ["人工核对诊断文件:" + diag],
-        "count": args.count, "at": rec["at"], "manual": True,
-        "log_path": codecheck_log_path(os.getcwd(), st)}
+    records = quality_codecheck_state.build_manual_records(
+        step=st["current"],
+        head=head,
+        files=tuple(files),
+        count=args.count,
+        diagnostic=diag,
+        diagnostic_sha256=digest,
+        reason=args.reason,
+        ack=args.ack,
+        at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        log_path=codecheck_log_path(os.getcwd(), st),
+    )
+    quality = st.setdefault("quality", {})
+    quality["codecheck_manual"] = records.manual_record()
+    quality["codecheck_scan"] = records.scan_record()
     append_codecheck_event(
-        os.getcwd(), st, "manual.result_recorded", {
-            "head": head, "files": files, "count": args.count,
-            "diagnostic": diag, "diagnostic_sha256": digest,
-            "reason": args.reason, "ack": args.ack,
-        })
+        os.getcwd(), st, "manual.result_recorded",
+        records.event_record())
     st["quality"].pop("codecheck_verify", None)
     _drop_agent_token("CODECHECK")
     (st.get("agent_tasks", {}) or {}).pop("CODECHECK", None)

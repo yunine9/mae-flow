@@ -37,7 +37,10 @@ from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 from mae_flow_core.quality.task_cards import (
     EXPECTED_STEPS as TASK_CARD_EXPECTED_STEPS,
 )
-from mae_flow_core.workflow.definition import definition_errors
+from mae_flow_core.workflow.definition import (
+    definition_errors,
+    workflow_graph_errors,
+)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 fails = []
@@ -253,9 +256,9 @@ for f in ("flow/flow.json", "hooks/hooks.json", "runtime/vendor/manifest.json"):
 if flow:
     steps = flow["steps"]
     # 3. 流程图连通 + 步骤文档
-    flow_errors = definition_errors(
-        flow,
-        os.path.join(ROOT, "flow", "steps"),
+    flow_errors = (
+        definition_errors(flow, os.path.join(ROOT, "flow", "steps"))
+        + workflow_graph_errors(flow)
     )
     check("流程定义结构有效", not flow_errors, str(flow_errors))
     bad = []

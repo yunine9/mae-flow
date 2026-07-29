@@ -2,10 +2,28 @@
 
 
 def transition_targets(step):
+    targets = []
+
+    def append(target, declared=False):
+        if (declared or target is not None) and target not in targets:
+            targets.append(target)
+
     nxt = step.get("next")
     if isinstance(nxt, dict):
-        return tuple(nxt.values())
-    return (nxt,) if nxt else ()
+        for target in nxt.values():
+            append(target, declared=True)
+    elif nxt:
+        append(nxt)
+    for key in ("source_change_next", "source_change_recheck"):
+        if key in step:
+            append(step.get(key), declared=True)
+    dynamic = step.get("dynamic_next")
+    if isinstance(dynamic, (list, tuple)):
+        for target in dynamic:
+            append(target, declared=True)
+    elif "dynamic_next" in step:
+        append(dynamic, declared=True)
+    return tuple(targets)
 
 
 def next_step(step, state, choice_override=""):

@@ -18,6 +18,7 @@ if SCRIPTS not in sys.path:
 from mae_flow_core.workflow.definition import (  # noqa: E402
     definition_errors,
     load_definition,
+    workflow_graph_errors,
 )
 from mae_flow_core.workflow import definition as workflow_definition  # noqa: E402
 from mae_flow_core.workflow import transitions as workflow_transitions  # noqa: E402
@@ -34,6 +35,19 @@ class WorkflowTransitionTests(unittest.TestCase):
         self.assertEqual(
             ("build", "skip"),
             transition_targets({"next": {"yes": "build", "no": "skip"}}),
+        )
+
+    def test_transition_targets_includes_declared_dynamic_edges_once(self):
+        self.assertEqual(
+            ("normal", "compile", "recompile", "morning"),
+            transition_targets(
+                {
+                    "next": "normal",
+                    "source_change_next": "compile",
+                    "source_change_recheck": "recompile",
+                    "dynamic_next": ["morning", "normal"],
+                }
+            ),
         )
 
     def test_next_step_resolves_plain_next_and_state_choices(self):
@@ -236,6 +250,49 @@ class WorkflowDefinitionTests(unittest.TestCase):
                 ),
             )
 
+    def test_workflow_graph_reports_unreachable_step(self):
+        self.assertEqual(
+            ["unreachable step: orphan"],
+            workflow_graph_errors(
+                {
+                    "start": "begin",
+                    "steps": {
+                        "begin": {"next": "end"},
+                        "end": {"terminal": True},
+                        "orphan": {"terminal": True},
+                    },
+                }
+            ),
+        )
+
+    def test_workflow_graph_accepts_named_compatibility_entry(self):
+        self.assertEqual(
+            [],
+            workflow_graph_errors(
+                {
+                    "start": "begin",
+                    "compatibility_entries": ["legacy"],
+                    "steps": {
+                        "begin": {"next": "end"},
+                        "end": {"terminal": True},
+                        "legacy": {"next": "end"},
+                    },
+                }
+            ),
+        )
+
+    def test_workflow_graph_reports_unknown_compatibility_entry(self):
+        self.assertEqual(
+            ["compatibility entry references unknown step: missing"],
+            workflow_graph_errors(
+                {
+                    "start": "end",
+                    "compatibility_entries": ["missing"],
+                    "steps": {"end": {"terminal": True}},
+                }
+            ),
+        )
+
     def test_repository_definition_is_valid(self):
         definition = load_definition(
             os.path.join(ROOT, "flow", "flow.json")
@@ -247,6 +304,7 @@ class WorkflowDefinitionTests(unittest.TestCase):
                 os.path.join(ROOT, "flow", "steps"),
             ),
         )
+        self.assertEqual([], workflow_graph_errors(definition))
 
 
 class WorkflowAdapterDelegationTests(unittest.TestCase):

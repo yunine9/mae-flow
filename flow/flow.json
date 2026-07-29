@@ -1,6 +1,9 @@
 {
   "start": "config_confirm",
   "state_file": ".mae-flow.json",
+  "compatibility_entries": [
+    "rf_verify"
+  ],
   "source_patterns": [
     "(^|/)(service|src|include|lib|app|modules?)/"
   ],
@@ -804,6 +807,9 @@
     },
     "push": {
       "title": "推送分支",
+      "dynamic_next": [
+        "moonlight_review"
+      ],
       "evidence": [
         {
           "type": "pushed"

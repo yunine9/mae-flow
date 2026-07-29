@@ -16,7 +16,7 @@ VALUES = {
     "workflow": {"none", "full", "tweak", "review", "all"},
     "transition": {
         "none", "repair", "rejection", "finalize", "report",
-        "normal", "graph",
+        "normal", "graph", "plan", "cancel", "defer",
     },
     "delivery": {
         "none", "standalone", "checkpoint-staged", "moonlight", "review",
@@ -29,6 +29,7 @@ VALUES = {
         "missing-review-receipt", "missing-upstream",
         "foreign-artifact", "protected-requirement", "protected-state",
         "stale-head",
+        "authentication", "tool-unavailable", "user-cancelled",
     },
 }
 FIELDS = {

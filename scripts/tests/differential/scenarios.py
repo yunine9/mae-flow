@@ -495,6 +495,7 @@ def moonlight_finalize(project, implementation_root):
 from differential import stage0_scenarios  # noqa: E402
 from differential import stage1_evidence_scenarios  # noqa: E402
 from differential import stage2_guard_scenarios  # noqa: E402
+from differential import stage3_delivery_scenarios  # noqa: E402
 
 
 def direct_current(project, implementation_root):
@@ -607,11 +608,37 @@ def ownership_foreign_openspec(project, implementation_root):
         "ownership_foreign_openspec", project, implementation_root)
 
 
+def _stage3_delivery(name, project, implementation_root):
+    return getattr(stage3_delivery_scenarios, name)(
+        project, implementation_root, _prepare_repository)
+
+
+def checkpoint_plan_creation(project, implementation_root):
+    return _stage3_delivery(
+        "checkpoint_plan_creation", project, implementation_root)
+
+
+def standalone_action_cancel(project, implementation_root):
+    return _stage3_delivery(
+        "standalone_action_cancel", project, implementation_root)
+
+
+def moonlight_quality_defer(project, implementation_root):
+    return _stage3_delivery(
+        "moonlight_quality_defer", project, implementation_root)
+
+
+def moonlight_push_failure(project, implementation_root):
+    return _stage3_delivery(
+        "moonlight_push_failure", project, implementation_root)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
     "active_pretooluse_edit": active_pretooluse_edit,
     "checkpoint_status": checkpoint_status,
+    "checkpoint_plan_creation": checkpoint_plan_creation,
     "compile_task_card": compile_task_card,
     "combined_git_add_flags": combined_git_add_flags,
     "corrupt_exit_repair": corrupt_exit_repair,
@@ -632,7 +659,10 @@ SCENARIOS = {
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
     "moonlight_report_issue": moonlight_report_issue,
+    "moonlight_quality_defer": moonlight_quality_defer,
+    "moonlight_push_failure": moonlight_push_failure,
     "standalone_action_status": standalone_action_status,
+    "standalone_action_cancel": standalone_action_cancel,
     "subagentstop_missing_task_card": subagentstop_missing_task_card,
     "terminal_status": terminal_status,
     "terminal_pretooluse_bypass": terminal_pretooluse_bypass,

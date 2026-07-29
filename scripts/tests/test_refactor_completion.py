@@ -127,7 +127,7 @@ class DifferentialCoverageContractTests(unittest.TestCase):
 
     def test_current_golden_covers_every_registered_scenario(self):
         goldens = load_goldens(os.path.join(
-            TESTS, "differential", "goldens", "phase12.json"))
+            TESTS, "differential", "goldens", "phase13.json"))
         self.assertEqual(set(SCENARIOS), set(goldens))
 
     def test_coverage_rejects_unknown_domain_and_missing_scenario(self):

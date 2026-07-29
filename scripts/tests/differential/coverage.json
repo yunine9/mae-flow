@@ -33,6 +33,14 @@
       "delivery": "checkpoint-staged",
       "fault": "none"
     },
+    "checkpoint_plan_creation": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "plan",
+      "delivery": "checkpoint-staged",
+      "fault": "none"
+    },
     "combined_git_add_flags": {
       "domain": "ownership",
       "runtime": "flow",
@@ -201,6 +209,22 @@
       "delivery": "moonlight",
       "fault": "recorded-issue"
     },
+    "moonlight_quality_defer": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "defer",
+      "delivery": "moonlight",
+      "fault": "tool-unavailable"
+    },
+    "moonlight_push_failure": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "report",
+      "delivery": "moonlight",
+      "fault": "authentication"
+    },
     "ordinary_advance": {
       "domain": "workflow",
       "runtime": "flow",
@@ -224,6 +248,14 @@
       "transition": "none",
       "delivery": "standalone",
       "fault": "none"
+    },
+    "standalone_action_cancel": {
+      "domain": "delivery",
+      "runtime": "standalone",
+      "workflow": "none",
+      "transition": "cancel",
+      "delivery": "standalone",
+      "fault": "user-cancelled"
     },
     "subagentstop_missing_task_card": {
       "domain": "quality",

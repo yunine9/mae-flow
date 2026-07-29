@@ -38,6 +38,12 @@ STAGE2_GUARD_SCENARIOS = {
     "guard_requirement_bash_write",
     "ownership_foreign_openspec",
 }
+STAGE3_DELIVERY_SCENARIOS = {
+    "checkpoint_plan_creation",
+    "moonlight_push_failure",
+    "moonlight_quality_defer",
+    "standalone_action_cancel",
+}
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
@@ -373,6 +379,28 @@ class DifferentialRunnerTests(unittest.TestCase):
             ROOT, "scripts", "tests", "differential",
             "goldens", "phase12.json"))
         for name in sorted(STAGE2_GUARD_SCENARIOS):
+            with self.subTest(name=name):
+                assert_matches_golden(
+                    self, name, run_scenario(ROOT, name), goldens)
+
+    def test_phase13_preserves_every_phase12_snapshot(self):
+        phase12 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase12.json"))
+        phase13 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase13.json"))
+        self.assertEqual(
+            set(phase12), set(phase13) - STAGE3_DELIVERY_SCENARIOS)
+        for name, expected in phase12.items():
+            with self.subTest(name=name):
+                self.assertEqual(expected, phase13[name])
+
+    def test_phase13_delivery_scenarios_match_fixed_baseline(self):
+        goldens = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase13.json"))
+        for name in sorted(STAGE3_DELIVERY_SCENARIOS):
             with self.subTest(name=name):
                 assert_matches_golden(
                     self, name, run_scenario(ROOT, name), goldens)

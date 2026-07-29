@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """Regression tests for workflow definition and pure transition policy."""
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -12,6 +14,10 @@ SCRIPTS = os.path.join(ROOT, "scripts")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
+from mae_flow_core.workflow.definition import (  # noqa: E402
+    definition_errors,
+    load_definition,
+)
 from mae_flow_core.workflow.transitions import (  # noqa: E402
     next_step,
     resolved_next,
@@ -114,6 +120,129 @@ class WorkflowTransitionTests(unittest.TestCase):
         self.assertEqual(
             ["one", "two"],
             workflow_chain(flow, "full"),
+        )
+
+
+class WorkflowDefinitionTests(unittest.TestCase):
+    def test_load_definition_preserves_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "flow.json")
+            with open(path, "w", encoding="utf-8") as stream:
+                json.dump(
+                    {
+                        "start": "end",
+                        "steps": {"end": {"terminal": True}},
+                        "future_field": {"keep": 7},
+                    },
+                    stream,
+                )
+            self.assertEqual(
+                {"keep": 7},
+                load_definition(path)["future_field"],
+            )
+
+    def test_load_definition_preserves_json_decode_error(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "flow.json")
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("{broken")
+            with self.assertRaises(json.JSONDecodeError):
+                load_definition(path)
+
+    def test_definition_errors_reports_invalid_root_structures(self):
+        self.assertEqual(
+            ["flow root must be an object"],
+            definition_errors([]),
+        )
+        self.assertEqual(
+            ["steps must be an object"],
+            definition_errors({"start": "begin", "steps": []}),
+        )
+
+    def test_definition_errors_reports_invalid_step_structures(self):
+        cases = [
+            (
+                {
+                    "start": "broken",
+                    "steps": {"broken": []},
+                },
+                ["step broken must be an object"],
+            ),
+            (
+                {
+                    "start": "begin",
+                    "steps": {
+                        "begin": {"next": []},
+                        "end": {"terminal": True},
+                    },
+                },
+                ["step begin has unsupported next type: list"],
+            ),
+            (
+                {
+                    "start": "begin",
+                    "steps": {
+                        "begin": {"next": {"yes": None}},
+                        "end": {"terminal": True},
+                    },
+                },
+                ["step begin has invalid next target: None"],
+            ),
+            (
+                {
+                    "start": 7,
+                    "steps": {7: {"terminal": True}},
+                },
+                ["step id must be a non-empty string: 7"],
+            ),
+        ]
+        for definition, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(expected, definition_errors(definition))
+
+    def test_definition_errors_reports_unknown_start_and_edge(self):
+        self.assertEqual(
+            [
+                "start references unknown step: missing",
+                "step begin references unknown step: gone",
+            ],
+            definition_errors(
+                {
+                    "start": "missing",
+                    "steps": {
+                        "begin": {"next": {"yes": "gone"}},
+                        "end": {"terminal": True},
+                    },
+                }
+            ),
+        )
+
+    def test_definition_errors_reports_missing_step_document(self):
+        with tempfile.TemporaryDirectory() as steps_dir:
+            self.assertEqual(
+                ["step begin is missing document: begin.md"],
+                definition_errors(
+                    {
+                        "start": "begin",
+                        "steps": {
+                            "begin": {"next": "end"},
+                            "end": {"terminal": True},
+                        },
+                    },
+                    steps_dir,
+                ),
+            )
+
+    def test_repository_definition_is_valid(self):
+        definition = load_definition(
+            os.path.join(ROOT, "flow", "flow.json")
+        )
+        self.assertEqual(
+            [],
+            definition_errors(
+                definition,
+                os.path.join(ROOT, "flow", "steps"),
+            ),
         )
 
 

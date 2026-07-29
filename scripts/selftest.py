@@ -95,6 +95,22 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/application/quality/codecheck_state.py",
           "scripts/mae_flow_core/application/quality/task_cards.py",
           "scripts/mae_flow_core/application/quality/task_card_documents.py",
+          "scripts/mae_flow_core/application/hooks/__init__.py",
+          "scripts/mae_flow_core/application/hooks/models.py",
+          "scripts/mae_flow_core/application/hooks/events.py",
+          "scripts/mae_flow_core/application/hooks/event_policies.py",
+          "scripts/mae_flow_core/application/hooks/task_cards.py",
+          "scripts/mae_flow_core/application/hooks/receipts.py",
+          "scripts/mae_flow_core/application/hooks/agent_completion.py",
+          "scripts/mae_flow_core/adapters/__init__.py",
+          "scripts/mae_flow_core/adapters/hook_events.py",
+          "scripts/mae_flow_core/adapters/hook_runtime.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_state.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_trace.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_source.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_contract_support.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_contracts.py",
+          "scripts/mae_flow_core/adapters/hook_runtime_dependencies.py",
           "scripts/mae_flow_core/delivery/__init__.py",
           "scripts/mae_flow_core/delivery/checkpoints.py",
           "scripts/mae_flow_core/delivery/evidence.py",
@@ -2421,6 +2437,11 @@ with _TmpDir() as td:
 
 # 6. Agent 契约由独立核心测试覆盖；这里只保留发布物完整性检查。
 dp = open(os.path.join(ROOT, "hooks", "dispatch.py"), encoding="utf-8").read()
+hook_events_adapter = open(
+    os.path.join(
+        ROOT, "scripts", "mae_flow_core", "adapters", "hook_events.py"),
+    encoding="utf-8",
+).read()
 for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
     if f.endswith(".md"):
         name = f[:-3]
@@ -2433,7 +2454,8 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
 check("Hook 入口只装配已抽离的 Agent 契约运行时",
       "HookRuntimeAdapter" in dp and "def _codecheck_contract" not in dp)
 check("dispatch 在直接模式完整停止旧流程接管",
-      "direct mode: bypass" in dp and "不要运行 current/done" in dp)
+      "direct mode: bypass" in hook_events_adapter
+      and "不要运行 current/done" in hook_events_adapter)
 
 # 插件全局安装不得接管未 init 的普通项目；Windows 控制台代码页也不得污染 Hook 的 UTF-8 JSON。
 with _TmpDir() as td:

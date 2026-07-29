@@ -114,3 +114,20 @@
 - Regression: all 56 Quality, CodeCheck, task-card, logging, and task-scope
   tests now run under strict `ResourceWarning` mode without warnings
 - Product behavior: unchanged; only the test fixture lifecycle changed
+
+## MF-RF-007: Selftest searched the Hook entrypoint for migrated Direct policy
+
+- Status: resolved during Stage 5
+- Classification: refactor safety-net defect
+- Trigger: run `python scripts/selftest.py` after Hook event routing moves to
+  `mae_flow_core.adapters.hook_events`
+- Evidence: all Direct-mode process tests passed, but the static selftest still
+  searched `hooks/dispatch.py` for `direct mode: bypass` and
+  `不要运行 current/done`
+- Root cause: the safety check was coupled to the old physical file instead of
+  the extracted event adapter that owns the behavior
+- Resolution: inspect the event adapter for the static publication check and
+  add every new Hook application/adapter module to the syntax release gate
+- Regression: the full selftest now completes with `全部通过`
+- Product behavior: unchanged; the existing Direct-mode subprocess tests still
+  verify bypass and answer capture through the public Hook process

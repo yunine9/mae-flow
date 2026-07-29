@@ -241,6 +241,38 @@
       "delivery": "none",
       "fault": "foreign-artifact"
     },
+    "quality_agent_task_missing_scan": {
+      "domain": "quality",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-codecheck-scan"
+    },
+    "quality_codecheck_empty_scan": {
+      "domain": "quality",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "normal",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "quality_codecheck_scope_missing_scan": {
+      "domain": "quality",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-codecheck-scan"
+    },
+    "quality_standalone_finish_missing_token": {
+      "domain": "quality",
+      "runtime": "standalone",
+      "workflow": "none",
+      "transition": "rejection",
+      "delivery": "standalone",
+      "fault": "missing-agent-token"
+    },
     "standalone_action_status": {
       "domain": "runtime",
       "runtime": "standalone",

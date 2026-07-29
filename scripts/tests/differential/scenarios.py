@@ -496,6 +496,7 @@ from differential import stage0_scenarios  # noqa: E402
 from differential import stage1_evidence_scenarios  # noqa: E402
 from differential import stage2_guard_scenarios  # noqa: E402
 from differential import stage3_delivery_scenarios  # noqa: E402
+from differential import stage4_quality_scenarios  # noqa: E402
 
 
 def direct_current(project, implementation_root):
@@ -633,6 +634,38 @@ def moonlight_push_failure(project, implementation_root):
         "moonlight_push_failure", project, implementation_root)
 
 
+def _stage4_quality(name, project, implementation_root):
+    return getattr(stage4_quality_scenarios, name)(
+        project, implementation_root, _prepare_repository)
+
+
+def quality_codecheck_empty_scan(project, implementation_root):
+    return _stage4_quality(
+        "quality_codecheck_empty_scan", project, implementation_root)
+
+
+def quality_codecheck_scope_missing_scan(project, implementation_root):
+    return _stage4_quality(
+        "quality_codecheck_scope_missing_scan",
+        project,
+        implementation_root,
+    )
+
+
+def quality_agent_task_missing_scan(project, implementation_root):
+    return _stage4_quality(
+        "quality_agent_task_missing_scan", project, implementation_root)
+
+
+def quality_standalone_finish_missing_token(
+        project, implementation_root):
+    return _stage4_quality(
+        "quality_standalone_finish_missing_token",
+        project,
+        implementation_root,
+    )
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
@@ -670,4 +703,10 @@ SCENARIOS = {
     "workflow_steps": workflow_steps,
     "ordinary_advance": ordinary_advance,
     "ownership_foreign_openspec": ownership_foreign_openspec,
+    "quality_agent_task_missing_scan": quality_agent_task_missing_scan,
+    "quality_codecheck_empty_scan": quality_codecheck_empty_scan,
+    "quality_codecheck_scope_missing_scan": (
+        quality_codecheck_scope_missing_scan),
+    "quality_standalone_finish_missing_token": (
+        quality_standalone_finish_missing_token),
 }

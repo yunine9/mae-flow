@@ -44,6 +44,12 @@ STAGE3_DELIVERY_SCENARIOS = {
     "moonlight_quality_defer",
     "standalone_action_cancel",
 }
+STAGE4_QUALITY_SCENARIOS = {
+    "quality_agent_task_missing_scan",
+    "quality_codecheck_empty_scan",
+    "quality_codecheck_scope_missing_scan",
+    "quality_standalone_finish_missing_token",
+}
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
@@ -401,6 +407,28 @@ class DifferentialRunnerTests(unittest.TestCase):
             ROOT, "scripts", "tests", "differential",
             "goldens", "phase13.json"))
         for name in sorted(STAGE3_DELIVERY_SCENARIOS):
+            with self.subTest(name=name):
+                assert_matches_golden(
+                    self, name, run_scenario(ROOT, name), goldens)
+
+    def test_phase14_preserves_every_phase13_snapshot(self):
+        phase13 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase13.json"))
+        phase14 = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase14.json"))
+        self.assertEqual(
+            set(phase13), set(phase14) - STAGE4_QUALITY_SCENARIOS)
+        for name, expected in phase13.items():
+            with self.subTest(name=name):
+                self.assertEqual(expected, phase14[name])
+
+    def test_phase14_quality_scenarios_match_fixed_baseline(self):
+        goldens = load_goldens(os.path.join(
+            ROOT, "scripts", "tests", "differential",
+            "goldens", "phase14.json"))
+        for name in sorted(STAGE4_QUALITY_SCENARIOS):
             with self.subTest(name=name):
                 assert_matches_golden(
                     self, name, run_scenario(ROOT, name), goldens)

@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "scenarios": {
+    "action_status": {
+      "domain": "quality",
+      "runtime": "inactive",
+      "workflow": "none",
+      "transition": "none",
+      "delivery": "standalone",
+      "fault": "none"
+    },
+    "active_gate_edit": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "combined_git_add_flags": {
+      "domain": "ownership",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "compile_task_card": {
+      "domain": "quality",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "corrupt_state_doctor": {
+      "domain": "state",
+      "runtime": "corrupt",
+      "workflow": "none",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "corrupt-json"
+    },
+    "dangerous_gate_bash": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "evidence_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "inactive_pretooluse_bypass": {
+      "domain": "hook",
+      "runtime": "inactive",
+      "workflow": "none",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "moonlight_finalize": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "finalize",
+      "delivery": "moonlight",
+      "fault": "none"
+    },
+    "ordinary_advance": {
+      "domain": "workflow",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "normal",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "terminal_status": {
+      "domain": "runtime",
+      "runtime": "flow-terminal",
+      "workflow": "tweak",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "workflow_steps": {
+      "domain": "workflow",
+      "runtime": "inactive",
+      "workflow": "all",
+      "transition": "graph",
+      "delivery": "all",
+      "fault": "none"
+    }
+  }
+}

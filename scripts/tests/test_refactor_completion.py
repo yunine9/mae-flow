@@ -50,5 +50,45 @@ class RefactorCompletionContractTests(unittest.TestCase):
         )
 
 
+from differential.coverage import (  # noqa: E402
+    load_coverage,
+    validate_coverage,
+)
+from differential.scenarios import SCENARIOS  # noqa: E402
+
+
+class DifferentialCoverageContractTests(unittest.TestCase):
+    def test_phase9_scenarios_have_complete_coverage_metadata(self):
+        coverage = load_coverage(os.path.join(
+            TESTS, "differential", "coverage.json"))
+        self.assertEqual(
+            [],
+            validate_coverage(coverage, set(SCENARIOS)),
+        )
+
+    def test_coverage_rejects_unknown_domain_and_missing_scenario(self):
+        coverage = {
+            "schema": 1,
+            "scenarios": {
+                "ghost": {
+                    "domain": "unknown",
+                    "runtime": "inactive",
+                    "workflow": "none",
+                    "transition": "none",
+                    "delivery": "none",
+                    "fault": "none",
+                }
+            },
+        }
+        self.assertEqual(
+            [
+                "coverage missing registered scenario action_status",
+                "coverage references unknown scenario ghost",
+                "ghost: unknown domain unknown",
+            ],
+            validate_coverage(coverage, {"action_status"}),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

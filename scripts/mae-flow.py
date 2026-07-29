@@ -85,6 +85,7 @@ from mae_flow_core.foundation.fingerprints import (
     review_path_fingerprint as _shared_review_path_fingerprint,
 )
 from mae_flow_core.foundation import source_paths
+from mae_flow_core.foundation import git_intent
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -246,106 +247,37 @@ def _git_add_pathspecs(command):
 
 
 def _git_subcommand_tokens(command, subcommand):
-    results = []
-    for segment in re.split(r"&&|\|\||[;\n]", command):
-        match = re.search(
-            r"(?:^|\s)git\s+" + re.escape(subcommand) + r"\b(.*)$",
-            segment, re.I)
-        if not match:
-            continue
-        try:
-            results.append(shlex.split(match.group(1), posix=True))
-        except ValueError:
-            continue
-    return results
+    return git_intent.git_subcommand_tokens(command, subcommand)
 
 
-_COMMIT_VALUE_OPTIONS = {
-    "-m", "--message", "-F", "--file", "-C", "--reuse-message",
-    "-c", "--reedit-message", "--author", "--date", "--cleanup",
-    "-t", "--template", "--fixup", "--squash", "--trailer",
-}
+_COMMIT_VALUE_OPTIONS = git_intent.COMMIT_VALUE_OPTIONS
 
 
 def _option_consumes_following(token, value_options):
-    option = token.split("=", 1)[0]
-    if option in value_options:
-        return "=" not in token
-    return bool(re.fullmatch(r"-[A-Za-z]*[mFCctS]", token))
+    return git_intent.option_consumes_following(token, value_options)
 
 
-class _PathspecCollector:
-    def __init__(self, value_options):
-        self.value_options = value_options
-        self.paths = []
-
-    def _consume(self, tokens, index):
-        token = tokens[index]
-        if not token.startswith("-"):
-            self.paths.append(norm(token))
-            return index + 1
-        return index + (
-            2 if _option_consumes_following(
-                token, self.value_options) else 1)
-
-    def collect(self, tokens):
-        index = 0
-        while index < len(tokens):
-            index = self._consume(tokens, index)
-        return self.paths
+_PathspecCollector = git_intent.PathspecCollector
 
 
 def _command_pathspecs(tokens, value_options=None):
-    value_options = value_options or set()
-    if "--" in tokens:
-        marker = tokens.index("--")
-        before, explicit = tokens[:marker], tokens[marker + 1:]
-    else:
-        before, explicit = tokens, []
-    paths = _PathspecCollector(value_options).collect(before)
-    paths.extend(norm(token) for token in explicit)
-    return list(dict.fromkeys(paths))
+    return git_intent.command_pathspecs(tokens, value_options)
 
 
 def _git_add_intent(tokens):
-    token_set = set(tokens)
-    all_mode = bool(
-        token_set & {"-A", "--all", "--no-ignore-removal"})
-    update = bool(token_set & {"-u", "--update"})
-    paths = _command_pathspecs(tokens)
-    default_paths = ["."] if all_mode or update else []
-    return {
-        "pathspecs": paths or default_paths,
-        "force": bool(token_set & {"-f", "--force"}),
-        "tracked_only": update,
-        "all": all_mode,
-    }
+    return git_intent.git_add_intent(tokens)
 
 
 def _git_add_intents(command):
-    return [
-        _git_add_intent(tokens)
-        for tokens in _git_subcommand_tokens(command, "add")
-    ]
+    return git_intent.git_add_intents(command)
 
 
 def _short_option_flags(tokens):
-    return "".join(
-        match.group(1) for token in tokens
-        for match in [re.fullmatch(r"-([A-Za-z]+)", token)]
-        if match)
+    return git_intent.short_option_flags(tokens)
 
 
 def _git_commit_intent(command):
-    token_sets = _git_subcommand_tokens(command, "commit")
-    tokens = token_sets[-1] if token_sets else []
-    token_set = set(tokens)
-    short_flags = _short_option_flags(tokens)
-    return {
-        "pathspecs": _command_pathspecs(tokens, _COMMIT_VALUE_OPTIONS),
-        "all": "a" in short_flags or "--all" in token_set,
-        "include": "i" in short_flags or "--include" in token_set,
-    }
+    return git_intent.git_commit_intent(command)
 
 
 def _agent_written_paths():

@@ -14,6 +14,7 @@ import unittest
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import source_paths
+from mae_flow_core.foundation import git_intent
 
 SPEC = importlib.util.spec_from_file_location(
     "mae_flow_task_scope_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
@@ -153,6 +154,57 @@ class TaskScopeTests(unittest.TestCase):
                         {"source_patterns": patterns[:-1]},
                     ),
                 )
+
+    def test_shared_git_intent_matrix(self):
+        matrix = [
+            (
+                "git add -- src/a.cpp 'src/a b.cpp' "
+                "&& git commit -m x",
+                [{
+                    "pathspecs": ["src/a.cpp", "src/a b.cpp"],
+                    "force": False,
+                    "tracked_only": False,
+                    "all": False,
+                }],
+                {"pathspecs": [], "all": False, "include": False},
+            ),
+            (
+                "git add -A && git commit -am x",
+                [{
+                    "pathspecs": ["."],
+                    "force": False,
+                    "tracked_only": False,
+                    "all": True,
+                }],
+                {"pathspecs": [], "all": True, "include": False},
+            ),
+            (
+                "git commit --include -- src/a.cpp",
+                [],
+                {
+                    "pathspecs": ["src/a.cpp"],
+                    "all": False,
+                    "include": True,
+                },
+            ),
+        ]
+        for command, add_expected, commit_expected in matrix:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    add_expected, git_intent.git_add_intents(command))
+                self.assertEqual(
+                    commit_expected,
+                    git_intent.git_commit_intent(command),
+                )
+                self.assertEqual(
+                    add_expected, mf._git_add_intents(command))
+                self.assertEqual(
+                    commit_expected, mf._git_commit_intent(command))
+        self.assertEqual(
+            [],
+            git_intent.git_subcommand_tokens(
+                "git add 'unterminated", "add"),
+        )
 
     def test_ut_card_filters_docs_and_freezes_function_and_module_scope(self):
         write("services/anr/src/Logic.cpp",

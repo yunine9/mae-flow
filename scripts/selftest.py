@@ -131,13 +131,8 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
 
 # 1.5 子测试由结构化清单统一注册；架构门会核对清单和真实执行循环，
 # 避免只在语法列表中保留文件名却悄悄停止运行。
-for label, result, output_limit in execute_refactor_safety_suites(
-        ROOT, sys.executable):
-    check(
-        label,
-        result.returncode == 0,
-        (result.stdout + result.stderr)[-output_limit:],
-    )
+execute_refactor_safety_suites(
+    ROOT, sys.executable, report=check)
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。
 for probe_name, probe_file in (

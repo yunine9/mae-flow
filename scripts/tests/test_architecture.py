@@ -241,20 +241,28 @@ class ArchitectureTests(unittest.TestCase):
         self.assertTrue(expected.issubset(commands))
 
         calls = []
+        reports = []
 
         class Result:
-            returncode = 0
             stdout = ""
             stderr = ""
 
+            def __init__(self, returncode):
+                self.returncode = returncode
+
         def fake_run(argv, **kwargs):
             calls.append((tuple(argv), kwargs))
-            return Result()
+            return Result(9 if len(calls) == 1 else 0)
 
-        results = list(execute_refactor_safety_suites(
-            ROOT, sys.executable, run=fake_run))
-        self.assertEqual(len(REFACTOR_SAFETY_SUITES), len(results))
+        def fake_report(label, ok, detail):
+            reports.append((label, ok, detail))
+
+        execute_refactor_safety_suites(
+            ROOT, sys.executable, report=fake_report, run=fake_run)
         self.assertEqual(len(REFACTOR_SAFETY_SUITES), len(calls))
+        self.assertEqual(len(REFACTOR_SAFETY_SUITES), len(reports))
+        self.assertFalse(reports[0][1])
+        self.assertTrue(all(ok for _label, ok, _detail in reports[1:]))
         self.assertEqual(commands, {
             tuple(os.path.relpath(argv[1], ROOT) if index == 0 else value
                   for index, value in enumerate(argv[1:]))
@@ -270,12 +278,17 @@ class ArchitectureTests(unittest.TestCase):
                 encoding="utf-8") as stream:
             tree = ast.parse(stream.read())
         self.assertTrue(any(
-            isinstance(node, ast.For)
-            and isinstance(node.iter, ast.Call)
-            and isinstance(node.iter.func, ast.Name)
-            and node.iter.func.id == "execute_refactor_safety_suites"
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "execute_refactor_safety_suites"
+            and any(
+                keyword.arg == "report"
+                and isinstance(keyword.value, ast.Name)
+                and keyword.value.id == "check"
+                for keyword in node.keywords
+            )
             for node in ast.walk(tree)
-        ), "selftest must consume the tested safety suite executor")
+        ), "selftest must execute suites with the real failure reporter")
 
     def test_import_expansion_catches_from_package_import_module(self):
         with tempfile.TemporaryDirectory() as temporary:

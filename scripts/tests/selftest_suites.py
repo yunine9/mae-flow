@@ -51,8 +51,9 @@ REFACTOR_SAFETY_SUITES = (
 )
 
 
-def execute_refactor_safety_suites(root, python_executable, run=None):
-    """Execute every registered suite and yield its result for reporting."""
+def execute_refactor_safety_suites(
+        root, python_executable, report, run=None):
+    """Execute every registered suite and report every result immediately."""
     run = run or subprocess.run
     for label, command, timeout, output_limit in REFACTOR_SAFETY_SUITES:
         result = run(
@@ -68,4 +69,8 @@ def execute_refactor_safety_suites(root, python_executable, run=None):
             check=False,
             timeout=timeout,
         )
-        yield label, result, output_limit
+        report(
+            label,
+            result.returncode == 0,
+            (result.stdout + result.stderr)[-output_limit:],
+        )

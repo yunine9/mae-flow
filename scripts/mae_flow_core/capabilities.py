@@ -11,6 +11,8 @@ from .capability_shared import (
     OPENSPEC_ENTRY,
     PLUGIN_ROOT,
     VENDOR_ROOT,
+    atomic_write_json,
+    atomic_write_text,
     hashlib,
     json,
     os,

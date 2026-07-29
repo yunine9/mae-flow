@@ -11,6 +11,7 @@ from .lightcheck_source import (
     PARAMETER_LIMIT,
     SUPPORTED_EXTENSIONS,
     TAB_WIDTH,
+    StringIO,
     _CLikeScanner,
     _DELIMITER_ONLY,
     _GENERATED_MARKERS,
@@ -29,6 +30,13 @@ from .lightcheck_source import (
     _python_doc_lines,
     _python_token_code_lines,
     _python_token_lines,
+    ast,
+    multiprocessing,
+    os,
+    re,
+    sys,
+    time,
+    tokenize,
 )
 from .lightcheck_functions import (
     _FUNCTION_RULES,

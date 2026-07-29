@@ -13,6 +13,8 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
+from mae_flow_core.foundation import source_paths
+
 SPEC = importlib.util.spec_from_file_location(
     "mae_flow_task_scope_test", os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
@@ -87,6 +89,70 @@ class TaskScopeTests(unittest.TestCase):
     def commit(self, message):
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", message)
+
+    def test_shared_source_classifier_contract(self):
+        patterns = [r"(^|/)src/", r"(^|/)include/", r"^module/"]
+        cases = [
+            ("src/main.cpp", True),
+            ("include/api.hpp", True),
+            ("CMakeLists.txt", True),
+            ("package-lock.json", True),
+            ("src/README.md", False),
+            ("docs/design.md", False),
+            ("module/custom.file", True),
+        ]
+        for path, expected in cases:
+            with self.subTest(path=path):
+                self.assertEqual(
+                    expected,
+                    source_paths.is_source_path(path, patterns),
+                )
+
+        source = os.path.join(self.repo, "services", "anr", "src",
+                              "Logic.cpp")
+        self.assertEqual(
+            "services/anr/src/Logic.cpp",
+            source_paths.repo_relative_for_match(source, self.repo),
+        )
+        outside = os.path.abspath(
+            os.path.join(self.repo, "..", "outside.py"))
+        self.assertIsNone(
+            source_paths.repo_relative_for_match(outside, self.repo))
+        self.assertFalse(source_paths.is_source_path(
+            outside,
+            [r"(^|/)src/"],
+            project_root=self.repo,
+            require_membership=True,
+        ))
+
+        self.assertEqual(
+            "src/Main.cpp",
+            source_paths.repo_relative_for_match(
+                r"C:\Repo\src\Main.cpp", r"c:\repo"),
+        )
+        self.assertTrue(source_paths.is_source_path(
+            r"C:\Repo\src\Main.cpp",
+            patterns,
+            project_root=r"c:\repo",
+            require_membership=True,
+        ))
+        self.assertFalse(source_paths.is_source_path(
+            r"D:\outside\Main.cpp",
+            patterns,
+            project_root=r"c:\repo",
+            require_membership=True,
+        ))
+
+        for path, expected in cases:
+            with self.subTest(adapter=path):
+                self.assertEqual(
+                    expected,
+                    mf._is_source_path(
+                        path,
+                        {"config": {"源码路径": r"^module/"}},
+                        {"source_patterns": patterns[:-1]},
+                    ),
+                )
 
     def test_ut_card_filters_docs_and_freezes_function_and_module_scope(self):
         write("services/anr/src/Logic.cpp",

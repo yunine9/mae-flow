@@ -46,6 +46,7 @@ from mae_flow_core.foundation.fingerprints import (
     path_fingerprint as _shared_path_fingerprint,
     review_path_fingerprint as _shared_review_path_fingerprint,
 )
+from mae_flow_core.foundation import source_paths
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -2034,31 +2035,18 @@ _TEST_PAT = re.compile(
     r"(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|"
     r"js|jsx|cjs|mjs|ts|tsx|cts|mts)$|"
                        r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$", re.I)
-_SOURCE_EXT_PAT = re.compile(
-    r"\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|java|kt|kts|groovy|scala|py|pyi|"
-    r"go|rs|cs|js|jsx|cjs|mjs|ts|tsx|cts|mts|vue|swift|m|mm|proto|sql|s|asm|cmake|gradle|sln|"
-    r"vcxproj|props|targets|sh|bash|bat|cmd|ps1|mk|gn|gni|bzl)$", re.I)
-_SOURCE_NAME_PAT = re.compile(
-    r"^(CMakeLists\.txt|Makefile|GNUMakefile|pom\.xml|build\.gradle|settings\.gradle|"
-    r"gradle\.properties|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|"
-    r"Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|meson\.build|build\.ninja|"
-    r"CMakePresets\.json|CMakeUserPresets\.json|vcpkg\.json|conanfile\.py|"
-    r"conanfile\.txt|pyproject\.toml|setup\.py|setup\.cfg|tox\.ini|Pipfile|"
-    r"Pipfile\.lock|poetry\.lock|requirements\.txt|WORKSPACE|WORKSPACE\.bazel|"
-    r"MODULE\.bazel|BUILD|BUILD\.bazel|Gemfile|Rakefile|composer\.json|"
-    r"composer\.lock)$", re.I)
-_SOURCE_DIR_PAT = re.compile(r"(^|/)(service|src|include|lib|app|modules?)/", re.I)
+_COMMON_SOURCE_PATTERN = (
+    r"(^|/)(service|src|include|lib|app|modules?)/")
 
 
 def _source_like(path):
     """dispatch 侧源码判定，顺序与主状态机一致：文件名/扩展名 > 文档排除 > 目录/私有规则。"""
-    p = str(path or "").replace("\\", "/").strip().strip("\"'")
-    base = p.rsplit("/", 1)[-1]
-    if _SOURCE_EXT_PAT.search(p) or _SOURCE_NAME_PAT.search(base):
-        return True
-    if re.search(r"\.(md|rst|adoc|txt)$", p, re.I):
-        return False
-    if _SOURCE_DIR_PAT.search(p):
+    normalized = str(path or "")
+    known = source_paths.known_source_classification(normalized)
+    if known is not None:
+        return known
+    if source_paths.is_source_path(
+            normalized, [_COMMON_SOURCE_PATTERN]):
         return True
     patterns = []
     value = _state_config().get("源码路径", [])
@@ -2073,13 +2061,8 @@ def _source_like(path):
         pass
     except Exception as exc:
         _log("defaults 源码路径解析失败(已忽略,请修复该 JSON): %s" % exc)
-    for pattern in patterns:
-        try:
-            if re.search(str(pattern), p, re.I):
-                return True
-        except re.error:
-            continue
-    return False
+    return source_paths.is_source_path(
+        normalized, [str(pattern) for pattern in patterns])
 
 
 def _test_like(path):

@@ -84,6 +84,7 @@ from mae_flow_core.foundation.fingerprints import (
     path_fingerprint as _shared_path_fingerprint,
     review_path_fingerprint as _shared_review_path_fingerprint,
 )
+from mae_flow_core.foundation import source_paths
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -95,7 +96,7 @@ for _s in (sys.stdout, sys.stderr):
 
 def norm(p):
     """路径/命令归一化:Windows 反斜杠 → 正斜杠,供正则匹配。"""
-    return (p or "").replace("\\", "/")
+    return source_paths.normalize_path(p)
 
 
 def _repo_path_identity(path, case_insensitive=None):
@@ -158,31 +159,10 @@ LEGACY_CODE_REVIEW_STEPS = {"build_review", "tw_review", "rf_review"}
 
 # source_patterns 只适合识别目录，不能承担跨仓源码真相（顶层 include/lib/app 已真实漏过）。
 # 扩展名与构建入口作为保守底座；仓库可用 defaults/config 的「源码路径」补私有布局。
-SOURCE_EXTS = (
-    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
-    ".java", ".kt", ".kts", ".groovy", ".scala", ".py", ".pyi", ".go", ".rs", ".cs",
-    ".js", ".jsx", ".cjs", ".mjs", ".ts", ".tsx", ".cts", ".mts",
-    ".vue", ".swift", ".m", ".mm", ".proto", ".sql",
-    ".s", ".asm", ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
-    # 构建脚本(校准实锤:.sh/.mk/.gn 改动曾不触发任何证据失效,旧编译证据
-    # 背新构建配置的书)
-    ".sh", ".bash", ".bat", ".cmd", ".ps1", ".mk", ".gn", ".gni", ".bzl",
-)
-SOURCE_FILENAMES = {
-    "cmakelists.txt", "makefile", "gnumakefile", "pom.xml", "build.gradle", "settings.gradle",
-    "gradle.properties", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
-    "cargo.toml", "cargo.lock", "go.mod", "go.sum", "meson.build", "build.ninja",
-    "cmakepresets.json", "cmakeuserpresets.json", "vcpkg.json", "conanfile.py",
-    "conanfile.txt", "pyproject.toml", "setup.py", "setup.cfg", "tox.ini", "pipfile",
-    "pipfile.lock", "poetry.lock", "requirements.txt", "workspace", "workspace.bazel",
-    "module.bazel", "build", "build.bazel", "gemfile", "rakefile", "composer.json",
-    "composer.lock",
-}
-BUILD_DESCRIPTOR_EXTS = (
-    ".cmake", ".gradle", ".sln", ".vcxproj", ".props", ".targets",
-    ".mk", ".gn", ".gni", ".bzl",
-)
-BUILD_SCRIPT_EXTS = (".sh", ".bash", ".bat", ".cmd", ".ps1")
+SOURCE_EXTS = source_paths.SOURCE_EXTENSIONS
+SOURCE_FILENAMES = source_paths.SOURCE_FILENAMES
+BUILD_DESCRIPTOR_EXTS = source_paths.BUILD_DESCRIPTOR_EXTENSIONS
+BUILD_SCRIPT_EXTS = source_paths.BUILD_SCRIPT_EXTENSIONS
 
 # 只把“几乎不可能是源码/交付物”的中间文件做提交硬拦。build/dist/out/target
 # 与 jar/dll/so 等可能是项目约定的发布件，只提示不阻断，避免为了防误提交反而漏交付。
@@ -883,10 +863,7 @@ def _configured_source_patterns(st):
 
 
 def _matches_pattern(path, pattern):
-    try:
-        return bool(re.search(pattern, path, re.I))
-    except re.error:
-        return False
+    return source_paths.matches_pattern(path, pattern)
 
 
 def _repo_rel_for_match(path):
@@ -897,46 +874,12 @@ def _repo_rel_for_match(path):
     defaults 里 `^ut/` 这类锚定私有正则则反向永不命中。相对路径原样返回(去掉 ./ 前缀);
     项目根之外的绝对路径返回 None——目录模式对根外路径无意义(插件目录另有专门拦截)。
     不用 os.path.relpath:跨盘符抛 ValueError(Windows 军规3)。"""
-    p = norm(path).strip().strip('"\'')
-    if not p:
-        return p
-    if not (p.startswith("/") or re.match(r"^[A-Za-z]:/", p)):
-        return re.sub(r"^(\./)+", "", p)
-    # 项目根与传入路径可能是同一位置的不同表示(盘符映射/subst/符号链接;
-    # 宿主给映射盘路径而 cwd 是真实路径,或反之)。原始与 realpath 两种形式都试。
-    cwd = os.getcwd()
-    roots = []
-    for r in (cwd, os.path.realpath(cwd)):
-        r = norm(r).rstrip("/")
-        if r and r.lower() not in {x.lower() for x in roots}:
-            roots.append(r)
-    cands = [p]
-    try:
-        rp = norm(os.path.realpath(p))
-        if rp.lower() != p.lower():
-            cands.append(rp)
-    except OSError:
-        pass
-    for cand in cands:
-        cl = cand.lower()
-        for r in roots:
-            rl = r.lower()
-            if cl == rl:
-                return ""
-            if cl.startswith(rl + "/"):
-                return cand[len(r) + 1:]
-    return None
+    return source_paths.repo_relative_for_match(path, os.getcwd())
 
 
 def _is_build_path(path):
     """识别会改变构建/依赖结果的入口；供源码范围和任务卡分类共用。"""
-    low = norm(path).strip().strip('"\'').lower()
-    base = os.path.basename(low)
-    return bool(
-        base in SOURCE_FILENAMES
-        or (base.startswith("requirements") and base.endswith(".txt"))
-        or low.endswith(BUILD_DESCRIPTOR_EXTS + BUILD_SCRIPT_EXTS)
-    )
+    return source_paths.is_build_path(path)
 
 
 def _is_source_path(path, st=None, flow=None):
@@ -944,27 +887,24 @@ def _is_source_path(path, st=None, flow=None):
 
     Edit gate、Bash gate、令牌新鲜度和 UT 源码回流必须共用它，避免四套口径漂移。
     """
-    p = norm(path).strip().strip('"\'')
-    if p.endswith("(未提交)"):
-        p = p[:-len("(未提交)")]
-    low = p.lower()
-    base = os.path.basename(low)
-    # 项目根归属先判(校准实锤):仓外临时脚本(/tmp/helper.py)动不了交付分支,
-    # 按扩展名先拦=零保护价值的高频误拦;仓外一律放行,done 的 dirty 证据兜仓内。
-    rel = _repo_rel_for_match(p)
-    if rel is None and os.path.isabs(p):
-        return False
-    # 已知源码/构建文件名单先判(CMakeLists.txt 以 .txt 结尾,不能被文档排除
-    # 误放);再排除文档——src/ 目录 pattern 曾把 README.md 一行改动判成源码,
-    # 触发整条质量链重跑(校准实锤)。
-    if _is_build_path(p) or low.endswith(SOURCE_EXTS):
-        return True
-    if low.endswith((".md", ".rst", ".adoc", ".txt")):
-        return False
-    if rel is None:
-        return False
-    rules = list((flow or FLOW or {}).get("source_patterns", [])) + _configured_source_patterns(st)
-    return any(_matches_pattern(rel, pat) for pat in rules)
+    normalized = norm(path).strip().strip('"\'')
+    membership = os.path.isabs(normalized)
+    known = source_paths.known_source_classification(
+        normalized,
+        project_root=os.getcwd(),
+        require_membership=membership,
+    )
+    if known is not None:
+        return known
+    rules = list(
+        (flow or FLOW or {}).get("source_patterns", []))
+    rules.extend(_configured_source_patterns(st))
+    return source_paths.is_source_path(
+        normalized,
+        rules,
+        project_root=os.getcwd(),
+        require_membership=membership,
+    )
 
 
 def _is_review(st):

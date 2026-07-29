@@ -25,9 +25,48 @@ class EvidenceRegistry:
     def names(self):
         return self._names
 
+    def __iter__(self):
+        return iter(self._names)
+
+    def __len__(self):
+        return len(self._names)
+
+    def __contains__(self, name):
+        return name in self._evaluators
+
     def evaluate(self, name, spec, state):
         evaluator = self._evaluators[name]
         return legacy_result(evaluator(spec, state))
+
+
+def build_evidence_registry(*, workflow, agent, delivery, quality):
+    """Compose the one authoritative legacy Evidence name registry."""
+    return EvidenceRegistry((
+        ("glob", workflow.glob),
+        ("branch_ok", workflow.branch_ok),
+        ("tasks_checked", workflow.tasks_checked),
+        ("commit_tagged", delivery.commit_tagged),
+        ("commit_tagged_after_entry", delivery.commit_tagged_after_entry),
+        ("review_fix_committed", delivery.review_fix_committed),
+        ("review_snapshot", agent.review_snapshot),
+        ("checkpoint_plan", delivery.checkpoint_plan),
+        ("checkpoint_plan_complete", delivery.checkpoint_plan_complete),
+        ("final_review_clear", delivery.final_review_clear),
+        ("spec_field", workflow.spec_field),
+        ("yaml_field", workflow.spec_field),
+        ("spec_validate", workflow.spec_validate),
+        ("tier_scope", workflow.tier_scope),
+        ("pushed", delivery.pushed),
+        ("agent_ran", agent.agent_ran),
+        ("content_free", workflow.content_free),
+        ("clean_paths", workflow.clean_paths),
+        ("archive_paths_clean", delivery.archive_paths_clean),
+        ("codecheck_clean", quality.codecheck_clean),
+        ("glob_absent", workflow.glob_absent),
+        ("review_agent_or_no_code", agent.review_agent_or_no_code),
+        ("agent_or_no_source", agent.agent_or_no_source),
+        ("review_codecheck", quality.review_codecheck),
+    ))
 
 
 def evaluate_step_evidence(step, state, registry):

@@ -28,7 +28,7 @@ class DeliveryEvidencePorts:
     agent_ran: object
 
 
-def _review_status_count(text, status):
+def review_status_count(text, status):
     count = 0
     for line in text.splitlines():
         if not line.lstrip().startswith("|"):
@@ -45,7 +45,7 @@ def _review_status_count(text, status):
     return count
 
 
-def _review_statuses(text):
+def review_statuses(text):
     result = {}
     section = "未分节"
     for line in text.splitlines():
@@ -70,6 +70,10 @@ def _review_statuses(text):
             duplicate += 1
         result[identity] = cells[-1]
     return result
+
+
+def review_has_confirmed_fix(text):
+    return review_status_count(text, "修复(已确认)") > 0
 
 
 class DeliveryEvidenceRules:
@@ -373,7 +377,7 @@ class DeliveryEvidenceRules:
             return EvidenceResult(
                 False, "评审裁决文档不存在: " + path)
         baseline_rows = state.get("review_triage_statuses")
-        current_rows = _review_statuses(text)
+        current_rows = review_statuses(text)
         newly_transferred = []
         if isinstance(baseline_rows, dict):
             newly_transferred = [
@@ -383,7 +387,7 @@ class DeliveryEvidenceRules:
             ]
         else:
             baseline = state.get("review_triage_transfer_count")
-            transfers = _review_status_count(
+            transfers = review_status_count(
                 text, "转规格轮次(已确认)")
             if isinstance(baseline, int) and transfers > baseline:
                 newly_transferred = [
@@ -400,6 +404,6 @@ class DeliveryEvidenceRules:
                     "修复中改变既有裁决必须先向用户展示代码证据与行为影响，"
                     "再由用户确认；" + asked.reason,
                 )
-        if _review_status_count(text, "修复(已确认)") == 0:
+        if not review_has_confirmed_fix(text):
             return EvidenceResult(True, "")
         return self.commit_tagged_after_entry(spec, state)

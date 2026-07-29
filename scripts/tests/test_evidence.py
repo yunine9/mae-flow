@@ -15,6 +15,7 @@ if SCRIPTS not in sys.path:
 from mae_flow_core.foundation.models import EvidenceResult  # noqa: E402
 from mae_flow_core.workflow.evidence import (  # noqa: E402
     EvidenceRegistry,
+    build_evidence_registry,
     evaluate_step_evidence,
     legacy_result,
 )
@@ -52,6 +53,32 @@ class EvidenceResultTests(unittest.TestCase):
 
 
 class EvidenceRegistryTests(unittest.TestCase):
+    def test_composed_registry_preserves_every_historical_name(self):
+        class Rules:
+            def __getattr__(self, _name):
+                return lambda _spec, _state: (True, "")
+
+        registry = build_evidence_registry(
+            workflow=Rules(),
+            agent=Rules(),
+            delivery=Rules(),
+            quality=Rules(),
+        )
+        self.assertEqual(
+            (
+                "glob", "branch_ok", "tasks_checked", "commit_tagged",
+                "commit_tagged_after_entry", "review_fix_committed",
+                "review_snapshot", "checkpoint_plan",
+                "checkpoint_plan_complete", "final_review_clear",
+                "spec_field", "yaml_field", "spec_validate", "tier_scope",
+                "pushed", "agent_ran", "content_free", "clean_paths",
+                "archive_paths_clean", "codecheck_clean", "glob_absent",
+                "review_agent_or_no_code", "agent_or_no_source",
+                "review_codecheck",
+            ),
+            registry.names,
+        )
+
     def test_registry_copies_mapping_and_exposes_names(self):
         source = {"first": lambda _spec, _state: (True, "")}
         registry = EvidenceRegistry(source)

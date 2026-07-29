@@ -146,6 +146,30 @@ class ArchitectureTests(unittest.TestCase):
     def test_refactored_core_modules_stay_within_size_limit(self):
         self.assertEqual([], new_module_size_violations(ROOT))
 
+    def test_cli_contains_no_evidence_policy_or_registry_dict(self):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        with open(path, encoding="utf-8") as stream:
+            tree = ast.parse(stream.read())
+        evidence_functions = sorted(
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("ev_")
+        )
+        self.assertEqual([], evidence_functions)
+        evidence_dicts = [
+            node for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and any(
+                isinstance(target, ast.Name) and target.id == "EVIDENCE"
+                for target in (
+                    node.targets if isinstance(node, ast.Assign)
+                    else [node.target]
+                )
+            )
+            and isinstance(node.value, ast.Dict)
+        ]
+        self.assertEqual([], evidence_dicts)
+
     def test_workflow_functions_stay_within_complexity_limit(self):
         self.assertEqual([], workflow_complexity_violations(ROOT))
 

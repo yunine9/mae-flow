@@ -92,6 +92,9 @@ from mae_flow_core.delivery import checkpoints as delivery_checkpoints
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
     DeliveryEvidenceRules,
+    review_has_confirmed_fix,
+    review_status_count,
+    review_statuses,
 )
 from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
@@ -112,7 +115,13 @@ from mae_flow_core.workflow.evidence_rules import (
     WorkflowEvidenceRules,
     substitute as subst,
 )
+from mae_flow_core.workflow.evidence import build_evidence_registry
 from mae_flow_core.workflow import transitions as workflow_transitions
+
+# Read-only compatibility names for historical diagnostics.
+_review_status_count = review_status_count
+_review_statuses = review_statuses
+_review_has_confirmed_fix = review_has_confirmed_fix
 
 # Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
 for _s in (sys.stdout, sys.stderr):
@@ -1520,201 +1529,6 @@ def _committed_initial_carryover(st):
     return carried, ""
 
 
-def ev_pushed(spec, st):
-    """实测本地 HEAD 已推送到远端上游(push 步证据,推没推成不看口头汇报)。"""
-    cur_branch = sh("git branch --show-current")
-    want = st.get("config", {}).get("分支名", "")
-    if want and cur_branch != want:
-        return False, f"当前分支 {cur_branch or '未知'} != 本单约定分支 {want}，禁止在错误分支结束交付"
-    head = sh("git rev-parse --verify HEAD")
-    up = sh("git rev-parse --verify @{u}")   # --verify:解析失败时 stdout 为空,不回显 @{u} 本身
-    if not head:
-        return False, "无法读取 HEAD"
-    if not up:
-        return False, "分支无上游跟踪——用 git push -u origin HEAD 推送并建立跟踪"
-    if head != up:
-        return False, (
-            "本地 HEAD 与远端上游不一致(未推送/推送失败/远端有新提交):"
-            "先尝试普通 git push -u origin HEAD；若远端领先，执行 git fetch 后展示分叉，"
-            "不要自动 rebase、reset 或 force-push（可能改写已检视检查点）")
-    carried, carry_err = _committed_initial_carryover(st)
-    if carry_err:
-        return False, "无法核对是否夹带上一单遗留文件:" + carry_err
-    if carried:
-        return False, (
-            "远端提交夹带了流程启动前已存在、且本单 Agent 未实际改写的文件: "
-            + "、".join(carried[:8])
-            + ("…" if len(carried) > 8 else "")
-            + "。这通常是上一单选择“不上传”后遗留的文件。"
-              "请用普通后续提交精确移除这些文件并重新 push；"
-              "不要 amend/rebase/force-push 改写已检视历史。"
-              "若本单确实需要它，先让 Agent 按本单需求实际修改并重新检视")
-    committed_paths, committed_err = _committed_delivery_paths(st)
-    if committed_err:
-        return False, "无法核对已推送 OpenSpec 的归属:" + committed_err
-    foreign_openspec = [
-        path for path in committed_paths
-        if path.startswith("openspec/")
-        and not _trusted_harness_commit_path(path, st)
-    ]
-    if foreign_openspec:
-        return False, (
-            "远端提交含不属于当前 CHANGE_NAME/本次归档的 OpenSpec 文件: "
-            + "、".join(foreign_openspec[:8])
-            + ("…" if len(foreign_openspec) > 8 else "")
-            + "。请用普通后续提交精确移除并重新 push；"
-              "STORY 不入库时应移入 .mae-flow-work/story")
-    current = set(_dirty_paths())
-    initial = set(st.get("initial_dirty", []))
-    if "initial_dirty" in st:
-        changed_initial = set()
-        fingerprints = st.get("initial_dirty_fingerprints", {}) or {}
-        if fingerprints:
-            changed_initial = {p for p in current & initial
-                               if fingerprints.get(p) != _path_fingerprint(p)}
-        changed_during_flow = (current - initial) | changed_initial
-    else:
-        # 旧在途状态没有初始化快照，只能从当前脏路径中再按来源缩小。
-        changed_during_flow = current
-
-    # 与提交前 Gate 使用同一来源口径：只有 Agent 通过文件工具直接写过的
-    # 路径，以及 Mae-Flow 明确维护的交付产物，才可能属于本单提交范围。
-    # IDE/CodeAgent/编译器在流程中生成的未证明路径仍留在工作区供审计，但
-    # 不能仅凭“初始化后出现”就逼用户把它提交进 MR。
-    written = _agent_written_paths()
-    new_dirty = {
-        p for p in changed_during_flow
-        if (_repo_path_identity(p) in written
-            or _trusted_harness_commit_path(p, st))
-    }
-    story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
-    if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
-        story = "docs/story/STORY-" + st.get("config", {}).get("单号", "") + ".md"
-        tracked = argv_out([
-            "git", "ls-tree", "-r", "--name-only", "HEAD", "--", story])
-        if tracked:
-            return False, (f"STORY 已确认不入库，但 {story} 仍在当前提交中。"
-                           "用 git rm --cached 精确移出索引并按单号提交修正；本地文件可以保留。")
-        new_dirty = {p for p in new_dirty if not p.startswith("docs/story/")}
-    if new_dirty:
-        return False, (
-            "仍有 Agent 实际写入或流程明确维护的交付候选未处理，远端不包含这些变化: "
-            + "、".join(sorted(new_dirty)[:8])
-            + "。逐个查看 diff：需要交付的精确提交，不需要的撤销修改；"
-              "候选范围不代表必须全部提交。")
-    return True, ""
-
-
-def ev_commit_tagged(spec, st):
-    dan = st["config"].get("单号", "")
-    msg = sh("git log -1 --pretty=%s")
-    if not msg:
-        return False, "无法读取最新 commit"
-    if re.match(r"^\[" + re.escape(dan) + r"\]\[(feat|fix)\]", msg):
-        return True, ""
-    # 晚拦截必须自带修复路径(核心哲学:错时机的拦截若不告诉怎么改,危害比
-    # 不拦更大)。此兜底只在提交绕过了实时格式检查(-F/长参形态/子 agent
-    # hook 未触发)时才会触发,修复=一条 amend,不动改动内容。
-    return False, (f"最新 commit「{msg}」不符合 [{dan}][feat|fix]描述 格式。"
-                   f"修复只需一条命令(不动已提交的改动内容):"
-                   f"git commit --amend -m \"[{dan}][fix|feat]<原描述>\"")
-
-
-def ev_commit_tagged_after_entry(spec, st):
-    """不仅看最新提交格式，还要求提交确实发生在当前步骤之后。"""
-    sid = st.get("current", "")
-    base = (st.get("step_heads", {}) or {}).get(sid, "")
-    if not base or argv_out(["git", "cat-file", "-t", base]) != "commit":
-        return False, f"缺少 {sid} 的入口 HEAD，无法证明本步真的产生过提交"
-    commits = argv_out(["git", "log", "--format=%H", base + "..HEAD"]).splitlines()
-    if not commits:
-        return False, "当前步骤之后没有新提交，不能拿上一步的提交冒充本步产出"
-    return ev_commit_tagged(spec, st)
-
-
-def _review_status_count(txt, status):
-    """只统计评审意见表的数据行，不把模板说明中的合法值当真实裁决。"""
-    # 只看意见清单的数据行。模板说明本身也会列出“修复(已确认)”这个合法值，
-    # 全文搜关键词会把空模板误判成已有修复，导致没有代码可改时也被永久卡住。
-    count = 0
-    for line in txt.splitlines():
-        if not line.lstrip().startswith("|"):
-            continue
-        cells = [x.strip().strip("*`") for x in line.strip().strip("|").split("|")]
-        if len(cells) < 4 or cells[0] == "#" or set(cells[0]) <= {"-", ":"}:
-            continue
-        if cells[-1] == status:
-            count += 1
-    return count
-
-
-def _review_statuses(txt):
-    """评审轮次/行号/意见原文 → 裁决；用于识别数量不变但意见身份被偷换。"""
-    out = {}
-    section = "未分节"
-    for line in txt.splitlines():
-        heading = re.match(r"^\s*##\s+(.+?)\s*$", line)
-        if heading:
-            section = re.sub(r"\s+", " ", heading.group(1)).strip()
-            continue
-        if not line.lstrip().startswith("|"):
-            continue
-        cells = [x.strip().strip("*`") for x in line.strip().strip("|").split("|")]
-        if len(cells) < 4 or cells[0] == "#" or set(cells[0]) <= {"-", ":"}:
-            continue
-        base_identity = "%s / #%s / %s" % (
-            section, cells[0], re.sub(r"\s+", " ", cells[1])[:40])
-        identity, duplicate = base_identity, 2
-        while identity in out:
-            identity = "%s / 重复%d" % (base_identity, duplicate)
-            duplicate += 1
-        out[identity] = cells[-1]
-    return out
-
-
-def _review_has_confirmed_fix(txt):
-    return _review_status_count(txt, "修复(已确认)") > 0
-
-
-def ev_review_fix_committed(spec, st):
-    """没有待修意见时允许空过；存在“修复(已确认)”则必须有本步骤的新提交。"""
-    p = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
-    try:
-        txt = read_text(p, errors="replace")
-    except OSError:
-        return False, "评审裁决文档不存在: " + p
-    # rf_triage 收尾时冻结「转规格轮次」数量。rf_fix 若把用户已经确认的
-    # 「修复」翻案为「转规格轮次(已确认)」，必须在本步骤重新取得用户裁决，
-    # 不能靠改文档里的终态文字单方面伪造“已确认”。旧版在途状态无快照时
-    # fail-open，避免升级把已经进行中的评审轮永久卡死。
-    baseline_rows = st.get("review_triage_statuses")
-    current_rows = _review_statuses(txt)
-    newly_transferred = []
-    if isinstance(baseline_rows, dict):
-        newly_transferred = [
-            row_id for row_id, status in current_rows.items()
-            if status == "转规格轮次(已确认)"
-            and baseline_rows.get(row_id) != "转规格轮次(已确认)"
-        ]
-    else:
-        # 旧状态只有计数快照，保留原有兼容语义。
-        baseline = st.get("review_triage_transfer_count")
-        transfers = _review_status_count(txt, "转规格轮次(已确认)")
-        if isinstance(baseline, int) and transfers > baseline:
-            newly_transferred = ["旧状态新增%d条" % (transfers - baseline)]
-    if newly_transferred:
-        ok, why = ev_agent_ran({"agent": "ASKUSER"}, st)
-        if not ok:
-            return False, (
-                "rf_fix 把以下意见新改成了「转规格轮次(已确认)」: "
-                + "、".join(newly_transferred[:8]) + "；"
-                "但本步没有真实 AskUserQuestion 用户裁决。修复中改变既有裁决"
-                "必须先向用户展示代码证据与行为影响，再由用户确认；" + why)
-    if not _review_has_confirmed_fix(txt):
-        return True, ""
-    return ev_commit_tagged_after_entry(spec, st)
-
-
 CODE_EXTS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
     ".java", ".js", ".jsx", ".cjs", ".mjs",
@@ -2767,177 +2581,6 @@ def _was_exempt_before_review(st, ex, rule, path):
     return _exemption_text_has_pair(txt, rule, path)
 
 
-def ev_codecheck_clean(spec, st):
-    """最硬约束:done 现场重跑 codecheck CLI,harness 亲数遗留告警(agent 报数不作数)。
-    0 条直接放行；遗留告警必须同时有豁免文件和用户审批账。告警数兼容控制台提示、
-    Markdown 汇总表与明确零告警文案；不能依赖 CLI 退出码。必须在项目根执行。"""
-    files, err = _biz_changed_files(st)
-    if err:
-        return False, err
-    if not files:
-        append_codecheck_event(
-            os.getcwd(), st, "verify.empty", {
-                "head": sh("git rev-parse --verify HEAD"),
-                "reason": "no-business-code-files",
-            })
-        return True, ""
-    # 校准实锤:零告警正常路上 fullcheck 必然跑两遍(scan 一遍+done 复核一遍,
-    # 每次 done 重试再+1)。scan 是 harness 亲跑的真实动作、记录绑 HEAD+文件清单
-    # 存于 gate 保护的状态文件——与 codecheck-record 同一信任模型。命中缓存
-    # (同步骤∧首检 0 条∧文件清单一致∧源码零变化)直接判过,把 scan 已算出的
-    # 结论真正用起来;agent 修复路径(scan.count>0)保持全量重跑,哲学不动。
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
-    if (scan.get("step") == st.get("current") and scan.get("count") == 0
-            and not scan.get("manual")
-            and scan.get("files") == files and scan.get("head")):
-        changed, cerr = _source_changed_since(scan.get("head"), st)
-        if not cerr and not changed:
-            append_codecheck_event(
-                os.getcwd(), st, "verify.cache_reused", {
-                    "kind": "clean-scan", "head": scan.get("head", ""),
-                    "files": files, "count": 0,
-                })
-            return True, ""
-    ex = "docs/codecheck-exempt-" + st["config"].get("单号", "") + ".md"
-    # 豁免文件未提交是纯本地廉价事实，先报再跑昂贵 CLI；提交后复用下面绑定
-    # HEAD+文件清单的复核缓存，不会因为一个台账问题反复 fullcheck。
-    if os.path.exists(ex):
-        dirty = argv_out(["git", "status", "--porcelain", "--", ex])
-        if dirty:
-            return False, f"豁免记录 {ex} 尚未提交；本地文件不能替远端 MR 背书，请精确提交后重试"
-
-    verified = (st.get("quality", {}) or {}).get("codecheck_verify", {})
-    use_verified = False
-    if (verified.get("step") == st.get("current")
-            and verified.get("files") == files and verified.get("head")):
-        changed, verr = _source_changed_since(verified.get("head"), st)
-        use_verified = not verr and not changed
-    if use_verified:
-        total = int(verified.get("count", 0))
-        pairs = verified.get("pairs", []) or []
-        append_codecheck_event(
-            os.getcwd(), st, "verify.cache_reused", {
-                "kind": "verification", "head": verified.get("head", ""),
-                "files": files, "count": total, "pairs": pairs,
-            })
-    else:
-        result, err = _run_codecheck(files, st, "harness-verify")
-        if err:
-            manual = (st.get("quality", {}) or {}).get("codecheck_manual", {})
-            same_files = manual.get("files") == files
-            same_head = manual.get("head") == sh("git rev-parse --verify HEAD")
-            diag = manual.get("diagnostic", "")
-            try:
-                same_diag = (os.path.isfile(diag)
-                             and hashlib.sha256(read_bytes(diag)).hexdigest()
-                             == manual.get("diagnostic_sha256"))
-            except OSError:
-                same_diag = False
-            if (manual.get("step") == st.get("current") and same_files and same_head
-                    and same_diag and manual.get("count") == 0):
-                return True, ""
-            return False, err + ("；若你已人工看过诊断文件并确认告警数，可使用 current 中给出的 "
-                                 "codecheck-record 恢复命令，记录会绑定当前 HEAD 和文件清单，代码一变即失效")
-        # 与 codecheck-scan 同源同口径:复核也只数本次修改范围内的告警
-        result, _stock = _scope_filter_codecheck(result, st, files)
-        total, pairs = result["total"], result["pairs"]
-        st.setdefault("quality", {})["codecheck_verify"] = {
-            "step": st.get("current"), "head": sh("git rev-parse --verify HEAD"),
-            "files": files, "count": total, "pairs": pairs,
-            "log_path": result.get("log_path", ""),
-            "at": time.strftime("%Y-%m-%d %H:%M:%S")}
-        append_codecheck_event(
-            os.getcwd(), st, "verify.completed", {
-                "head": st["quality"]["codecheck_verify"]["head"],
-                "files": files, "count": total, "pairs": pairs,
-            })
-    if total == 0:
-        return True, ""
-    if not os.path.exists(ex):
-        return False, (f"harness 现场复核实测遗留 {total} 条告警,且无豁免清单({ex})。"
-                       "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),把「规则ID + 文件 + 用户原话」"
-                       f"逐行写入 {ex} 并 commit 后重试——口头豁免无效")
-    extxt = read_text(ex, errors="replace")
-    bad = [f"{r}({f})" for r, f, _ln in pairs if not _exemption_text_has_pair(extxt, r, f)]
-    if len(pairs) < total and bad == []:
-        bad = [f"(另有 {total - len(pairs)} 条未解析出明细,无法核对豁免)"]
-    if bad:
-        return False, (f"实测遗留 {total} 条告警,以下未被豁免清单覆盖: " + "、".join(bad[:5])
-                       + ("…" if len(bad) > 5 else "") + f"。修掉或补齐 {ex}(须用户裁决原话)后重试")
-    approved = _approved_exemptions(st)
-    unauthorized = [f"{r}({f})" for r, f, _ln in pairs
-                    if _approval_key(r, f) not in approved and not _was_exempt_before_review(st, ex, r, f)]
-    if unauthorized:
-        return False, ("豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: " + "、".join(unauthorized[:5])
-                       + "。逐项 AskUserQuestion 后执行 mae-flow approve-exemption --rule <规则ID> "
-                       "--file <文件> --reason <理由> --ack \"用户原话\"；手写豁免文件不再算授权")
-    return True, ""
-
-
-def ev_review_codecheck(spec, st):
-    """统一规范检查协议：真实尝试一次；结果透明，但工具自身不成为硬阻塞源。"""
-    scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
-    files, err = _biz_changed_files(st)
-    if err and scan.get("step") != st.get("current"):
-        return False, err
-    if files == []:
-        # 文档、台账、测试和纯构建配置都不属于 CodeCheck 的业务代码输入。
-        # 在证据层直接放行，避免弱模型仍照步骤说明生成一次空扫描。
-        return True, ""
-    accepted, _ = _risk_acceptance("CODECHECK_TOOL", st)
-    if accepted:
-        # CodeCheck is the one optional company CLI. A real user may explicitly
-        # accept its absence after seeing the risk; otherwise an internal npm or
-        # PATH outage would dead-lock the whole delivery.
-        return True, ""
-    if scan.get("step") != st.get("current"):
-        return False, "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，禁止主会话自行修复"
-    if scan.get("scope_pending"):
-        return False, (
-            "CodeCheck 仍有 %d 条机器准备排除的候选，尚未经用户确认是否涉及本次修改。"
-            "按 codecheck-scan 输出使用 AskUserQuestion 展示候选，再执行 codecheck-scope；"
-            "确认前不能忽略这些结果。"
-            % len(scan.get("scope_candidates") or []))
-    if scan.get("status") == "TOOL_ERROR":
-        changed, err = _source_changed_since(scan.get("head", ""), st)
-        if err:
-            return False, "CodeCheck 诊断基点失效:" + err + "；重新执行 codecheck-scan"
-        if changed:
-            return False, ("CodeCheck 工具诊断后源码发生变化: " + "、".join(changed[:5])
-                           + "。对新代码重新尝试一次 codecheck-scan")
-        return True, ""
-    if scan.get("count", 0) == 0:
-        changed, err = _source_changed_since(scan.get("head", ""), st)
-        if err:
-            return False, "CodeCheck 首检基点失效:" + err + "；重新执行 codecheck-scan"
-        if changed:
-            return False, ("CodeCheck 首检为 0 后源码又发生变化: " + "、".join(changed[:5])
-                           + "。旧首检不背新代码的书,重新执行 codecheck-scan")
-    else:
-        ok, why = ev_agent_ran(
-            {"agent": "CODECHECK", "statuses": ["CLEAN", "REMAINING", "FAIL"]}, st)
-        if not ok:
-            return False, why
-        try:
-            token = load_json(
-                STATE_PATH + ".tokens").get("CODECHECK", {})
-        except Exception:
-            token = {}
-        if isinstance(token, dict) and token.get("status") == "FAIL":
-            task = (st.get("agent_tasks", {}) or {}).get("CODECHECK", {})
-            changed, err = _source_changed_since(task.get("head", ""), st)
-            if err:
-                return False, "CodeCheck FAIL 后无法核对源码状态:" + err
-            if changed:
-                return False, ("CodeCheck Agent 以 FAIL 收尾但留下了源码变化: "
-                               + "、".join(changed[:5])
-                               + "。先回退未验证改动，或完成编译并以 REMAINING/CLEAN 收尾。")
-        # Agent 的最后一轮 fullcheck 已由 SubagentStop 绑定任务卡、源码和真实调用。
-        # 不在 done 再跑第三遍；REMAINING/工具 FAIL 作为建议项进入交付报告。
-        return True, ""
-    return True, ""
-
-
 def run_env_checks(force_all=False):
     """Compatibility view of self-contained runtime diagnostics."""
     checks = capability_diagnostics(os.getcwd(), include_codecheck=False)
@@ -3079,23 +2722,14 @@ ev_glob_absent = _WORKFLOW_EVIDENCE.glob_absent
 ev_clean_paths = _WORKFLOW_EVIDENCE.clean_paths
 
 
-EVIDENCE = {"glob": ev_glob, "branch_ok": ev_branch_ok,
-            "tasks_checked": ev_tasks_checked, "commit_tagged": ev_commit_tagged,
-            "commit_tagged_after_entry": ev_commit_tagged_after_entry,
-            "review_fix_committed": ev_review_fix_committed,
-            "review_snapshot": ev_review_snapshot,
-            "checkpoint_plan": ev_checkpoint_plan,
-            "checkpoint_plan_complete": ev_checkpoint_plan_complete,
-            "final_review_clear": ev_final_review_clear,
-            "spec_field": ev_spec_field, "yaml_field": ev_spec_field,
-            "spec_validate": ev_spec_validate, "tier_scope": ev_tier_scope,
-            "pushed": ev_pushed, "agent_ran": ev_agent_ran,
-            "content_free": ev_content_free, "clean_paths": ev_clean_paths,
-            "archive_paths_clean": ev_archive_paths_clean,
-            "codecheck_clean": ev_codecheck_clean, "glob_absent": ev_glob_absent,
-            "review_agent_or_no_code": ev_review_agent_or_no_code,
-            "agent_or_no_source": ev_agent_or_no_source,
-            "review_codecheck": ev_review_codecheck}
+_EVIDENCE_REGISTRY = build_evidence_registry(
+    workflow=_WORKFLOW_EVIDENCE,
+    agent=_AGENT_EVIDENCE,
+    delivery=_DELIVERY_EVIDENCE,
+    quality=_QUALITY_EVIDENCE,
+)
+# Read-only compatibility view for older diagnostics that enumerate names.
+EVIDENCE = _EVIDENCE_REGISTRY
 
 
 def _evidence_failure_count(sid, success=False):
@@ -3502,7 +3136,7 @@ def _config_ack_verified(st, ack, config_sha, review_id):
 
 def check_evidence(step, st):
     return workflow_completion.evidence_failures(
-        step, st, EVIDENCE)
+        step, st, _EVIDENCE_REGISTRY)
 
 
 # ---------------- 步骤展示 ----------------
@@ -5335,8 +4969,8 @@ def advance(flow, st, sid, step, tag, note=""):
             review_text = read_text(review_doc, errors="replace")
         except OSError as exc:
             die("无法冻结评审裁决快照:" + str(exc), 2)
-        st["review_triage_statuses"] = _review_statuses(review_text)
-        st["review_triage_transfer_count"] = _review_status_count(
+        st["review_triage_statuses"] = review_statuses(review_text)
+        st["review_triage_transfer_count"] = review_status_count(
             review_text, "转规格轮次(已确认)")
     st.pop("unlock", None)   # 源码解锁仅限本步实例,推进即失效
     st.pop("risk_acceptances", None)   # 风险放行同样只属于当前步骤实例

@@ -36,17 +36,23 @@ delivery；纯规则模块不得直接 `print`、`chdir` 或启动进程。磁�
 | `mae_flow_core/workflow/transitions.py` | 动态/兼容转移目标 | 保存和输出 |
 | `mae_flow_core/workflow/advancement.py` | 推进事件与副作用顺序 | 直接执行副作用 |
 | `mae_flow_core/workflow/completion.py` | choice、证据失败、完成事件 | 读取文件和 Git |
+| `mae_flow_core/workflow/evidence.py` | Evidence 值规范化、唯一注册和有序执行 | 具体业务裁决与 I/O |
+| `mae_flow_core/workflow/evidence_rules.py` | 文件、分支与规格 Evidence 纯裁决 | 直接文件或 Git 操作 |
+| `mae_flow_core/workflow/agent_evidence.py` | Agent 令牌、源码新鲜度与检视快照裁决 | token 文件读取 |
 | `mae_flow_core/guard/intent.py` | Edit/Bash/Git 请求的纯语义 | 用户提示与 exit code |
 | `mae_flow_core/quality/task_cards.py` | 质量任务卡正文、摘要、记录 | Agent 派发和落盘 |
+| `mae_flow_core/quality/evidence.py` | CodeCheck 扫描、缓存和豁免 Evidence 裁决 | 直接执行 CodeCheck |
 | `mae_flow_core/delivery/checkpoints.py` | Checkpoint 导航和锁定判定 | Git push |
+| `mae_flow_core/delivery/evidence.py` | Checkpoint、提交、push 和评审 Evidence 裁决 | 直接读写仓库 |
 | `mae_flow_core/delivery/moonlight.py` | Moonlight issue/finalize 规则 | 报告写入和状态保存 |
 | `mae_flow_core/command_dispatch.py` | Action/Flow 命令到处理器及参数的路由 | Runtime 模式门禁 |
 | `mae_flow_core/runtime.py` | 唯一运行模式裁决 | 命令分发 |
 | `mae_flow_core/state_store.py` | schema、锁、CAS、原子状态读写 | 业务推进规则 |
 
-`scripts/mae-flow.py` 目前仍是兼容适配层。旧处理器、证据注册表、输出文案及调用
-顺序留在这里，以避免大爆炸式迁移。新增业务判断应优先写成上述内核中的纯函数，再由
-CLI 处理 I/O。
+`scripts/mae-flow.py` 目前仍是兼容适配层。Evidence 的全部业务裁决和唯一注册源已经
+迁入内核；CLI 只装配显式 I/O 端口，并为历史诊断保留无逻辑名称别名。其他旧处理器、
+输出文案及调用顺序仍按后续阶段逐步迁移。新增业务判断应优先写成上述内核中的纯函数，
+再由 CLI 处理 I/O。
 
 ## CLI 分发顺序
 
@@ -73,7 +79,8 @@ Action 和活跃流程命令只在 `command_dispatch.py` 注册一次；全局�
    不可达步骤伪装成兼容入口；
 4. `definition.py` 从 `start` 和兼容入口检查全图可达性；运行时选择策略仍放入
    `transitions.py`；
-5. 新证据先写纯裁决测试，再在 CLI 的证据适配层注册；
+5. 新证据先写纯裁决测试，再在 `workflow/evidence.py` 的唯一构造函数注册；CLI
+   只为对应规则对象装配 I/O 端口；
 6. 更新 Workflow 单测和固定旧行为差分场景。
 
 ### 新增 CLI 命令

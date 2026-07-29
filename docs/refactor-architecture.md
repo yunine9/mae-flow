@@ -15,6 +15,7 @@ CLI / Hooks（副作用适配层）
         ├── guard（Git / 文件操作意图）
         ├── workflow（定义、转移、推进、完成裁决）
         ├── foundation（路径、指纹、Git 命令语义）
+        ├── file_io（受管文件读写）
         ├── runtime（唯一运行模式裁决）
         └── state_store（状态迁移、锁与原子存储）
 ```
@@ -30,6 +31,7 @@ delivery；纯规则模块不得直接 `print`、`chdir` 或启动进程。磁�
 | `mae_flow_core/foundation/source_paths.py` | 源码、测试、构建文件的路径分类 | 流程步骤和状态写入 |
 | `mae_flow_core/foundation/fingerprints.py` | 文件集合与检视快照指纹 | Git 命令执行 |
 | `mae_flow_core/foundation/git_intent.py` | Git 命令的提交/添加意图解析 | Gate 放行裁决 |
+| `mae_flow_core/file_io.py` | 确定关闭的文本、字节和 JSON 文件读写 | 状态迁移和业务裁决 |
 | `mae_flow_core/workflow/definition.py` | 流程定义结构与边校验 | 当前运行状态 |
 | `mae_flow_core/workflow/transitions.py` | 动态/兼容转移目标 | 保存和输出 |
 | `mae_flow_core/workflow/advancement.py` | 推进事件与副作用顺序 | 直接执行副作用 |
@@ -65,10 +67,14 @@ Action 和活跃流程命令只在 `command_dispatch.py` 注册一次；全局�
 ### 新增流程步骤
 
 1. 在 `flow/flow.json` 声明步骤和边，并补 `flow/steps/<step>.md`；
-2. 静态边由 `definition.py` 校验，运行时选择若不能由 `next` 表达，放入
+2. 普通边用 `next`；源码变化回流用 `source_change_next` /
+   `source_change_recheck`；其他运行时边在 `dynamic_next` 同步声明；
+3. 只为升级前在途状态保留的入口加入顶层 `compatibility_entries`，不能把普通
+   不可达步骤伪装成兼容入口；
+4. `definition.py` 从 `start` 和兼容入口检查全图可达性；运行时选择策略仍放入
    `transitions.py`；
-3. 新证据先写纯裁决测试，再在 CLI 的证据适配层注册；
-4. 更新 Workflow 单测和固定旧行为差分场景。
+5. 新证据先写纯裁决测试，再在 CLI 的证据适配层注册；
+6. 更新 Workflow 单测和固定旧行为差分场景。
 
 ### 新增 CLI 命令
 
@@ -87,6 +93,16 @@ CLI 或 Hook。
 先在 `state_store.py` 定义迁移、默认值和未知字段保留策略，再写业务规则。任何
 read-modify-write 必须经过 StateStore，不能用固定 `.tmp` 或裸 `json.dump` 覆盖主状态。
 
+## 文件 I/O 边界
+
+生产入口中的一次性读取和写入使用 `mae_flow_core.file_io`。需要流式处理或原子替换时
+可以保留显式 `with open(...)`，但不得使用 `open(...).read()`、
+`json.load(open(...))` 或依赖垃圾回收关闭文件。架构测试会扫描 CLI、Hook、
+Comet 兼容层和状态栏入口，任何新增的未受管 `open()` 都会失败。
+
+`file_io` 只管理文件生命周期，不吞异常、不改变 JSON 解码、不猜测编码。调用方必须
+明确保留原有的 `encoding`、`errors`、`newline`、追加模式和读取上限。
+
 ## 行为安全网
 
 验证分三层：
@@ -95,6 +111,10 @@ read-modify-write 必须经过 StateStore，不能用固定 `.tmp` 或裸 `json.
 - `test_architecture.py` 限制依赖、文件大小及关键函数复杂度；
 - `differential/runner.py` 在临时 Git 仓中比较固定重构前实现与当前实现的 stdout、
   stderr、退出码、状态、文件哈希和 Git 状态。
+
+Phase-9 相比行为保持型 phase-8 只允许 `combined_git_add_flags` 这一项已批准缺陷修复：
+`git add -fu`、`-uf`、`-Af` 必须按 Git 的组合短参数语义展开。新增差分阶段时，既有
+场景值必须完全相同，只能增加经过明确分类的新场景。
 
 发版前入口仍是：
 
@@ -115,6 +135,6 @@ CLI 中与内核同名或相近的薄函数是有意保留的兼容桥接：旧�
 3. 固定旧实现差分与完整 selftest 均通过；
 4. 删除不改变公开导入或历史状态迁移。
 
-当前已知但未在结构重构中修复的问题记录在
+重构期间的问题及处置证据记录在
 `docs/superpowers/mae-flow-refactor-findings.md`。缺陷修复必须使用独立测试和 `fix:`
 提交，不能混入行为保持型重构。

@@ -2,27 +2,49 @@
 
 ## MF-RF-001: File handles remain open during tests
 
-- Classification: evidence insufficient
+- Status: resolved by `5f8286b`
+- Classification: resource lifecycle defect
 - Baseline: `d5e7d7b2cb5d3def06d21df79fb3069efea94f16`
 - Trigger: checkpoint tests reading `.tokens`, `.usermsg`, and step Markdown
-- Evidence: Python emits `ResourceWarning: unclosed file`
-- Refactor action: none
-- Required next step: isolate a deterministic resource-warning test before
-  deciding whether this is a user-visible defect
+- Reproduction: run Checkpoint cases with
+  `-W always::ResourceWarning`; Python reports unclosed `.tokens`, `.usermsg`,
+  step Markdown, and the test fixture's `flow.json`
+- Root cause: production adapters used immediate `open(...).read()` /
+  `json.load(open(...))` expressions whose streams depended on garbage
+  collection for release
+- Resolution: introduced `mae_flow_core.file_io` managed helpers, migrated all
+  unmanaged opens in the four production entrypoints, and added an AST rule
+  that prevents them from returning
+- Regression: `test_file_io.py` checks helper lifecycle and launches real
+  Checkpoint subprocesses with ResourceWarnings enabled;
+  `test_architecture.py` requires zero unmanaged production opens
+- Product behavior: output, state, encodings, append modes, and read limits are
+  unchanged; streams now close deterministically, including on Windows
 
 ## MF-RF-002: Static next graph does not enumerate every entered step
 
+- Status: resolved by `c75da6a`
 - Classification: documentation and implementation mismatch
 - Baseline: `d5e7d7b2cb5d3def06d21df79fb3069efea94f16`
 - Trigger: enumerate `flow.json` ordinary `next` edges
 - Evidence: `moonlight_review`, `rf_verify`, and `verify_recompile` require
   dynamic or compatibility code paths
-- Refactor action: none in phase one
-- Required next step: register dynamic transition policies in phase two
-  without changing their behavior
+- Root cause: static validation only knew `next`, while runtime policy also
+  consumes source-change routes, Moonlight routing, and legacy in-flight entry
+  points
+- Resolution: transition metadata now includes `source_change_next`,
+  `source_change_recheck`, and `dynamic_next`; `rf_verify` is declared as a
+  compatibility entry; graph validation starts from both the normal start and
+  declared compatibility entries
+- Regression: `test_workflow_definition.py` covers deduplicated dynamic edges,
+  unreachable steps, compatibility entries, and the complete repository graph
+- Product behavior: runtime transition selection is unchanged; the new fields
+  are static validation and documentation metadata only. All phase-8
+  differential scenarios remain identical
 
 ## MF-RF-003: Combined short options escape Git add intent flags
 
+- Status: resolved by `d78f15b`
 - Classification: reproducible guard coverage gap
 - Baseline: `d5e7d7b2cb5d3def06d21df79fb3069efea94f16`
 - Trigger: `git add -fu` or another combined `git add` short-option token
@@ -34,9 +56,14 @@
 - Impact: a same-command `git add -fu && git commit` can under-report pending
   candidates; an ignored path forced into the index can also miss the
   pre-commit artifact inspection
-- Refactor action: none; the shared parser preserves baseline behavior
-- Required next step: add a failing black-box Gate regression, then fix in a
-  dedicated `fix:` commit after explicit classification
+- Resolution: `git_add_intent()` now reuses the existing combined-short-option
+  expansion and recognizes `f`, `u`, and uppercase `A` while retaining long
+  option behavior
+- Regression: the shared parser/CLI bridge matrix covers `-fu`, `-uf -- path`,
+  and `-Af`; phase-9 adds a deterministic active-Gate scenario
+- Behavior boundary: this is the only intentional baseline difference. Phase-9
+  contains exactly one new scenario key, all phase-8 snapshots are unchanged,
+  and the fixed old implementation demonstrably fails the new scenario
 
 ## MF-RF-004: Selftest searched for an extracted task-card variable
 

@@ -7871,6 +7871,151 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
     sys.exit(0)
 
 
+def _gate_commit_candidates(c, st, jdie):
+    candidate_snapshot = _pending_commit_candidates(c)
+    item = _checkpoint_locked_item(st) or {}
+    receipt = item.get("receipt") or {}
+    if item.get("status") == "commit_pending" and receipt.get("snapshot"):
+        expected = set((receipt.get("snapshot") or {}).keys())
+        actual = set(candidate_snapshot.get("paths") or [])
+        current = _reviewed_snapshot_current(st, item)
+        if current != (receipt.get("snapshot") or {}):
+            jdie(
+                "bash-checkpoint-reviewed-snapshot",
+                "检视后的未提交代码已经变化，禁止拿旧确认提交新 diff。"
+                "保留现场并重新进入调整、编译和检视。")
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
+            detail = []
+            if missing:
+                detail.append("漏掉 " + "、".join(missing[:8]))
+            if extra:
+                detail.append("夹带 " + "、".join(extra[:8]))
+            jdie(
+                "bash-checkpoint-reviewed-files",
+                "本次 commit 必须精确等于用户刚检视的文件；"
+                + "；".join(detail)
+                + "。按 checkpoint status 输出的精确 git add/commit 执行。")
+    (inherited, foreign_openspec, strong_artifacts,
+     unproven_paths, artifact_hints) = _pending_commit_files(
+         c, st, candidate_snapshot)
+    if inherited:
+        shown = "、".join(inherited[:8])
+        more = "…" if len(inherited) > 8 else ""
+        jdie(
+            "bash-cross-delivery-carryover",
+            "提交前检测到流程启动前已经存在、内容至今未变，且本单 Agent "
+            "没有实际改写的文件: " + shown + more
+            + "。它们属于上一单/用户现场，不能因为本次暂存而变成本单交付。"
+              "执行 git restore --staged -- <上述路径> 只移出暂存区；"
+              "若本单确实需要某文件，让 Agent 按本单需求实际修改并检视后再提交。")
+    if foreign_openspec:
+        shown = "、".join(foreign_openspec[:8])
+        more = "…" if len(foreign_openspec) > 8 else ""
+        jdie(
+            "bash-foreign-openspec",
+            "提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec "
+            "文件: " + shown + more
+            + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
+              "选择不入库后由流程移入 .mae-flow-work/story。")
+    if strong_artifacts:
+        shown = "、".join(strong_artifacts[:8])
+        more = "…" if len(strong_artifacts) > 8 else ""
+        jdie(
+            "bash-build-artifacts",
+            "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时编译产物: "
+            + shown + more
+            + "。这些文件通常不应进入 MR。若已暂存，执行 "
+              "git restore --staged -- <上述路径>（只移出暂存区，不删除本地文件），"
+              "并把对应规则加入项目 .gitignore 后再提交；若命令是 git add && git commit，"
+              "从 git add 清单中移除这些路径。")
+    if unproven_paths:
+        print(
+            "[mae-flow] ⚠ 提交提示:以下文件不在 Agent 通过 Write/Edit/MultiEdit "
+            "实际改写的候选范围内，可能是编译、格式化或生成命令的副作用；"
+            "也可能是必要的移动/删除，因此本次不阻断。请逐个确认: "
+            + "、".join(unproven_paths[:8])
+            + ("…" if len(unproven_paths) > 8 else ""),
+            file=sys.stderr)
+    if artifact_hints:
+        print(
+            "[mae-flow] ⚠ 产物提示:以下候选位于常见输出目录或具有编译产物特征；"
+            "即使 Agent 直接写过，也不代表必须提交，请结合 git diff 确认: "
+            + "、".join(artifact_hints[:8])
+            + ("…" if len(artifact_hints) > 8 else ""),
+            file=sys.stderr)
+    _advisory_lightcheck_before_commit(st, candidate_snapshot)
+
+
+def _gate_bash_writes(flow, st, sid, step, intent, jdie):
+    c = intent.subject
+    toks = intent.tokens
+    redirects = _redirect_targets(c)
+    strong_write = bool(re.search(WRITEISH_STRONG, c, re.I))
+    weak_write = bool(re.search(WRITEISH_WEAK, c, re.I))
+    writeish = strong_write or weak_write or bool(redirects)
+    if writeish and any(t.lower().endswith((".comet.yaml", ".openspec.yaml"))
+                        for t in toks):
+        die("comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护(黑名单#4),"
+            "直写等同伪造阶段/验证证据。", 2)
+    if re.search(r"COMET_FORCE_PHASE", c, re.I):
+        die("COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
+            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。", 2)
+    if re.search(r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*\.(sh|mjs|js)\b"
+                 r"|runtime/bin/openspec\b", c, re.I):
+        die("禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec 路由等环境,"
+            "退落到机器全局版本(版本锁失效)。请使用 current 给出的 capability 命令。", 2)
+    if re.search(r"(?:^|[;&|(])\s*openspec\b", c):
+        die("禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,全局版本随"
+            "上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染仓库。"
+            "请使用 current 给出的 capability openspec 命令。", 2)
+    if (sid == "config_confirm" and writeish
+            and guard_intent.hits_path(intent, r"(^|/)docs/req/")):
+        jdie("bash-docs-req",
+             "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
+             "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。")
+    if writeish and guard_intent.hits_path(
+            intent, r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
+            r"|\.mae-flow-work/moonlight-report\.md"):
+        die("流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
+            "(待重启标记只能靠重启会话清;仓库预设决定门禁口径,流程外走正常评审提交)。", 2)
+    if (writeish and guard_intent.hits_path(intent, flow["specs_truth"])
+            and not step.get("allow_specs_write")):
+        jdie("bash-specs",
+             f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。")
+    source_toks = [t for t in toks if _is_source_path(t, st, flow)]
+    redirect_sources = [t for t in redirects if _is_source_path(t, st, flow)]
+    offenders = list(dict.fromkeys(
+        redirect_sources + (source_toks if strong_write else [])))
+    if offenders:
+        if _checkpoint_review_locked(st):
+            item = _checkpoint_current(st) or {}
+            jdie(
+                "bash-checkpoint-review-source",
+                "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
+                "先由用户选择继续或调整。" % item.get("id", "?"))
+        if not step.get("allow_source_edit"):
+            jdie("bash-source",
+                 f"当前步骤 {sid} 禁止经 Bash 写源码文件(命中: {'、'.join(offenders[:3])});"
+                 "先 mae-flow current 查看该做什么。")
+        tp = _effective_test_patterns(st) if step.get("tests_only") else []
+        ul = (st or {}).get("unlock") or {}
+        if tp and not (ul.get("scope") == "source" and ul.get("step") == sid):
+            bad = [t2 for t2 in offenders
+                   if not any(re.search(t, (_repo_rel_for_match(t2) or t2), re.I)
+                              for t in tp)]
+            if bad:
+                jdie("bash-tests-only",
+                     f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
+                     f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。")
+    elif weak_write and source_toks and not step.get("allow_source_edit"):
+        print(f"[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径({source_toks[0]})。"
+              "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
+              "启发式不拦截(误报率高),真正校验在 done 证据层。", file=sys.stderr)
+    sys.exit(0)
+
+
 def cmd_gate(flow, st, args):
     # 全局安装只是提供能力，不代表用户授权接管当前仓库。没有状态时必须 fail-open；
     # 真正启用流程只认 init 创建的 .mae-flow.json。
@@ -7961,81 +8106,7 @@ def cmd_gate(flow, st, args):
                          f"提交前拦截:当前分支 {cur_branch} != 本单约定分支 {want}。"
                          f"先 git checkout {want} 再提交;在错分支上积累提交,done 时才发现要整步返工。")
         if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
-            candidate_snapshot = _pending_commit_candidates(c)
-            item = _checkpoint_locked_item(st) or {}
-            receipt = item.get("receipt") or {}
-            if (item.get("status") == "commit_pending"
-                    and receipt.get("snapshot")):
-                expected = set((receipt.get("snapshot") or {}).keys())
-                actual = set(candidate_snapshot.get("paths") or [])
-                current = _reviewed_snapshot_current(st, item)
-                if current != (receipt.get("snapshot") or {}):
-                    jdie(
-                        "bash-checkpoint-reviewed-snapshot",
-                        "检视后的未提交代码已经变化，禁止拿旧确认提交新 diff。"
-                        "保留现场并重新进入调整、编译和检视。")
-                if actual != expected:
-                    missing = sorted(expected - actual)
-                    extra = sorted(actual - expected)
-                    detail = []
-                    if missing:
-                        detail.append("漏掉 " + "、".join(missing[:8]))
-                    if extra:
-                        detail.append("夹带 " + "、".join(extra[:8]))
-                    jdie(
-                        "bash-checkpoint-reviewed-files",
-                        "本次 commit 必须精确等于用户刚检视的文件；"
-                        + "；".join(detail)
-                        + "。按 checkpoint status 输出的精确 git add/commit 执行。")
-            (inherited, foreign_openspec, strong_artifacts,
-             unproven_paths, artifact_hints) = _pending_commit_files(
-                 c, st, candidate_snapshot)
-            if inherited:
-                shown = "、".join(inherited[:8])
-                more = "…" if len(inherited) > 8 else ""
-                jdie(
-                    "bash-cross-delivery-carryover",
-                    "提交前检测到流程启动前已经存在、内容至今未变，且本单 Agent "
-                    "没有实际改写的文件: " + shown + more
-                    + "。它们属于上一单/用户现场，不能因为本次暂存而变成本单交付。"
-                      "执行 git restore --staged -- <上述路径> 只移出暂存区；"
-                      "若本单确实需要某文件，让 Agent 按本单需求实际修改并检视后再提交。")
-            if foreign_openspec:
-                shown = "、".join(foreign_openspec[:8])
-                more = "…" if len(foreign_openspec) > 8 else ""
-                jdie(
-                    "bash-foreign-openspec",
-                    "提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec "
-                    "文件: " + shown + more
-                    + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
-                      "选择不入库后由流程移入 .mae-flow-work/story。")
-            if strong_artifacts:
-                shown = "、".join(strong_artifacts[:8])
-                more = "…" if len(strong_artifacts) > 8 else ""
-                jdie(
-                    "bash-build-artifacts",
-                    "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时编译产物: "
-                    + shown + more
-                    + "。这些文件通常不应进入 MR。若已暂存，执行 "
-                      "git restore --staged -- <上述路径>（只移出暂存区，不删除本地文件），"
-                      "并把对应规则加入项目 .gitignore 后再提交；若命令是 git add && git commit，"
-                      "从 git add 清单中移除这些路径。")
-            if unproven_paths:
-                print(
-                    "[mae-flow] ⚠ 提交提示:以下文件不在 Agent 通过 Write/Edit/MultiEdit "
-                    "实际改写的候选范围内，可能是编译、格式化或生成命令的副作用；"
-                    "也可能是必要的移动/删除，因此本次不阻断。请逐个确认: "
-                    + "、".join(unproven_paths[:8])
-                    + ("…" if len(unproven_paths) > 8 else ""),
-                    file=sys.stderr)
-            if artifact_hints:
-                print(
-                    "[mae-flow] ⚠ 产物提示:以下候选位于常见输出目录或具有编译产物特征；"
-                    "即使 Agent 直接写过，也不代表必须提交，请结合 git diff 确认: "
-                    + "、".join(artifact_hints[:8])
-                    + ("…" if len(artifact_hints) > 8 else ""),
-                    file=sys.stderr)
-            _advisory_lightcheck_before_commit(st, candidate_snapshot)
+            _gate_commit_candidates(c, st, jdie)
         if re.search(r"git\s+push\b.*(--force|-f\b)", c) or re.search(r"git\s+push\b.*\s\+\S+", c):
             die("禁止 force push(含 +refspec 形式)。", 2)
         if re.search(r"dispatch\.py", c):
@@ -8091,71 +8162,7 @@ def cmd_gate(flow, st, args):
             jdie("bash-worktree",
                  "本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联(新目录无状态文件,gate 全拦)。"
                  "若是为并行另一单开工作区:请用户手动建 worktree 并在新目录另起会话独立 init,本流程内不执行该命令。")
-        redirects = _redirect_targets(c)
-        strong_write = bool(re.search(WRITEISH_STRONG, c, re.I))
-        weak_write = bool(re.search(WRITEISH_WEAK, c, re.I))
-        writeish = strong_write or weak_write or bool(redirects)
-        # comet/openspec 状态文件的 Bash 写路必须与 Edit 对称(黑名单#4):
-        # 否则 `echo "verify_result: pass" >> .comet.yaml` 一条命令即可伪造验证证据。
-        if writeish and any(t.lower().endswith((".comet.yaml", ".openspec.yaml"))
-                            for t in toks):
-            die("comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护(黑名单#4),"
-                "直写等同伪造阶段/验证证据。", 2)
-        if re.search(r"COMET_FORCE_PHASE", c, re.I):
-            die("COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
-                "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。", 2)
-        if re.search(r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*\.(sh|mjs|js)\b"
-                     r"|runtime/bin/openspec\b", c, re.I):
-            die("禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec 路由等环境,"
-                "退落到机器全局版本(版本锁失效)。请使用 current 给出的 capability 命令。", 2)
-        if re.search(r"(?:^|[;&|(])\s*openspec\b", c):
-            die("禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,全局版本随"
-                "上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染仓库。"
-                "请使用 current 给出的 capability openspec 命令。", 2)
-        if sid == "config_confirm" and writeish and hits_path(r"(^|/)docs/req/"):
-            jdie("bash-docs-req",
-                 "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
-                 "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。")
-        if writeish and hits_path(r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
-                                  r"|\.mae-flow-work/moonlight-report\.md"):
-            die("流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow 维护,禁止经 Bash 改写/删除"
-                "(待重启标记只能靠重启会话清;仓库预设决定门禁口径,流程外走正常评审提交)。", 2)
-        if writeish and hits_path(flow["specs_truth"]) and not step.get("allow_specs_write"):
-            jdie("bash-specs",
-                 f"openspec/specs/ 为真相源,当前步骤 {sid or '未初始化'} 禁止经 Bash 写入(黑名单#3)。")
-        source_toks = [t for t in toks if _is_source_path(t, st, flow)]
-        redirect_sources = [t for t in redirects if _is_source_path(t, st, flow)]
-        # 硬拦只认高置信写源码:重定向目标本身是源码、或强写动词与源码路径同现。
-        # 弱启发(cp/mv/tee/patch)只软提醒:`git diff -- src/ 2>&1` 这类只读命令
-        # 被硬拦的每一次弹回都是一整轮模型往返,而真正的越权写有 done 证据层兜底。
-        offenders = list(dict.fromkeys(redirect_sources
-                                       + (source_toks if strong_write else [])))
-        if offenders:
-            if _checkpoint_review_locked(st):
-                item = _checkpoint_current(st) or {}
-                jdie(
-                    "bash-checkpoint-review-source",
-                    "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
-                    "先由用户选择继续或调整。" % item.get("id", "?"))
-            if not step.get("allow_source_edit"):
-                jdie("bash-source",
-                     f"当前步骤 {sid} 禁止经 Bash 写源码文件(命中: {'、'.join(offenders[:3])});"
-                     "先 mae-flow current 查看该做什么。")
-            tp = _effective_test_patterns(st) if step.get("tests_only") else []
-            ul = (st or {}).get("unlock") or {}
-            if tp and not (ul.get("scope") == "source" and ul.get("step") == sid):
-                bad = [t2 for t2 in offenders
-                       if not any(re.search(t, (_repo_rel_for_match(t2) or t2), re.I)
-                                  for t in tp)]
-                if bad:
-                    jdie("bash-tests-only",
-                         f"当前步骤 {sid} 仅允许写测试路径(当前生效规则: {'|'.join(tp)});"
-                         f"命中非测试源码: {'、'.join(bad[:3])}。经用户裁决确为代码缺陷时用 unlock source 解锁。")
-        elif weak_write and source_toks and not step.get("allow_source_edit"):
-            print(f"[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径({source_toks[0]})。"
-                  "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
-                  "启发式不拦截(误报率高),真正校验在 done 证据层。", file=sys.stderr)
-        sys.exit(0)
+        return _gate_bash_writes(flow, st, sid, step, intent, jdie)
     die("gate 用法: gate edit <路径> | gate bash <命令>")
 
 

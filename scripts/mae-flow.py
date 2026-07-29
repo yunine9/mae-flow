@@ -87,6 +87,7 @@ from mae_flow_core.foundation.fingerprints import (
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core.workflow import advancement as workflow_advancement
+from mae_flow_core.workflow import completion as workflow_completion
 from mae_flow_core.workflow import definition as workflow_definition
 from mae_flow_core.workflow import transitions as workflow_transitions
 
@@ -3812,12 +3813,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
 
 
 def check_evidence(step, st):
-    fails = []
-    for spec in step.get("evidence", []):
-        ok, why = EVIDENCE[spec["type"]](spec, st)
-        if not ok:
-            fails.append(why)
-    return fails
+    return workflow_completion.evidence_failures(
+        step, st, EVIDENCE)
 
 
 # ---------------- 步骤展示 ----------------
@@ -6935,15 +6932,9 @@ def cmd_checkpoint(flow, st, args):
     die("未知 checkpoint 动作: " + str(action), 2)
 
 
-def cmd_done(flow, st, args):
-    sid = st["current"]
-    step = flow["steps"][sid]
-    if step.get("terminal"):
-        die("流程已在终态。")
+def _done_handle_legacy_pace(flow, st, sid, step):
     if (sid in PACE_STEPS and not _development_checkpoints_enabled(st)
             and not _development_review(st)):
-        # Compatibility for an old state that was already advanced onto the
-        # newly inserted pace node by an earlier build of this release.
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         target = _next_from_step(step, st, "continuous")
         st.setdefault("history", []).append({
@@ -6956,222 +6947,231 @@ def cmd_done(flow, st, args):
         print("[mae-flow] 检测到升级前在途状态；本单不追加开发节奏确认，"
               "已按原流程进入 %s。\n" % target)
         print_current(flow, st)
-        return
-    if sid == "moonlight_review":
-        die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
-            "不能用 done 跳过报告闭环。", 2)
-    if _moonlight(st) and step.get("skip_in_moonlight") and not args.choice:
-        # 兼容升级时已经停在旧现场、随后才开启月光的状态。正常路径会在
-        # advance 进入本节点之前旁路；这里仅让在途状态也不需要人工选择。
-        args.choice = step.get("moonlight_choice")
+        return True
+    return False
 
+def _done_pending_config(step, st, args, sid):
     review = st.get("config_review") if sid == "config_confirm" else None
-    if sid == "config_confirm" and not _moonlight(st):
-        if not isinstance(review, dict) or not review.get("sha256"):
+    if sid != "config_confirm" or _moonlight(st):
+        return _validated_pending_config(step, st, args.set or [])
+    if not isinstance(review, dict) or not review.get("sha256"):
+        die(
+            "尚未生成完整配置确认单。先按 current 输出执行 config-review --set ...；"
+            "脚本会校验并展示全部配置，再让用户只做一次最终确认。"
+            "不要直接拿基线分支、单号等局部回答调用 done。", 2)
+    if args.set:
+        pending_config = _validated_pending_config(step, st, args.set)
+        current_requirement_sha = _requirement_sha256(
+            pending_config.get("需求文档", ""))
+        if _config_sha256(
+                pending_config, current_requirement_sha) != review.get("sha256"):
             die(
-                "尚未生成完整配置确认单。先按 current 输出执行 config-review --set ...；"
-                "脚本会校验并展示全部配置，再让用户只做一次最终确认。"
-                "不要直接拿基线分支、单号等局部回答调用 done。", 2)
-        if args.set:
-            pending_config = _validated_pending_config(step, st, args.set)
-            current_requirement_sha = _requirement_sha256(
-                pending_config.get("需求文档", ""))
-            if _config_sha256(
-                    pending_config, current_requirement_sha) != review.get("sha256"):
-                die(
-                    "done 携带的配置与用户看到的确认单不一致。禁止确认 A、提交 B；"
-                    "请用新配置重新执行 config-review。", 2)
-        else:
-            review_state = dict(st)
-            review_state["config"] = dict(review.get("config") or {})
-            pending_config = _validated_pending_config(step, review_state, [])
-            current_requirement_sha = _requirement_sha256(
-                pending_config.get("需求文档", ""))
-            if _config_sha256(
-                    pending_config, current_requirement_sha) != review.get("sha256"):
-                die("配置或需求文档在呈现后发生变化，旧确认单已自动失效。"
-                    "重新执行 config-review 即可恢复，无需退出流程。", 2)
-        ok, why = _config_ack_verified(
-            st, args.ack or "", review.get("sha256"), review.get("id", ""))
-        if not ok:
-            die(why, 2)
+                "done 携带的配置与用户看到的确认单不一致。禁止确认 A、提交 B；"
+                "请用新配置重新执行 config-review。", 2)
     else:
-        pending_config = _validated_pending_config(step, st, args.set or [])
+        review_state = dict(st)
+        review_state["config"] = dict(review.get("config") or {})
+        pending_config = _validated_pending_config(step, review_state, [])
+        current_requirement_sha = _requirement_sha256(
+            pending_config.get("需求文档", ""))
+        if _config_sha256(
+                pending_config,
+                current_requirement_sha) != review.get("sha256"):
+            die("配置或需求文档在呈现后发生变化，旧确认单已自动失效。"
+                "重新执行 config-review 即可恢复，无需退出流程。", 2)
+    ok, why = _config_ack_verified(
+        st, args.ack or "", review.get("sha256"), review.get("id", ""))
+    if not ok:
+        die(why, 2)
+    return pending_config
+
+def _done_validate_choice_and_ack(step, st, args, sid):
+    error = workflow_completion.choice_error(step, args.choice)
+    if error:
+        die(error, 2)
+    if (sid == "config_confirm" or not step.get("user_ack")
+            or _moonlight(st)):
+        return
     if step.get("choice_key"):
-        if args.choice not in step.get("choices", []):
-            die(f"--choice 必须为: {'|'.join(step['choices'])}", 2)
-    if (sid != "config_confirm" and step.get("user_ack")
-            and not _moonlight(st)):
-        if step.get("choice_key"):
-            pace_state = _development_review(st) if sid in PACE_STEPS else None
-            ok, why = _choice_verified(
-                step, st, args.choice,
-                (pace_state or {}).get("ack_cursor")
-                if pace_state else None)
-        elif step.get("confirmation_answers"):
-            ok, why = _implicit_ack_verified(step, st)
-        elif args.ack:
-            ok, why = _ack_verified(st, args.ack)
-        else:
-            ok, why = _implicit_ack_verified(step, st)
-        if not ok:
-            die(why, 2)
-    # 到这里配置、文档、用户确认和 choice 已全部通过，才提交候选值。
-    if step.get("choice_key"):
-        choice_sets = (step.get("choice_sets") or {}).get(args.choice, {}) or {}
-        for key, value in choice_sets.items():
-            bad = _validate_config_value(key, str(value))
-            if bad:
-                die(f"流程定义为选择 {args.choice} 配置的 {key}「{value}」不合法:{bad}。"
-                    "请维护人修正 flow.json，拒绝写入半套状态。", 2)
-            pending_config[key] = str(value)
+        pace_state = _development_review(st) if sid in PACE_STEPS else None
+        ok, why = _choice_verified(
+            step, st, args.choice,
+            (pace_state or {}).get("ack_cursor")
+            if pace_state else None)
+    elif step.get("confirmation_answers"):
+        ok, why = _implicit_ack_verified(step, st)
+    elif args.ack:
+        ok, why = _ack_verified(st, args.ack)
+    else:
+        ok, why = _implicit_ack_verified(step, st)
+    if not ok:
+        die(why, 2)
+
+def _done_commit_inputs(step, st, args, sid, pending_config):
+    for key, value in workflow_completion.choice_config(step, args.choice).items():
+        bad = _validate_config_value(key, value)
+        if bad:
+            die(f"流程定义为选择 {args.choice} 配置的 {key}「{value}」不合法:{bad}。"
+                "请维护人修正 flow.json，拒绝写入半套状态。", 2)
+        pending_config[key] = value
     st["config"] = pending_config
     if sid == "config_confirm":
         st.pop("config_review", None)
         st.pop("branch_resolution", None)
     if step.get("choice_key"):
         st["choices"][step["choice_key"]] = args.choice
+
+def _done_guard_branch(st, sid):
     if sid == "story":
-        # The generator contract says docs/story, but older/weak agents have
-        # written STORY into openspec. Repair one unambiguous current-ticket
-        # output before evidence checks, so the same done both validates it and
-        # (for local mode) removes it from the delivery tree.
         _canonicalize_story_output(
             st.get("config", {}).get("单号", ""), st)
     want = st.get("config", {}).get("分支名", "")
     if sid not in ("config_confirm", "workflow_select", "branch_create") and want:
         cur = sh("git branch --show-current")
         if cur != want:
-            save_state(st)
-            die(f"当前分支 {cur or '未知'} != 本单约定分支 {want}。先切回正确分支，禁止在别的分支推进。", 2)
+            _done_save_die(
+                st, f"当前分支 {cur or '未知'} != 本单约定分支 {want}。先切回正确分支，禁止在别的分支推进。")
+
+def _done_save_die(st, message):
+    save_state(st)
+    die(message, 2)
+
+def _done_transition_to_recheck(flow, st, sid, target, changed, note, message,
+                                clear_unlock=False):
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    st["history"].append({"step": sid, "result": "source-recheck:" + target,
+                          "note": note + "、".join(changed[:10]), "at": now})
+    st["current"] = target
+    st.setdefault("step_heads", {})[target] = sh("git rev-parse --verify HEAD")
+    if clear_unlock:
+        st.pop("unlock", None)
+    for kind in ("COMPILE", "CODECHECK", "UT"):
+        (st.get("agent_tasks", {}) or {}).pop(kind, None)
+    (st.get("quality", {}) or {}).pop("codecheck_scan", None)
+    (st.get("quality", {}) or {}).pop("codecheck_verify", None)
+    save_state(st)
+    print(message)
+    print_current(flow, st)
+    return True
+
+def _done_source_change(flow, st, sid, step):
     source_next = step.get("source_change_next")
-    if source_next:
-        _, migrate_err = _ensure_step_entry_head(flow, st, sid)
-        if migrate_err:
-            save_state(st)
-            die("无法恢复步骤入口 HEAD:" + migrate_err + "。拒绝猜测源码是否变化。", 2)
-        changed, why = _source_changed_since((st.get("step_heads", {}) or {}).get(sid, ""), st)
-        if why:
-            save_state(st)
-            die("无法核对本步源码变化:" + why, 2)
-        if changed:
-            dirty = [x for x in changed if x.endswith("(未提交)")]
-            if dirty:
-                save_state(st)
-                die("本步改过源码，但仍有未提交改动: " + "、".join(dirty[:5])
-                    + "。先按单号格式精确提交，再 done；否则下一步任务卡看不到这些文件。", 2)
-            ok, commit_why = ev_commit_tagged_after_entry({}, st)
-            if not ok:
-                save_state(st)
-                die("源码变化尚未形成可追踪的本步提交:" + commit_why, 2)
-            now = time.strftime("%Y-%m-%d %H:%M:%S")
-            st["history"].append({"step": sid, "result": "source-recheck:" + source_next,
-                                  "note": "本步修改源码:" + "、".join(changed[:10]), "at": now})
-            st["current"] = source_next
-            st.setdefault("step_heads", {})[source_next] = sh("git rev-parse --verify HEAD")
-            for kind in ("COMPILE", "CODECHECK", "UT"):
-                (st.get("agent_tasks", {}) or {}).pop(kind, None)
-            (st.get("quality", {}) or {}).pop("codecheck_scan", None)
-            (st.get("quality", {}) or {}).pop("codecheck_verify", None)
-            save_state(st)
-            print(f"[mae-flow] {sid} 修改了源码，自动进入 {source_next} 重新编译；主会话不要自行编译。\n")
-            print_current(flow, st)
-            return
+    if not source_next:
+        return False
+    _, migrate_err = _ensure_step_entry_head(flow, st, sid)
+    if migrate_err:
+        _done_save_die(
+            st, "无法恢复步骤入口 HEAD:" + migrate_err + "。拒绝猜测源码是否变化。")
+    changed, why = _source_changed_since(
+        (st.get("step_heads", {}) or {}).get(sid, ""), st)
+    if why:
+        _done_save_die(st, "无法核对本步源码变化:" + why)
+    if not changed:
+        return False
+    dirty = [x for x in changed if x.endswith("(未提交)")]
+    if dirty:
+        _done_save_die(st, "本步改过源码，但仍有未提交改动: " + "、".join(dirty[:5])
+                       + "。先按单号格式精确提交，再 done；否则下一步任务卡看不到这些文件。")
+    ok, commit_why = ev_commit_tagged_after_entry({}, st)
+    if not ok:
+        _done_save_die(st, "源码变化尚未形成可追踪的本步提交:" + commit_why)
+    return _done_transition_to_recheck(
+        flow, st, sid, source_next, changed, "本步修改源码:",
+        f"[mae-flow] {sid} 修改了源码，自动进入 {source_next} 重新编译；主会话不要自行编译。\n")
+
+def _done_source_recheck(flow, st, sid, step):
     recheck = step.get("source_change_recheck")
-    if recheck:
-        _, migrate_err = _ensure_step_entry_head(flow, st, sid)
-        if migrate_err:
-            save_state(st)
-            die("无法恢复 UT 步骤入口 HEAD:" + migrate_err
-                + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人核对历史。", 2)
-        changed, why = _business_source_changed_since_step(st, sid)
-        if why:
-            save_state(st)
-            die("无法核对 UT 步骤内是否修改过被测源码:" + why
-                + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人恢复步骤入口基点。", 2)
-        if changed:
-            ul = st.get("unlock") or {}
-            if ul.get("scope") != "source" or ul.get("step") != sid:
-                save_state(st)
-                die("UT 步骤内检测到未经 unlock source 用户裁决的被测源码变更: "
-                    + "、".join(changed[:5])
-                    + ("…" if len(changed) > 5 else "")
-                    + "。这是越权修改，不能靠补跑验证洗白；先呈报变更和 UT 自查结论，由用户裁决后再处理。", 2)
-            dirty = [x for x in changed if x.endswith("(未提交)")]
-            if dirty:
-                save_state(st)
-                die("用户虽已解锁源码修复，但这些源码仍未提交: " + "、".join(dirty[:5])
-                    + "。先按单号格式精确提交，再 done；否则回流任务卡无法覆盖真实改动。", 2)
-            ok, commit_why = ev_commit_tagged_after_entry({}, st)
-            if not ok:
-                save_state(st)
-                die("UT 暴露的源码修复尚未形成可追踪提交:" + commit_why, 2)
-            now = time.strftime("%Y-%m-%d %H:%M:%S")
-            st["history"].append({"step": sid, "result": "source-recheck:" + recheck,
-                                  "note": "UT 裁决后修改被测源码:" + "、".join(changed[:10]), "at": now})
-            st["current"] = recheck
-            st.setdefault("step_heads", {})[recheck] = sh("git rev-parse --verify HEAD")
-            st.pop("unlock", None)
-            # 旧任务卡和首检只描述旧源码。即使令牌新鲜度还能拦住，也主动清掉避免弱模型误用。
-            for kind in ("COMPILE", "CODECHECK", "UT"):
-                (st.get("agent_tasks", {}) or {}).pop(kind, None)
-            (st.get("quality", {}) or {}).pop("codecheck_scan", None)
-            (st.get("quality", {}) or {}).pop("codecheck_verify", None)
-            save_state(st)
-            print(f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
-                  "必须重新经过编译、CodeCheck 与 UT；禁止直接推送。\n")
-            print_current(flow, st)
-            return
+    if not recheck:
+        return False
+    _, migrate_err = _ensure_step_entry_head(flow, st, sid)
+    if migrate_err:
+        _done_save_die(st, "无法恢复 UT 步骤入口 HEAD:" + migrate_err
+                       + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人核对历史。")
+    changed, why = _business_source_changed_since_step(st, sid)
+    if why:
+        _done_save_die(st, "无法核对 UT 步骤内是否修改过被测源码:" + why
+                       + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人恢复步骤入口基点。")
+    if not changed:
+        return False
+    ul = st.get("unlock") or {}
+    if ul.get("scope") != "source" or ul.get("step") != sid:
+        _done_save_die(st, "UT 步骤内检测到未经 unlock source 用户裁决的被测源码变更: "
+                       + "、".join(changed[:5]) + ("…" if len(changed) > 5 else "")
+                       + "。这是越权修改，不能靠补跑验证洗白；先呈报变更和 UT 自查结论，由用户裁决后再处理。")
+    dirty = [x for x in changed if x.endswith("(未提交)")]
+    if dirty:
+        _done_save_die(st, "用户虽已解锁源码修复，但这些源码仍未提交: "
+                       + "、".join(dirty[:5])
+                       + "。先按单号格式精确提交，再 done；否则回流任务卡无法覆盖真实改动。")
+    ok, commit_why = ev_commit_tagged_after_entry({}, st)
+    if not ok:
+        _done_save_die(st, "UT 暴露的源码修复尚未形成可追踪提交:" + commit_why)
+    return _done_transition_to_recheck(
+        flow, st, sid, recheck, changed, "UT 裁决后修改被测源码:",
+        f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
+        "必须重新经过编译、CodeCheck 与 UT；禁止直接推送。\n", clear_unlock=True)
+
+def _done_require_evidence(step, st, args, sid):
     fails = check_evidence(step, st)
-    if fails:
-        save_state(st)
-        msg = "证据不足,拒绝推进:\n  - " + "\n  - ".join(fails)
-        # "用户说跳过吧,hook 不听"是最伤信任的体验:用户裁决的整步跳过通道
-        # (goto --force --ack)一直存在,但只写在维护文档里,拒绝消息从不提示。
-        # 与 gate 三振同一哲学:重复拒绝时自动亮出用户出口,平时不广告。
-        count = _evidence_failure_count(sid)
-        if count >= 2 and not _moonlight(st):
-            target = _next_from_step(step, st, args.choice or "")
-            goto_hint = (
-                '执行 python "%s" goto %s --force --ack "用户原话"'
-                % (os.path.abspath(sys.argv[0]), target)
-                if target else
-                "先按 current 完成本步选择；目标确定后再执行 goto <目标步骤> "
-                '--force --ack "用户原话"'
-            )
-            msg += ("\n⚠ 本步证据已连续 %d 次不满足。机器事实不能由口头确认替代;"
-                    "但若**用户已明确表示**接受现状/跳过本步(如“跳过吧/我认为可以了”),"
-                    "这是用户的风险裁决,%s "
-                    "整步跳过并留痕审计;缺的是 COMPILE/CODECHECK/UT 等 Agent 令牌时,"
-                    "优先用报错里的 accept-risk(只放当前令牌,其他证据照查)。"
-                    "没有用户原话时 Agent 不得自行跳过。"
-                    % (count, goto_hint))
-        die(msg, 2)
-    _evidence_failure_count(sid, success=True)
-    if sid in PACE_STEPS and not _moonlight(st):
-        if args.choice == "adjust":
-            st.pop("development_review", None)
-            st.get("choices", {}).pop("development_pace", None)
-            now = time.strftime("%Y-%m-%d %H:%M:%S")
-            st.setdefault("history", []).append({
-                "step": sid, "result": "checkpoint-plan:adjust",
-                "note": "用户要求调整检查点划分", "at": now})
-            st.setdefault("step_heads", {})[sid] = sh("git rev-parse --verify HEAD")
-            save_state(st)
-            print("[mae-flow] 用户选择调整检查点；旧方案已失效，代码仍未解锁。"
-                  "结合用户意见重新执行 checkpoint plan --item ...。")
-            print_current(flow, st)
+    if not fails:
+        _evidence_failure_count(sid, success=True)
+        return
+    save_state(st)
+    count = _evidence_failure_count(sid)
+    target = (_next_from_step(step, st, args.choice or "")
+              if count >= 2 and not _moonlight(st) else "")
+    die(workflow_completion.evidence_error(
+        fails, count, _moonlight(st), target,
+        os.path.abspath(sys.argv[0])), 2)
+
+def _done_adjust_checkpoint(flow, st, sid):
+    st.pop("development_review", None)
+    st.get("choices", {}).pop("development_pace", None)
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    st.setdefault("history", []).append({
+        "step": sid, "result": "checkpoint-plan:adjust",
+        "note": "用户要求调整检查点划分", "at": now})
+    st.setdefault("step_heads", {})[sid] = sh("git rev-parse --verify HEAD")
+    save_state(st)
+    print("[mae-flow] 用户选择调整检查点；旧方案已失效，代码仍未解锁。"
+          "结合用户意见重新执行 checkpoint plan --item ...。")
+    print_current(flow, st)
+
+def _done_finalize(flow, st, args, sid, step):
+    for event in workflow_completion.completion_events(
+            sid, step, st, args.choice, args.ack or ""):
+        if event.kind == "adjust_checkpoint":
+            _done_adjust_checkpoint(flow, st, sid)
             return
-        _activate_checkpoint_plan(st, args.choice)
-    kind = _moonlight_step_kind(sid)
-    if kind:
-        _moonlight_resolve_kind(st, kind)
-    if sid == "story":
-        story_mode = str(st.get("config", {}).get("STORY入库", "")).lower()
-        if any(x in story_mode for x in ("不生成", "不入库", "不提交", "no", "false")):
-            _localize_story(st.get("config", {}).get("单号", ""))
-    note = args.ack or ("月光宝盒自动决策" if _moonlight(st) and step.get("user_ack") else "")
-    advance(flow, st, sid, step, "done", note)
+        if event.kind == "activate_checkpoint":
+            _activate_checkpoint_plan(st, event.value)
+        elif event.kind == "resolve_moonlight":
+            _moonlight_resolve_kind(st, event.value)
+        elif event.kind == "localize_story":
+            _localize_story(event.value)
+        elif event.kind == "advance":
+            advance(flow, st, sid, step, "done", event.note)
+
+def cmd_done(flow, st, args):
+    sid = st["current"]
+    step = flow["steps"][sid]
+    if step.get("terminal"):
+        die("流程已在终态。")
+    if _done_handle_legacy_pace(flow, st, sid, step):
+        return
+    if sid == "moonlight_review":
+        die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
+            "不能用 done 跳过报告闭环。", 2)
+    args.choice = workflow_completion.resolve_choice(step, st, args.choice)
+    pending_config = _done_pending_config(step, st, args, sid)
+    _done_validate_choice_and_ack(step, st, args, sid)
+    _done_commit_inputs(step, st, args, sid, pending_config)
+    _done_guard_branch(st, sid)
+    if (_done_source_change(flow, st, sid, step)
+            or _done_source_recheck(flow, st, sid, step)):
+        return
+    _done_require_evidence(step, st, args, sid)
+    _done_finalize(flow, st, args, sid, step)
 
 
 def cmd_skip(flow, st, args):

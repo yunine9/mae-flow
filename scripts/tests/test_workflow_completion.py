@@ -3,8 +3,11 @@
 """Regression tests for pure workflow completion policy."""
 
 import copy
+import importlib.util
 import os
 import sys
+import tempfile
+from argparse import Namespace
 import unittest
 
 
@@ -18,6 +21,7 @@ from mae_flow_core.workflow.completion import (  # noqa: E402
     choice_config,
     choice_error,
     completion_events,
+    evidence_error,
     evidence_failures,
     resolve_choice,
 )
@@ -125,6 +129,26 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
             calls,
         )
 
+    def test_repeated_evidence_error_exposes_the_original_user_exit(self):
+        self.assertEqual(
+            "证据不足,拒绝推进:\n  - missing",
+            evidence_error(
+                ["missing"], 1, False, "next", "/tmp/mae-flow.py"),
+        )
+        message = evidence_error(
+            ["missing"],
+            2,
+            False,
+            "next",
+            "/tmp/mae-flow.py",
+        )
+        self.assertIn(
+            '执行 python "/tmp/mae-flow.py" goto next '
+            '--force --ack "用户原话"',
+            message,
+        )
+        self.assertIn("本步证据已连续 2 次不满足", message)
+
     def test_checkpoint_adjust_is_terminal_completion_event(self):
         state = {
             "choices": {},
@@ -219,6 +243,94 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
         ))
         self.assertEqual(original_step, step)
         self.assertEqual(original_state, state)
+
+
+class WorkflowCompletionAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        spec = importlib.util.spec_from_file_location(
+            "mae_flow_phase4_adapter",
+            path,
+        )
+        cls.mf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mf)
+
+    def test_cmd_done_consumes_completion_policy_events(self):
+        flow = {
+            "steps": {
+                "source": {"next": "end"},
+                "end": {"terminal": True},
+            },
+        }
+        state = {
+            "current": "source",
+            "config": {},
+            "choices": {},
+            "history": [],
+            "started": "2026-07-29 10:00:00",
+        }
+        args = Namespace(
+            ack="",
+            choice="",
+            set=[],
+        )
+        observed = []
+
+        def events(step_id, step, current, choice, ack):
+            observed.append(
+                (step_id, step, current, choice, ack)
+            )
+            yield CompletionEvent(
+                "advance",
+                note="policy note",
+            )
+
+        def advance(flow_value, state_value, sid, step, result, note):
+            observed.append(
+                (
+                    flow_value,
+                    state_value,
+                    sid,
+                    step,
+                    result,
+                    note,
+                )
+            )
+
+        original_events = (
+            self.mf.workflow_completion.completion_events
+        )
+        original_advance = self.mf.advance
+        with tempfile.TemporaryDirectory() as project:
+            previous = os.getcwd()
+            try:
+                os.chdir(project)
+                self.mf.workflow_completion.completion_events = events
+                self.mf.advance = advance
+                self.mf.cmd_done(flow, state, args)
+            finally:
+                self.mf.workflow_completion.completion_events = (
+                    original_events
+                )
+                self.mf.advance = original_advance
+                os.chdir(previous)
+
+        self.assertEqual(
+            ("source", flow["steps"]["source"], state, "", ""),
+            observed[0],
+        )
+        self.assertEqual(
+            (
+                flow,
+                state,
+                "source",
+                flow["steps"]["source"],
+                "done",
+                "policy note",
+            ),
+            observed[1],
+        )
 
 
 if __name__ == "__main__":

@@ -55,6 +55,35 @@ def evidence_failures(step, state, evaluators):
     return failures
 
 
+def evidence_error(
+    failures,
+    failure_count,
+    moonlight,
+    target,
+    script_path,
+):
+    message = "证据不足,拒绝推进:\n  - " + "\n  - ".join(
+        failures)
+    if failure_count < 2 or moonlight:
+        return message
+    goto_hint = (
+        '执行 python "%s" goto %s --force --ack "用户原话"'
+        % (script_path, target)
+        if target else
+        "先按 current 完成本步选择；目标确定后再执行 goto <目标步骤> "
+        '--force --ack "用户原话"'
+    )
+    return message + (
+        "\n⚠ 本步证据已连续 %d 次不满足。机器事实不能由口头确认替代;"
+        "但若**用户已明确表示**接受现状/跳过本步(如“跳过吧/我认为可以了”),"
+        "这是用户的风险裁决,%s "
+        "整步跳过并留痕审计;缺的是 COMPILE/CODECHECK/UT 等 Agent 令牌时,"
+        "优先用报错里的 accept-risk(只放当前令牌,其他证据照查)。"
+        "没有用户原话时 Agent 不得自行跳过。"
+        % (failure_count, goto_hint)
+    )
+
+
 def _story_is_local(state):
     mode = str(
         (state.get("config") or {}).get("STORY入库", "")

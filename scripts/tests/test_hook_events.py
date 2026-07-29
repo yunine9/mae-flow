@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Tests for pure Hook event routing and policies."""
+
+import os
+import sys
+import unittest
+from types import SimpleNamespace
+
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SCRIPTS = os.path.join(ROOT, "scripts")
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+from mae_flow_core import RuntimeMode  # noqa: E402
+from mae_flow_core.application.hooks.event_policies import (  # noqa: E402
+    stop_decision,
+    template_decision,
+)
+from mae_flow_core.application.hooks.events import (  # noqa: E402
+    HookEventPorts,
+    handle_hook_event,
+)
+from mae_flow_core.application.hooks.models import HookResponse  # noqa: E402
+
+
+class HookEventTests(unittest.TestCase):
+    def runtime(self, mode, terminal=False, conflict=False):
+        return SimpleNamespace(
+            mode=mode,
+            flow_terminal=terminal,
+            has_conflict=conflict,
+            conflicts=("flow+action",) if conflict else (),
+            errors=("broken",) if mode == RuntimeMode.CORRUPT else (),
+        )
+
+    def ports(self):
+        calls = []
+
+        def handler(name):
+            def call(*args):
+                calls.append((name, args))
+                return HookResponse(stdout=name + "\n")
+            return call
+
+        return HookEventPorts(
+            conflict=handler("conflict"),
+            corrupt=handler("corrupt"),
+            terminal=handler("terminal"),
+            standalone_pretool=handler("standalone_pretool"),
+            standalone_inject=handler("standalone_inject"),
+            direct=handler("direct"),
+            inactive=handler("inactive"),
+            pretool=handler("pretool"),
+            inject=handler("inject"),
+            subagentstop=handler("subagentstop"),
+            posttool=handler("posttool"),
+            stop=handler("stop"),
+            log=handler("log"),
+        ), calls
+
+    def test_active_routes_every_public_event(self):
+        expected = {
+            "pretooluse": "pretool",
+            "userprompt": "inject",
+            "sessionstart": "inject",
+            "subagentstop": "subagentstop",
+            "posttooluse": "posttool",
+            "stop": "stop",
+        }
+        for event, target in expected.items():
+            with self.subTest(event=event):
+                ports, calls = self.ports()
+                response = handle_hook_event(
+                    event, {}, self.runtime(RuntimeMode.FLOW), ports)
+                self.assertEqual(target + "\n", response.stdout)
+                self.assertIn(target, [name for name, _args in calls])
+
+    def test_terminal_corrupt_direct_and_inactive_take_precedence(self):
+        cases = (
+            (RuntimeMode.FLOW, True, "pretooluse", "terminal"),
+            (RuntimeMode.CORRUPT, False, "pretooluse", "corrupt"),
+            (RuntimeMode.DIRECT, False, "posttooluse", "direct"),
+            (RuntimeMode.INACTIVE, False, "stop", "inactive"),
+        )
+        for mode, terminal, event, target in cases:
+            with self.subTest(mode=mode, event=event):
+                ports, calls = self.ports()
+                response = handle_hook_event(
+                    event, {}, self.runtime(mode, terminal), ports)
+                self.assertEqual(target + "\n", response.stdout)
+                self.assertEqual(
+                    target,
+                    [name for name, _args in calls if name != "log"][-1],
+                )
+
+    def test_standalone_only_owns_pretool_subagent_and_injection(self):
+        expected = {
+            "pretooluse": "standalone_pretool",
+            "subagentstop": "subagentstop",
+            "userprompt": "standalone_inject",
+            "sessionstart": "standalone_inject",
+            "posttooluse": "inactive",
+            "stop": "inactive",
+        }
+        for event, target in expected.items():
+            with self.subTest(event=event):
+                ports, _calls = self.ports()
+                response = handle_hook_event(
+                    event, {}, self.runtime(RuntimeMode.STANDALONE), ports)
+                self.assertEqual(target + "\n", response.stdout)
+
+    def test_runtime_conflict_notice_is_prepended_without_changing_route(self):
+        ports, calls = self.ports()
+        response = handle_hook_event(
+            "userprompt",
+            {},
+            self.runtime(RuntimeMode.FLOW, conflict=True),
+            ports,
+        )
+        self.assertEqual("conflict\ninject\n", response.stdout)
+        self.assertEqual(
+            ["conflict", "inject"],
+            [name for name, _args in calls if name != "log"],
+        )
+
+    def test_stop_policy_tracks_progress_and_fails_open_after_three_retries(self):
+        state = {"current": "ut", "revision": 8, "moonlight": {"enabled": True}}
+        first = stop_decision(state, False, {})
+        progressed = stop_decision(state, True, {"revision": 7, "blocks": 3})
+        exhausted = stop_decision(state, True, {"revision": 8, "blocks": 3})
+        self.assertFalse(first.allow)
+        self.assertEqual(1, first.blocks)
+        self.assertFalse(progressed.allow)
+        self.assertEqual(1, progressed.blocks)
+        self.assertTrue(exhausted.allow)
+        self.assertEqual("retry-limit", exhausted.reason)
+
+    def test_stop_policy_allows_safe_points(self):
+        for state in (
+            {},
+            {"moonlight": {"enabled": False}},
+            {"current": "end", "moonlight": {"enabled": True}},
+            {"current": "ut", "moonlight": {
+                "enabled": True, "hard_blocked": True}},
+            {"current": "push", "moonlight": {
+                "enabled": True,
+                "issues": [{"kind": "push"}],
+            }},
+        ):
+            with self.subTest(state=state):
+                self.assertTrue(stop_decision(state, False, {}).allow)
+
+    def test_template_policy_supports_instantiated_placeholders(self):
+        template = "# STORY-{单号}\n## 验收标准\n## 风险\n"
+        document = "# STORY-123\n## 验收标准\n"
+        decision = template_decision(template, document)
+        self.assertFalse(decision.accepted)
+        self.assertEqual(("风险",), decision.missing)
+
+
+if __name__ == "__main__":
+    unittest.main()

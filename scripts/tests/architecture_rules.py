@@ -287,6 +287,59 @@ def assert_delivery_dependencies(root):
     return sorted(violations)
 
 
+def assert_hook_application_dependencies(root):
+    """Hook application use cases sequence effects but never perform them."""
+    root_path = Path(root)
+    hooks = (
+        root_path / "scripts" / "mae_flow_core" / "application" / "hooks")
+    violations = []
+    if not hooks.exists():
+        return violations
+    for path in sorted(hooks.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        tree = _parse(os.fspath(path))
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _resolved_call_name(node.func, aliases)
+            if name in FORBIDDEN_CALLS:
+                violations.append(
+                    "%s:%d: forbidden call %s"
+                    % (relative, node.lineno, name)
+                )
+    return sorted(violations)
+
+
+def private_hook_import_violations(root):
+    """Find business tests that dynamically load the Hook entrypoint."""
+    root_path = Path(root)
+    tests = root_path / "scripts" / "tests"
+    allowed = {"test_hook_protocol.py"}
+    violations = []
+    for path in sorted(tests.glob("test_*.py")):
+        if path.name in allowed:
+            continue
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=os.fspath(path))
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _resolved_call_name(node.func, aliases)
+            if name not in {
+                    "importlib.util.spec_from_file_location",
+                    "runpy.run_path"}:
+                continue
+            fragment = ast.get_source_segment(source, node) or ""
+            if "dispatch.py" in fragment:
+                violations.append(
+                    "%s:%d: private Hook entrypoint import"
+                    % (path.relative_to(root_path).as_posix(), node.lineno)
+                )
+    return sorted(violations)
+
+
 def new_module_size_violations(root, maximum=500):
     root_path = Path(root)
     core = root_path / "scripts" / "mae_flow_core"

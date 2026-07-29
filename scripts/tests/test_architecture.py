@@ -18,6 +18,7 @@ from architecture_rules import (  # noqa: E402
     assert_delivery_dependencies,
     assert_foundation_dependencies,
     assert_guard_dependencies,
+    assert_hook_application_dependencies,
     assert_policy_dependencies,
     assert_quality_dependencies,
     delivery_complexity_violations,
@@ -27,6 +28,7 @@ from architecture_rules import (  # noqa: E402
     line_count,
     module_imports,
     new_module_size_violations,
+    private_hook_import_violations,
     quality_complexity_violations,
     unmanaged_runtime_open_violations,
     workflow_complexity_violations,
@@ -134,6 +136,28 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_delivery_policy_has_no_direct_side_effects(self):
         self.assertEqual([], assert_delivery_dependencies(ROOT))
+
+    def test_hook_application_has_no_direct_side_effects(self):
+        self.assertEqual([], assert_hook_application_dependencies(ROOT))
+
+    def test_hook_entrypoint_is_a_bounded_protocol_adapter(self):
+        path = os.path.join(ROOT, "hooks", "dispatch.py")
+        self.assertLessEqual(line_count(path), 800)
+        with open(path, encoding="utf-8") as stream:
+            tree = ast.parse(stream.read())
+        definitions = {
+            node.name for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        migrated = {
+            "_record_agent_token", "_contract_state", "_record_rejection",
+            "_source_snapshot", "_source_like", "_codecheck_contract",
+            "_ut_contract", "_grill_contract", "_compile_contract",
+        }
+        self.assertEqual(set(), definitions & migrated)
+
+    def test_business_tests_do_not_import_hook_private_policy(self):
+        self.assertEqual([], private_hook_import_violations(ROOT))
 
     def test_delivery_functions_stay_within_complexity_limit(self):
         self.assertEqual([], delivery_complexity_violations(ROOT))

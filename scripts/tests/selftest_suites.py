@@ -110,6 +110,10 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_hook_unit_test_contract.py",), 180, 5000),
     ("Hook Agent 收尾编排回归",
      ("scripts/tests/test_hook_agent_completion.py",), 180, 5000),
+    ("Hook 事件路由回归",
+     ("scripts/tests/test_hook_events.py",), 180, 5000),
+    ("Hook 协议适配回归",
+     ("scripts/tests/test_hook_protocol.py",), 180, 5000),
 )
 
 

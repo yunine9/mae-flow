@@ -22,6 +22,16 @@ STAGE0_SCENARIOS = {
     "active_pretooluse_edit",
     "subagentstop_missing_task_card",
 }
+STAGE1_EVIDENCE_SCENARIOS = {
+    "evidence_agent_rejection",
+    "evidence_archive_rejection",
+    "evidence_branch_rejection",
+    "evidence_checkpoint_rejection",
+    "evidence_codecheck_rejection",
+    "evidence_push_rejection",
+    "evidence_review_rejection",
+    "evidence_spec_rejection",
+}
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
@@ -101,6 +111,10 @@ class DifferentialRunnerTests(unittest.TestCase):
             "active_pretooluse_edit",
             "subagentstop_missing_task_card",
         }.issubset(SCENARIOS))
+
+    def test_stage1_evidence_scenarios_are_registered(self):
+        from differential.scenarios import SCENARIOS
+        self.assertTrue(STAGE1_EVIDENCE_SCENARIOS.issubset(SCENARIOS))
 
     def test_phase1_scenarios_match_fixed_baseline(self):
         golden_path = os.path.join(
@@ -284,6 +298,49 @@ class DifferentialRunnerTests(unittest.TestCase):
             "phase10.json",
         ))
         for name in sorted(STAGE0_SCENARIOS):
+            with self.subTest(name=name):
+                assert_matches_golden(
+                    self,
+                    name,
+                    run_scenario(ROOT, name),
+                    goldens,
+                )
+
+    def test_phase11_preserves_every_phase10_snapshot(self):
+        phase10 = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase10.json",
+        ))
+        phase11 = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase11.json",
+        ))
+        self.assertEqual(
+            set(phase10),
+            set(phase11) - STAGE1_EVIDENCE_SCENARIOS,
+        )
+        for name, expected in phase10.items():
+            with self.subTest(name=name):
+                self.assertEqual(expected, phase11[name])
+
+    def test_phase11_evidence_scenarios_match_fixed_baseline(self):
+        goldens = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase11.json",
+        ))
+        for name in sorted(STAGE1_EVIDENCE_SCENARIOS):
             with self.subTest(name=name):
                 assert_matches_golden(
                     self,

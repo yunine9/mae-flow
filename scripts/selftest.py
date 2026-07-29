@@ -118,6 +118,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/differential/snapshot.py",
           "scripts/tests/differential/scenarios.py",
           "scripts/tests/differential/stage0_scenarios.py",
+          "scripts/tests/differential/stage1_evidence_scenarios.py",
           "scripts/tests/differential/runner.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py"):

@@ -89,6 +89,70 @@
       "delivery": "none",
       "fault": "none"
     },
+    "evidence_agent_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-agent-token"
+    },
+    "evidence_archive_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "archive",
+      "fault": "missing-artifact"
+    },
+    "evidence_branch_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "evidence_checkpoint_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "checkpoint-staged",
+      "fault": "missing-checkpoint-plan"
+    },
+    "evidence_codecheck_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-codecheck-scan"
+    },
+    "evidence_push_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "push",
+      "fault": "missing-upstream"
+    },
+    "evidence_review_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "review",
+      "fault": "missing-review-receipt"
+    },
+    "evidence_spec_rejection": {
+      "domain": "evidence",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-artifact"
+    },
     "inactive_pretooluse_bypass": {
       "domain": "hook",
       "runtime": "inactive",

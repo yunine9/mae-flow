@@ -493,6 +493,7 @@ def moonlight_finalize(project, implementation_root):
 
 
 from differential import stage0_scenarios  # noqa: E402
+from differential import stage1_evidence_scenarios  # noqa: E402
 
 
 def direct_current(project, implementation_root):
@@ -535,6 +536,51 @@ def subagentstop_missing_task_card(project, implementation_root):
         project, implementation_root, _prepare_repository)
 
 
+def _stage1_evidence(name, project, implementation_root):
+    return getattr(stage1_evidence_scenarios, name)(
+        project, implementation_root, _prepare_repository)
+
+
+def evidence_agent_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_agent_rejection", project, implementation_root)
+
+
+def evidence_archive_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_archive_rejection", project, implementation_root)
+
+
+def evidence_branch_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_branch_rejection", project, implementation_root)
+
+
+def evidence_checkpoint_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_checkpoint_rejection", project, implementation_root)
+
+
+def evidence_codecheck_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_codecheck_rejection", project, implementation_root)
+
+
+def evidence_push_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_push_rejection", project, implementation_root)
+
+
+def evidence_review_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_review_rejection", project, implementation_root)
+
+
+def evidence_spec_rejection(project, implementation_root):
+    return _stage1_evidence(
+        "evidence_spec_rejection", project, implementation_root)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
@@ -546,6 +592,14 @@ SCENARIOS = {
     "dangerous_gate_bash": dangerous_gate_bash,
     "direct_current": direct_current,
     "evidence_rejection": evidence_rejection,
+    "evidence_agent_rejection": evidence_agent_rejection,
+    "evidence_archive_rejection": evidence_archive_rejection,
+    "evidence_branch_rejection": evidence_branch_rejection,
+    "evidence_checkpoint_rejection": evidence_checkpoint_rejection,
+    "evidence_codecheck_rejection": evidence_codecheck_rejection,
+    "evidence_push_rejection": evidence_push_rejection,
+    "evidence_review_rejection": evidence_review_rejection,
+    "evidence_spec_rejection": evidence_spec_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
     "moonlight_report_issue": moonlight_report_issue,

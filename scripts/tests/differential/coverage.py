@@ -19,10 +19,14 @@ VALUES = {
         "normal", "graph",
     },
     "delivery": {
-        "none", "standalone", "checkpoint-staged", "moonlight", "all",
+        "none", "standalone", "checkpoint-staged", "moonlight", "review",
+        "archive", "push", "all",
     },
     "fault": {
         "none", "corrupt-json", "recorded-issue", "missing-task-card",
+        "missing-agent-token", "missing-artifact",
+        "missing-checkpoint-plan", "missing-codecheck-scan",
+        "missing-review-receipt", "missing-upstream",
     },
 }
 FIELDS = {

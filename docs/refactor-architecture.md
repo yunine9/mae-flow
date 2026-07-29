@@ -121,6 +121,10 @@ Phase-9 快照，旧值有任何变化都直接失败。`scripts/tests/different
 必须为每个注册场景声明领域、Runtime、Workflow、Transition、Delivery 和故障类型，
 同时 Phase-10 golden 必须与场景注册表一一对应。
 
+Phase-11 只在 Phase-10 上增加 Evidence 迁移前的拒绝边界场景；测试继续逐项比较全部
+Phase-10 快照。当前 golden 与场景注册表的一一对应以 Phase-11 为准，Phase-10 仍是
+不可修改的 Stage-0 基线。
+
 `scripts/tests/refactor_completion_contract.json` 保存最终入口行数、业务模块大小、复杂度
 和迁移阶段。它是完成目标，不是当前代码的宽松基线：不得为了让现状通过而提高目标。
 `scripts/tests/fault_injection.py` 只属于测试基础设施，生产代码不得导入；它用于在迁移

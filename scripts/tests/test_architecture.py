@@ -16,8 +16,10 @@ if TESTS not in sys.path:
 from architecture_rules import (  # noqa: E402
     assert_foundation_dependencies,
     assert_policy_dependencies,
+    function_complexity,
     line_count,
     new_module_size_violations,
+    workflow_complexity_violations,
 )
 
 
@@ -108,6 +110,43 @@ class ArchitectureTests(unittest.TestCase):
     def test_refactored_core_modules_stay_within_size_limit(self):
         self.assertEqual([], new_module_size_violations(ROOT))
 
+    def test_workflow_functions_stay_within_complexity_limit(self):
+        self.assertEqual([], workflow_complexity_violations(ROOT))
+
+    def test_workflow_complexity_reports_oversized_function(self):
+        root = self._write_core_fixture(
+            "workflow",
+            "def crowded(value):\n"
+            + "".join(
+                "    if value == %d:\n        value += 1\n" % index
+                for index in range(16)
+            ),
+        )
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/workflow/fixture.py:1: "
+                "crowded complexity 17 exceeds 15"
+            ],
+            workflow_complexity_violations(root),
+        )
+
+    def test_function_complexity_counts_boolean_decisions(self):
+        root = self._write_core_fixture(
+            "workflow",
+            "def choose(one, two, three):\n"
+            "    if one and two and three:\n"
+            "        return one\n"
+            "    return two\n",
+        )
+        path = os.path.join(
+            root,
+            "scripts",
+            "mae_flow_core",
+            "workflow",
+            "fixture.py",
+        )
+        self.assertEqual(4, function_complexity(path, "choose"))
+
     def test_new_core_module_rejects_more_than_500_lines(self):
         root = self._write_core_fixture(
             "workflow",
@@ -120,6 +159,23 @@ class ArchitectureTests(unittest.TestCase):
             ],
             new_module_size_violations(root),
         )
+
+    def test_configured_adapter_complexity_limits_are_enforced(self):
+        baseline_path = os.path.join(
+            ROOT, "scripts", "tests", "architecture_baseline.json")
+        with open(baseline_path, encoding="utf-8") as stream:
+            baseline = json.load(stream)
+        self.assertIn("max_complexity", baseline)
+        for relative, functions in baseline["max_complexity"].items():
+            for name, maximum in functions.items():
+                with self.subTest(relative=relative, function=name):
+                    self.assertLessEqual(
+                        function_complexity(
+                            os.path.join(ROOT, relative),
+                            name,
+                        ),
+                        maximum,
+                    )
 
     def test_selftest_runs_refactor_safety_suites(self):
         with open(

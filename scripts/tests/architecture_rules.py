@@ -193,3 +193,108 @@ def new_module_size_violations(root, maximum=500):
                 % (relative, count, maximum)
             )
     return violations
+
+
+class _ComplexityVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.value = 1
+
+    def visit_If(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_For(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_AsyncFor(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_While(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node):
+        self.value += 1
+        self.generic_visit(node)
+
+    def visit_BoolOp(self, node):
+        self.value += max(0, len(node.values) - 1)
+        self.generic_visit(node)
+
+    def visit_comprehension(self, node):
+        self.value += 1 + len(node.ifs)
+        self.visit(node.target)
+        self.visit(node.iter)
+        for condition in node.ifs:
+            self.visit(condition)
+
+    def visit_FunctionDef(self, node):
+        return
+
+    def visit_AsyncFunctionDef(self, node):
+        return
+
+    def visit_Lambda(self, node):
+        return
+
+    def visit_ClassDef(self, node):
+        return
+
+
+def _node_complexity(node):
+    visitor = _ComplexityVisitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.value
+
+
+def function_complexity(path, function_name):
+    tree = _parse(path)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+        ):
+            return _node_complexity(node)
+    raise ValueError(
+        "function %s not found in %s" % (function_name, path)
+    )
+
+
+def workflow_complexity_violations(root, maximum=15):
+    root_path = Path(root)
+    workflow = root_path / "scripts" / "mae_flow_core" / "workflow"
+    violations = []
+    if not workflow.exists():
+        return violations
+    for path in sorted(workflow.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        tree = _parse(os.fspath(path))
+        functions = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(
+                node,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+        ]
+        for node in sorted(functions, key=lambda item: item.lineno):
+            complexity = _node_complexity(node)
+            if complexity > maximum:
+                violations.append(
+                    "%s:%d: %s complexity %d exceeds %d"
+                    % (
+                        relative,
+                        node.lineno,
+                        node.name,
+                        complexity,
+                        maximum,
+                    )
+                )
+    return violations

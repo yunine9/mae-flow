@@ -52,10 +52,7 @@ def _audit(step, result, note):
     return TransitionEvent("audit", step, result, note)
 
 
-def transition_events(flow, state, step_id, step):
-    """Yield audit events followed by the final visible transition target."""
-    target = next_step(step, state)
-
+def _legacy_pace_events(flow, state, target):
     if (
         target in PACE_STEPS
         and not _development_checkpoints_enabled(state)
@@ -72,8 +69,11 @@ def transition_events(flow, state, step_id, step):
             state,
             "continuous",
         )
+    return target
 
-    review_state = _development_review(state)
+
+def _legacy_delivery_review_events(
+        flow, state, target, review_state):
     if (
         target == "delivery_review"
         and not review_state
@@ -88,7 +88,11 @@ def transition_events(flow, state, step_id, step):
             flow["steps"]["delivery_review"],
             state,
         )
+    return target
 
+
+def _checkpoint_review_events(
+        flow, state, target, review_state):
     while (
         not _moonlight_enabled(state)
         and review_state
@@ -106,7 +110,10 @@ def transition_events(flow, state, step_id, step):
             ),
         )
         target = next_step(bypass, state, "continue")
+    return target
 
+
+def _moonlight_review_events(flow, state, target):
     seen = set()
     while (
         _moonlight_enabled(state)
@@ -132,7 +139,10 @@ def transition_events(flow, state, step_id, step):
             "无人值守模式不进入编译后用户检视",
         )
         target = resolved
+    return target
 
+
+def _moonlight_archive_events(state, step_id, target):
     if _moonlight_enabled(state) and target == "archive_confirm":
         yield _audit(
             step_id,
@@ -140,6 +150,23 @@ def transition_events(flow, state, step_id, step):
             "夜间先推送，规格定稿留到晨间 finalize",
         )
         target = "push"
+    return target
+
+
+def transition_events(flow, state, step_id, step):
+    """Yield audit events followed by the final visible transition target."""
+    target = next_step(step, state)
+    target = yield from _legacy_pace_events(
+        flow, state, target)
+    review_state = _development_review(state)
+    target = yield from _legacy_delivery_review_events(
+        flow, state, target, review_state)
+    target = yield from _checkpoint_review_events(
+        flow, state, target, review_state)
+    target = yield from _moonlight_review_events(
+        flow, state, target)
+    target = yield from _moonlight_archive_events(
+        state, step_id, target)
 
     if _moonlight_enabled(state) and step_id == "push":
         target = "moonlight_review"

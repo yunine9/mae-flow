@@ -72,8 +72,18 @@ from mae_flow_core.quality.agent_reports import (
     report_section as _core_report_section,
 )
 from mae_flow_core.quality.tool_transcript import (
+    ToolCall as _ToolCall,
     parse_transcript as _parse_tool_transcript,
     select_contract_marker as _select_contract_marker,
+)
+from mae_flow_core.quality.agent_contracts import (
+    AgentContractContext as _AgentContractContext,
+)
+from mae_flow_core.quality.compile_contract import (
+    evaluate_compile_contract as _evaluate_compile_contract,
+)
+from mae_flow_core.quality.grill_contract import (
+    evaluate_grill_contract as _evaluate_grill_contract,
 )
 
 for _s in (sys.stdout, sys.stderr):
@@ -1201,6 +1211,31 @@ def _contract_bail(label, msg, soft):
     sys.exit(2)
 
 
+def _contract_context(
+        kind, status, report, task, tool_calls, changed=(),
+        compile_net=0, reusable_receipts=None, facts=None):
+    calls = tuple(_ToolCall(
+        call_id=call.get("id", ""),
+        name=call.get("name", ""),
+        input=call.get("input", {}),
+        result_seen=bool(call.get("result_seen")),
+        is_error=bool(call.get("is_error")),
+        result=str(call.get("result", "") or ""),
+    ) for call in (tool_calls or []))
+    return _AgentContractContext(
+        kind=kind,
+        status=status,
+        report=report,
+        task=task,
+        config=_state_config(),
+        calls=calls,
+        changed_paths=tuple(changed),
+        compile_net=compile_net,
+        reusable_receipts=reusable_receipts or {},
+        facts=facts or {},
+    )
+
+
 def _task_card_contract(kind, report, soft=False):
     """报告必须回传 harness 任务卡指纹；缺配置时不再允许子 agent 边猜边做。"""
     st = _contract_state()
@@ -2285,37 +2320,11 @@ def _grill_contract(status, report, tool_calls=None, soft=False):
         _contract_bail("GRILL", msg, soft)
 
     task = _task_card_contract("GRILL", report, soft)
-    _enforce_agent_scope("GRILL", task, bail)
-    if status not in ("CLEAR", "GAPS", "FAIL"):
-        bail("未知结果状态 " + status + "；只能是 CLEAR/GAPS/FAIL。")
-    if status == "FAIL":
-        return
-    # 校准实锤:grill 的唯一价值是"真读过材料后说没遗漏",而 CLEAR/GAPS 令牌
-    # 曾零阅读即发(tool_calls 传入却完全没用)——一个一轮未读、直接输出样板的
-    # agent 与认真审查者在门禁眼中无差别。要求至少一次成功的只读检索;transcript
-    # 完全无 tool_use 块的老宿主场景沿用既有话术(展示风险+accept-risk),不新增死锁。
-    calls = tool_calls or []
-    read_ok = any(str(c.get("name", "")).lower() in ("read", "grep", "glob")
-                  and c.get("result_seen") and not c.get("is_error")
-                  for c in calls)
-    if not read_ok:
-        bail("grill critic 报 %s 但 transcript 无任何成功的 Read/Grep/Glob "
-             "调用——'没有遗漏'的结论必须建立在真读过需求/代码材料之上,"
-             "而非样板输出。若宿主确未暴露子会话工具调用,主会话展示风险后"
-             "用 accept-risk grill。" % status)
-    stage = _flex_field(report, "STAGE") or ""
-    if stage.lower() != str(task.get("stage", "")).lower():
-        bail("STAGE 与任务卡的质询检查阶段不一致。")
-    count = _number_field(report, "GAPS_FOUND")
-    if count is None:
-        bail("缺少 GAPS_FOUND: <数字>。")
-    if status == "CLEAR" and count != 0:
-        bail("标记 CLEAR 但 GAPS_FOUND 不是 0。")
-    if status == "GAPS" and count == 0:
-        bail("标记 GAPS 但 GAPS_FOUND=0。")
-    branches = _flex_field(report, "MISSING_BRANCHES")
-    if status == "GAPS" and (branches is None or _empty_section(branches)):
-        bail("发现遗漏时必须在 MISSING_BRANCHES 中列出可继续追问的决策分支。")
+    changed = _enforce_agent_scope("GRILL", task, bail)
+    decision = _evaluate_grill_contract(_contract_context(
+        "GRILL", status, report, task, tool_calls, changed))
+    if not decision.accepted:
+        bail(decision.reason)
 
 
 def _git_out(cmd):
@@ -2373,47 +2382,18 @@ def _compile_contract(status, report, tool_calls=None, soft=False):
         _contract_bail("COMPILE", msg, soft)
 
     task = _task_card_contract("COMPILE", report, soft)
-    _enforce_agent_scope("COMPILE", task, bail)
-    if status == "FAIL":
-        return   # 诚实上报工具/配置问题,不苛求对账
-    if not re.search(r"EXECUTED_BUILD", report):
-        bail("必须包含 EXECUTED_BUILD(实际执行的编译方式与输出摘录)。")
-    build_cfg = _state_config().get("编译方式", "")
-    if not _build_summary_matches(_field(report, "EXECUTED_BUILD"), build_cfg):
-        bail("EXECUTED_BUILD 与配置确认的编译方式不一致,禁止自行猜测或替换编译命令。")
-    need = _required_skill(build_cfg)
-    if need:
-        call = _skill_call(tool_calls, need)
-        if not call:
-            bail(f"编译配置要求 {need} Skill,但 transcript 中没有对应 Skill 工具调用。")
-        # BLOCKED 的定义就是"修复上限内仍编译不过"——最后一次调用失败正是
-        # BLOCKED 的证明而非反证。校准实锤:成功性检查曾把诚实 BLOCKED 结构性
-        # 打回,形成重派整只 agent 的死循环。BLOCKED+零 error 的矛盾由下方
-        # BUILD_ERRORS 对账兜住,此豁免不放宽任何造假面。
-        if status != "BLOCKED" and _call_failed(call):
-            bail(f"{need} Skill 的工具结果明确失败，不能报告编译成功。")
-    else:
-        expected = _embedded_build_command(build_cfg) or build_cfg
-        if status != "BLOCKED":
-            _require_bash_success(tool_calls, expected, bail, "编译")
-        else:
-            # BLOCKED 仍须证明真跑过编译(防空口弃权),只豁免"必须成功"
-            if not _bash_call(tool_calls, expected):
-                bail("标记 BLOCKED 但 transcript 中没有配置编译命令的真实调用"
-                     "——弃权也必须先真实尝试过编译。")
-    m = re.search(r"^\s*BUILD_ERRORS:\s*(\d+)", report, re.M)
-    if not m:
-        bail("缺少 BUILD_ERRORS: <数字>(最终一次编译的 error 数)。")
-    n = int(m.group(1))
-    if status == "OK" and n != 0:
-        bail(f"标记 OK 但 BUILD_ERRORS={n},自相矛盾。")
-    if status == "BLOCKED" and n == 0:
-        bail("标记 BLOCKED 但 BUILD_ERRORS=0,自相矛盾(编译已过应报 OK)。")
-    net = _compile_agent_net(task)
-    shrink = _section(report, "SHRINK_EXEMPT")
-    if net < 0 and (shrink is None or _empty_section(shrink)):
-        bail(f"代码净删 {-net} 行(git 亲算:未提交+修复编译 commit)且无 SHRINK_EXEMPT 声明——"
-             "禁止删代码/注释代码换编译通过;确属合理精简须逐项声明并接受下游评审复核。")
+    changed = _enforce_agent_scope("COMPILE", task, bail)
+    decision = _evaluate_compile_contract(_contract_context(
+        "COMPILE",
+        status,
+        report,
+        task,
+        tool_calls,
+        changed,
+        compile_net=_compile_agent_net(task),
+    ))
+    if not decision.accepted:
+        bail(decision.reason)
 
 
 def ev_posttooluse(d):

@@ -100,6 +100,10 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_hook_task_card_contracts.py",), 180, 5000),
     ("Hook 质量收据创建与复用回归",
      ("scripts/tests/test_hook_receipts.py",), 180, 5000),
+    ("Hook COMPILE Agent 契约回归",
+     ("scripts/tests/test_hook_compile_contract.py",), 180, 5000),
+    ("Hook GRILL Agent 契约回归",
+     ("scripts/tests/test_hook_grill_contract.py",), 180, 5000),
 )
 
 

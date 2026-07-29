@@ -64,6 +64,13 @@ from mae_flow_core.application.hooks.receipts import (
     reusable_codecheck_fullcheck_receipt as _core_reusable_codecheck_fullcheck,
     reusable_ut_receipt as _core_reusable_ut_receipt,
 )
+from mae_flow_core.application.hooks.agent_completion import (
+    AgentCompletionPorts as _AgentCompletionPorts,
+    handle_agent_completion as _handle_agent_completion,
+)
+from mae_flow_core.application.hooks.models import (
+    HookResponse as _HookResponse,
+)
 from mae_flow_core.quality.agent_reports import (
     ac_coverage_has_mapping as _core_ac_coverage_has_mapping,
     empty_section as _core_empty_section,
@@ -468,124 +475,63 @@ def _autopsy(tp, asst):
     return clue
 
 
-def ev_subagentstop(d):
-    # retry=打回后的重答收尾:此路径禁止再次 exit 2(防死循环),但验证通过仍须发令牌
-    # (历史 bug:曾在此处无条件放行,导致"打回→改正→再收尾"的自愈终点拿不到令牌)
-    retry = bool(d.get("stop_hook_active"))
-    # 定位 agent 自己的 transcript:payload 的 transcript_path 可能指向主会话文件
-    # (历史 bug:一直解析主会话尾巴,agent 的合法标记永远"看不见")。
-    # 优先用 payload 中带 agent 字样的路径字段;否则取 <主transcript同名目录>/subagents/ 下最新的 agent 文件。
-    tp = ""
-    for k, v in d.items():
-        if isinstance(v, str) and "transcript" in k.lower() and "agent" in k.lower():
-            tp = v
-            break
-    main_tp = d.get("transcript_path", "")
-    if not tp:
-        stem = os.path.splitext(main_tp)[0]
-        cand = glob.glob(os.path.join(stem, "subagents", "agent-*.jsonl"))
-        tp = max(cand, key=os.path.getmtime) if cand else main_tp
-    _log("subagentstop transcript: " + (os.path.basename(tp) or "?"))
-    try:
-        lines = [json.loads(x) for x in read_lines(tp) if x.strip()]
-    except Exception:
-        sys.exit(0)
+def _latest_subagent_transcript(main_path):
+    stem = os.path.splitext(main_path)[0]
+    candidates = glob.glob(
+        os.path.join(stem, "subagents", "agent-*.jsonl"))
+    return max(candidates, key=os.path.getmtime) if candidates else ""
 
-    transcript = _parse_tool_transcript(lines)
-    users, asst = transcript.user_texts, transcript.assistant_texts
-    tool_calls = [call.to_legacy() for call in transcript.tool_calls]
-    prompt = users[0] if users else ""
-    last = (asst[-1] if asst else "").strip()
-    # 标记本身即身份证明。优先第一行；兼容模型在前面多写一句话/代码围栏的情况，
-    # 只要最终回复中恰好有一个契约标记就继续验完整契约。格式小毛病不值得重跑重活。
-    first_line = last.splitlines()[0] if last else ""
-    matches = list(re.finditer(
-        r"^\s*(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", last, re.M))
-    selected = _select_contract_marker(last)
-    reject_reason = selected.error
-    m = (
-        re.match(
-            r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)",
-            "%s_RESULT: %s" % (selected.kind, selected.status),
-        )
-        if selected.kind else None
-    )
-    if len(matches) > 1 and m:
-        kinds = {x.group(1) + "/" + x.group(2) for x in matches}
-        _log("subagentstop: 多个相同结果标记(%s),判定无歧义,接受"
-             % next(iter(kinds)))
-    elif not re.match(
-            r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)",
-            first_line) and len(matches) == 1 and m:
-        _log("subagentstop: 契约标记不在第一行,兼容接受并继续验完整契约")
-    if reject_reason:
-        _record_rejection("SUBAGENT", reject_reason)
-    runtime = _contract_state()
-    standalone_expected = ""
-    if runtime.get("_standalone"):
-        standalone_expected = {
-            "ut": "UT", "codecheck": "CODECHECK", "grill": "GRILL",
-        }.get(str(runtime.get("current", "")).replace("standalone_", ""), "")
-        if m and m.group(1) != standalone_expected:
-            _log("standalone action ignores unrelated contract agent: " + m.group(1))
-            sys.exit(0)
-    # 凡以唯一合法契约标记收尾的 agent,直接验契约+发令牌,
-    # 不依赖启动 prompt 的措辞(主模型派发时未必写 agent 文件名——已实际踩过)
-    if m:
-        if m.group(1) == "CODECHECK":
+
+def _load_agent_transcript(path):
+    return [
+        json.loads(line)
+        for line in read_lines(path)
+        if line.strip()
+    ]
+
+
+def _run_agent_contract(kind, status, report, calls, retry):
+    legacy_calls = [call.to_legacy() for call in calls]
+    validators = {
+        "CODECHECK": _codecheck_contract,
+        "UT": _ut_contract,
+        "COMPILE": _compile_contract,
+        "GRILL": _grill_contract,
+    }
+    validator = validators.get(kind)
+    if validator:
+        validator(status, report, legacy_calls, soft=retry)
+    return _HookResponse()
+
+
+def _agent_completion_ports():
+    return _AgentCompletionPorts(
+        latest_subagent_transcript=_latest_subagent_transcript,
+        load_transcript=_load_agent_transcript,
+        read_transcript_head=lambda path, limit: read_text(
+            path, errors="replace", limit=limit),
+        contract_state=_contract_state,
+        record_codecheck_trace=lambda status, report, calls, path, retry:
             _record_codecheck_agent_trace(
-                m.group(2), last, tool_calls, tp, retry=retry)
-            _codecheck_contract(m.group(2), last, tool_calls, soft=retry)
-        if m.group(1) == "UT":
-            _ut_contract(m.group(2), last, tool_calls, soft=retry)
-        if m.group(1) == "COMPILE":
-            _compile_contract(m.group(2), last, tool_calls, soft=retry)
-        if m.group(1) == "GRILL":
-            _grill_contract(m.group(2), last, tool_calls, soft=retry)
-        _record_agent_token(m.group(1), m.group(2), last)
-        sys.exit(0)
-    if retry:
-        _autopsy(tp, asst)   # 留档(不进 stderr:此路径 exit 0,别被 harness 当 hook error 展示)
-        _record_rejection("SUBAGENT", reject_reason
-                          or "重答后仍未找到唯一的 XXX_RESULT 结果标记。")
-        _log("subagentstop: 重答后仍无可判定契约标记,放行防死循环(不发令牌,done 会拦;尸检已留档)")
-        sys.exit(0)
-    # 无标记:判定是否我方契约 agent——扫 transcript 头部(含 agent 系统提示,必带 agent 名/契约字样),
-    # 不依赖任务 prompt 措辞(主模型派"定稿"类子任务时不会写 agent 名——已实际踩过)
-    try:
-        head = read_text(tp, errors="replace", limit=16000)
-    except OSError:
-        head = prompt
-    if standalone_expected:
-        expected_agent = {
-            "UT": "ut-generator-agent",
-            "CODECHECK": "codecheck-fix-agent",
-            "GRILL": "grill-critic-agent",
-        }.get(standalone_expected, "")
-        if expected_agent not in head and not re.search(
-                r"\b" + re.escape(standalone_expected) + r"_RESULT:", head):
-            _log("standalone action ignores unrelated subagent without expected contract")
-            sys.exit(0)
-    if not re.search(r"_RESULT:|ut-generator-agent|codecheck-fix-agent|"
-                     r"story-generator-agent|compile-agent|grill-critic-agent", head):
-        _log("subagentstop: 无契约标记且 transcript 头部未见契约 agent 特征,跳过")
-        sys.exit(0)
-    if (standalone_expected == "CODECHECK"
-            or "codecheck-fix-agent" in head
-            or re.search(r"\bCODECHECK_RESULT:", head)):
-        _record_codecheck_agent_trace(
-            "NO_RESULT", last, tool_calls, tp, retry=retry)
-    clue = _autopsy(tp, asst)
-    # 打回话术必须与真实拒签原因一致:矛盾标记场景若仍说"第一行必须是标记",
-    # 弱模型会按错误指引改写(第一行明明就是标记)再死一遍,循环重跑昂贵 agent。
-    reason_text = reject_reason or (
-        "最终回复必须以 XXX_RESULT: <状态> 开头(第一行)。"
-        "请按你的定义文件顶部「最终回复格式」重新输出完整结果;不确定时用失败/待确认类状态,禁止省略标记。")
-    print("[mae-flow] 子 agent 契约违规:" + reason_text + "\n"
-          "尸检线索(" + clue + ")——若死因是工具不可用/持续报错,按契约「带着情报死」条款以 FAIL/BLOCKED 收尾并写明详情;"
-          "主 agent 重启新实例时必须把此线索转告它。",
-          file=sys.stderr)
-    sys.exit(2)
+                status,
+                report,
+                [call.to_legacy() for call in calls],
+                path,
+                retry=retry,
+            ),
+        run_contract=_run_agent_contract,
+        record_token=_record_agent_token,
+        record_rejection=_record_rejection,
+        autopsy=_autopsy,
+        log=_log,
+    )
+
+
+def ev_subagentstop(d):
+    response = _handle_agent_completion(d, _agent_completion_ports())
+    if response.stderr:
+        print(response.stderr, file=sys.stderr, end="")
+    sys.exit(response.exit_code)
 
 
 def _git_head():

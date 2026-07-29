@@ -33,6 +33,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_guard_gate.py",), 180, 5000),
     ("Gate 一次性放行令策略回归",
      ("scripts/tests/test_guard_permits.py",), 180, 5000),
+    ("Gate 提交归属策略回归",
+     ("scripts/tests/test_guard_ownership.py",), 180, 5000),
     ("质量任务卡纯契约回归",
      ("scripts/tests/test_quality_task_cards.py",), 180, 5000),
     ("交付子状态机纯策略回归",

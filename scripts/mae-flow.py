@@ -110,6 +110,10 @@ from mae_flow_core.guard.permits import (
     record_strike,
     strike_escalation,
 )
+from mae_flow_core.guard.ownership import (
+    OwnershipFacts,
+    decide_ownership,
+)
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,
@@ -7175,76 +7179,42 @@ def _gate_commit_candidates(c, st, jdie):
     candidate_snapshot = _pending_commit_candidates(c)
     item = _checkpoint_locked_item(st) or {}
     receipt = item.get("receipt") or {}
-    if item.get("status") == "commit_pending" and receipt.get("snapshot"):
-        expected = set((receipt.get("snapshot") or {}).keys())
-        actual = set(candidate_snapshot.get("paths") or [])
-        current = _reviewed_snapshot_current(st, item)
-        if current != (receipt.get("snapshot") or {}):
-            jdie(
-                "bash-checkpoint-reviewed-snapshot",
-                "检视后的未提交代码已经变化，禁止拿旧确认提交新 diff。"
-                "保留现场并重新进入调整、编译和检视。")
-        if actual != expected:
-            missing = sorted(expected - actual)
-            extra = sorted(actual - expected)
-            detail = []
-            if missing:
-                detail.append("漏掉 " + "、".join(missing[:8]))
-            if extra:
-                detail.append("夹带 " + "、".join(extra[:8]))
-            jdie(
-                "bash-checkpoint-reviewed-files",
-                "本次 commit 必须精确等于用户刚检视的文件；"
-                + "；".join(detail)
-                + "。按 checkpoint status 输出的精确 git add/commit 执行。")
+    review_required = (
+        item.get("status") == "commit_pending"
+        and bool(receipt.get("snapshot")))
+    review = decide_ownership(OwnershipFacts(
+        review_required=review_required,
+        expected_snapshot=receipt.get("snapshot") or {},
+        current_snapshot=(
+            _reviewed_snapshot_current(st, item)
+            if review_required else {}),
+        candidate_paths=tuple(candidate_snapshot.get("paths") or []),
+        inherited=(),
+        foreign_openspec=(),
+        strong_artifacts=(),
+        unproven_paths=(),
+        artifact_hints=(),
+    ))
+    if review.block:
+        jdie(review.block.rule, review.block.message)
     (inherited, foreign_openspec, strong_artifacts,
      unproven_paths, artifact_hints) = _pending_commit_files(
          c, st, candidate_snapshot)
-    if inherited:
-        shown = "、".join(inherited[:8])
-        more = "…" if len(inherited) > 8 else ""
-        jdie(
-            "bash-cross-delivery-carryover",
-            "提交前检测到流程启动前已经存在、内容至今未变，且本单 Agent "
-            "没有实际改写的文件: " + shown + more
-            + "。它们属于上一单/用户现场，不能因为本次暂存而变成本单交付。"
-              "执行 git restore --staged -- <上述路径> 只移出暂存区；"
-              "若本单确实需要某文件，让 Agent 按本单需求实际修改并检视后再提交。")
-    if foreign_openspec:
-        shown = "、".join(foreign_openspec[:8])
-        more = "…" if len(foreign_openspec) > 8 else ""
-        jdie(
-            "bash-foreign-openspec",
-            "提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec "
-            "文件: " + shown + more
-            + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
-              "选择不入库后由流程移入 .mae-flow-work/story。")
-    if strong_artifacts:
-        shown = "、".join(strong_artifacts[:8])
-        more = "…" if len(strong_artifacts) > 8 else ""
-        jdie(
-            "bash-build-artifacts",
-            "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时编译产物: "
-            + shown + more
-            + "。这些文件通常不应进入 MR。若已暂存，执行 "
-              "git restore --staged -- <上述路径>（只移出暂存区，不删除本地文件），"
-              "并把对应规则加入项目 .gitignore 后再提交；若命令是 git add && git commit，"
-              "从 git add 清单中移除这些路径。")
-    if unproven_paths:
-        print(
-            "[mae-flow] ⚠ 提交提示:以下文件不在 Agent 通过 Write/Edit/MultiEdit "
-            "实际改写的候选范围内，可能是编译、格式化或生成命令的副作用；"
-            "也可能是必要的移动/删除，因此本次不阻断。请逐个确认: "
-            + "、".join(unproven_paths[:8])
-            + ("…" if len(unproven_paths) > 8 else ""),
-            file=sys.stderr)
-    if artifact_hints:
-        print(
-            "[mae-flow] ⚠ 产物提示:以下候选位于常见输出目录或具有编译产物特征；"
-            "即使 Agent 直接写过，也不代表必须提交，请结合 git diff 确认: "
-            + "、".join(artifact_hints[:8])
-            + ("…" if len(artifact_hints) > 8 else ""),
-            file=sys.stderr)
+    decision = decide_ownership(OwnershipFacts(
+        review_required=False,
+        expected_snapshot={},
+        current_snapshot={},
+        candidate_paths=tuple(candidate_snapshot.get("paths") or []),
+        inherited=tuple(inherited),
+        foreign_openspec=tuple(foreign_openspec),
+        strong_artifacts=tuple(strong_artifacts),
+        unproven_paths=tuple(unproven_paths),
+        artifact_hints=tuple(artifact_hints),
+    ))
+    if decision.block:
+        jdie(decision.block.rule, decision.block.message)
+    for message in decision.advisories:
+        print(message, file=sys.stderr)
     _advisory_lightcheck_before_commit(st, candidate_snapshot)
 
 

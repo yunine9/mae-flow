@@ -54,6 +54,16 @@ from mae_flow_core.application.hooks.task_cards import (
     verify_completion_task as _verify_completion_task,
     verify_dispatch_task as _verify_dispatch_task,
 )
+from mae_flow_core.application.hooks.receipts import (
+    ReceiptContext as _ReceiptContext,
+    plan_codecheck_build_receipt as _plan_codecheck_build_receipt,
+    plan_codecheck_fullcheck_receipt as _plan_codecheck_fullcheck_receipt,
+    plan_ut_generator_receipt as _plan_ut_generator_receipt,
+    plan_ut_run_receipt as _plan_ut_run_receipt,
+    reusable_codecheck_build_receipt as _core_reusable_codecheck_build,
+    reusable_codecheck_fullcheck_receipt as _core_reusable_codecheck_fullcheck,
+    reusable_ut_receipt as _core_reusable_ut_receipt,
+)
 from mae_flow_core.quality.agent_reports import (
     ac_coverage_has_mapping as _core_ac_coverage_has_mapping,
     empty_section as _core_empty_section,
@@ -1264,20 +1274,25 @@ def _codecheck_build_call(tool_calls, build_cfg):
     return call if call and not _call_failed(call) else None
 
 
+def _receipt_context(task):
+    snapshot = (
+        _source_snapshot(task.get("head", ""))
+        if task.get("standalone") else None
+    )
+    return _ReceiptContext(
+        at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        head=_git_head(),
+        source_snapshot=snapshot,
+    )
+
+
 def _record_codecheck_build_receipt(task, tool_calls):
     """报告格式即使被打回，也保留已经真实发生的编译证据，供同一 HEAD 的重答复用。"""
     build_cfg = _state_config().get("编译方式", "")
     if not build_cfg or not _codecheck_build_call(tool_calls, build_cfg):
         return None
-    rec = {
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "step": task.get("step", ""),
-        "task_sha256": task.get("sha256", ""),
-        "head": _git_head(),
-        "build": build_cfg,
-    }
-    if task.get("standalone"):
-        rec["source_snapshot"] = _source_snapshot(task.get("head", ""))
+    rec = _plan_codecheck_build_receipt(
+        task, _receipt_context(task), build_cfg)
     try:
         data = _evidence_data()
         data["CODECHECK_BUILD"] = rec
@@ -1296,25 +1311,16 @@ def _record_codecheck_fullcheck_receipt(
     精确计数可解析时同时保存机器对账；未知成功输出只保存执行凭证，并把
     CodeCheck 结论视为建议项。源码、任务卡或首检口径任一变化都会让凭证失效。
     """
-    counts_complete = (
-        len(raw_counts) == int(command_count)
-        and all(isinstance(x, int) and x >= 0 for x in raw_counts))
-    rec = {
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "step": task.get("step", ""),
-        "task_sha256": task.get("sha256", ""),
-        "head": _git_head(),
-        "command_count": int(command_count),
-        "raw_counts": list(raw_counts),
-        "raw_total": int(sum(raw_counts)),
-        "machine_counts_complete": counts_complete,
-        "expected_raw": int(expected_raw) if expected_raw is not None else None,
-        "result_hashes": list(result_hashes or []),
-        "scan_count": scan.get("count"),
-        "stock_excluded": scan.get("stock_excluded"),
-    }
-    if task.get("standalone"):
-        rec["source_snapshot"] = _source_snapshot(task.get("head", ""))
+    rec = _plan_codecheck_fullcheck_receipt(
+        task,
+        _receipt_context(task),
+        command_count,
+        raw_counts,
+        scan,
+        expected_raw=expected_raw,
+        result_hashes=result_hashes,
+    )
+    counts_complete = rec["machine_counts_complete"]
     try:
         data = _evidence_data()
         data["CODECHECK_FULLCHECK"] = rec
@@ -1680,88 +1686,87 @@ def _record_ut_receipts(task, report, tool_calls, require_baseline=False):
     executed = _flex_field(report, "EXECUTED_UT") or ""
     run = _reported_bash_call(tool_calls, executed)
     records = {}
-    common = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "step": task.get("step", ""),
-              "task_sha256": task.get("sha256", ""), "head": _git_head()}
-    if task.get("standalone"):
-        common["source_snapshot"] = _source_snapshot(task.get("head", ""))
+    context = _receipt_context(task)
     if generator and not _call_failed(generator):
-        records["UT_GENERATOR"] = dict(common, value=cfg.get("UT生成方式", ""))
+        records["UT_GENERATOR"] = _plan_ut_generator_receipt(
+            task, context, cfg.get("UT生成方式", ""))
     reported_counts = _ut_report_counts(report)
     counts_complete = all(v is not None for v in reported_counts.values())
     if run and counts_complete and not _call_failed(run) and not _ut_execution_risk(
             report, run, cfg.get("UT运行命令", ""), tool_calls, require_baseline):
         actual = _reported_bash_segment(run, executed) or executed
-        records["UT_RUN"] = dict(
-            common, value=actual, reported_counts=reported_counts,
-            result_sha256=hashlib.sha256(
-                str(run.get("result", "") or "").encode(
-                    "utf-8", errors="replace")).hexdigest())
+        records["UT_RUN"] = _plan_ut_run_receipt(
+            task,
+            context,
+            actual,
+            reported_counts,
+            run.get("result", ""),
+        )
     if not records:
         return
     try:
         data = _evidence_data()
         data.update(records)
         _save_evidence(data)
-        _log("UT 执行凭证: " + "/".join(sorted(records)) + " @" + common["head"][:9])
+        _log("UT 执行凭证: " + "/".join(sorted(records))
+             + " @" + context.head[:9])
     except Exception as e:
         _log("ut receipt EXC: " + str(e))
 
 
+def _reuse_source_facts(receipt, task):
+    if task.get("standalone"):
+        return _source_snapshot(task.get("head", "")), (), ""
+    changed, err = _source_changed_since_receipt(
+        receipt.get("head", ""), _contract_state())
+    return None, tuple(changed), err
+
+
 def _reusable_ut_receipt(key, task, expected=None):
     rec = _evidence_data().get(key, {})
-    if not rec or rec.get("step") != task.get("step") \
-            or rec.get("task_sha256") != task.get("sha256") \
-            or (expected is not None and not _same_config(rec.get("value", ""), expected)):
+    if not rec:
         return None
-    if task.get("standalone"):
-        return rec if rec.get("source_snapshot") == _source_snapshot(task.get("head", "")) else None
-    changed, err = _source_changed_since_receipt(
-        rec.get("head", ""), _contract_state())
-    return rec if not err and not changed else None
+    snapshot, changed, err = _reuse_source_facts(rec, task)
+    return _core_reusable_ut_receipt(
+        rec,
+        task,
+        expected=expected,
+        standalone_snapshot=snapshot,
+        changed_paths=changed,
+        source_error=err,
+    )
 
 
 def _reusable_codecheck_build_receipt(task):
     """仅同任务卡、同步骤且源码未变化时复用；代码一变就必须重新编译。"""
     rec = _evidence_data().get("CODECHECK_BUILD", {})
-    if not rec or rec.get("step") != task.get("step") \
-            or rec.get("task_sha256") != task.get("sha256") \
-            or not _same_config(rec.get("build", ""), _state_config().get("编译方式", "")):
+    if not rec:
         return None
-    if task.get("standalone"):
-        return rec if rec.get("source_snapshot") == _source_snapshot(task.get("head", "")) else None
-    head = rec.get("head", "")
-    if not head:
-        return None
-    st = _contract_state()
-    changed, err = _source_changed_since_receipt(head, st)
-    return rec if not err and not changed else None
+    snapshot, changed, err = _reuse_source_facts(rec, task)
+    return _core_reusable_codecheck_build(
+        rec,
+        task,
+        _state_config().get("编译方式", ""),
+        standalone_snapshot=snapshot,
+        changed_paths=changed,
+        source_error=err,
+    )
 
 
 def _reusable_codecheck_fullcheck_receipt(task, command_count, scan):
     rec = _evidence_data().get("CODECHECK_FULLCHECK", {})
-    if not rec or rec.get("step") != task.get("step") \
-            or rec.get("task_sha256") != task.get("sha256") \
-            or rec.get("command_count") != int(command_count) \
-            or rec.get("scan_count") != scan.get("count") \
-            or rec.get("stock_excluded") != scan.get("stock_excluded"):
+    if not rec:
         return None
-    counts = rec.get("raw_counts")
-    if not isinstance(counts, list) \
-            or not all(isinstance(x, int) and x >= 0 for x in counts) \
-            or sum(counts) != rec.get("raw_total"):
-        return None
-    if rec.get("machine_counts_complete"):
-        if len(counts) != int(command_count):
-            return None
-    else:
-        if counts or not rec.get("result_hashes"):
-            return None
-    if task.get("standalone"):
-        return rec if rec.get("source_snapshot") == _source_snapshot(
-            task.get("head", "")) else None
-    changed, err = _source_changed_since_receipt(
-        rec.get("head", ""), _contract_state())
-    return rec if not err and not changed else None
+    snapshot, changed, err = _reuse_source_facts(rec, task)
+    return _core_reusable_codecheck_fullcheck(
+        rec,
+        task,
+        command_count,
+        scan,
+        standalone_snapshot=snapshot,
+        changed_paths=changed,
+        source_error=err,
+    )
 
 
 def _source_changed_since_receipt(head, st):

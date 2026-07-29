@@ -73,6 +73,15 @@ class DifferentialNormalizationTests(unittest.TestCase):
 
 
 class DifferentialRunnerTests(unittest.TestCase):
+    def test_stage0_runtime_scenarios_are_registered(self):
+        from differential.scenarios import SCENARIOS
+        self.assertTrue({
+            "direct_current",
+            "standalone_action_status",
+            "corrupt_exit_repair",
+            "terminal_pretooluse_bypass",
+        }.issubset(SCENARIOS))
+
     def test_phase1_scenarios_match_fixed_baseline(self):
         golden_path = os.path.join(
             ROOT,

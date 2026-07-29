@@ -492,16 +492,43 @@ def moonlight_finalize(project, implementation_root):
     }, {}
 
 
+from differential import stage0_scenarios  # noqa: E402
+
+
+def direct_current(project, implementation_root):
+    return stage0_scenarios.direct_current(
+        project, implementation_root, _prepare_repository)
+
+
+def standalone_action_status(project, implementation_root):
+    return stage0_scenarios.standalone_action_status(
+        project, implementation_root, _prepare_repository)
+
+
+def corrupt_exit_repair(project, implementation_root):
+    return stage0_scenarios.corrupt_exit_repair(
+        project, implementation_root, _prepare_repository)
+
+
+def terminal_pretooluse_bypass(project, implementation_root):
+    return stage0_scenarios.terminal_pretooluse_bypass(
+        project, implementation_root, _prepare_repository)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
     "compile_task_card": compile_task_card,
     "combined_git_add_flags": combined_git_add_flags,
+    "corrupt_exit_repair": corrupt_exit_repair,
     "dangerous_gate_bash": dangerous_gate_bash,
+    "direct_current": direct_current,
     "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
+    "standalone_action_status": standalone_action_status,
     "terminal_status": terminal_status,
+    "terminal_pretooluse_bypass": terminal_pretooluse_bypass,
     "corrupt_state_doctor": corrupt_state_doctor,
     "workflow_steps": workflow_steps,
     "ordinary_advance": ordinary_advance,

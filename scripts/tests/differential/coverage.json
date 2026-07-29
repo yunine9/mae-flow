@@ -25,6 +25,14 @@
       "delivery": "none",
       "fault": "none"
     },
+    "corrupt_exit_repair": {
+      "domain": "state",
+      "runtime": "corrupt",
+      "workflow": "none",
+      "transition": "repair",
+      "delivery": "none",
+      "fault": "corrupt-json"
+    },
     "compile_task_card": {
       "domain": "quality",
       "runtime": "flow",
@@ -45,6 +53,14 @@
       "domain": "gate",
       "runtime": "flow",
       "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "direct_current": {
+      "domain": "runtime",
+      "runtime": "direct",
+      "workflow": "none",
       "transition": "none",
       "delivery": "none",
       "fault": "none"
@@ -81,8 +97,24 @@
       "delivery": "none",
       "fault": "none"
     },
+    "standalone_action_status": {
+      "domain": "runtime",
+      "runtime": "standalone",
+      "workflow": "none",
+      "transition": "none",
+      "delivery": "standalone",
+      "fault": "none"
+    },
     "terminal_status": {
       "domain": "runtime",
+      "runtime": "flow-terminal",
+      "workflow": "tweak",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "terminal_pretooluse_bypass": {
+      "domain": "hook",
       "runtime": "flow-terminal",
       "workflow": "tweak",
       "transition": "none",

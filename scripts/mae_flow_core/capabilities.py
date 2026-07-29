@@ -795,8 +795,12 @@ def _tree_sha256(path):
     digest = hashlib.sha256()
     files = []
     for base, directories, names in os.walk(path):
-        directories.sort()
-        files.extend(os.path.join(base, name) for name in names)
+        directories[:] = sorted(
+            name for name in directories if name != "__pycache__")
+        files.extend(
+            os.path.join(base, name)
+            for name in names
+            if not name.endswith((".pyc", ".pyo")))
     files.sort(key=lambda item: os.path.relpath(
         item, path).replace(os.sep, "/"))
     for filename in files:

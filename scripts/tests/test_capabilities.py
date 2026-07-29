@@ -160,6 +160,23 @@ class EmbeddedCapabilityTests(unittest.TestCase):
     # ------------------------------------------------------------------
     # 能力包与内嵌资源
     # ------------------------------------------------------------------
+    def test_vendor_tree_hash_ignores_python_bytecode_cache(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "analyzer.py")
+            write(source, "VALUE = 1\n")
+            expected = capabilities._tree_sha256(root)
+
+            write(
+                os.path.join(
+                    root, "__pycache__", "analyzer.cpython-313.pyc"),
+                "runtime cache")
+            write(os.path.join(root, "legacy.pyc"), "legacy runtime cache")
+
+            self.assertEqual(expected, capabilities._tree_sha256(root))
+
+            write(source, "VALUE = 2\n")
+            self.assertNotEqual(expected, capabilities._tree_sha256(root))
+
     def test_all_phase_packs_are_pinned_and_host_safe(self):
         expected = {
             "open", "hotfix-open", "tweak-open", "design", "build",

@@ -184,3 +184,24 @@ Stage 1 已将通用、Agent、Delivery 和 Quality 共 24 个历史注册名（
 
 Stage 1 只降低职责耦合，不调整证据名称、失败文案、执行顺序、状态字段、文件副作用
 或 Git 行为。后续阶段继续以 Phase-11 为当前追加式行为基线。
+
+## Stage 2：Gate、Permit 与 Ownership 完成证据
+
+Stage 2 将 Edit、Bash/Git、一次性放行令和提交归属规则迁入 `mae_flow_core.guard`。
+CLI 只采集 Flow/State/Git/文件事实，执行 sidecar 与历史写入，并映射纯决策到既有
+stderr/退出码；Hook 继续通过同一个 Gate 入口调用这些策略。架构测试禁止已迁移规则
+ID 回流到 CLI 或 Hook。
+
+2026-07-30 在 Stage 2 最终实现上取得的新鲜验证结果：
+
+- 完整 `unittest discover`：328 项通过；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-12 differential runner：零差分，且 Phase-11 全部快照逐项保持；
+- fault injection：3 项通过；
+- State、Checkpoint、Gate、Permit、Ownership 和 Bash 测试在
+  `error::ResourceWarning` 下全部通过；
+- 四个新增 Guard 业务模块分别为 291、264、77、119 行，复杂度门禁通过；
+- `git diff --check main...HEAD` 通过。
+
+Stage 2 没有修改规则优先级、block id 算法、permit/strike sidecar schema、失败文案、
+Git 候选范围或 break-glass 安全等级。后续阶段继续以 Phase-12 为追加式行为基线。

@@ -78,3 +78,22 @@
 - Refactor action: corrected the selftest to inspect the exported
   routing contract while retaining the CLI handler check
 - Product behavior: unchanged
+
+## MF-RF-005: Gate permit was replayed during commit branch assembly
+
+- Status: resolved by `75bdf3c`
+- Classification: refactor-introduced compatibility defect
+- Trigger: sign a one-shot permit for an early pre-commit rule such as
+  `bash-commit-format`, then retry the same commit command on a configured
+  delivery branch
+- Evidence: the first policy pass consumed the permit, but CLI assembly filled
+  `current_branch` and reran the complete pre-commit policy; the same early rule
+  immediately blocked again because the permit was already marked used
+- Root cause: commit branch verification was coupled to the full ordered
+  pre-commit evaluator instead of being a distinct later rule
+- Resolution: split `decide_commit_branch()` from format and earlier rules;
+  query Git at the historical point, then evaluate only the branch rule
+- Regression: `test_guard_permit_integration.py` loads the real CLI assembly,
+  signs a valid format permit, verifies exit 0, exactly one consumption and no
+  strike sidecar; pure policy tests separately preserve branch failure
+- Product behavior: restored to the pre-refactor one-shot permit semantics

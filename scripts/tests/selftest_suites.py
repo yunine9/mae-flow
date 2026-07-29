@@ -48,6 +48,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_refactor_completion.py",), 180, 5000),
     ("故障注入与原子写失败回归",
      ("scripts/tests/test_fault_injection.py",), 180, 5000),
+    ("Evidence 值对象与注册执行回归",
+     ("scripts/tests/test_evidence.py",), 180, 5000),
 )
 
 

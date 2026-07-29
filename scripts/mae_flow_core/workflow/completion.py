@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from ..moonlight import enabled as moonlight_enabled
 from ..moonlight import step_kind as moonlight_step_kind
 from .advancement import PACE_STEPS
+from .evidence import EvidenceRegistry, evaluate_step_evidence
 
 
 @dataclass(frozen=True)
@@ -47,12 +48,12 @@ def choice_config(step, choice):
 
 
 def evidence_failures(step, state, evaluators):
-    failures = []
-    for spec in step.get("evidence", []):
-        ok, why = evaluators[spec["type"]](spec, state)
-        if not ok:
-            failures.append(why)
-    return failures
+    registry = (
+        evaluators
+        if isinstance(evaluators, EvidenceRegistry)
+        else EvidenceRegistry(evaluators)
+    )
+    return evaluate_step_evidence(step, state, registry)
 
 
 def evidence_error(

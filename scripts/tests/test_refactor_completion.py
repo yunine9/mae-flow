@@ -58,7 +58,7 @@ from differential.scenarios import SCENARIOS  # noqa: E402
 
 
 class DifferentialCoverageContractTests(unittest.TestCase):
-    def test_phase9_scenarios_have_complete_coverage_metadata(self):
+    def test_registered_scenarios_have_complete_coverage_metadata(self):
         coverage = load_coverage(os.path.join(
             TESTS, "differential", "coverage.json"))
         self.assertEqual(

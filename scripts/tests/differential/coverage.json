@@ -17,6 +17,22 @@
       "delivery": "none",
       "fault": "none"
     },
+    "active_pretooluse_edit": {
+      "domain": "gate",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "none",
+      "delivery": "none",
+      "fault": "none"
+    },
+    "checkpoint_status": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "none",
+      "delivery": "checkpoint-staged",
+      "fault": "none"
+    },
     "combined_git_add_flags": {
       "domain": "ownership",
       "runtime": "flow",
@@ -89,6 +105,14 @@
       "delivery": "moonlight",
       "fault": "none"
     },
+    "moonlight_report_issue": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "report",
+      "delivery": "moonlight",
+      "fault": "recorded-issue"
+    },
     "ordinary_advance": {
       "domain": "workflow",
       "runtime": "flow",
@@ -104,6 +128,14 @@
       "transition": "none",
       "delivery": "standalone",
       "fault": "none"
+    },
+    "subagentstop_missing_task_card": {
+      "domain": "quality",
+      "runtime": "flow",
+      "workflow": "full",
+      "transition": "rejection",
+      "delivery": "none",
+      "fault": "missing-task-card"
     },
     "terminal_status": {
       "domain": "runtime",

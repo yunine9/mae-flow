@@ -82,6 +82,15 @@ class DifferentialRunnerTests(unittest.TestCase):
             "terminal_pretooluse_bypass",
         }.issubset(SCENARIOS))
 
+    def test_stage0_domain_scenarios_are_registered(self):
+        from differential.scenarios import SCENARIOS
+        self.assertTrue({
+            "checkpoint_status",
+            "moonlight_report_issue",
+            "active_pretooluse_edit",
+            "subagentstop_missing_task_card",
+        }.issubset(SCENARIOS))
+
     def test_phase1_scenarios_match_fixed_baseline(self):
         golden_path = os.path.join(
             ROOT,

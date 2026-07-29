@@ -515,9 +515,31 @@ def terminal_pretooluse_bypass(project, implementation_root):
         project, implementation_root, _prepare_repository)
 
 
+def checkpoint_status(project, implementation_root):
+    return stage0_scenarios.checkpoint_status(
+        project, implementation_root, _prepare_repository)
+
+
+def moonlight_report_issue(project, implementation_root):
+    return stage0_scenarios.moonlight_report_issue(
+        project, implementation_root, _prepare_repository)
+
+
+def active_pretooluse_edit(project, implementation_root):
+    return stage0_scenarios.active_pretooluse_edit(
+        project, implementation_root, _prepare_repository)
+
+
+def subagentstop_missing_task_card(project, implementation_root):
+    return stage0_scenarios.subagentstop_missing_task_card(
+        project, implementation_root, _prepare_repository)
+
+
 SCENARIOS = {
     "action_status": action_status,
     "active_gate_edit": active_gate_edit,
+    "active_pretooluse_edit": active_pretooluse_edit,
+    "checkpoint_status": checkpoint_status,
     "compile_task_card": compile_task_card,
     "combined_git_add_flags": combined_git_add_flags,
     "corrupt_exit_repair": corrupt_exit_repair,
@@ -526,7 +548,9 @@ SCENARIOS = {
     "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "moonlight_finalize": moonlight_finalize,
+    "moonlight_report_issue": moonlight_report_issue,
     "standalone_action_status": standalone_action_status,
+    "subagentstop_missing_task_card": subagentstop_missing_task_card,
     "terminal_status": terminal_status,
     "terminal_pretooluse_bypass": terminal_pretooluse_bypass,
     "corrupt_state_doctor": corrupt_state_doctor,

@@ -84,6 +84,8 @@ class EvidenceRegistryTests(unittest.TestCase):
         registry = EvidenceRegistry(source)
         source["second"] = lambda _spec, _state: (True, "")
         self.assertEqual(("first",), registry.names)
+        self.assertIn("first", registry)
+        self.assertTrue(callable(registry["first"]))
         with self.assertRaises(KeyError):
             registry.evaluate("second", {}, {})
 

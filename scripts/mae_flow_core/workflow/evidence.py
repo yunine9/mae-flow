@@ -1,5 +1,6 @@
 """Evidence registration and ordered step evaluation."""
 
+from collections.abc import Mapping
 from types import MappingProxyType
 
 from ..foundation.models import EvidenceResult
@@ -14,7 +15,7 @@ def legacy_result(value):
     return EvidenceResult(value[0], value[1])
 
 
-class EvidenceRegistry:
+class EvidenceRegistry(Mapping):
     """An immutable snapshot of Evidence names and evaluators."""
 
     def __init__(self, evaluators):
@@ -33,6 +34,9 @@ class EvidenceRegistry:
 
     def __contains__(self, name):
         return name in self._evaluators
+
+    def __getitem__(self, name):
+        return self._evaluators[name]
 
     def evaluate(self, name, spec, state):
         evaluator = self._evaluators[name]

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Architecture boundaries for behavior-preserving Mae-Flow refactoring."""
 
+import ast
 import json
 import os
 import sys
@@ -212,21 +213,68 @@ class ArchitectureTests(unittest.TestCase):
                     )
 
     def test_selftest_runs_refactor_safety_suites(self):
+        from selftest_suites import REFACTOR_SAFETY_SUITES
+        commands = {
+            tuple(command)
+            for _label, command, _timeout, _output_limit
+            in REFACTOR_SAFETY_SUITES
+        }
+        expected = {
+            ("scripts/tests/test_differential_harness.py",),
+            ("scripts/tests/differential/runner.py",
+             "--implementation-root", "."),
+            ("scripts/tests/test_architecture.py",),
+            ("scripts/tests/test_workflow_advancement.py",),
+            ("scripts/tests/test_workflow_completion.py",),
+            ("scripts/tests/test_guard_intent.py",),
+            ("scripts/tests/test_quality_task_cards.py",),
+            ("scripts/tests/test_delivery_policies.py",),
+            ("scripts/tests/test_command_dispatch.py",),
+            ("scripts/tests/test_file_io.py",),
+            ("scripts/tests/test_refactor_completion.py",),
+            ("scripts/tests/test_fault_injection.py",),
+        }
+        self.assertTrue(expected.issubset(commands))
+
         with open(
                 os.path.join(ROOT, "scripts", "selftest.py"),
                 encoding="utf-8") as stream:
-            text = stream.read()
-        self.assertIn("test_differential_harness.py", text)
-        self.assertIn("test_architecture.py", text)
-        self.assertIn("test_workflow_advancement.py", text)
-        self.assertIn("test_workflow_completion.py", text)
-        self.assertIn("test_guard_intent.py", text)
-        self.assertIn("test_quality_task_cards.py", text)
-        self.assertIn("test_delivery_policies.py", text)
-        self.assertIn("test_command_dispatch.py", text)
-        self.assertIn("test_file_io.py", text)
-        self.assertIn("test_refactor_completion.py", text)
-        self.assertIn("test_fault_injection.py", text)
+            tree = ast.parse(stream.read())
+        self.assertTrue(any(
+            isinstance(node, ast.For)
+            and isinstance(node.iter, ast.Name)
+            and node.iter.id == "REFACTOR_SAFETY_SUITES"
+            for node in ast.walk(tree)
+        ), "selftest must execute the structured safety suite manifest")
+
+    def test_production_code_cannot_import_test_fault_injection(self):
+        production = [
+            os.path.join(ROOT, "scripts", "mae-flow.py"),
+            os.path.join(ROOT, "scripts", "comet_compat.py"),
+            os.path.join(ROOT, "scripts", "statusline.py"),
+            os.path.join(ROOT, "hooks", "dispatch.py"),
+        ]
+        for current, _dirs, files in os.walk(
+                os.path.join(ROOT, "scripts", "mae_flow_core")):
+            production.extend(
+                os.path.join(current, name)
+                for name in files if name.endswith(".py"))
+        for path in production:
+            with self.subTest(path=os.path.relpath(path, ROOT)):
+                with open(path, encoding="utf-8") as stream:
+                    tree = ast.parse(stream.read())
+                imports = []
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        imports.extend(alias.name for alias in node.names)
+                    elif isinstance(node, ast.ImportFrom):
+                        imports.append(node.module or "")
+                self.assertFalse(any(
+                    name == "fault_injection"
+                    or name.startswith("scripts.tests")
+                    or ".fault_injection" in name
+                    for name in imports
+                ), imports)
 
 
 if __name__ == "__main__":

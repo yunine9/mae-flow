@@ -32,6 +32,36 @@ class RefactorCompletionContractTests(unittest.TestCase):
             500, contract["final_targets"]["max_business_module_lines"])
         self.assertEqual(
             15, contract["final_targets"]["max_policy_complexity"])
+        self.assertEqual(
+            0, contract["final_targets"]["private_monolith_test_imports"])
+        self.assertEqual(
+            {
+                "architecture": [
+                    "python scripts/tests/test_architecture.py",
+                ],
+                "differential": [
+                    "python scripts/tests/differential/runner.py "
+                    "--implementation-root .",
+                ],
+                "fault_injection": [
+                    "python scripts/tests/test_fault_injection.py",
+                ],
+                "resource_warnings": [
+                    "python -W error::ResourceWarning "
+                    "scripts/tests/test_state_core.py",
+                    "python -W error::ResourceWarning "
+                    "scripts/tests/test_checkpoints.py",
+                ],
+                "selftest": [
+                    "python scripts/selftest.py",
+                ],
+                "unit_tests": [
+                    "python -m unittest discover -s scripts/tests "
+                    "-p 'test_*.py'",
+                ],
+            },
+            contract["required_verifications"],
+        )
         self.assertEqual(list(range(10)), [
             item["id"] for item in contract["stages"]])
         self.assertEqual([], validate_contract(ROOT, contract))
@@ -46,6 +76,34 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertIn(
             "scripts/mae-flow.py: final target 20000 must be below "
             "current architecture baseline 10408",
+            validate_contract(ROOT, contract),
+        )
+
+    def test_contract_rejects_relaxed_or_missing_final_targets(self):
+        contract = load_contract(os.path.join(
+            TESTS, "refactor_completion_contract.json"))
+        contract["final_targets"]["private_monolith_test_imports"] = 1
+        self.assertIn(
+            "final_targets must match the approved completion thresholds",
+            validate_contract(ROOT, contract),
+        )
+        del contract["final_targets"]["private_monolith_test_imports"]
+        self.assertIn(
+            "final_targets must match the approved completion thresholds",
+            validate_contract(ROOT, contract),
+        )
+
+    def test_contract_rejects_relaxed_or_missing_required_verification(self):
+        contract = load_contract(os.path.join(
+            TESTS, "refactor_completion_contract.json"))
+        contract["required_verifications"]["differential"] = []
+        self.assertIn(
+            "required_verifications must match the approved release gates",
+            validate_contract(ROOT, contract),
+        )
+        del contract["required_verifications"]["resource_warnings"]
+        self.assertIn(
+            "required_verifications must match the approved release gates",
             validate_contract(ROOT, contract),
         )
 
@@ -94,6 +152,31 @@ class DifferentialCoverageContractTests(unittest.TestCase):
             ],
             validate_coverage(coverage, {"action_status"}),
         )
+
+    def test_coverage_rejects_invalid_schema_values_and_extra_fields(self):
+        coverage = {
+            "schema": 999,
+            "extra": True,
+            "scenarios": {
+                "action_status": {
+                    "domain": "quality",
+                    "runtime": None,
+                    "workflow": "",
+                    "transition": "typo",
+                    "delivery": [],
+                    "fault": "none",
+                    "surprise": "ignored",
+                }
+            },
+        }
+        errors = validate_coverage(coverage, {"action_status"})
+        self.assertIn("coverage schema must be 1", errors)
+        self.assertIn("coverage has unknown top-level fields extra", errors)
+        self.assertIn("action_status: unknown fields surprise", errors)
+        self.assertIn("action_status: invalid runtime None", errors)
+        self.assertIn("action_status: invalid workflow ", errors)
+        self.assertIn("action_status: invalid transition typo", errors)
+        self.assertIn("action_status: invalid delivery []", errors)
 
 
 if __name__ == "__main__":

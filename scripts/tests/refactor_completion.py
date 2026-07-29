@@ -4,6 +4,43 @@ import json
 import os
 
 
+APPROVED_FINAL_TARGETS = {
+    "max_entrypoint_lines": {
+        "scripts/mae-flow.py": 1500,
+        "hooks/dispatch.py": 800,
+    },
+    "max_business_module_lines": 500,
+    "max_policy_complexity": 15,
+    "private_monolith_test_imports": 0,
+}
+
+APPROVED_REQUIRED_VERIFICATIONS = {
+    "architecture": [
+        "python scripts/tests/test_architecture.py",
+    ],
+    "differential": [
+        "python scripts/tests/differential/runner.py "
+        "--implementation-root .",
+    ],
+    "fault_injection": [
+        "python scripts/tests/test_fault_injection.py",
+    ],
+    "resource_warnings": [
+        "python -W error::ResourceWarning "
+        "scripts/tests/test_state_core.py",
+        "python -W error::ResourceWarning "
+        "scripts/tests/test_checkpoints.py",
+    ],
+    "selftest": [
+        "python scripts/selftest.py",
+    ],
+    "unit_tests": [
+        "python -m unittest discover -s scripts/tests "
+        "-p 'test_*.py'",
+    ],
+}
+
+
 def load_contract(path):
     with open(path, encoding="utf-8") as stream:
         return json.load(stream)
@@ -15,6 +52,13 @@ def validate_contract(root, contract):
         errors.append("schema must be 1")
     if contract.get("behavior_baseline") != "phase9":
         errors.append("behavior_baseline must be phase9")
+    if contract.get("final_targets") != APPROVED_FINAL_TARGETS:
+        errors.append(
+            "final_targets must match the approved completion thresholds")
+    if (contract.get("required_verifications")
+            != APPROVED_REQUIRED_VERIFICATIONS):
+        errors.append(
+            "required_verifications must match the approved release gates")
     stages = contract.get("stages", [])
     if [item.get("id") for item in stages] != list(range(10)):
         errors.append("stages must be ordered 0 through 9")

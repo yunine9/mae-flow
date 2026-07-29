@@ -6,6 +6,12 @@ agent 契约与 dispatch 识别名同步、v3/v4 换轨防回退(comet 子命令
 规格引擎不得复活)、关键文件存在。任何 ❌ 退出码 1。"""
 import ast, contextlib, glob, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile, time, types
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, ".."))
+TESTS = os.path.join(HERE, "tests")
+if TESTS not in sys.path:
+    sys.path.insert(0, TESTS)
+
 # 非 UTF-8 控制台(公司 GBK 机器典型形态)下 ✅/❌ 第一行就会编码崩——
 # dispatch.py 同款 stdout 自愈,发版门必须开箱即跑。
 for _s in (sys.stdout, sys.stderr):
@@ -41,8 +47,8 @@ from mae_flow_core.workflow.definition import (
     definition_errors,
     workflow_graph_errors,
 )
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, ".."))
+from selftest_suites import REFACTOR_SAFETY_SUITES
+
 fails = []
 
 
@@ -102,6 +108,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_file_io.py",
           "scripts/tests/test_refactor_completion.py",
           "scripts/tests/test_fault_injection.py",
+          "scripts/tests/selftest_suites.py",
           "scripts/tests/architecture_rules.py",
           "scripts/tests/refactor_completion.py",
           "scripts/tests/fault_injection.py",
@@ -122,120 +129,21 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
     except Exception as e:
         check(f"语法 {f}", False, str(e))
 
-# 1.5 共享状态内核使用独立测试文件，避免 selftest 再长成第二个单体。
-core_tests = subprocess.run(
-    [sys.executable, os.path.join(ROOT, "scripts", "tests", "test_state_core.py")],
-    text=True, capture_output=True, timeout=90)
-check("共享状态内核回归", core_tests.returncode == 0,
-      (core_tests.stdout + core_tests.stderr)[-3000:])
-capability_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_capabilities.py")],
-    text=True, capture_output=True, timeout=240)
-check("内嵌能力完整生命周期回归", capability_tests.returncode == 0,
-      (capability_tests.stdout + capability_tests.stderr)[-5000:])
-# v4:规格引擎换成纯 Python，它的单元测试 + 与内嵌 CLI 的差分对拍必须同样点名跑。
-specengine_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_specengine.py")],
-    text=True, capture_output=True, timeout=300)
-check("内置规格引擎回归与差分对拍", specengine_tests.returncode == 0,
-      (specengine_tests.stdout + specengine_tests.stderr)[-5000:])
-checkpoint_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_checkpoints.py")],
-    text=True, capture_output=True, timeout=180)
-check("开发检查点与最终增量检视回归", checkpoint_tests.returncode == 0,
-      (checkpoint_tests.stdout + checkpoint_tests.stderr)[-5000:])
-ownership_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_commit_ownership.py")],
-    text=True, capture_output=True, timeout=180)
-check("跨单提交归属与 STORY 本地化回归", ownership_tests.returncode == 0,
-      (ownership_tests.stdout + ownership_tests.stderr)[-5000:])
-codecheck_logging_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_codecheck_logging.py")],
-    text=True, capture_output=True, timeout=180)
-check("CodeCheck 全链路诊断日志回归", codecheck_logging_tests.returncode == 0,
-      (codecheck_logging_tests.stdout + codecheck_logging_tests.stderr)[-5000:])
-task_scope_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_task_scope.py")],
-    text=True, capture_output=True, timeout=180)
-check("质量任务范围、函数边界与执行目录回归", task_scope_tests.returncode == 0,
-      (task_scope_tests.stdout + task_scope_tests.stderr)[-5000:])
-lightcheck_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_lightcheck.py")],
-    text=True, capture_output=True, timeout=180)
-check("轻量编码预检跨语言与安全降级回归", lightcheck_tests.returncode == 0,
-      (lightcheck_tests.stdout + lightcheck_tests.stderr)[-5000:])
-workflow_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_workflow_definition.py")],
-    text=True, capture_output=True, timeout=180)
-check("Workflow 定义与转移策略回归", workflow_tests.returncode == 0,
-      (workflow_tests.stdout + workflow_tests.stderr)[-5000:])
-advancement_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_workflow_advancement.py")],
-    text=True, capture_output=True, timeout=180)
-check("Workflow 推进策略与适配器回归",
-      advancement_tests.returncode == 0,
-      (advancement_tests.stdout + advancement_tests.stderr)[-5000:])
-completion_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_workflow_completion.py")],
-    text=True, capture_output=True, timeout=180)
-check("Workflow 完成裁决与适配器回归",
-      completion_tests.returncode == 0,
-      (completion_tests.stdout + completion_tests.stderr)[-5000:])
-guard_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_guard_intent.py")],
-    text=True, capture_output=True, timeout=180)
-check("Gate 请求解析策略回归", guard_tests.returncode == 0,
-      (guard_tests.stdout + guard_tests.stderr)[-5000:])
-quality_task_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_quality_task_cards.py")],
-    text=True, capture_output=True, timeout=180)
-check("质量任务卡纯契约回归", quality_task_tests.returncode == 0,
-      (quality_task_tests.stdout + quality_task_tests.stderr)[-5000:])
-delivery_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_delivery_policies.py")],
-    text=True, capture_output=True, timeout=180)
-check("交付子状态机纯策略回归", delivery_tests.returncode == 0,
-      (delivery_tests.stdout + delivery_tests.stderr)[-5000:])
-command_dispatch_tests = subprocess.run(
-    [sys.executable, os.path.join(
-        ROOT, "scripts", "tests", "test_command_dispatch.py")],
-    text=True, capture_output=True, timeout=180)
-check("CLI 命令路由契约回归",
-      command_dispatch_tests.returncode == 0,
-      (command_dispatch_tests.stdout
-       + command_dispatch_tests.stderr)[-5000:])
-for label, filename in (
-        ("行为差分安全网", "test_differential_harness.py"),
-        ("重构架构边界", "test_architecture.py"),
-        ("受管文件句柄", "test_file_io.py"),
-        ("重构完成契约与覆盖清单", "test_refactor_completion.py"),
-        ("故障注入与原子写失败回归", "test_fault_injection.py")):
+# 1.5 子测试由结构化清单统一注册；架构门会核对清单和真实执行循环，
+# 避免只在语法列表中保留文件名却悄悄停止运行。
+for label, command, timeout, output_limit in REFACTOR_SAFETY_SUITES:
     result = subprocess.run(
-        [sys.executable, os.path.join(
-            ROOT, "scripts", "tests", filename)],
+        [sys.executable, os.path.join(ROOT, command[0]), *command[1:]],
         text=True,
         encoding="utf-8",
         errors="replace",
         capture_output=True,
-        timeout=180,
+        timeout=timeout,
     )
     check(
         label,
         result.returncode == 0,
-        (result.stdout + result.stderr)[-5000:],
+        (result.stdout + result.stderr)[-output_limit:],
     )
 # v5:两个黑盒探针入库常驻(历次会话临时重建的 92+17 项语义面收编版)——
 # gate 拦/放与证据全路径、spec 子命令三档端到端,发版门同样点名跑。

@@ -316,14 +316,16 @@ def main():
         ("RuleB", "src/a.c", 13),    # 窗口内(11+3) → 保留(近似"改动所在函数")
         ("RuleC", "src/a.c", 1),     # 存量行 → 滤除
     ], "commands": []}
-    filtered, stock = mf._scope_filter_codecheck(result, st_scope, ["src/a.c"])
+    filtered, stock = mf._filter_codecheck_with_repository_facts(
+        result, st_scope, ["src/a.c"])
     check("范围口径: 本次修改±3 内保留、存量滤除",
           filtered["total"] == 2 and stock == 1
           and all(r != "RuleC" for r, _f, _l in filtered["pairs"]),
           str((filtered, stock)))
     nodetail = {"total": 2, "pairs": [("R", "src/a.c", None),
                                       ("R2", "src/a.c", 5)], "commands": []}
-    filtered, stock = mf._scope_filter_codecheck(nodetail, st_scope, ["src/a.c"])
+    filtered, stock = mf._filter_codecheck_with_repository_facts(
+        nodetail, st_scope, ["src/a.c"])
     check("范围口径: 明细缺行号保守全算(不静默漏报)",
           filtered["total"] == 2 and stock is None, str((filtered, stock)))
 

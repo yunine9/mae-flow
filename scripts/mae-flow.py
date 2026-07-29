@@ -2285,7 +2285,8 @@ def _codecheck_scope_classification(result, st, files):
     )
 
 
-def _scope_classify_codecheck(result, st, files):
+def _classify_codecheck_with_repository_facts(
+        result, st, files):
     """Classify CodeCheck warnings using repository facts and pure policy."""
     scoped = _codecheck_scope_classification(
         result, st, files)
@@ -2311,40 +2312,16 @@ def _scope_classify_codecheck(result, st, files):
     return filtered, excluded
 
 
-def _scope_filter_codecheck(result, st, files):
+def _filter_codecheck_with_repository_facts(
+        result, st, files):
     """旧调用口径兼容：返回过滤结果与窗口外数量。
 
-    codecheck-scan 使用 _scope_classify_codecheck 保留逐条候选并要求用户确认；
+    codecheck-scan 使用完整分类结果保留逐条候选并要求用户确认；
     旧的现场复核只需要数量对账，继续走这个薄包装。
     """
-    filtered, excluded = _scope_classify_codecheck(result, st, files)
+    filtered, excluded = _classify_codecheck_with_repository_facts(
+        result, st, files)
     return filtered, (len(excluded) if excluded is not None else None)
-
-
-def _render_warning_pairs(pairs):
-    """任务卡里的告警清单渲染:规则|文件[|行号](旧状态里的二元组也兼容)。"""
-    out = []
-    for p in pairs:
-        rule, file_name = p[0], p[1]
-        line = p[2] if len(p) > 2 else None
-        out.append("|".join([rule, file_name] + ([str(line)] if line is not None else [])))
-    return "、".join(out)
-
-
-def _batches(files, maxlen=6000):
-    """按命令行长度分批；同名文件拆开，保证报告只给 basename 时仍能还原完整路径。"""
-    out, cur, ln, names = [], [], 0, set()
-    for f in files:
-        bn = os.path.basename(f).lower()
-        if cur and (ln + len(f) + 1 > maxlen or bn in names):
-            out.append(cur)
-            cur, ln, names = [], 0, set()
-        cur.append(f)
-        names.add(bn)
-        ln += len(f) + 1
-    if cur:
-        out.append(cur)
-    return out
 
 
 def _codecheck_launch(batch, executable=None, windows=None):
@@ -2396,7 +2373,7 @@ def _run_codecheck(files, st=None, phase="scan"):
                     cwd, state, event, payload)
             ),
             ensure_capability=lambda: ensure_codecheck(install=True),
-            split_batches=_batches,
+            split_batches=quality_codecheck.split_batches,
             build_launch=lambda batch, executable: (
                 _codecheck_launch(
                     batch, executable=executable)
@@ -2420,7 +2397,7 @@ def _run_codecheck(files, st=None, phase="scan"):
             read_text=lambda path: read_text(
                 path, encoding="utf-8", errors="replace"),
             modified_time=os.path.getmtime,
-            parse_json_file=_parse_codecheck_json,
+            parse_json_file=_load_codecheck_json_result,
             log_path=lambda state: codecheck_log_path(cwd, state),
             save_diagnostic=_save_codecheck_diagnostic,
             program_path=os.path.abspath(sys.argv[0]),
@@ -2439,16 +2416,7 @@ def _run_codecheck(files, st=None, phase="scan"):
     }, result.error
 
 
-def _parse_codecheck_count(console, report):
-    """CodeCheckCLI 没有稳定 JSON/退出码契约，兼容已见的三种可信输出。
-
-    1) 提示行「共有 N 条告警」；2) Markdown 汇总表「总计」；
-    3) 明确的零告警文案。不能仅凭进程退出码判断（公司 CLI 成功也可能返回 1）。
-    """
-    return quality_codecheck.parse_count(console, report)
-
-
-def _parse_codecheck_json(path):
+def _load_codecheck_json_result(path):
     """兼容 CodeCheckCLI 的 JSON 结果：不依赖固定顶层字段，按带 UUID/规则/文件的告警对象去重。"""
     count, warnings = quality_codecheck.parse_json_result(
         load_json(path, errors="replace"))
@@ -2582,8 +2550,9 @@ _QUALITY_EVIDENCE = QualityEvidenceRules(QualityEvidencePorts(
     argv_output=lambda arguments: argv_out(arguments),
     run_codecheck=lambda files, state, source: _run_codecheck(
         files, state, source),
-    scope_filter=lambda result, state, files: _scope_filter_codecheck(
-        result, state, files),
+    scope_filter=lambda result, state, files:
+        _filter_codecheck_with_repository_facts(
+            result, state, files),
     read_bytes=lambda path: read_bytes(path),
     read_text_replace=lambda path: read_text(path, errors="replace"),
     now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -3687,14 +3656,16 @@ def _action_task_card(action, kind, stage=""):
     head = sh("git rev-parse --verify HEAD")
     sid = "standalone_" + action["kind"]
     files = action.get("files", [])
-    groups = _task_file_groups(files, {"config": config})
+    groups = _classify_task_files_from_runtime(
+        files, {"config": config})
     scan = action.get("quality", {}).get("codecheck_scan", {})
     execution_files = (
         groups["business"]
         or groups["tests"]
         or groups["build"]
     )
-    roots, unresolved = _task_execution_roots(execution_files)
+    roots, unresolved = _resolve_task_roots_from_runtime(
+        execution_files)
     execution_plan = quality_task_card_use_cases.ExecutionRootPlan(
         roots=tuple(roots),
         unresolved=tuple(unresolved),
@@ -3762,7 +3733,7 @@ def _action_task_card(action, kind, stage=""):
             task_files=files,
             execution_roots=[
                 root for root, _reason
-                in _task_execution_roots(
+                in _resolve_task_roots_from_runtime(
                     groups["business"]
                     or groups["tests"]
                     or groups["build"])[0]
@@ -6711,7 +6682,7 @@ def _task_scope(st, diff_override=""):
     return diff, [x for x in out.splitlines() if x.strip()], ""
 
 
-def _task_file_groups(files, st):
+def _classify_task_files_from_runtime(files, st):
     """把子任务范围拆成业务源码、测试、构建三组；文档根本不应传进来。"""
     return quality_task_card_use_cases.task_file_groups(
         files,
@@ -6720,15 +6691,7 @@ def _task_file_groups(files, st):
     ).as_legacy()
 
 
-def _execution_root_for_file(path):
-    """Legacy adapter for diagnostics that inspect one task file."""
-    roots, _unresolved = _task_execution_roots((path,))
-    if roots:
-        return roots[0]
-    return "", "未找到可证明的模块目录"
-
-
-def _task_execution_roots(files):
+def _resolve_task_roots_from_runtime(files):
     """生成去重的模块执行目录和依据，供任务卡阻止根目录意外全量构建。"""
     plan = quality_task_card_use_cases.execution_roots(
         files,
@@ -6752,23 +6715,7 @@ def _task_execution_roots(files):
     return list(plan.roots), list(plan.unresolved)
 
 
-def _append_task_files(lines, title, files):
-    quality_task_card_use_cases.append_task_files(
-        lines, title, files)
-
-
-def _append_execution_context(lines, files, kind):
-    """把代码范围翻译成 Agent 可直接使用的 cwd；CodeCheck 扫描仍固定在项目根。"""
-    roots, unresolved = _task_execution_roots(files)
-    quality_task_card_use_cases.append_execution_context(
-        lines,
-        kind=kind,
-        roots=roots,
-        unresolved=unresolved,
-    )
-
-
-def _requirement_sources(st):
+def _resolve_requirement_sources_from_runtime(st):
     return list(quality_task_card_use_cases.requirement_sources(
         st.get("config", {}),
         exists=os.path.exists,
@@ -6810,7 +6757,7 @@ def _store_agent_task(flow, st, args, context):
             if kind == "CODECHECK" else []),
         task_files=context["task_files"],
         execution_roots=[
-            root for root, _reason in _task_execution_roots(
+            root for root, _reason in _resolve_task_roots_from_runtime(
                 context["execution_files"])[0]],
         lightcheck=({
             "status": lightcheck_result.get("status"),
@@ -6950,10 +6897,11 @@ def cmd_agent_task(flow, st, args):
                 + "。禁止主会话先修再补手续；回退这些改动后重扫。", 2)
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     task_files = list(scan.get("files", [])) if kind == "CODECHECK" else list(source_files)
-    groups = _task_file_groups(task_files, st)
+    groups = _classify_task_files_from_runtime(
+        task_files, st)
     cfg = st.get("config", {})
     task_head = sh("git rev-parse --verify HEAD")
-    sources = _requirement_sources(st)
+    sources = _resolve_requirement_sources_from_runtime(st)
     execution_files = (
         task_files if kind == "COMPILE"
         else (
@@ -6962,7 +6910,8 @@ def cmd_agent_task(flow, st, args):
             or groups["build"]
         )
     )
-    roots, unresolved = _task_execution_roots(execution_files)
+    roots, unresolved = _resolve_task_roots_from_runtime(
+        execution_files)
     execution_plan = quality_task_card_use_cases.ExecutionRootPlan(
         roots=tuple(roots),
         unresolved=tuple(unresolved),

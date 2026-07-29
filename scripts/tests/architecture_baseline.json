@@ -1,7 +1,7 @@
 {
   "max_lines": {
     "hooks/dispatch.py": 2860,
-    "scripts/mae-flow.py": 10408
+    "scripts/mae-flow.py": 8620
   },
   "max_complexity": {
     "scripts/mae-flow.py": {
@@ -11,8 +11,11 @@
       "_gate_edit": 25,
       "_gate_commit_candidates": 22,
       "_gate_bash_writes": 41,
-      "cmd_agent_task": 87,
+      "cmd_agent_task": 56,
       "_store_agent_task": 14,
+      "cmd_codecheck_scan": 31,
+      "cmd_codecheck_scope": 10,
+      "cmd_codecheck_record": 13,
       "cmd_moonlight": 75,
       "_moonlight_blocked": 8,
       "_moonlight_push_failed": 4,

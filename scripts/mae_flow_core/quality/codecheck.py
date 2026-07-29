@@ -250,6 +250,30 @@ def aggregate_batches(batches):
     )
 
 
+def split_batches(files, maxlen=6000):
+    """Split command input by length and ambiguous duplicate basenames."""
+    batches = []
+    current = []
+    length = 0
+    names = set()
+    for path in files:
+        basename = os.path.basename(path).lower()
+        if current and (
+            length + len(path) + 1 > maxlen
+            or basename in names
+        ):
+            batches.append(tuple(current))
+            current = []
+            length = 0
+            names = set()
+        current.append(path)
+        names.add(basename)
+        length += len(path) + 1
+    if current:
+        batches.append(tuple(current))
+    return tuple(batches)
+
+
 def _warning_tuple(value):
     return CodeCheckWarning(
         value[0],

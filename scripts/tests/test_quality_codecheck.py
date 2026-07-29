@@ -21,6 +21,7 @@ from mae_flow_core.quality.codecheck import (  # noqa: E402
     map_warning_paths,
     parse_count,
     parse_json_result,
+    split_batches,
 )
 
 
@@ -167,6 +168,22 @@ class CodeCheckPolicyTests(unittest.TestCase):
         self.assertEqual(
             ("R.ONE", "a.cpp", 1),
             result.warnings[0].as_tuple(),
+        )
+
+    def test_batching_limits_command_length_and_separates_duplicate_names(self):
+        self.assertEqual(
+            (
+                ("src/Foo.cpp",),
+                ("other/Foo.cpp", "src/LongName.cpp"),
+            ),
+            split_batches(
+                (
+                    "src/Foo.cpp",
+                    "other/Foo.cpp",
+                    "src/LongName.cpp",
+                ),
+                maxlen=40,
+            ),
         )
 
 

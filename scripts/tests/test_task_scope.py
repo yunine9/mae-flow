@@ -507,14 +507,15 @@ class TaskScopeTests(unittest.TestCase):
         ]))
         self.commit("change deep function line")
         state = self.state("verify_codecheck", base)
-        classified, candidates = mf._scope_classify_codecheck({
+        classified, candidates = (
+            mf._classify_codecheck_with_repository_facts({
             "total": 2,
             "pairs": [
                 ("R.SIGNATURE", path, 1),
                 ("R.STOCK", path, 12),
             ],
             "commands": ["codecheck fullcheck -f " + path],
-        }, state, [path])
+            }, state, [path]))
         self.assertEqual(classified["pairs"], [("R.SIGNATURE", path, 1)])
         self.assertEqual(candidates, [("R.STOCK", path, 12)])
         self.assertIn("本次变更函数", classified["scope_reasons"][0]["reason"])
@@ -578,31 +579,21 @@ class TaskScopeTests(unittest.TestCase):
         self.assertTrue(set(fixtures).issubset(set(scanned_files)))
 
         for path, (_template, _old, _new, signature_line, stock_line) in fixtures.items():
-            classified, candidates = mf._scope_classify_codecheck({
+            classified, candidates = (
+                mf._classify_codecheck_with_repository_facts({
                 "total": 2,
                 "pairs": [
                     ("R.SIGNATURE", path, signature_line),
                     ("R.STOCK", path, stock_line),
                 ],
                 "commands": ["codecheck fullcheck -f " + path],
-            }, state, [path])
+                }, state, [path]))
             self.assertEqual(
                 classified["pairs"], [("R.SIGNATURE", path, signature_line)],
                 path)
             self.assertEqual(candidates, [("R.STOCK", path, stock_line)], path)
             self.assertIn("本次变更函数", classified["scope_reasons"][0]["reason"])
             self.assertTrue(path.lower().endswith(mf.CODE_EXTS))
-
-    def test_unresolved_root_does_not_silently_become_project_root(self):
-        os.makedirs("build")
-        write("root.cpp", "int root_value = 1;\n")
-        root, reason = mf._execution_root_for_file("root.cpp")
-        self.assertEqual(root, "")
-        self.assertIn("未找到", reason)
-        write("module/src/Nested.cpp", "int nested = 1;\n")
-        root, reason = mf._execution_root_for_file("module/src/Nested.cpp")
-        self.assertEqual(root, "module/src")
-        self.assertIn("源码所在目录", reason)
 
     def test_standalone_scope_rejects_build_only_and_codecheck_non_code(self):
         config = {}

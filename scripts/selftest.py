@@ -43,6 +43,7 @@ from comet_compat import BEGIN as COMET_COMPAT_BEGIN, ensure_direct_mode_compat
 from mae_flow_core.quality.task_cards import (
     EXPECTED_STEPS as TASK_CARD_EXPECTED_STEPS,
 )
+from mae_flow_core.quality import codecheck as quality_codecheck
 from mae_flow_core.workflow.definition import (
     definition_errors,
     workflow_graph_errors,
@@ -356,7 +357,8 @@ if flow:
         ("[CodeCheck] 代码检查完成! 未发现代码告警", "", 0),
     ]
     check("CodeCheck 告警数多格式解析",
-          all(mf._parse_codecheck_count(a, b) == n for a, b, n in parser_cases))
+          all(quality_codecheck.parse_count(a, b) == n
+              for a, b, n in parser_cases))
     real_run, real_ensure = mf.subprocess.run, mf.ensure_codecheck
     real_cwd = os.getcwd()
     try:
@@ -388,8 +390,11 @@ if flow:
                               {"uuid": "2", "rule": "R.TWO", "file": "b/Foo.cpp"}]}, f)
         codecheck_json = f.name
     try:
-        count, pairs = mf._parse_codecheck_json(codecheck_json)
-        check("CodeCheck JSON 兜底解析", count == 2 and len(pairs) == 2)
+        with open(codecheck_json, encoding="utf-8") as stream:
+            count, warnings = quality_codecheck.parse_json_result(
+                json.load(stream))
+        check("CodeCheck JSON 兜底解析",
+              count == 2 and len(warnings) == 2)
     finally:
         os.unlink(codecheck_json)
 
@@ -450,14 +455,15 @@ if flow:
             check("CodeCheck 工具故障留痕可继续但源码变化会使其失效",
                   tool_issue_ok and not stale_tool_issue_ok)
 
-            classified, candidates = mf._scope_classify_codecheck({
+            classified, candidates = (
+                mf._classify_codecheck_with_repository_facts({
                 "total": 2,
                 "pairs": [
                     ("R.NEAR", "src/Foo.cpp", 2),
                     ("R.FAR", "src/Foo.cpp", 100),
                 ],
                 "commands": ["codecheck fullcheck -f src/Foo.cpp"],
-            }, state, ["src/Foo.cpp"])
+                }, state, ["src/Foo.cpp"]))
             check("CodeCheck 行窗口只做预分类而不再静默丢弃候选",
                   classified["total"] == 1
                   and classified["pairs"][0][0] == "R.NEAR"

@@ -242,6 +242,36 @@ class ArchitectureTests(unittest.TestCase):
             "Delivery recovery policy belongs in application.delivery",
         )
 
+    def test_cli_contains_no_migrated_quality_policy_helpers(self):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        with open(path, encoding="utf-8") as stream:
+            tree = ast.parse(stream.read())
+        forbidden = {
+            "_parse_codecheck_count",
+            "_parse_codecheck_json",
+            "_scope_classify_codecheck",
+            "_scope_filter_codecheck",
+            "_render_warning_pairs",
+            "_task_file_groups",
+            "_execution_root_for_file",
+            "_task_execution_roots",
+            "_append_task_files",
+            "_append_execution_context",
+            "_requirement_sources",
+            "_batches",
+        }
+        definitions = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertEqual(
+            set(),
+            forbidden & definitions,
+            "Quality policy belongs in mae_flow_core quality modules",
+        )
+
     def test_workflow_functions_stay_within_complexity_limit(self):
         self.assertEqual([], workflow_complexity_violations(ROOT))
 

@@ -75,7 +75,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
             "scripts/mae-flow.py"] = 20000
         self.assertIn(
             "scripts/mae-flow.py: final target 20000 must be below "
-            "current architecture baseline 10408",
+            "current architecture baseline 8620",
             validate_contract(ROOT, contract),
         )
 

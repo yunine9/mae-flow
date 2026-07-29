@@ -92,6 +92,10 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_delivery_moonlight_use_cases.py",), 180, 5000),
     ("Quality Evidence CodeCheck 回归",
      ("scripts/tests/test_quality_evidence.py",), 180, 5000),
+    ("Hook transcript 工具证据回归",
+     ("scripts/tests/test_hook_tool_transcript.py",), 180, 5000),
+    ("Hook Agent 报告解析回归",
+     ("scripts/tests/test_hook_agent_reports.py",), 180, 5000),
 )
 
 

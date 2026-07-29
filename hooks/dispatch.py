@@ -48,6 +48,17 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.file_io import load_json, read_lines, read_text, write_text
+from mae_flow_core.quality.agent_reports import (
+    ac_coverage_has_mapping as _core_ac_coverage_has_mapping,
+    empty_section as _core_empty_section,
+    report_field as _core_report_field,
+    report_number as _core_report_number,
+    report_section as _core_report_section,
+)
+from mae_flow_core.quality.tool_transcript import (
+    parse_transcript as _parse_tool_transcript,
+    select_contract_marker as _select_contract_marker,
+)
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -482,40 +493,9 @@ def ev_subagentstop(d):
     except Exception:
         sys.exit(0)
 
-    def texts(role):
-        out = []
-        for e in lines:
-            if e.get("type") == role or (e.get("message", {}) or {}).get("role") == role:
-                c = (e.get("message", {}) or {}).get("content", e.get("content", ""))
-                if isinstance(c, list):
-                    out.append("".join(b.get("text", "") for b in c if isinstance(b, dict)))
-                elif isinstance(c, str):
-                    out.append(c)
-        return out
-
-    users, asst = texts("user"), texts("assistant")
-    tool_calls, by_id = [], {}
-    for e in lines:
-        c = (e.get("message", {}) or {}).get("content", e.get("content", ""))
-        if not isinstance(c, list):
-            continue
-        for b in c:
-            if isinstance(b, dict) and b.get("type") in ("tool_use", "tool_call"):
-                call = {"id": b.get("id", ""), "name": b.get("name", ""),
-                        "input": b.get("input", {}), "result_seen": False,
-                        "is_error": False, "result": ""}
-                tool_calls.append(call)
-                if call["id"]:
-                    by_id[call["id"]] = call
-            if isinstance(b, dict) and b.get("type") in ("tool_result", "tool_response"):
-                call = by_id.get(b.get("tool_use_id") or b.get("tool_call_id") or b.get("id"))
-                if call:
-                    content = b.get("content", "")
-                    if isinstance(content, list):
-                        content = "\n".join(str(x.get("text", x)) if isinstance(x, dict) else str(x) for x in content)
-                    call["result_seen"] = True
-                    call["is_error"] = bool(b.get("is_error") or b.get("isError"))
-                    call["result"] = str(content)
+    transcript = _parse_tool_transcript(lines)
+    users, asst = transcript.user_texts, transcript.assistant_texts
+    tool_calls = [call.to_legacy() for call in transcript.tool_calls]
     prompt = users[0] if users else ""
     last = (asst[-1] if asst else "").strip()
     # 标记本身即身份证明。优先第一行；兼容模型在前面多写一句话/代码围栏的情况，
@@ -523,25 +503,25 @@ def ev_subagentstop(d):
     first_line = last.splitlines()[0] if last else ""
     matches = list(re.finditer(
         r"^\s*(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", last, re.M))
-    m = re.match(r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)", first_line)
-    reject_reason = ""
-    if len(matches) > 1:
+    selected = _select_contract_marker(last)
+    reject_reason = selected.error
+    m = (
+        re.match(
+            r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)",
+            "%s_RESULT: %s" % (selected.kind, selected.status),
+        )
+        if selected.kind else None
+    )
+    if len(matches) > 1 and m:
         kinds = {x.group(1) + "/" + x.group(2) for x in matches}
-        if len(kinds) == 1:
-            # 重答/汇报场景常在正文引用同一结论(如先引格式说明再给结果)。
-            # 同名同值不构成歧义;为一个可判定的回复重跑整只编译/UT agent 才是浪费。
-            m = m or matches[-1]
-            _log("subagentstop: 多个相同结果标记(%s),判定无歧义,接受" % next(iter(kinds)))
-        else:
-            reject_reason = (
-                "最终回复包含互相矛盾的结果标记(%s)，无法判断本轮真实结论。"
-                "重新输出时整个回复只保留一行顶行的 XXX_RESULT: 标记(本轮真实结果)；"
-                "引用历史结论或格式说明时不要顶行书写标记。" % "、".join(sorted(kinds)))
-            _record_rejection("SUBAGENT", reject_reason)
-            m = None
-    elif not m and len(matches) == 1:
-        m = matches[0]
+        _log("subagentstop: 多个相同结果标记(%s),判定无歧义,接受"
+             % next(iter(kinds)))
+    elif not re.match(
+            r"^(ENV|UT|CODECHECK|STORY|GRILL|COMPILE)_RESULT:\s*(\S+)",
+            first_line) and len(matches) == 1 and m:
         _log("subagentstop: 契约标记不在第一行,兼容接受并继续验完整契约")
+    if reject_reason:
+        _record_rejection("SUBAGENT", reject_reason)
     runtime = _contract_state()
     standalone_expected = ""
     if runtime.get("_standalone"):
@@ -1291,28 +1271,13 @@ def _field(report, name):
     return m.group(1).strip() if m else ""
 
 
-_REPORT_FIELDS = (
-    "TASK_CARD_SHA256", "GENERATOR_USED", "EXECUTED_UT", "EXECUTED_BUILD", "EXECUTED_COMMAND",
-    "TESTS_TOTAL", "TESTS_PASSED", "TESTS_FAILED", "AC_COVERAGE", "PENDING_QUESTIONS",
-    "KNOWN_FAILURES", "SUSPECTED_BUGS", "FOUND", "FIXED", "REMAINING_COUNT",
-    "STAGE", "GAPS_FOUND", "MISSING_BRANCHES",
-)
-
-
 def _flex_field(report, name):
     """弱模型常把机器字段挤在一行或加 Markdown bullet；按下一个已知字段切开而非卡排版。"""
-    fields = "|".join(re.escape(x) for x in _REPORT_FIELDS)
-    m = re.search(
-        r"(?:^|(?<=[\s,;]))(?:[-*]\s*)?" + re.escape(name)
-        + r"\s*:\s*(.*?)(?=(?:\s+|,\s*)(?:[-*]\s*)?(?:" + fields + r")\s*:|\Z)",
-        report, re.I | re.S)
-    return m.group(1).strip(" \t\r\n`") if m else None
+    return _core_report_field(report, name)
 
 
 def _number_field(report, name):
-    value = _flex_field(report, name)
-    m = re.match(r"(\d+)\b", value or "")
-    return int(m.group(1)) if m else None
+    return _core_report_number(report, name)
 
 
 def _same_config(actual, expected):
@@ -1976,13 +1941,11 @@ def _require_bash_success(tool_calls, expected, bail, label):
 
 
 def _section(report, name):
-    m = re.search(r"^\s*" + re.escape(name) + r":\s*(.*?)(?=^\s*[A-Z][A-Z0-9_]+:\s*|\Z)",
-                  report, re.M | re.S)
-    return m.group(1).strip() if m else None
+    return _core_report_section(report, name)
 
 
 def _empty_section(value):
-    return value is not None and re.sub(r"[\s`*_-]+", "", value).lower() in ("无", "none", "0", "暂无")
+    return _core_empty_section(value)
 
 
 def _changed_paths_since(head):
@@ -2307,30 +2270,7 @@ def _ac_coverage_has_mapping(coverage):
     only counts when it has a separator row and at least one non-empty data row;
     a header-only table or a prose assertion still does not prove coverage.
     """
-    if re.search(r"(->|→|=>)", coverage):
-        return True
-
-    rows = []
-    for raw in coverage.splitlines():
-        line = raw.strip()
-        if not line.startswith("|") or "|" not in line[1:]:
-            continue
-        cells = [cell.strip() for cell in line.strip("|").split("|")]
-        if len(cells) >= 2:
-            rows.append(cells)
-
-    for index, cells in enumerate(rows):
-        if not all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
-                   for cell in cells):
-            continue
-        if index == 0 or index + 1 >= len(rows):
-            continue
-        for data in rows[index + 1:]:
-            if len(data) >= 2 and data[0] and data[1] and not all(
-                    re.fullmatch(r":?-{3,}:?", cell.replace(" ", ""))
-                    for cell in data):
-                return True
-    return False
+    return _core_ac_coverage_has_mapping(coverage)
 
 
 def _ut_contract(status, report, tool_calls=None, soft=False):

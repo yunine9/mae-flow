@@ -107,6 +107,16 @@ from mae_flow_core.application.delivery.checkpoint_final import (
 from mae_flow_core.application.delivery.checkpoint_status import (
     inspect_checkpoint_status,
 )
+from mae_flow_core.application.delivery.standalone import (
+    cancel_standalone,
+    confirm_standalone_scope,
+    finish_standalone,
+    inspect_standalone,
+    prepare_standalone_critic,
+    start_standalone,
+    validate_scope_confirmation,
+    validate_standalone_start,
+)
 from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
@@ -3936,14 +3946,7 @@ def cmd_action_start(flow, st, args):
     terminal_state = bool(
         st and flow.get("steps", {}).get(
             st.get("current", ""), {}).get("terminal"))
-    if st is not None and not terminal_state:
-        die("当前有完整交付流程正在运行，不能叠加独立任务。"
-            "若确定只做单项工作，先发送 `/mae-flow:mae-flow exit`，退出后重试。", 2)
     current = _load_action()
-    if current:
-        die("已有独立任务 %s(%s) 未收尾。它不会拦普通开发；"
-            "继续用 action status，放弃用 action cancel。" % (
-                current.get("id", "?"), current.get("kind", "?")), 2)
     kind = args.kind
     defaults = _standalone_config(st if terminal_state else None)
     config = {
@@ -3952,16 +3955,17 @@ def cmd_action_start(flow, st, args):
         "UT运行命令": args.ut_command or defaults.get("UT运行命令", ""),
         "测试路径": defaults.get("测试路径", ""),
     }
-    if kind == "ut":
-        missing = [k for k in ("UT生成方式", "UT运行命令") if not config.get(k)]
-        if missing:
-            die("独立 UT 缺少 %s。先从项目实际能力确认后，用 --generator/--ut-command 传入；"
-                "禁止让 Agent 猜。" % "、".join(missing), 2)
-    if kind == "codecheck" and not args.check_only and not config.get("编译方式"):
-        die("独立 CodeCheck 修复模式缺少编译方式。用 --build 传入项目真实编译方式；"
-            "如果只想看报告，使用 --check-only。", 2)
-    if kind == "grill" and not (args.request or args.source):
-        die("独立质询必须提供 --request 用户需求原话或 --source 需求文本路径。", 2)
+    validation = validate_standalone_start(
+        live_flow=st is not None and not terminal_state,
+        current_action=current,
+        kind=kind,
+        config=config,
+        request=args.request or "",
+        has_source=bool(args.source),
+        check_only=bool(args.check_only),
+    )
+    if validation.exit_code:
+        die(validation.stderr[0], validation.exit_code)
     raw_files = _action_files(args.files)
     inferred_scope = not bool(args.files)
     if kind in ("ut", "codecheck"):
@@ -3985,64 +3989,101 @@ def cmd_action_start(flow, st, args):
     # 同一秒内取消后重开同类任务也必须使用全新目录，避免旧任务卡/报告混入新现场。
     nonce = hashlib.sha256(("%s:%s" % (time.time_ns(), os.getpid())).encode()).hexdigest()[:8]
     action_id = f"{stamp}-{nonce}-{kind}"
-    action = {
-        "version": 1, "id": action_id, "kind": kind,
-        "status": ("awaiting_scope_confirmation"
-                   if kind in ("ut", "codecheck") else "active"),
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "expires_epoch": time.time() + 24 * 3600,
-        "work_dir": os.path.abspath(os.path.join(".mae-flow-work", "standalone", action_id)),
-        "request": (args.request or "").strip(), "config": config,
-        "check_only": bool(args.check_only),
-        "base_head": sh("git rev-parse --verify HEAD"),
-        "commit_policy": "forbid", "tokens": {}, "rejections": {}, "quality": {},
-    }
-    action["sources"] = _action_request(action, args.request or "", args.source or "")
-    action["files"] = scoped_files
-    if kind in ("ut", "codecheck"):
-        action["scope_source"] = "dirty-worktree" if inferred_scope else "explicit"
-        action["scope_proposed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        action["scope_proposed_epoch"] = time.time()
-        _save_action(action)
-        _print_action_scope(action, inferred_scope)
-        return
-    _save_action(action)
-    work = _action_dir(action)
-    prep = os.path.join(work, "grill-prep.md")
-    clarification = os.path.join(work, "clarifications.md")
-    action["grill"] = {"prep": prep, "clarifications": clarification, "questions_answered": 0}
-    _save_action(action)
-    print("[mae-flow] 独立需求质询已开启，不会进入设计或编码。")
-    print("先定向阅读需求与相关代码，把八维检查和候选问题写入：%s" % prep)
-    print("备课工作表必须按模板结构填写(hook 会校验章节,自由发挥会被打回):%s"
-          % os.path.abspath(os.path.join(HERE, "..", "skills", "mae-flow",
-                                         "assets", "GRILL-PREP-TEMPLATE.md")))
-    print("随后一次只问用户一个问题，每次回答后先检查模糊词、新名词、矛盾和衍生边界，"
-          "答案增量写入：%s" % clarification)
-    print("备课完成后执行 action critic --stage prep --document \"%s\" 做第一次对抗检查。"
-          % prep)
+    work_dir = os.path.abspath(os.path.join(
+        ".mae-flow-work", "standalone", action_id))
+    sources = _action_request(
+        {"id": action_id, "work_dir": work_dir},
+        args.request or "",
+        args.source or "",
+    )
+    result = start_standalone(
+        live_flow=False,
+        current_action=None,
+        kind=kind,
+        config=config,
+        files=tuple(scoped_files),
+        request=args.request or "",
+        check_only=bool(args.check_only),
+        action_id=action_id,
+        created_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        expires_epoch=time.time() + 24 * 3600,
+        work_dir=work_dir,
+        base_head=sh("git rev-parse --verify HEAD"),
+        sources=tuple(sources),
+        inferred_scope=inferred_scope,
+        scope_epoch=time.time(),
+        scope_proposed_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    action = None
+    for effect in result.effects:
+        if effect.kind == "save_action":
+            action = thaw_delivery_payload(effect.payload)
+            _save_action(action)
+        elif effect.kind == "show_scope":
+            _print_action_scope(
+                action, bool(effect.payload.get("inferred")))
+        elif effect.kind == "setup_grill":
+            work = _action_dir(action)
+            prep = os.path.join(work, "grill-prep.md")
+            clarification = os.path.join(work, "clarifications.md")
+            action["grill"] = {
+                "prep": prep,
+                "clarifications": clarification,
+                "questions_answered": 0,
+            }
+            _save_action(action)
+            print("[mae-flow] 独立需求质询已开启，不会进入设计或编码。")
+            print("先定向阅读需求与相关代码，把八维检查和候选问题写入：%s" % prep)
+            print(
+                "备课工作表必须按模板结构填写"
+                "(hook 会校验章节,自由发挥会被打回):%s"
+                % os.path.abspath(os.path.join(
+                    HERE, "..", "skills", "mae-flow",
+                    "assets", "GRILL-PREP-TEMPLATE.md")))
+            print(
+                "随后一次只问用户一个问题，每次回答后先检查模糊词、"
+                "新名词、矛盾和衍生边界，答案增量写入：%s"
+                % clarification)
+            print(
+                '备课完成后执行 action critic --stage prep --document "%s" '
+                "做第一次对抗检查。" % prep)
+        else:
+            raise RuntimeError(
+                "unsupported standalone start effect: " + effect.kind)
 
 
 def cmd_action_confirm_scope(flow, args):
     action = _load_action()
-    if not action or action.get("kind") not in ("ut", "codecheck"):
-        die("当前没有等待范围确认的独立 UT/CodeCheck 任务。", 2)
-    if action.get("status") != "awaiting_scope_confirmation":
-        die("当前独立任务已经确认过范围，不能重复确认或改写范围。", 2)
-    ok, why = _action_scope_ack_verified(action, args.ack)
-    if not ok:
-        die("独立任务范围确认验真失败：" + why, 2)
+    ack_verified = (
+        _action_scope_ack_verified(action, args.ack)
+        if action else (False, "")
+    )
+    validation = validate_scope_confirmation(action, ack_verified)
+    if validation.exit_code:
+        die(validation.stderr[0], validation.exit_code)
     # 确认与执行可能跨会话；再次验证冻结路径仍存在且仍属于允许类型。
     files = _action_files(action.get("files", []))
     files = _action_target_files(
         files, action["kind"], action.get("config", {}), flow)
-    if files != action.get("files", []):
-        die("确认后的文件范围与展示内容不一致，已拒绝执行；取消后重新发起。", 2)
-    action["status"] = "active"
-    action["scope_confirmed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    action["scope_confirmed_ack"] = args.ack
-    _save_action(action)
-    if action["kind"] == "codecheck":
+    result = confirm_standalone_scope(
+        action=action,
+        ack=args.ack,
+        ack_verified=ack_verified,
+        validated_files=tuple(files),
+        now=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    next_effect = None
+    for effect in result.effects:
+        if effect.kind == "save_action":
+            action = thaw_delivery_payload(effect.payload)
+            _save_action(action)
+        else:
+            next_effect = effect.kind
+    if next_effect == "run_standalone_codecheck":
         append_codecheck_event(
             os.getcwd(), action, "standalone.scope_confirmed", {
                 "head": action.get("base_head", ""),
@@ -4124,91 +4165,101 @@ def cmd_action_confirm_scope(flow, args):
         print("[mae-flow] CodeCheck 详细日志: %s"
               % norm(codecheck_log_path(os.getcwd(), action)))
         return _action_task_card(action, "codecheck")
-    return _action_task_card(action, "ut")
+    if next_effect == "create_task_card":
+        return _action_task_card(action, "ut")
+    raise RuntimeError(
+        "unsupported standalone confirmation effect: "
+        + str(next_effect))
 
 
 def cmd_action_critic(args):
     action = _load_action()
-    if not action or action.get("kind") != "grill":
-        die("当前没有独立 Grill 任务。", 2)
     document = os.path.abspath(args.document or "")
-    if not os.path.isfile(document):
-        die("质询检查材料不存在：" + (args.document or "(空)"), 2)
-    action.setdefault("grill", {})["last_critic_document"] = document
-    action["grill"]["last_critic_stage"] = args.stage
-    if args.stage == "prep":
-        # 双查承诺的前半:final 会覆盖 last_critic_stage,prep 是否跑过需单独留痕
-        action["grill"]["prep_critic_done"] = True
-    if document not in action.setdefault("sources", []):
-        action["sources"].append(document)
-    return _action_task_card(action, "grill", args.stage)
+    result = prepare_standalone_critic(
+        action, document, os.path.isfile(document), args.stage)
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    payload = thaw_delivery_payload(result.effects[0].payload)
+    return _action_task_card(
+        payload["action"], "grill", payload["stage"])
 
 
 def cmd_action_status():
     action = _load_action()
-    if not action:
-        print("[mae-flow] 当前没有独立任务；普通开发完全不受 mae-flow 接管。")
-        return
-    print(json.dumps(action, ensure_ascii=False, indent=2))
+    result = inspect_standalone(action)
+    for line in result.stdout:
+        print(line)
 
 
 def cmd_action_finish(args):
     action = _load_action()
-    if not action:
-        die("当前没有独立任务。", 2)
-    kind = action.get("kind")
+    kind = action.get("kind") if action else ""
+    report = ""
+    report_exists = False
+    report_text = ""
+    report_error = ""
     if kind == "grill":
         report = os.path.abspath(args.report or action.get("grill", {}).get("clarifications", ""))
-        if not os.path.isfile(report):
-            die("独立质询结果文档不存在；用 --report 指定最终澄清文档。", 2)
-        text, _, err = _read_text_source(report, normalize=False)
-        if err:
-            die("独立质询结果不可读：" + err, 2)
-        if re.search(r"\{\{[^}]+\}\}|待确认|TODO|TBD", text, re.I):
-            die("澄清文档仍有待确认项，不能宣称质询完成。继续追问或把未决项明确列为用户决定暂缓。", 2)
-        if not (action.get("grill", {}) or {}).get("prep_critic_done"):
-            die("备课后的第一轮对抗检查(prep critic)没有执行过——双查是独立质询的质量承诺,"
-                "不能只做收尾那次。先 action critic --stage prep --document <备课文件>,"
-                "补齐它找出的缺口后再收尾。", 2)
-        grill_token = (action.get("tokens", {}) or {}).get("GRILL", {})
-        if not grill_token or (action.get("agent_tasks", {}).get("GRILL", {}) or {}).get("stage") != "final":
-            die("收尾前还没有执行 final 对抗检查。先 action critic --stage final --document <澄清文档>；"
-                "它只找遗漏，不会阻塞普通开发。", 2)
-        work = _archive_action(action, "completed", "独立需求质询完成")
-        print("[mae-flow] 独立需求质询已完成：%s" % report)
-        if grill_token.get("status") == "GAPS":
-            print("⚠ final critic 仍报告潜在遗漏，已保留在 %s；这是风险提示，不会卡住后续开发。"
-                  % grill_token.get("report_path", work))
-        print("没有启动完整交付流程，也没有自动进入设计或编码。")
-        return
-    label = kind.upper()
-    token = (action.get("tokens", {}) or {}).get(label, {})
-    if not token:
-        rejection = (action.get("rejections", {}) or {}).get(label, {})
-        detail = rejection.get("reason", "尚未收到专项 Agent 的合法收尾")
-        die(detail + "。继续修正 Agent 报告，或执行 action cancel 结束独立任务；"
-            "无论哪种情况都不会拦普通开发。", 2)
-    report = token.get("report_path", "")
-    work = _archive_action(action, "completed", "%s/%s" % (label, token.get("status", "")))
-    print("[mae-flow] 独立 %s 已结束，结果：%s" % (label, token.get("status", "?")))
-    print("报告：" + (norm(report) if report else norm(work)))
-    if token.get("status") not in ("PASS", "CLEAN", "CLEAR"):
-        print("⚠ 结果包含失败、待确认或遗留项；已如实保留，但不会自动豁免，也不会卡住普通开发。")
-    print("本任务没有自动提交或推送代码。")
+        report_exists = os.path.isfile(report)
+        if report_exists:
+            report_text, _, report_error = _read_text_source(
+                report, normalize=False)
+    result = finish_standalone(
+        action=action,
+        report_path=report,
+        report_exists=report_exists,
+        report_text=report_text,
+        report_error=report_error,
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    work = ""
+    archived_report = ""
+    grill_report = ""
+    for effect in result.effects:
+        if effect.kind != "archive_action":
+            raise RuntimeError(
+                "unsupported standalone finish effect: " + effect.kind)
+        payload = thaw_delivery_payload(effect.payload)
+        archived_report = payload.get("report", "")
+        grill_report = payload.get("grill_report", "")
+        work = _archive_action(
+            action, payload["outcome"], payload.get("note", ""))
+    for line in result.stdout:
+        if line == "report_after_archive":
+            print("报告：" + (
+                norm(archived_report) if archived_report else norm(work)))
+        elif line == "grill_gaps_after_archive":
+            print(
+                "⚠ final critic 仍报告潜在遗漏，已保留在 %s；"
+                "这是风险提示，不会卡住后续开发。"
+                % (grill_report or work))
+        else:
+            print(line)
 
 
 def cmd_action_cancel():
     action, err, _ = core_load_action()
-    if err:
-        work = core_archive_corrupt_action()
-        print("[mae-flow] 独立任务状态已损坏，但取消成功；坏现场保存在 %s。"
-              "普通开发从未被它拦截。原因：%s" % (norm(work or "无"), err))
-        return
-    if not action:
-        print("[mae-flow] 当前没有独立任务，无需取消。")
-        return
-    work = _archive_action(action, "cancelled", "用户取消独立任务")
-    print("[mae-flow] 独立任务已取消，现场保留在 %s；代码未回滚，普通开发继续放行。" % norm(work))
+    result = cancel_standalone(action, err)
+    for effect in result.effects:
+        payload = thaw_delivery_payload(effect.payload)
+        if effect.kind == "archive_corrupt_action":
+            work = core_archive_corrupt_action()
+            print(
+                "[mae-flow] 独立任务状态已损坏，但取消成功；"
+                "坏现场保存在 %s。普通开发从未被它拦截。原因：%s"
+                % (norm(work or "无"), payload["error"]))
+        elif effect.kind == "archive_action":
+            work = _archive_action(
+                action, payload["outcome"], payload.get("note", ""))
+            print(
+                "[mae-flow] 独立任务已取消，现场保留在 %s；"
+                "代码未回滚，普通开发继续放行。" % norm(work))
+        else:
+            raise RuntimeError(
+                "unsupported standalone cancel effect: " + effect.kind)
+    for line in result.stdout:
+        print(line)
 
 
 def _captured_user_messages(st):

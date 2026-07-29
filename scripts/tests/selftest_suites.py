@@ -76,6 +76,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_delivery_checkpoint_final.py",), 180, 5000),
     ("Delivery Checkpoint 状态路由用例回归",
      ("scripts/tests/test_delivery_checkpoint_status.py",), 180, 5000),
+    ("Delivery Standalone 生命周期用例回归",
+     ("scripts/tests/test_delivery_standalone_use_cases.py",), 180, 5000),
     ("Quality Evidence CodeCheck 回归",
      ("scripts/tests/test_quality_evidence.py",), 180, 5000),
 )

@@ -129,6 +129,11 @@
   init 应恢复旧断点，若期间改过源码则回退质量链，旧 COMPILE/CODECHECK/UT 令牌不得复用。再把状态 JSON 故意截断，
   `/mae-flow:mae-flow exit` 仍应成功并保留坏文件；最后临时禁用 UserPromptSubmit Hook，在真实终端执行
   `exit --interactive`，Agent 管道调用应拒绝、用户输入 EXIT 应成功。
+- [ ] **2.7.1 终态入口矩阵**：准备一个 `current=end` 的已完成现场，依次验证：
+  `exit` 幂等成功且保留终态；新一轮完整入口与 `review-fix` 自动归档并进入配置确认；
+  即使 Agent 误用 `init --new` 也归一化成功且本条用户原文能在新轮 `messages` 中看到；
+  独立 UT/CodeCheck/Grill 在自身参数校验通过后自动归档终态再启动，参数不完整时不得提前归档；
+  非终态流程仍拒绝 `init --new` 和独立任务叠加。全程不得建议 goto/skip/交互式 exit。
 - [ ] **2.8 月光宝盒端到端**:分别从全新项目子目录、普通在途步骤、已退出的直接开发模式说
   “开启月光宝盒”——三种入口都应一次生效且不弹 AskUserQuestion。人为制造一条 CodeCheck/UT 环境失败，
   确认先真实尝试、再留痕继续，报告含现象/尝试/风险且没有假 PASS；push 成功后停在晨间检查、不自动定稿。

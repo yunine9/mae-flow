@@ -273,10 +273,10 @@ class RuntimeAndStateTests(unittest.TestCase):
                 "flow", project_root=root)
             return td
 
-        def hook(root):
+        def hook(root, prompt="/mae-flow:mae-flow exit"):
             payload = json.dumps({
                 "cwd": root,
-                "prompt": "/mae-flow:mae-flow exit",
+                "prompt": prompt,
             }, ensure_ascii=False) + "\n"
             child_env = dict(env)
             child_env["PYTHONPYCACHEPREFIX"] = os.path.join(
@@ -326,8 +326,101 @@ class RuntimeAndStateTests(unittest.TestCase):
                 env=child_env, timeout=15)
             self.assertEqual(0, raw_cli.returncode, raw_cli.stderr)
             self.assertIn("无需再次退出", raw_cli.stdout)
+
+            review_prompt = (
+                "/mae-flow:mae-flow review-fix REQ-NEW "
+                "继续现有 MR，清理无用 Markdown 并处理评审意见")
+            review_hook = hook(terminal.name, review_prompt)
+            self.assertEqual(
+                0, review_hook.returncode, review_hook.stderr)
+            with open(
+                    os.path.join(terminal.name, ".mae-flow.json.usermsg"),
+                    encoding="utf-8") as stream:
+                messages = json.load(stream)
+            message_id = messages[-1]["id"]
+            rollover = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"),
+                 "init", "--new", "--message-id", message_id],
+                cwd=terminal.name, text=True, capture_output=True,
+                env=child_env, timeout=20)
+            self.assertEqual(0, rollover.returncode, rollover.stderr)
+            self.assertIn("归一化为终态换轮", rollover.stdout)
+            with open(
+                    os.path.join(terminal.name, ".mae-flow.json"),
+                    encoding="utf-8") as stream:
+                next_round = json.load(stream)
+            with open(
+                    os.path.join(terminal.name, ".mae-flow.json.last"),
+                    encoding="utf-8") as stream:
+                previous = json.load(stream)
+            with open(
+                    os.path.join(terminal.name, ".mae-flow.json.usermsg"),
+                    encoding="utf-8") as stream:
+                carried = json.load(stream)
+            self.assertEqual("config_confirm", next_round["current"])
+            self.assertEqual("end", previous["current"])
+            self.assertEqual(review_prompt, carried[-1]["text"])
+            self.assertEqual("config_confirm", carried[-1]["step"])
         finally:
             terminal.cleanup()
+
+        # end 只是完成记录，不是仍在途的完整流程。独立任务应在自身参数
+        # 校验通过后自动归档终态，而不是要求用户先 exit。
+        standalone = fixture("end")
+        try:
+            child_env = dict(env)
+            child_env["PYTHONPYCACHEPREFIX"] = os.path.join(
+                standalone.name, "pycache")
+            invalid_action = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"),
+                 "action", "start", "grill"],
+                cwd=standalone.name, text=True, capture_output=True,
+                env=child_env, timeout=20)
+            self.assertEqual(2, invalid_action.returncode)
+            self.assertTrue(os.path.exists(os.path.join(
+                standalone.name, ".mae-flow.json")))
+            self.assertFalse(os.path.exists(os.path.join(
+                standalone.name, ".mae-flow.json.last")))
+
+            action = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"),
+                 "action", "start", "grill",
+                 "--request", "澄清下一项需求边界"],
+                cwd=standalone.name, text=True, capture_output=True,
+                env=child_env, timeout=20)
+            self.assertEqual(0, action.returncode, action.stderr)
+            self.assertIn("无需 exit", action.stdout)
+            self.assertFalse(os.path.exists(os.path.join(
+                standalone.name, ".mae-flow.json")))
+            self.assertTrue(os.path.exists(os.path.join(
+                standalone.name, ".mae-flow.json.last")))
+            self.assertTrue(os.path.exists(os.path.join(
+                standalone.name, ".mae-flow-work",
+                "standalone-action.json")))
+        finally:
+            standalone.cleanup()
+
+        active_guard = fixture("config_confirm")
+        try:
+            child_env = dict(env)
+            child_env["PYTHONPYCACHEPREFIX"] = os.path.join(
+                active_guard.name, "pycache")
+            wrong_new = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"), "init", "--new"],
+                cwd=active_guard.name, text=True, capture_output=True,
+                env=child_env, timeout=20)
+            self.assertEqual(2, wrong_new.returncode)
+            self.assertIn("不会覆盖", wrong_new.stderr)
+            self.assertTrue(os.path.exists(os.path.join(
+                active_guard.name, ".mae-flow.json")))
+            self.assertFalse(os.path.exists(os.path.join(
+                active_guard.name, ".mae-flow.json.last")))
+        finally:
+            active_guard.cleanup()
 
     def test_concurrent_read_modify_write_does_not_lose_updates(self):
         with tempfile.TemporaryDirectory() as td:

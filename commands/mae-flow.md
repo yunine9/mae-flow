@@ -27,7 +27,8 @@
      原样交给用户在真实终端手动运行，禁止再次询问。Agent 不得用 Bash 管道代答。
      成功后禁止继续 current/done。
      没有在途流程时插件本来就完全旁路，只说明当前无需退出，不创建新流程。
-   - **无参数** — 完整交付流程:项目根已有 .mae-flow.json → `python "<插件>/scripts/mae-flow.py" current` 续跑;
+   - **无参数** — 完整交付流程:项目根已有 `.mae-flow.json` 且 `current=end` → 直接 `init` 自动归档上一单
+     并开启新轮；非终态才执行 `current` 续跑，禁止把已完成状态当成仍在途；
      有 `.mae-flow.json.exited` → 当前是普通开发模式。只有用户本条消息明确要求重新接回/重新使用 Mae-Flow
      时，先执行 `messages` 取得本条真实消息 ID：恢复原流程执行 `init --message-id <ID>`；
      保留旧现场并明确开启另一流程执行 `init --new --message-id <ID>`。普通改码请求不要 init；
@@ -36,7 +37,8 @@
      两者都没有 → **不要接管普通开发**；仅当用户明确要求 mae-flow 交付且已给出单号/需求时 `init`,
      否则照常执行用户的直接改码/补 UT 请求，不得为了使用插件而 init。
    - **ut** — 只补并执行单元测试，**不 init 完整流程**。如果项目还有 `.mae-flow.json` 在途状态，
-     先说明不能叠加两套控制状态，让用户发送 `/mae-flow:mae-flow exit` 后重试；禁止自行退出。
+     先说明不能叠加两套控制状态，让用户发送 `/mae-flow:mae-flow exit` 后重试；禁止自行退出。若状态已经
+     `current=end`，它不算在途，`action start` 会先自动归档上一单再启动独立任务，不得要求用户 exit。
      从命令剩余文字提取目标文件/功能和验收说明；若用户只说了功能，先定向查找并定位至少一个被测
      业务文件。用重复的 `--files` 明确传入业务文件（可同时带相关测试文件），完整用户描述用
      `--request` 原样传入。执行：
@@ -116,7 +118,10 @@
    - **review-fix** — 处理评审意见:本单已交付(MR 已建),处理评审/走读/流水线门禁意见。
      单号确定同 story 模式(参数带→直接用;.mae-flow.json 或 .last 里有→向用户确认;都没有→问)。
      用户本条 `/mae-flow:mae-flow review-fix ...` 已经是明确使用 Mae-Flow 开启评审修复轮的授权，禁止再问
-     “是否重新启用”。若项目有 `.mae-flow.json.exited`，执行 `messages` 找到本条命令的 ID，再执行
+     “是否重新启用”。先按状态唯一分流，禁止混用：
+     - `.mae-flow.json` 的 `current=end` → **直接执行 `init`**，上一单会自动归档并开启新轮；不得先
+       exit、goto、skip，也不得把终态误报成死锁。误用了 `init --new` 时脚本会自动归一化，不再卡住；
+     - 只有项目存在 `.mae-flow.json.exited` 时，才执行 `messages` 找到本条命令的 ID，再执行
      `init --new --message-id <ID>`；旧退出现场会保留。禁止把 `.exited` 改名成主状态文件。
      确认后走标准 init(上一单终态自动备份;存在**非终态**在途单则先问用户续跑还是放弃,禁止直接覆盖),
      config_confirm 以上轮配置为预填,workflow_select 选 review(同单号→同分支名→commit 自动追加进原 MR);

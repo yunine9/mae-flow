@@ -807,6 +807,21 @@ def _explicit_exit_prompt(text):
     return names_flow and explicit_verb and direct_after and not question
 
 
+def _explicit_flow_start_prompt(text):
+    """识别宿主真实 Slash 入口中会开启完整流程的动作。
+
+    终态 Hook 虽然全面旁路门禁，仍需把这类用户原话交给下一轮 init；独立
+    ut/codecheck/grill/story/chain/help/cancel 不属于完整流程重入。
+    """
+    value = re.sub(r"\s+", " ", (text or "").strip()).lower()
+    command = re.match(
+        r"^/mae-flow(?::mae-flow)?(?:\s+([^\s]+))?", value)
+    if not command:
+        return False
+    action = (command.group(1) or "").strip()
+    return action in ("", "review-fix", "moonlight", "月光宝盒")
+
+
 def _capture_exit_intent(text):
     """用户事件本身签发一次性退出凭据，避免 exit 再依赖已经故障的 ack 账本。"""
     try:
@@ -2653,9 +2668,11 @@ def main():
                           "不要再执行 mae-flow.py exit 或 exit --interactive。")
                     _log("terminal flow: idempotent exit")
                     raise SystemExit(0)
-                elif re.search(r"月光宝盒|moonlight", prompt, re.I):
-                    # 终态直接开启下一单月光模式仍需真实用户原话验真。只捕获这类
-                    # 明确控制意图，不把普通开发消息继续写进上一单账本。
+                elif (_explicit_flow_start_prompt(prompt)
+                      or re.search(r"月光宝盒|moonlight", prompt, re.I)):
+                    # 终态门禁虽已旁路，但下一轮仍要拿到本次 review-fix /
+                    # moonlight / 完整入口的真实原话。只捕获明确 Slash 控制命令，
+                    # 普通开发消息仍不写入上一单账本。
                     _capture_usermsg(prompt)
             if (ev in ("userprompt", "sessionstart")
                     and _session_notice_due("terminal", d, ev)):

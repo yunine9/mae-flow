@@ -3145,6 +3145,16 @@ check("明确自然语言退出会触发、询问退出不会误触发",
       and dispatch._explicit_exit_prompt("/mae-flow:mae-flow direct")
       and dispatch._explicit_exit_prompt("/mae-flow exit")
       and not dispatch._explicit_exit_prompt("这个工作流能不能退出？"))
+check("终态只捕获会开启完整流程的 Slash 请求",
+      dispatch._explicit_flow_start_prompt("/mae-flow:mae-flow")
+      and dispatch._explicit_flow_start_prompt(
+          "/mae-flow:mae-flow review-fix REQ-1")
+      and dispatch._explicit_flow_start_prompt(
+          "/mae-flow:mae-flow moonlight REQ-2")
+      and not dispatch._explicit_flow_start_prompt(
+          "/mae-flow:mae-flow ut 补测试")
+      and not dispatch._explicit_flow_start_prompt(
+          "/mae-flow:mae-flow help"))
 
 # 插件全局安装不得接管未 init 的普通项目；Windows 控制台代码页也不得污染 Hook 的 UTF-8 JSON。
 with _TmpDir() as td:

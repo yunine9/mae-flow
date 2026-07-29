@@ -3331,7 +3331,7 @@ def _archive_action(action, outcome, note=""):
             + "。重新执行 action status 后继续。", 2)
 
 
-def _standalone_config():
+def _standalone_config(terminal_state=None):
     """独立任务只继承项目运行方式，不继承单号、步骤、令牌或质量结论。"""
     merged = {}
     candidates = []
@@ -3353,6 +3353,11 @@ def _standalone_config():
                     merged[key] = cfg[key]
         except Exception:
             pass
+    if terminal_state:
+        cfg = terminal_state.get("config", {}) or {}
+        for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
+            if cfg.get(key):
+                merged[key] = cfg[key]
     try:
         defaults = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")) if os.path.isfile(DEFAULTS_PATH) else {}
         for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
@@ -3550,7 +3555,10 @@ def _action_task_card(action, kind, stage=""):
 
 
 def cmd_action_start(flow, st, args):
-    if st is not None:
+    terminal_state = bool(
+        st and flow.get("steps", {}).get(
+            st.get("current", ""), {}).get("terminal"))
+    if st is not None and not terminal_state:
         die("当前有完整交付流程正在运行，不能叠加独立任务。"
             "若确定只做单项工作，先发送 `/mae-flow:mae-flow exit`，退出后重试。", 2)
     current = _load_action()
@@ -3559,7 +3567,7 @@ def cmd_action_start(flow, st, args):
             "继续用 action status，放弃用 action cancel。" % (
                 current.get("id", "?"), current.get("kind", "?")), 2)
     kind = args.kind
-    defaults = _standalone_config()
+    defaults = _standalone_config(st if terminal_state else None)
     config = {
         "编译方式": args.build or defaults.get("编译方式", ""),
         "UT生成方式": args.generator or defaults.get("UT生成方式", ""),
@@ -3586,6 +3594,14 @@ def cmd_action_start(flow, st, args):
                 "不会自动扩大到全仓。" % label, 2)
     else:
         scoped_files = raw_files
+    if terminal_state:
+        # end 只是一份待归档的完成记录，不应冒充“在途流程”阻断独立任务。
+        # 在所有参数/范围校验通过后再归档，避免一次无效 action start 改变状态。
+        _clear_auxiliary_state()
+        _append_history(st, outcome="已完成后开启独立任务")
+        os.replace(STATE_PATH, STATE_PATH + ".last")
+        print("[mae-flow] 上一单已交付完成并归档为 .mae-flow.json.last；"
+              "现在启动独立任务，无需 exit。")
     _git_local_runtime_ignore()
     stamp = time.strftime("%Y%m%d-%H%M%S")
     # 同一秒内取消后重开同类任务也必须使用全新目录，避免旧任务卡/报告混入新现场。
@@ -4298,6 +4314,46 @@ def _start_new_from_direct(flow, ack="", message_id=""):
     return previous, dst
 
 
+def _terminal_rollover_message(st, message_id="", ack=""):
+    """Select a fresh terminal Slash request to carry into the next round."""
+    rows = [
+        item for item in _captured_user_messages(st)
+        if item.get("step") == st.get("current")
+    ]
+    if message_id:
+        rows = [item for item in rows if item.get("id") == message_id]
+        if not rows:
+            die("终态换轮找不到消息 ID %s。无需 exit/goto/skip；执行 messages "
+                "查看本条 Slash 命令 ID，或直接执行 init 自动开启下一轮。"
+                % message_id, 2)
+    elif ack:
+        needle = re.sub(r"\s+", "", ack)
+        rows = [
+            item for item in rows
+            if needle in _trusted_answer_candidates(
+                str(item.get("text", "") or ""))
+        ]
+        if not rows:
+            die("终态换轮的 --ack 与本步骤用户原话不匹配。无需退出；"
+                "直接执行 init 即可自动归档上一单并开启下一轮。", 2)
+    else:
+        cutoff = time.time() - 600
+        rows = [
+            item for item in rows
+            if float(item.get("epoch", 0) or 0) >= cutoff
+            and _direct_reentry_decision(
+                str(item.get("text", "") or "")) == "allow"
+        ]
+    if not rows:
+        return None
+    row = dict(rows[-1])
+    if _direct_reentry_decision(
+            str(row.get("text", "") or "")) != "allow":
+        die("消息没有明确要求开启 Mae-Flow 新轮次。终态门禁已解除，"
+            "普通开发请求不应被 Agent 擅自解释成 init。", 2)
+    return row
+
+
 def cmd_init(flow, args):
     action = _load_action()
     if action:
@@ -4307,16 +4363,28 @@ def cmd_init(flow, args):
     live_before = load_state()
     has_exit = os.path.exists(EXIT_PATH)
     new_exit_snapshot = ""
+    terminal_live = bool(
+        live_before and flow.get("steps", {}).get(
+            live_before.get("current", ""), {}).get("terminal"))
+    rollover_message = (
+        _terminal_rollover_message(
+            live_before, getattr(args, "message_id", "") or "",
+            args.ack or "")
+        if terminal_live else None
+    )
     if (not live_before and not has_exit
             and (getattr(args, "message_id", None) or args.ack)):
         die("当前没有退出指针，--message-id/--ack 已失效，不能悄悄改成新建流程。"
             "若确实要开启全新流程，请去掉这两个参数后执行 init；"
             "若原本要恢复旧现场，请先用 doctor 查明退出指针为何不存在。", 2)
-    if getattr(args, "new", False) and live_before:
+    if getattr(args, "new", False) and live_before and not terminal_live:
         die("当前仍有完整流程状态，init --new 不会覆盖它。先查看 current/status；"
             "确需放弃时走 /mae-flow:mae-flow exit 留存现场，再用 Direct 模式的 messages + "
             "init --new --message-id。禁止删除或改名状态文件。", 2)
-    if getattr(args, "new", False):
+    if getattr(args, "new", False) and terminal_live:
+        print("[mae-flow] 当前已是交付终态；已将 init --new 归一化为终态换轮。"
+              "无需 exit/goto/skip，上一单会自动归档为 .mae-flow.json.last。")
+    if getattr(args, "new", False) and not terminal_live:
         _previous, new_exit_snapshot = _start_new_from_direct(
             flow, args.ack or "", getattr(args, "message_id", "") or "")
     elif not live_before:
@@ -4329,7 +4397,9 @@ def cmd_init(flow, args):
                 print_current(flow, resumed)
                 return
     old = load_state()
-    prepared = bool(getattr(args, "new", False))
+    # --new 在终态只是兼容性别名，并没有经过 Direct 的预检/清理路径；
+    # 仍须像普通终态 init 一样执行 prepare_project。
+    prepared = bool(getattr(args, "new", False) and not terminal_live)
     auxiliary_cleared = prepared
     if old:
         sid = old.get("current")
@@ -4373,6 +4443,14 @@ def cmd_init(flow, args):
           "initial_dirty_fingerprints": {p: _path_fingerprint(p) for p in dirty}}
     atomic_write_json(AGENT_WRITES_PATH, {"paths": {}})
     save_state(st)
+    if rollover_message:
+        carried = dict(rollover_message)
+        carried["carried_from_step"] = carried.get("step", "end")
+        carried["step"] = st["current"]
+        carried.pop("config_review_sha256", None)
+        carried.pop("config_review_id", None)
+        atomic_write_json(STATE_PATH + ".usermsg", [carried])
+        print("[mae-flow] 已把本条 Slash 请求带入新轮，可通过 messages 查看原文。")
     if new_exit_snapshot and os.path.exists(EXIT_PATH):
         remove_with_retry(EXIT_PATH)
         print("[mae-flow] 已按用户明确授权开启另一流程；旧退出现场继续保留在 %s。"
@@ -8348,7 +8426,9 @@ def main():
         if runtime.mode == RuntimeMode.STANDALONE:
             die("当前有 UT/CodeCheck/Grill 独立任务正在运行，"
                 "先 finish/cancel 后再整理 STORY。", 2)
-        if st is not None:
+        if (st is not None
+                and not flow.get("steps", {}).get(
+                    st.get("current", ""), {}).get("terminal")):
             die("完整流程中的 STORY 不入库由 story 步 done 自动处理，"
                 "无需手工执行 story-localize。", 2)
         return cmd_story_localize(args)

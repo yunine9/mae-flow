@@ -173,6 +173,28 @@ def assert_policy_dependencies(root):
     return sorted(violations)
 
 
+def assert_guard_dependencies(root):
+    root_path = Path(root)
+    guard = root_path / "scripts" / "mae_flow_core" / "guard"
+    violations = []
+    if not guard.exists():
+        return violations
+    for path in sorted(guard.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        tree = _parse(os.fspath(path))
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _resolved_call_name(node.func, aliases)
+            if name in FORBIDDEN_CALLS:
+                violations.append(
+                    "%s:%d: forbidden call %s"
+                    % (relative, node.lineno, name)
+                )
+    return sorted(violations)
+
+
 def new_module_size_violations(root, maximum=500):
     root_path = Path(root)
     core = root_path / "scripts" / "mae_flow_core"
@@ -296,5 +318,25 @@ def workflow_complexity_violations(root, maximum=15):
                         complexity,
                         maximum,
                     )
+                )
+    return violations
+
+
+def guard_complexity_violations(root, maximum=15):
+    root_path = Path(root)
+    guard = root_path / "scripts" / "mae_flow_core" / "guard"
+    violations = []
+    if not guard.exists():
+        return violations
+    for path in sorted(guard.rglob("*.py")):
+        relative = path.relative_to(root_path).as_posix()
+        for node in ast.walk(_parse(os.fspath(path))):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            complexity = _node_complexity(node)
+            if complexity > maximum:
+                violations.append(
+                    "%s:%d: %s complexity %d exceeds %d"
+                    % (relative, node.lineno, node.name, complexity, maximum)
                 )
     return violations

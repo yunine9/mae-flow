@@ -55,6 +55,8 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/foundation/fingerprints.py",
           "scripts/mae_flow_core/foundation/source_paths.py",
           "scripts/mae_flow_core/foundation/git_intent.py",
+          "scripts/mae_flow_core/guard/__init__.py",
+          "scripts/mae_flow_core/guard/intent.py",
           "scripts/mae_flow_core/workflow/__init__.py",
           "scripts/mae_flow_core/workflow/advancement.py",
           "scripts/mae_flow_core/workflow/completion.py",
@@ -74,6 +76,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/test_lightcheck.py",
+          "scripts/tests/test_guard_intent.py",
           "scripts/tests/test_task_scope.py",
           "scripts/tests/test_workflow_advancement.py",
           "scripts/tests/test_workflow_completion.py",
@@ -165,6 +168,12 @@ completion_tests = subprocess.run(
 check("Workflow 完成裁决与适配器回归",
       completion_tests.returncode == 0,
       (completion_tests.stdout + completion_tests.stderr)[-5000:])
+guard_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_guard_intent.py")],
+    text=True, capture_output=True, timeout=180)
+check("Gate 请求解析策略回归", guard_tests.returncode == 0,
+      (guard_tests.stdout + guard_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py")):

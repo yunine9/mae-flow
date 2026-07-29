@@ -149,6 +149,26 @@ class DifferentialRunnerTests(unittest.TestCase):
             goldens,
         )
 
+    def test_phase5_active_gate_matches_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase5.json",
+        )
+        goldens = load_goldens(golden_path)
+        for name in ("active_gate_edit", "dangerous_gate_bash"):
+            with self.subTest(name=name):
+                actual = run_scenario(ROOT, name)
+                assert_matches_golden(
+                    self,
+                    name,
+                    actual,
+                    goldens,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

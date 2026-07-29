@@ -256,7 +256,62 @@ def evidence_rejection(project, implementation_root):
     }, {}
 
 
+def _active_gate(project, implementation_root, kind, subject):
+    env = _prepare_repository(project)
+    state = {
+        "schema_version": 2,
+        "revision": 1,
+        "updated_at": "2026-07-29 10:00:00",
+        "current": "build",
+        "config": {
+            "单号": "REQ-DIFF",
+            "分支名": "",
+            "CHANGE_NAME": "diff-change",
+        },
+        "choices": {"workflow": "full"},
+        "history": [],
+        "started": "2026-07-29 10:00:00",
+    }
+    with open(
+            os.path.join(project, ".mae-flow.json"),
+            "w",
+            encoding="utf-8",
+            newline="\n") as stream:
+        json.dump(
+            state,
+            stream,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        stream.write("\n")
+    return {
+        "argv": [
+            sys.executable,
+            os.path.join(
+                implementation_root, "scripts", "mae-flow.py"),
+            "gate",
+            kind,
+            subject,
+        ],
+        "stdin": "",
+        "env": env,
+    }, {}
+
+
+def active_gate_edit(project, implementation_root):
+    return _active_gate(
+        project, implementation_root, "edit", "README.md")
+
+
+def dangerous_gate_bash(project, implementation_root):
+    return _active_gate(
+        project, implementation_root, "bash", "rm -rf .")
+
+
 SCENARIOS = {
+    "active_gate_edit": active_gate_edit,
+    "dangerous_gate_bash": dangerous_gate_bash,
     "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "terminal_status": terminal_status,

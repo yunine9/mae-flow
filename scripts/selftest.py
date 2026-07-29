@@ -56,6 +56,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/foundation/source_paths.py",
           "scripts/mae_flow_core/foundation/git_intent.py",
           "scripts/mae_flow_core/workflow/__init__.py",
+          "scripts/mae_flow_core/workflow/advancement.py",
           "scripts/mae_flow_core/workflow/definition.py",
           "scripts/mae_flow_core/workflow/transitions.py",
           "scripts/mae_flow_core/__init__.py",
@@ -73,6 +74,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_task_scope.py",
+          "scripts/tests/test_workflow_advancement.py",
           "scripts/tests/test_workflow_definition.py",
           "scripts/tests/test_differential_harness.py",
           "scripts/tests/test_architecture.py",
@@ -147,6 +149,13 @@ workflow_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("Workflow 定义与转移策略回归", workflow_tests.returncode == 0,
       (workflow_tests.stdout + workflow_tests.stderr)[-5000:])
+advancement_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_workflow_advancement.py")],
+    text=True, capture_output=True, timeout=180)
+check("Workflow 推进策略与适配器回归",
+      advancement_tests.returncode == 0,
+      (advancement_tests.stdout + advancement_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py")):

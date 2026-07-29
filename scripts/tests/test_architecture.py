@@ -184,6 +184,7 @@ class ArchitectureTests(unittest.TestCase):
             text = stream.read()
         self.assertIn("test_differential_harness.py", text)
         self.assertIn("test_architecture.py", text)
+        self.assertIn("test_workflow_advancement.py", text)
 
 
 if __name__ == "__main__":

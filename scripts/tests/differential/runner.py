@@ -20,7 +20,7 @@ from differential.snapshot import Snapshot
 
 
 DEFAULT_GOLDENS = os.path.join(
-    os.path.dirname(__file__), "goldens", "phase1.json")
+    os.path.dirname(__file__), "goldens", "phase2.json")
 
 
 def _sha256(path):

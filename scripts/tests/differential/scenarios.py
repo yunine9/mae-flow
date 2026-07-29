@@ -134,8 +134,23 @@ def corrupt_state_doctor(project, implementation_root):
     }, {}
 
 
+def workflow_steps(project, implementation_root):
+    env = _prepare_repository(project)
+    return {
+        "argv": [
+            sys.executable,
+            os.path.join(
+                implementation_root, "scripts", "mae-flow.py"),
+            "steps",
+        ],
+        "stdin": "",
+        "env": env,
+    }, {}
+
+
 SCENARIOS = {
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,
     "terminal_status": terminal_status,
     "corrupt_state_doctor": corrupt_state_doctor,
+    "workflow_steps": workflow_steps,
 }

@@ -95,6 +95,24 @@ class DifferentialRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown scenario"):
             run_scenario(ROOT, "not-registered")
 
+    def test_phase2_workflow_steps_matches_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase2.json",
+        )
+        goldens = load_goldens(golden_path)
+        actual = run_scenario(ROOT, "workflow_steps")
+        assert_matches_golden(
+            self,
+            "workflow_steps",
+            actual,
+            goldens,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

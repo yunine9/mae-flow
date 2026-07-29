@@ -1,0 +1,6 @@
+{
+  "max_lines": {
+    "hooks/dispatch.py": 2860,
+    "scripts/mae-flow.py": 10653
+  }
+}

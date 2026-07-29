@@ -17,10 +17,12 @@ from architecture_rules import (  # noqa: E402
     assert_foundation_dependencies,
     assert_guard_dependencies,
     assert_policy_dependencies,
+    assert_quality_dependencies,
     function_complexity,
     guard_complexity_violations,
     line_count,
     new_module_size_violations,
+    quality_complexity_violations,
     workflow_complexity_violations,
 )
 
@@ -101,6 +103,12 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_guard_functions_stay_within_complexity_limit(self):
         self.assertEqual([], guard_complexity_violations(ROOT))
+
+    def test_quality_policy_has_no_direct_side_effects(self):
+        self.assertEqual([], assert_quality_dependencies(ROOT))
+
+    def test_quality_functions_stay_within_complexity_limit(self):
+        self.assertEqual([], quality_complexity_violations(ROOT))
 
     def test_workflow_rejects_aliased_process_calls(self):
         root = self._write_core_fixture(
@@ -195,6 +203,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_workflow_advancement.py", text)
         self.assertIn("test_workflow_completion.py", text)
         self.assertIn("test_guard_intent.py", text)
+        self.assertIn("test_quality_task_cards.py", text)
 
 
 if __name__ == "__main__":

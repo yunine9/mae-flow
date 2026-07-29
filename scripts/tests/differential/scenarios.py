@@ -309,8 +309,86 @@ def dangerous_gate_bash(project, implementation_root):
         project, implementation_root, "bash", "rm -rf .")
 
 
+def compile_task_card(project, implementation_root):
+    env = _prepare_repository(project)
+    _run_git(project, env, "branch", "baseline")
+    os.makedirs(os.path.join(project, "src"))
+    with open(
+            os.path.join(project, "src", "main.py"),
+            "w",
+            encoding="utf-8",
+            newline="\n") as stream:
+        stream.write("def answer():\n    return 42\n")
+    _run_git(project, env, "add", "--", "src/main.py")
+    _run_git(
+        project,
+        env,
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "[REQ-DIFF][feat]add source",
+    )
+    state = {
+        "schema_version": 2,
+        "revision": 1,
+        "updated_at": "2026-07-29 10:00:00",
+        "current": "build",
+        "config": {
+            "单号": "REQ-DIFF",
+            "单号类型": "feat",
+            "基线分支": "baseline",
+            "分支名": "",
+            "编译方式": "project command",
+            "UT生成方式": "existing",
+            "UT运行命令": "python -m unittest",
+        },
+        "choices": {"workflow": "full"},
+        "history": [],
+        "started": "2026-07-29 10:00:00",
+    }
+    with open(
+            os.path.join(project, ".mae-flow.json"),
+            "w",
+            encoding="utf-8",
+            newline="\n") as stream:
+        json.dump(
+            state,
+            stream,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        stream.write("\n")
+    script = os.path.join(
+        implementation_root,
+        "scripts",
+        "mae-flow.py",
+    )
+    fixed_time_runner = (
+        "import os,runpy,sys,time;"
+        "path=sys.argv[1];"
+        "sys.path.insert(0,os.path.dirname(path));"
+        "time.strftime=lambda *_args:'2026-07-29 10:00:00';"
+        "time.monotonic=lambda:0.0;"
+        "sys.argv=[path,'agent-task','compile'];"
+        "runpy.run_path(path,run_name='__main__')"
+    )
+    return {
+        "argv": [
+            sys.executable,
+            "-c",
+            fixed_time_runner,
+            script,
+        ],
+        "stdin": "",
+        "env": env,
+    }, {}
+
+
 SCENARIOS = {
     "active_gate_edit": active_gate_edit,
+    "compile_task_card": compile_task_card,
     "dangerous_gate_bash": dangerous_gate_bash,
     "evidence_rejection": evidence_rejection,
     "inactive_pretooluse_bypass": inactive_pretooluse_bypass,

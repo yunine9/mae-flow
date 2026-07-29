@@ -14,24 +14,16 @@ TESTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
-from differential.normalize import normalize_value
+from differential.normalize import normalize_text, normalize_value
 from differential.scenarios import SCENARIOS
 from differential.snapshot import Snapshot
 
 
 DEFAULT_GOLDENS = os.path.join(
-    os.path.dirname(__file__), "goldens", "phase5.json")
+    os.path.dirname(__file__), "goldens", "phase6.json")
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _capture_files(root):
+def _capture_files(root, replacements):
     result = {}
     for current, dirs, files in os.walk(root):
         dirs[:] = sorted(
@@ -40,8 +32,17 @@ def _capture_files(root):
         for name in sorted(files):
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, root).replace("\\", "/")
+            with open(absolute, "rb") as stream:
+                content = stream.read()
+            try:
+                normalized = normalize_text(
+                    content.decode("utf-8"),
+                    replacements,
+                ).encode("utf-8")
+            except UnicodeDecodeError:
+                normalized = content
             result[relative] = {
-                "sha256": _sha256(absolute),
+                "sha256": hashlib.sha256(normalized).hexdigest(),
                 "size": os.path.getsize(absolute),
             }
     return result
@@ -64,6 +65,25 @@ def _read_states(root):
                     type(exc).__name__, exc),
             }
     return result
+
+
+def _state_replacements(states):
+    replacements = {}
+    for state in states.values():
+        if not isinstance(state, dict):
+            continue
+        tasks = state.get("agent_tasks") or {}
+        if not isinstance(tasks, dict):
+            continue
+        for task in tasks.values():
+            digest = (
+                task.get("sha256", "")
+                if isinstance(task, dict)
+                else ""
+            )
+            if digest:
+                replacements[digest] = "<TASK_CARD_SHA256>"
+    return replacements
 
 
 def _git(root, *args):
@@ -105,12 +125,14 @@ def run_scenario(implementation_root, scenario_name):
             "<IMPLEMENTATION>")
         replacements[os.path.realpath(implementation_root).replace(
             "\\", "/")] = "<IMPLEMENTATION>"
+        states = _read_states(project)
+        replacements.update(_state_replacements(states))
         snapshot = Snapshot(
             stdout=completed.stdout,
             stderr=completed.stderr,
             returncode=completed.returncode,
-            files=_capture_files(project),
-            state=_read_states(project),
+            files=_capture_files(project, replacements),
+            state=states,
             git={
                 "branch": _git(project, "branch", "--show-current"),
                 "head": _git(project, "rev-parse", "--verify", "HEAD"),

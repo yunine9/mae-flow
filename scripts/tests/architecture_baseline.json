@@ -10,7 +10,9 @@
       "cmd_gate": 59,
       "_gate_edit": 25,
       "_gate_commit_candidates": 22,
-      "_gate_bash_writes": 41
+      "_gate_bash_writes": 41,
+      "cmd_agent_task": 87,
+      "_store_agent_task": 14
     }
   }
 }

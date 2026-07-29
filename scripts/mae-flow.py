@@ -8302,7 +8302,6 @@ def _requirement_sources(st):
             out.extend(os.path.abspath(x) for x in globmod.glob(p))
     return list(dict.fromkeys(out))
 
-
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
@@ -8359,7 +8358,6 @@ def _store_agent_task(flow, st, args, context):
         print("[mae-flow] CodeCheck 详细日志: %s"
               % norm(codecheck_log_path(os.getcwd(), st)))
     print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
-
 
 def cmd_agent_task(flow, st, args):
     """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""
@@ -8614,7 +8612,6 @@ def cmd_agent_task(flow, st, args):
         "lightcheck_result": lightcheck_result, "ut_targets": ut_targets,
         "inherited_dirty": inherited_dirty,
     })
-
 
 def cmd_codecheck_scan(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):

@@ -169,6 +169,24 @@ class DifferentialRunnerTests(unittest.TestCase):
                     goldens,
                 )
 
+    def test_phase6_compile_task_card_matches_fixed_baseline(self):
+        golden_path = os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase6.json",
+        )
+        goldens = load_goldens(golden_path)
+        actual = run_scenario(ROOT, "compile_task_card")
+        assert_matches_golden(
+            self,
+            "compile_task_card",
+            actual,
+            goldens,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -59,6 +59,9 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/guard/intent.py",
           "scripts/mae_flow_core/quality/__init__.py",
           "scripts/mae_flow_core/quality/task_cards.py",
+          "scripts/mae_flow_core/delivery/__init__.py",
+          "scripts/mae_flow_core/delivery/checkpoints.py",
+          "scripts/mae_flow_core/delivery/moonlight.py",
           "scripts/mae_flow_core/workflow/__init__.py",
           "scripts/mae_flow_core/workflow/advancement.py",
           "scripts/mae_flow_core/workflow/completion.py",
@@ -80,6 +83,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_lightcheck.py",
           "scripts/tests/test_guard_intent.py",
           "scripts/tests/test_quality_task_cards.py",
+          "scripts/tests/test_delivery_policies.py",
           "scripts/tests/test_task_scope.py",
           "scripts/tests/test_workflow_advancement.py",
           "scripts/tests/test_workflow_completion.py",
@@ -183,6 +187,12 @@ quality_task_tests = subprocess.run(
     text=True, capture_output=True, timeout=180)
 check("质量任务卡纯契约回归", quality_task_tests.returncode == 0,
       (quality_task_tests.stdout + quality_task_tests.stderr)[-5000:])
+delivery_tests = subprocess.run(
+    [sys.executable, os.path.join(
+        ROOT, "scripts", "tests", "test_delivery_policies.py")],
+    text=True, capture_output=True, timeout=180)
+check("交付子状态机纯策略回归", delivery_tests.returncode == 0,
+      (delivery_tests.stdout + delivery_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
         ("重构架构边界", "test_architecture.py")):

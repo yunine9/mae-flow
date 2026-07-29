@@ -14,10 +14,12 @@ if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
 from architecture_rules import (  # noqa: E402
+    assert_delivery_dependencies,
     assert_foundation_dependencies,
     assert_guard_dependencies,
     assert_policy_dependencies,
     assert_quality_dependencies,
+    delivery_complexity_violations,
     function_complexity,
     guard_complexity_violations,
     line_count,
@@ -109,6 +111,12 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_quality_functions_stay_within_complexity_limit(self):
         self.assertEqual([], quality_complexity_violations(ROOT))
+
+    def test_delivery_policy_has_no_direct_side_effects(self):
+        self.assertEqual([], assert_delivery_dependencies(ROOT))
+
+    def test_delivery_functions_stay_within_complexity_limit(self):
+        self.assertEqual([], delivery_complexity_violations(ROOT))
 
     def test_workflow_rejects_aliased_process_calls(self):
         root = self._write_core_fixture(
@@ -204,6 +212,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_workflow_completion.py", text)
         self.assertIn("test_guard_intent.py", text)
         self.assertIn("test_quality_task_cards.py", text)
+        self.assertIn("test_delivery_policies.py", text)
 
 
 if __name__ == "__main__":

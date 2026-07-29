@@ -12,7 +12,12 @@
       "_gate_commit_candidates": 22,
       "_gate_bash_writes": 41,
       "cmd_agent_task": 87,
-      "_store_agent_task": 14
+      "_store_agent_task": 14,
+      "cmd_moonlight": 75,
+      "_moonlight_blocked": 8,
+      "_moonlight_push_failed": 4,
+      "_moonlight_unlock_source": 4,
+      "_moonlight_finalize": 7
     }
   }
 }

@@ -96,6 +96,17 @@ from mae_flow_core.application.delivery.checkpoints import (
     plan_checkpoint,
     ready_checkpoint,
 )
+from mae_flow_core.application.delivery.checkpoint_decisions import (
+    CheckpointDecisionPorts,
+    decide_checkpoint,
+)
+from mae_flow_core.application.delivery.checkpoint_final import (
+    FinalReviewPorts,
+    prepare_final_review,
+)
+from mae_flow_core.application.delivery.checkpoint_status import (
+    inspect_checkpoint_status,
+)
 from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
@@ -5851,78 +5862,67 @@ def _refresh_final_review_status(st, data, final):
 
 def cmd_checkpoint_status(st):
     data = _development_review(st)
-    if not data:
-        print("[mae-flow] 当前是旧版在途流程，没有检查点子状态；继续按 current 的既有步骤执行。")
-        return
-    print("[mae-flow] 开发节奏: %s；计划状态: %s"
-          % (data.get("mode", "待确认"), data.get("status", "未知")))
-    for item in data.get("checkpoints") or []:
-        print("  %s [%s] %s" % (
-            item.get("id"), item.get("status"), item.get("title")))
-    item = _checkpoint_current(st)
-    if not item:
-        final = _final_review_active(data)
-        if final:
+    result = inspect_checkpoint_status(data)
+    for line in result.stdout:
+        print(line)
+    for effect in result.effects:
+        if effect.kind == "refresh_final_review":
+            final = _final_review_active(data)
             if _refresh_final_review_status(st, data, final):
                 return
             _show_final_review_receipt(st, data, final)
             return
-        print("全部计划检查点已闭环；继续当前主流程。")
-        return
-    if _refresh_checkpoint_status(st, data, item):
-        return
-    _show_checkpoint_review(st, data, item)
+        if effect.kind == "refresh_checkpoint":
+            item = _checkpoint_current(st)
+            if _refresh_checkpoint_status(st, data, item):
+                return
+            _show_checkpoint_review(st, data, item)
+            return
+        raise RuntimeError(
+            "unsupported checkpoint status effect: " + effect.kind)
 
 
 def cmd_checkpoint_final(st):
-    if st.get("current") != "delivery_review":
-        die("checkpoint final 只允许在最终代码增量检视步骤执行；"
-            "中间批次使用 checkpoint ready/status。", 2)
-    data = _development_review(st)
-    if not data or _moonlight(st):
-        print("[mae-flow] 当前无需检查点式最终检视；直接按 current 执行 done。")
-        return
-    active = _final_review_active(data)
-    if active:
-        if active.get("status") == "push_pending":
-            _migrate_legacy_final_push_pending(st, active)
-        _show_final_review_receipt(st, data, active)
-        return
-    changed, err = _final_review_delta(st)
-    if err:
-        die("最终检视基点无法核实:" + err, 2)
-    if not changed:
-        print("[mae-flow] 最后已检视代码版本之后没有源码/测试/构建变化；"
-              "无需重复确认，直接执行 done。")
-        return
-    base = str(data.get("last_reviewed_head") or data.get("delivery_base") or "")
-    head = sh("git rev-parse --verify HEAD")
-    worktree_snapshot = _final_delivery_snapshot(st, head)
-    receipt = {}
-    if worktree_snapshot:
-        receipt = {
-            "base": head,
-            "snapshot": worktree_snapshot,
-            "snapshot_sha256": _snapshot_sha256(worktree_snapshot),
-            "scope": "final",
-        }
-    ref, remote_head, _local_head = _upstream_snapshot()
-    remote_ref = ref if remote_head == head else ""
-    data["final_review"] = {
-        "status": "review_pending", "base": base, "head": head,
-        "title": "最终检视增量",
-        "remote_ref": remote_ref,
-        "remote_head": remote_head if remote_ref else "",
-        "changed": changed,
-        "receipt": receipt,
-        "requires_commit": bool(worktree_snapshot),
-        "requires_quality_rerun": bool(worktree_snapshot),
-        "ack_cursor": _ack_message_cursor(),
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    save_state(st)
-    final = data["final_review"]
-    _show_final_review_receipt(st, data, final)
+    result = prepare_final_review(
+        current=st.get("current"),
+        review=_development_review(st),
+        moonlight=_moonlight(st),
+        ports=FinalReviewPorts(
+            final_delta=lambda: _final_review_delta(st),
+            head=lambda: sh("git rev-parse --verify HEAD"),
+            final_snapshot=lambda head: _final_delivery_snapshot(
+                st, head),
+            snapshot_sha256=_snapshot_sha256,
+            upstream=_upstream_snapshot,
+            ack_cursor=_ack_message_cursor,
+            now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    show_final = False
+    save = False
+    for effect in result.effects:
+        if effect.kind == "set_development_review":
+            st["development_review"] = thaw_delivery_payload(effect.payload)
+            save = True
+        elif effect.kind == "migrate_legacy_final":
+            data = _development_review(st)
+            _migrate_legacy_final_push_pending(
+                st, (data or {}).get("final_review") or {})
+        elif effect.kind == "show_final_review":
+            show_final = True
+        else:
+            raise RuntimeError(
+                "unsupported final review effect: " + effect.kind)
+    if save:
+        save_state(st)
+    if show_final:
+        data = _development_review(st)
+        _show_final_review_receipt(
+            st, data, (data or {}).get("final_review") or {})
+    for line in result.stdout:
+        print(line)
 
 
 def _checkpoint_ack(st, ack, expected, receipt):
@@ -5957,204 +5957,68 @@ def _invalidate_quality_for_rework(st):
 
 
 def cmd_checkpoint_decide(flow, st, args):
-    data = _development_review(st)
-    if not data or _moonlight(st):
-        die("当前没有等待用户裁决的普通模式检查点。", 2)
-    expected = {
-        "continue": CHECKPOINT_CONTINUE_ACK,
-        "revise": CHECKPOINT_REVISE_ACK,
-        "continuous": CHECKPOINT_CONTINUOUS_ACK,
-    }[args.choice]
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    final = data.get("final_review") or {}
-    if st.get("current") == "delivery_review" and final.get("status") == "review_pending":
-        ok, why = _checkpoint_ack(st, args.ack, expected, final)
-        if not ok:
-            die("检查点用户裁决验真失败:" + why, 2)
-        if args.choice == "continuous":
-            die("最终检视已经是统一收尾，不能再切换为连续模式。", 2)
-        if args.choice == "revise":
+    result = decide_checkpoint(
+        review=_development_review(st),
+        current=st.get("current"),
+        moonlight=_moonlight(st),
+        choice=args.choice,
+        ack=args.ack,
+        config=st.get("config", {}) or {},
+        ports=CheckpointDecisionPorts(
+            verify_ack=lambda receipt, expected: _checkpoint_ack(
+                st, args.ack, expected, receipt),
+            head=lambda: sh("git rev-parse --verify HEAD"),
+            upstream=_upstream_snapshot,
+            worktree_fresh=lambda item: _reviewed_worktree_fresh(
+                st, item),
+            final_snapshot=lambda head: _final_delivery_snapshot(
+                st, head),
+            source_fresh=lambda head: _checkpoint_source_fresh(
+                head, st),
+            upstream_contains=_upstream_contains_reset_commit,
+            now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    show_final = False
+    changed = False
+    for effect in result.effects:
+        if effect.kind == "set_development_review":
+            st["development_review"] = thaw_delivery_payload(effect.payload)
+            changed = True
+        elif effect.kind == "invalidate_quality":
+            _invalidate_quality_for_rework(st)
+            changed = True
+        elif effect.kind == "append_history":
+            st.setdefault("history", []).append(
+                thaw_delivery_payload(effect.payload))
+            changed = True
+        elif effect.kind == "show_final_review":
+            show_final = True
+        elif effect.kind == "activate_final_rework":
+            payload = thaw_delivery_payload(effect.payload)
+            data = _development_review(st)
+            final = (data or {}).get("final_review") or {}
             target = _activate_final_rework(
-                flow, st, data, final, {"note": args.ack})
-            print("[mae-flow] 用户要求调整最终代码，已回到 %s。修复提交后必须重新走编译和质量链；"
-                  "已检视基点不前移，最终会展示完整修复组合。" % target)
+                flow, st, data, final, payload)
+            print(
+                "[mae-flow] 用户要求调整最终代码，已回到 %s。"
+                "修复提交后必须重新走编译和质量链；"
+                "已检视基点不前移，最终会展示完整修复组合。" % target)
             print_current(flow, st)
             return
-        receipt_head = final.get("head", "")
-        if sh("git rev-parse --verify HEAD") != receipt_head:
-            die("最终检视期间 HEAD 已变化，旧确认不能背书新版本；先选择调整并重新验证。", 2)
-        if final.get("remote_ref"):
-            ref, remote_head, local_head = _upstream_snapshot()
-            if ref != final.get("remote_ref") or remote_head != local_head:
-                die("远端检查点在检视期间发生变化，拒绝确认旧远端收据。", 2)
-        if final.get("requires_commit"):
-            fresh, why = _reviewed_worktree_fresh(st, final)
-            if not fresh:
-                die("最终检视收据已失效:" + why, 2)
-            final["status"] = "commit_pending"
-            final["confirmed_at"] = now
-            st.setdefault("history", []).append({
-                "step": "delivery_review",
-                "result": "checkpoint:confirmed-final-worktree",
-                "note": args.ack,
-                "at": now,
-            })
-            save_state(st)
-            _show_final_review_receipt(st, data, final)
-            return
-        dirty_after_receipt = _final_delivery_snapshot(st, receipt_head)
-        if dirty_after_receipt:
-            die("最终检视收据已失效:检视期间又出现交付代码变化："
-                + "、".join(list(dirty_after_receipt)[:8]), 2)
-        data["last_reviewed_head"] = receipt_head
-        final["status"] = "accepted"
-        final["accepted_at"] = now
-        data.pop("final_rework", None)
-        st.setdefault("history", []).append({
-            "step": "delivery_review", "result": "checkpoint:accept-final",
-            "note": args.ack, "at": now})
-        save_state(st)
-        print("[mae-flow] 最终代码增量已确认。执行 done 进入规格定稿/最终 push。")
-        return
-
-    if (st.get("current") == "delivery_review"
-            and final.get("status") == "commit_recovery"):
-        if args.choice != "revise":
-            die("错误的最终增量提交不能直接放行；只能选择「需要调整代码」。", 2)
-        ok, why = _checkpoint_ack(
-            st, args.ack, CHECKPOINT_REVISE_ACK, final)
-        if not ok:
-            die("最终提交恢复裁决验真失败:" + why, 2)
-        base = str((final.get("receipt") or {}).get("base", ""))
-        head = sh("git rev-parse --verify HEAD")
-        pushed_ref = _upstream_contains_reset_commit(base, head)
-        if pushed_ref:
-            die("待拆回的最终增量提交已经存在于上游 %s，不能自动改写远端历史。"
-                "请让用户决定追加纠正提交、另开分支或由管理员处理；"
-                "禁止 force-push。" % pushed_ref, 2)
-        final["status"] = "reset_pending"
-        final["recovery_ack"] = args.ack
-        save_state(st)
-        print("[mae-flow] 用户已选择调整。执行：")
-        print("  git reset --mixed " + base)
-        print("完成后执行 checkpoint status；文件内容会保留并回到完整质量链。")
-        return
-
-    item = _checkpoint_current(st)
-    if item and item.get("status") == "commit_recovery":
-        if args.choice != "revise":
-            die("错误提交不能用“继续”放行；只能让用户选择「需要调整代码」后安全拆回工作区。", 2)
-        ok, why = _checkpoint_ack(
-            st, args.ack, CHECKPOINT_REVISE_ACK, item.get("receipt") or {})
-        if not ok:
-            die("检查点恢复裁决验真失败:" + why, 2)
-        base = str((item.get("receipt") or {}).get("base", ""))
-        head = sh("git rev-parse --verify HEAD")
-        pushed_ref = _upstream_contains_reset_commit(base, head)
-        if pushed_ref:
-            die("错误提交已经存在于上游 %s，不能自动改写远端历史。"
-                "请让用户决定追加纠正提交、另开分支或由仓库管理员处理；"
-                "当前继续冻结，禁止 force-push。" % pushed_ref, 2)
-        item["status"] = "reset_pending"
-        item["recovery_ack"] = args.ack
-        save_state(st)
-        print("[mae-flow] 用户已选择调整。执行：")
-        print("  git reset --mixed " + base)
-        print("该命令只撤销尚未推送的错误检查点提交，文件内容保留在工作区；"
-              "完成后执行 checkpoint status 返回 coding。")
-        return
-    if not item or item.get("status") != "review_pending":
-        die("当前没有处于 review_pending 的中间检查点；执行 checkpoint status 查看。", 2)
-    ok, why = _checkpoint_ack(st, args.ack, expected, item.get("receipt") or {})
-    if not ok:
-        die("检查点用户裁决验真失败:" + why, 2)
-    if args.choice == "revise":
-        item["status"] = "coding"
-        item["attempt"] = int(item.get("attempt", 1)) + 1
-        for key in ("receipt", "head", "compile_head", "compile_task_sha256"):
-            item.pop(key, None)
-        _invalidate_quality_for_rework(st)
-        st.setdefault("history", []).append({
-            "step": st.get("current"), "result": "checkpoint:revise:" + item["id"],
-            "note": args.ack, "at": now})
-        save_state(st)
-        print("[mae-flow] %s 返回修改；固定基点仍为 %s，修复后会重新展示整批组合差异。"
-              % (item["id"], str(item.get("fixed_base", ""))[:10]))
-        return
-    if _review_before_commit(data):
-        fresh, fresh_why = _reviewed_worktree_fresh(st, item)
-        if not fresh:
-            die("检查点收据已失效:" + fresh_why
-                + "；旧确认不能背书另一份未提交 diff。", 2)
-        item["status"] = "commit_pending"
-        item["confirmed_at"] = now
-        item["after_commit_continuous"] = args.choice == "continuous"
-        st.setdefault("history", []).append({
-            "step": st.get("current"),
-            "result": "checkpoint:confirmed-worktree:" + item["id"],
-            "note": args.ack, "at": now})
-        save_state(st)
-        add, commit = _checkpoint_commit_command(st, item)
-        if args.choice == "continuous":
-            print("[mae-flow] 用户选择后续统一检视；当前工作区快照已冻结，"
-                  "先形成可追踪的内部检查点提交，之后不 push、不再停顿。")
         else:
-            print("[mae-flow] 用户已确认未提交 diff。现在只提交刚才检视过的精确文件：")
-        print("  " + add)
-        print("  " + commit)
-        print("提交成功后执行 checkpoint status；系统会逐文件核对提交内容与检视快照，"
-              + ("然后进入连续开发。" if args.choice == "continuous"
-                 else "相等后才允许小步 push。"))
-        return
-    if args.choice == "continuous":
-        fresh, fresh_why = _checkpoint_source_fresh(
-            item.get("compile_head", ""), st)
-        if not fresh:
-            die("切换一次完成模式前，当前批编译收据已失效:"
-                + fresh_why + "。先选择调整并重新编译。", 2)
-        completed_head = sh("git rev-parse --verify HEAD")
-        data["mode"] = "continuous"
-        item["status"] = "completed"
-        item["completed_head"] = completed_head
-        item["closed_at"] = now
-        item.pop("receipt", None)
-        data["current_index"] = int(data.get("current_index", 0)) + 1
-        nxt = _checkpoint_current(st)
-        if nxt:
-            nxt["fixed_base"] = completed_head
-        st.setdefault("history", []).append({
-            "step": st.get("current"), "result": "checkpoint:switch-continuous",
-            "note": args.ack, "at": now})
+            raise RuntimeError(
+                "unsupported checkpoint decision effect: " + effect.kind)
+    if changed:
         save_state(st)
-        print("[mae-flow] 已切换为一次完成模式。当前批的有效编译结果已保留，"
-              "但不会冒充用户已检视；%s质量链结束后从上一个已确认 HEAD 统一检视。"
-              % (("进入 " + nxt["id"] + "，") if nxt else "全部检查点已完成，"))
-        return
-    receipt = item.get("receipt") or {}
-    receipt_head = receipt.get("head", "")
-    if sh("git rev-parse --verify HEAD") != receipt_head:
-        die("检视期间 HEAD 已变化；旧远端收据失效，选择调整后重新编译、push、检视。", 2)
-    fresh, why = _checkpoint_source_fresh(receipt_head, st)
-    if not fresh:
-        die("检查点收据已失效:" + why, 2)
-    ref, remote_head, local_head = _upstream_snapshot()
-    if (ref != receipt.get("remote_ref") or remote_head != receipt_head
-            or local_head != receipt_head):
-        die("检视期间本地或远端分支发生变化；拒绝确认旧收据。", 2)
-    item["status"] = "accepted"
-    item["accepted_head"] = receipt_head
-    item["accepted_at"] = now
-    data["last_reviewed_head"] = receipt_head
-    data["current_index"] = int(data.get("current_index", 0)) + 1
-    nxt = _checkpoint_current(st)
-    if nxt:
-        nxt["fixed_base"] = receipt_head
-    st.setdefault("history", []).append({
-        "step": st.get("current"), "result": "checkpoint:accept:" + item["id"],
-        "note": args.ack, "at": now})
-    save_state(st)
-    print("[mae-flow] %s 已确认并冻结远端收据。%s"
-          % (item["id"], ("进入 " + nxt["id"]) if nxt else "全部计划检查点已完成"))
+    if show_final:
+        data = _development_review(st)
+        _show_final_review_receipt(
+            st, data, (data or {}).get("final_review") or {})
+    for line in result.stdout:
+        print(line)
 
 
 def cmd_checkpoint(flow, st, args):

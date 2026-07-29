@@ -32,14 +32,9 @@ def _parse(path):
 
 
 def module_imports(path):
-    imports = set()
-    for node in ast.walk(_parse(path)):
-        if isinstance(node, ast.Import):
-            imports.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            imports.add("." * node.level + module)
-    return imports
+    return {
+        name for name, _line in _import_nodes(_parse(path))
+    }
 
 
 def _attribute_name(node):
@@ -53,18 +48,25 @@ def _attribute_name(node):
 
 
 def forbidden_calls(path):
+    tree = _parse(path)
+    aliases = _import_aliases(tree)
     calls = []
-    for node in ast.walk(_parse(path)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        name = (
-            node.func.id
-            if isinstance(node.func, ast.Name)
-            else _attribute_name(node.func)
-        )
+        name = _resolved_call_name(node.func, aliases)
         if name in FORBIDDEN_CALLS:
             calls.append("%s:%d" % (name, node.lineno))
     return calls
+
+
+def _relative_module(node):
+    package = ["mae_flow_core", "foundation"]
+    keep = max(0, len(package) - max(0, node.level - 1))
+    parts = package[:keep]
+    if node.module:
+        parts.extend(node.module.split("."))
+    return ".".join(parts)
 
 
 def _import_nodes(tree):
@@ -73,7 +75,49 @@ def _import_nodes(tree):
             for alias in node.names:
                 yield alias.name, node.lineno
         elif isinstance(node, ast.ImportFrom):
-            yield node.module or "", node.lineno
+            module = (
+                _relative_module(node)
+                if node.level else node.module or "")
+            if module:
+                yield module, node.lineno
+            if not module.startswith(FORBIDDEN_IMPORT_PREFIXES):
+                for alias in node.names:
+                    if alias.name != "*":
+                        yield ".".join(
+                            part for part in (module, alias.name) if part
+                        ), node.lineno
+
+
+def _import_aliases(tree):
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                aliases[local] = (
+                    alias.name if alias.asname else local)
+        elif isinstance(node, ast.ImportFrom):
+            module = (
+                _relative_module(node)
+                if node.level else node.module or "")
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                aliases[local] = ".".join(
+                    part for part in (module, alias.name) if part)
+    return aliases
+
+
+def _resolved_call_name(function, aliases):
+    raw = (
+        function.id
+        if isinstance(function, ast.Name)
+        else _attribute_name(function)
+    )
+    head, separator, tail = raw.partition(".")
+    resolved = aliases.get(head, head)
+    return resolved + (separator + tail if separator else "")
 
 
 def assert_foundation_dependencies(root):
@@ -85,6 +129,7 @@ def assert_foundation_dependencies(root):
     for path in sorted(foundation.rglob("*.py")):
         relative = path.relative_to(root_path).as_posix()
         tree = _parse(os.fspath(path))
+        aliases = _import_aliases(tree)
         for name, line in _import_nodes(tree):
             if name.startswith(FORBIDDEN_IMPORT_PREFIXES):
                 violations.append(
@@ -93,11 +138,7 @@ def assert_foundation_dependencies(root):
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            name = (
-                node.func.id
-                if isinstance(node.func, ast.Name)
-                else _attribute_name(node.func)
-            )
+            name = _resolved_call_name(node.func, aliases)
             if name in FORBIDDEN_CALLS:
                 violations.append(
                     "%s:%d: forbidden call %s" % (

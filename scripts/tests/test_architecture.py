@@ -5,6 +5,7 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -22,6 +23,21 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 class ArchitectureTests(unittest.TestCase):
+    def _write_foundation_fixture(self, source):
+        temporary = tempfile.TemporaryDirectory()
+        path = os.path.join(
+            temporary.name,
+            "scripts",
+            "mae_flow_core",
+            "foundation",
+            "fixture.py",
+        )
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+        self.addCleanup(temporary.cleanup)
+        return temporary.name
+
     def test_existing_monoliths_do_not_grow(self):
         baseline_path = os.path.join(
             ROOT, "scripts", "tests", "architecture_baseline.json")
@@ -34,6 +50,39 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
+
+    def test_foundation_rejects_relative_reverse_imports(self):
+        root = self._write_foundation_fixture(
+            "from ..workflow import engine\n")
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/foundation/fixture.py:1: "
+                "forbidden import mae_flow_core.workflow"
+            ],
+            assert_foundation_dependencies(root),
+        )
+
+    def test_foundation_rejects_parent_relative_module_imports(self):
+        root = self._write_foundation_fixture(
+            "from .. import workflow\n")
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/foundation/fixture.py:1: "
+                "forbidden import mae_flow_core.workflow"
+            ],
+            assert_foundation_dependencies(root),
+        )
+
+    def test_foundation_rejects_aliased_forbidden_calls(self):
+        root = self._write_foundation_fixture(
+            "import subprocess as sp\nsp.run(['git', 'status'])\n")
+        self.assertEqual(
+            [
+                "scripts/mae_flow_core/foundation/fixture.py:2: "
+                "forbidden call subprocess.run"
+            ],
+            assert_foundation_dependencies(root),
+        )
 
     def test_selftest_runs_refactor_safety_suites(self):
         with open(

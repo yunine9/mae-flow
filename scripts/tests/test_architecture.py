@@ -198,6 +198,37 @@ class ArchitectureTests(unittest.TestCase):
                     "Gate policy rule ids belong in mae_flow_core.guard",
                 )
 
+    def test_cli_contains_no_delivery_recovery_policy(self):
+        path = os.path.join(ROOT, "scripts", "mae-flow.py")
+        with open(path, encoding="utf-8") as stream:
+            tree = ast.parse(stream.read())
+        forbidden = {
+            "_refresh_staged_checkpoint",
+            "_accept_pushed_checkpoint",
+            "_verify_reviewed_checkpoint_commit",
+            "_verify_reviewed_checkpoint_push",
+            "_refresh_pending_checkpoint_commit",
+            "_refresh_pending_checkpoint_reset",
+            "_refresh_pending_checkpoint_push",
+            "_refresh_checkpoint_status",
+            "_final_commit_recovery",
+            "_refresh_final_pending_commit",
+            "_refresh_final_pending_reset",
+            "_migrate_legacy_final_push_pending",
+            "_refresh_final_review_status",
+            "_activate_final_rework",
+        }
+        definitions = {
+            node.name for node in ast.walk(tree)
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertEqual(
+            set(),
+            forbidden & definitions,
+            "Delivery recovery policy belongs in application.delivery",
+        )
+
     def test_workflow_functions_stay_within_complexity_limit(self):
         self.assertEqual([], workflow_complexity_violations(ROOT))
 

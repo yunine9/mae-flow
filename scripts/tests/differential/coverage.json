@@ -41,6 +41,38 @@
       "delivery": "checkpoint-staged",
       "fault": "none"
     },
+    "checkpoint_staged_status": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "push-to-review",
+      "delivery": "checkpoint-staged",
+      "fault": "missing-upstream"
+    },
+    "checkpoint_continuous_ready": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "ready",
+      "delivery": "checkpoint-continuous",
+      "fault": "none"
+    },
+    "checkpoint_revise_decision": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "revise",
+      "delivery": "checkpoint-staged",
+      "fault": "none"
+    },
+    "checkpoint_final_review": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "tweak",
+      "transition": "final-review",
+      "delivery": "checkpoint-continuous",
+      "fault": "none"
+    },
     "combined_git_add_flags": {
       "domain": "ownership",
       "runtime": "flow",
@@ -201,6 +233,14 @@
       "delivery": "moonlight",
       "fault": "none"
     },
+    "moonlight_finalize_clean": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "finalize",
+      "delivery": "moonlight",
+      "fault": "none"
+    },
     "moonlight_report_issue": {
       "domain": "delivery",
       "runtime": "flow",
@@ -224,6 +264,14 @@
       "transition": "report",
       "delivery": "moonlight",
       "fault": "authentication"
+    },
+    "moonlight_repair_issue": {
+      "domain": "delivery",
+      "runtime": "flow",
+      "workflow": "review",
+      "transition": "repair",
+      "delivery": "moonlight",
+      "fault": "recorded-issue"
     },
     "ordinary_advance": {
       "domain": "workflow",
@@ -288,6 +336,14 @@
       "transition": "cancel",
       "delivery": "standalone",
       "fault": "user-cancelled"
+    },
+    "standalone_scope_confirmation": {
+      "domain": "delivery",
+      "runtime": "standalone",
+      "workflow": "none",
+      "transition": "scope-confirm",
+      "delivery": "standalone",
+      "fault": "none"
     },
     "subagentstop_missing_task_card": {
       "domain": "quality",

@@ -63,7 +63,7 @@ def _current_item(review):
     return items[index] if 0 <= index < len(items) else None
 
 
-def _commit_commands(item, config):
+def commit_commands(item, config):
     paths = list(((item.get("receipt") or {}).get("snapshot") or {}).keys())
     add = "git add -- " + " ".join(shlex.quote(path) for path in paths)
     message = "[%s][%s]%s" % (
@@ -142,6 +142,7 @@ def _decide_final_review(
         return _success(
             effects=(DeliveryEffect("activate_final_rework", {
                 "note": ack,
+                "show_current": True,
             }),),
         )
     receipt_head = final.get("head", "")
@@ -288,7 +289,7 @@ def _confirm_worktree(
     item["status"] = "commit_pending"
     item["confirmed_at"] = now
     item["after_commit_continuous"] = choice == "continuous"
-    add, commit = _commit_commands(item, config)
+    add, commit = commit_commands(item, config)
     output = []
     if choice == "continuous":
         output.append(

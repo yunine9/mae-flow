@@ -86,6 +86,26 @@ def _state_replacements(states):
     return replacements
 
 
+def _standalone_replacements(root):
+    path = os.path.join(
+        root, ".mae-flow-work", "standalone-action.json")
+    try:
+        with open(path, encoding="utf-8-sig") as stream:
+            action = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    replacements = {}
+    for task in (action.get("agent_tasks") or {}).values():
+        digest = (
+            task.get("sha256", "")
+            if isinstance(task, dict)
+            else ""
+        )
+        if digest:
+            replacements[digest] = "<TASK_CARD_SHA256>"
+    return replacements
+
+
 def _git(root, *args):
     return subprocess.run(
         ["git", *args],
@@ -127,6 +147,7 @@ def run_scenario(implementation_root, scenario_name):
             "\\", "/")] = "<IMPLEMENTATION>"
         states = _read_states(project)
         replacements.update(_state_replacements(states))
+        replacements.update(_standalone_replacements(project))
         snapshot = Snapshot(
             stdout=completed.stdout,
             stderr=completed.stderr,
@@ -164,10 +185,12 @@ def assert_matches_golden(testcase, name, actual, goldens):
     testcase.assertEqual(goldens[name], actual)
 
 
-def _snapshot_map(implementation_root):
+def _snapshot_map(implementation_root, excluded=()):
+    excluded = set(excluded)
     return {
         name: run_scenario(os.path.abspath(implementation_root), name)
         for name in sorted(SCENARIOS)
+        if name not in excluded
     }
 
 
@@ -212,12 +235,15 @@ def _parse_args():
     parser.add_argument("--implementation-root", required=True)
     parser.add_argument("--write-goldens")
     parser.add_argument("--goldens", default=DEFAULT_GOLDENS)
+    parser.add_argument(
+        "--exclude", action="append", default=[])
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     _ARGS = _parse_args()
-    _SNAPSHOTS = _snapshot_map(_ARGS.implementation_root)
+    _SNAPSHOTS = _snapshot_map(
+        _ARGS.implementation_root, _ARGS.exclude)
     if _ARGS.write_goldens:
         _write_goldens(_ARGS.write_goldens, _SNAPSHOTS)
         raise SystemExit(0)

@@ -39,10 +39,17 @@ STAGE2_GUARD_SCENARIOS = {
     "ownership_foreign_openspec",
 }
 STAGE3_DELIVERY_SCENARIOS = {
+    "checkpoint_continuous_ready",
+    "checkpoint_final_review",
     "checkpoint_plan_creation",
+    "checkpoint_revise_decision",
+    "checkpoint_staged_status",
+    "moonlight_finalize_clean",
     "moonlight_push_failure",
     "moonlight_quality_defer",
+    "moonlight_repair_issue",
     "standalone_action_cancel",
+    "standalone_scope_confirmation",
 }
 STAGE4_QUALITY_SCENARIOS = {
     "quality_agent_task_missing_scan",

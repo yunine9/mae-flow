@@ -619,9 +619,34 @@ def checkpoint_plan_creation(project, implementation_root):
         "checkpoint_plan_creation", project, implementation_root)
 
 
+def checkpoint_staged_status(project, implementation_root):
+    return _stage3_delivery(
+        "checkpoint_staged_status", project, implementation_root)
+
+
+def checkpoint_continuous_ready(project, implementation_root):
+    return _stage3_delivery(
+        "checkpoint_continuous_ready", project, implementation_root)
+
+
+def checkpoint_revise_decision(project, implementation_root):
+    return _stage3_delivery(
+        "checkpoint_revise_decision", project, implementation_root)
+
+
+def checkpoint_final_review(project, implementation_root):
+    return _stage3_delivery(
+        "checkpoint_final_review", project, implementation_root)
+
+
 def standalone_action_cancel(project, implementation_root):
     return _stage3_delivery(
         "standalone_action_cancel", project, implementation_root)
+
+
+def standalone_scope_confirmation(project, implementation_root):
+    return _stage3_delivery(
+        "standalone_scope_confirmation", project, implementation_root)
 
 
 def moonlight_quality_defer(project, implementation_root):
@@ -632,6 +657,16 @@ def moonlight_quality_defer(project, implementation_root):
 def moonlight_push_failure(project, implementation_root):
     return _stage3_delivery(
         "moonlight_push_failure", project, implementation_root)
+
+
+def moonlight_finalize_clean(project, implementation_root):
+    return _stage3_delivery(
+        "moonlight_finalize_clean", project, implementation_root)
+
+
+def moonlight_repair_issue(project, implementation_root):
+    return _stage3_delivery(
+        "moonlight_repair_issue", project, implementation_root)
 
 
 def _stage4_quality(name, project, implementation_root):
@@ -672,6 +707,10 @@ SCENARIOS = {
     "active_pretooluse_edit": active_pretooluse_edit,
     "checkpoint_status": checkpoint_status,
     "checkpoint_plan_creation": checkpoint_plan_creation,
+    "checkpoint_staged_status": checkpoint_staged_status,
+    "checkpoint_continuous_ready": checkpoint_continuous_ready,
+    "checkpoint_revise_decision": checkpoint_revise_decision,
+    "checkpoint_final_review": checkpoint_final_review,
     "compile_task_card": compile_task_card,
     "combined_git_add_flags": combined_git_add_flags,
     "corrupt_exit_repair": corrupt_exit_repair,
@@ -694,8 +733,11 @@ SCENARIOS = {
     "moonlight_report_issue": moonlight_report_issue,
     "moonlight_quality_defer": moonlight_quality_defer,
     "moonlight_push_failure": moonlight_push_failure,
+    "moonlight_finalize_clean": moonlight_finalize_clean,
+    "moonlight_repair_issue": moonlight_repair_issue,
     "standalone_action_status": standalone_action_status,
     "standalone_action_cancel": standalone_action_cancel,
+    "standalone_scope_confirmation": standalone_scope_confirmation,
     "subagentstop_missing_task_card": subagentstop_missing_task_card,
     "terminal_status": terminal_status,
     "terminal_pretooluse_bypass": terminal_pretooluse_bypass,

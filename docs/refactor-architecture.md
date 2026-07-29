@@ -205,3 +205,35 @@ ID 回流到 CLI 或 Hook。
 
 Stage 2 没有修改规则优先级、block id 算法、permit/strike sidecar schema、失败文案、
 Git 候选范围或 break-glass 安全等级。后续阶段继续以 Phase-12 为追加式行为基线。
+
+## Stage 3：Delivery Use Cases 完成证据
+
+Stage 3 将 Checkpoint、Standalone Action 与 Moonlight 的交付编排迁入
+`mae_flow_core.application.delivery`。Checkpoint plan/ready/decide/final/status 以及
+commit、push、reset 和旧状态恢复由显式 ports 取得 Git、快照、时间与用户消息事实，
+返回不可变 `DeliveryResult`/`DeliveryEffect`；CLI 只装配端口、按顺序执行 effect
+并保持既有输出。Moonlight defer 的 build 完成边界、脏源码阻断、步内源码变化回流及
+质量缓存失效也由独立用例统一裁决。
+
+Phase-13 在 Phase-12 上追加 11 个 Delivery 场景，覆盖 staged、continuous、revise、
+final review、Standalone scope/cancel，以及 Moonlight defer、push-failed、finalize
+和 repair；Phase-14 逐项继承全部 Phase-13 快照。差分 runner 会从 Standalone 状态
+提取动态任务卡摘要用于归一化，产品输出和任务卡内容不为测试改写。
+
+2026-07-30 在 Stage 3 最终实现上取得的新鲜验证结果：
+
+- 完整 `unittest discover`：373 项通过；
+- 完整 `scripts/selftest.py`：全部通过；
+- Phase-14 differential runner：零差分，且 Phase-12 全部快照逐项保持；
+- fault injection：3 项通过；
+- State、Checkpoint 与全部 Delivery application 测试在
+  `error::ResourceWarning` 下 75 项通过；
+- Delivery 依赖、模块大小和函数复杂度门禁全部通过；新增恢复模块分别为
+  498 行和 137 行，所有新业务模块均不超过 500 行、复杂度不超过 15；
+- CLI 已删除已迁移的 checkpoint 恢复函数，架构门禁阻止这些状态机回流；
+- `git diff --check` 通过。
+
+独立审查最初指出 CLI 恢复裁决残留和 Phase-13 覆盖不足；两项均在本阶段内修复并
+复审。Stage 3 不改变命令参数、状态 schema、用户停点、提交/push 安全顺序、
+Standalone 不自动提交的边界或 Moonlight 的失败留痕语义。后续阶段继续以 Phase-14
+为追加式行为基线。

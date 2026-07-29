@@ -16,11 +16,12 @@ VALUES = {
     "workflow": {"none", "full", "tweak", "review", "all"},
     "transition": {
         "none", "repair", "rejection", "finalize", "report",
-        "normal", "graph", "plan", "cancel", "defer",
+        "normal", "graph", "plan", "cancel", "defer", "ready",
+        "revise", "final-review", "push-to-review", "scope-confirm",
     },
     "delivery": {
         "none", "standalone", "checkpoint-staged", "moonlight", "review",
-        "archive", "push", "all",
+        "checkpoint-continuous", "archive", "push", "all",
     },
     "fault": {
         "none", "corrupt-json", "recorded-issue", "missing-task-card",

@@ -21,6 +21,10 @@ from mae_flow_core.application.delivery.moonlight import (  # noqa: E402
     repair_moonlight,
     unlock_moonlight_source,
 )
+from mae_flow_core.application.delivery.moonlight_defer import (  # noqa: E402
+    MoonlightDeferPorts,
+    defer_moonlight_quality,
+)
 from mae_flow_core.delivery.models import thaw  # noqa: E402
 
 
@@ -82,6 +86,129 @@ class MoonlightUseCaseTests(unittest.TestCase):
             "superseded",
             updated["moonlight"]["issues"][0]["resolved_as"])
         self.assertEqual("advance_deferred", result.effects[-1].kind)
+
+    def test_defer_routes_changed_source_back_through_quality_chain(self):
+        state = self.state("verify_ut")
+        state["unlock"] = {
+            "scope": "source",
+            "step": "verify_ut",
+        }
+        state["agent_tasks"] = {
+            "COMPILE": {"stale": True},
+            "CODECHECK": {"stale": True},
+            "UT": {"stale": True},
+        }
+        state["quality"] = {
+            "codecheck_scan": {"stale": True},
+            "codecheck_verify": {"stale": True},
+        }
+        persisted = []
+        calls = []
+        result = defer_moonlight_quality(
+            state,
+            kind="ut",
+            reason="source repair still leaves one unstable test",
+            rejection="agent diagnostic",
+            recheck="verify_recompile",
+            ports=MoonlightDeferPorts(
+                build_boundary=lambda: (
+                    calls.append("build") or (True, "")),
+                dirty_paths=lambda: (
+                    calls.append("dirty") or ()),
+                head=lambda: "head",
+                now=lambda: "now",
+                persist_issue=lambda updated: (
+                    calls.append("persist"),
+                    persisted.append(updated),
+                ),
+                ensure_step_entry=lambda: (
+                    calls.append("ensure") or ""),
+                source_changes=lambda: (
+                    calls.append("changes")
+                    or (("src/main.py",), "")),
+            ),
+        )
+        updated = self.updated(result)
+        self.assertEqual("verify_recompile", updated["current"])
+        self.assertNotIn("unlock", updated)
+        self.assertEqual({}, updated["agent_tasks"])
+        self.assertEqual({}, updated["quality"])
+        self.assertEqual("print_current", result.effects[-1].kind)
+        self.assertNotIn(
+            "advance_deferred",
+            [effect.kind for effect in result.effects],
+        )
+        self.assertEqual(
+            ["dirty", "persist", "ensure", "changes"], calls)
+        self.assertEqual(1, len(persisted))
+
+    def test_defer_rejects_incomplete_build_and_dirty_source(self):
+        state = self.state("build")
+        result = defer_moonlight_quality(
+            state,
+            kind="compile",
+            reason="compiler service is unavailable after retries",
+            rejection="agent diagnostic",
+            recheck="",
+            ports=MoonlightDeferPorts(
+                build_boundary=lambda: (
+                    False, "tasks not complete"),
+                dirty_paths=lambda: (),
+                head=lambda: "head",
+                now=lambda: "now",
+                persist_issue=lambda _updated: None,
+                ensure_step_entry=lambda: "",
+                source_changes=lambda: ((), ""),
+            ),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("不能 defer", result.stderr[0])
+
+        result = defer_moonlight_quality(
+            state,
+            kind="compile",
+            reason="compiler service is unavailable after retries",
+            rejection="agent diagnostic",
+            recheck="",
+            ports=MoonlightDeferPorts(
+                build_boundary=lambda: (True, ""),
+                dirty_paths=lambda: ("src/main.py",),
+                head=lambda: "head",
+                now=lambda: "now",
+                persist_issue=lambda _updated: None,
+                ensure_step_entry=lambda: "",
+                source_changes=lambda: ((), ""),
+            ),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("push 会漏文件", result.stderr[0])
+
+    def test_defer_persists_issue_before_source_check_failure(self):
+        state = self.state("verify_ut")
+        calls = []
+        result = defer_moonlight_quality(
+            state,
+            kind="ut",
+            reason="source verification cannot read repository history",
+            rejection="agent diagnostic",
+            recheck="verify_recompile",
+            ports=MoonlightDeferPorts(
+                build_boundary=lambda: (True, ""),
+                dirty_paths=lambda: (),
+                head=lambda: "head",
+                now=lambda: "now",
+                persist_issue=lambda _updated: calls.append(
+                    "persist"),
+                ensure_step_entry=lambda: (
+                    calls.append("ensure") or ""),
+                source_changes=lambda: (
+                    calls.append("changes")
+                    or ((), "git history unavailable")),
+            ),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertEqual(
+            ["persist", "ensure", "changes"], calls)
 
     def test_unlock_and_repair_blocker_preserve_current_step(self):
         state = self.state()

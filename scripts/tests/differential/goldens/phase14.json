@@ -92,6 +92,149 @@
     "stderr": "",
     "stdout": ""
   },
+  "checkpoint_continuous_ready": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "67494226decedc148d27c46721b690848f117b75a7e3f9372c3e58da421e19ba",
+        "size": 1150
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "notes.md": {
+        "sha256": "02aa2d86aee3d9b63e6218b65e136391e391dbf2cde9b35c1dd73597bd27624e",
+        "size": 18
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "closed_at": "2026-07-29 10:00:00",
+              "compile_head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "compile_skipped_no_source": true,
+              "compile_task_sha256": "",
+              "completed_head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "head": "6251e85acaea8d0df80980dff3836726d8dcff29",
+              "id": "CP1",
+              "status": "completed",
+              "task_structure_drift": false,
+              "title": "continuous batch"
+            }
+          ],
+          "current_index": 1,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "continuous",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] CP1 已编译并记录范围 9c6b2db726..6251e85aca；连续模式不 push、不等待，直接进入编码收尾。\n"
+  },
+  "checkpoint_final_review": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "1a01b981e14afd198a4bc6fa1b9db75d1870f92657ae86cb077de7b83a55ae22",
+        "size": 1395
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "aecc013c518523ca22b7e3780f87002f5cae13fabc369f2f59a1faf7058f8c76",
+        "size": 28
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "e11a843d4d3373dd7edd0d08ba7295593decd6c2",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "current": "delivery_review",
+        "development_review": {
+          "checkpoints": [
+            {
+              "completed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "completed",
+              "title": "completed batch"
+            }
+          ],
+          "current_index": 1,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "final_review": {
+            "ack_cursor": [],
+            "at": "2026-07-29 10:00:00",
+            "base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+            "changed": [
+              "src/main.py"
+            ],
+            "head": "e11a843d4d3373dd7edd0d08ba7295593decd6c2",
+            "receipt": {},
+            "remote_head": "",
+            "remote_ref": "",
+            "requires_commit": false,
+            "requires_quality_rerun": false,
+            "status": "review_pending",
+            "title": "最终检视增量"
+          },
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "continuous",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "🔎 最终未检视代码增量\n  范围: 9c6b2db726..e11a843d4d\n  提交:\n    e11a843 [REQ-DIFF][feat]final delta\n  文件:\n    A\tsrc/main.py\n  统计: 1 file changed, 2 insertions(+)\n  完整差异命令: git diff 9c6b2db726f49b708a5876d0b5a1c51c773e083b e11a843d4d3373dd7edd0d08ba7295593decd6c2\n  模式说明:中途策略是不 push；确认最终整体代码后才进入正式 push。\n\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：\n  - 我已认真检视并完成自验证，继续\n  - 需要调整代码\n点选后执行 checkpoint decide continue|revise --ack \"用户选择原文\"。\n"
+  },
   "checkpoint_plan_creation": {
     "files": {
       ".mae-flow.json": {
@@ -156,6 +299,147 @@
     },
     "stderr": "",
     "stdout": "[mae-flow] 开发检查点方案（确认前尚未开始写码）\n  代码基点: 9c6b2db726\n  实现/评审任务数: 0（勾选状态和备注不计入结构指纹）\n  CP1 — core behavior\n  CP2 — regression coverage\n\n用 AskUserQuestion 提供三个固定选项：\n  - 按检查点分阶段开发、检视确认后提交并推送\n  - 一次完成全部代码，最终统一检视\n  - 调整检查点划分\n用户点选后执行 done --choice staged|continuous|adjust；月光宝盒不会进入此确认。\n"
+  },
+  "checkpoint_revise_decision": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "f336d3b7505396573c055382a7f43deebd396b34b8c57c85b05cc7b8645eefff",
+        "size": 955
+      },
+      ".mae-flow.json.failures": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      ".mae-flow.json.tokens": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
+      },
+      ".mae-flow.json.usermsg": {
+        "sha256": "2a1747e3c796e95af1a03611bd50604b1b4f01bf6bee49b1ac0f934992eb8762",
+        "size": 103
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.tokens\n?? .mae-flow.json.usermsg"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "attempt": 2,
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "coding",
+              "title": "revise batch"
+            }
+          ],
+          "current_index": 0,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "staged",
+          "review_before_commit": true,
+          "status": "active",
+          "version": 1
+        },
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "需要调整代码",
+            "result": "checkpoint:revise:CP1",
+            "step": "tw_change"
+          }
+        ],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      },
+      ".mae-flow.json.failures": {},
+      ".mae-flow.json.tokens": {},
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "9999-12-31 23:59:59",
+          "step": "tw_change",
+          "text": "需要调整代码"
+        }
+      ]
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] CP1 返回修改；固定基点仍为 9c6b2db726，修复后会重新展示整批组合差异。\n"
+  },
+  "checkpoint_staged_status": {
+    "files": {
+      ".mae-flow.json": {
+        "sha256": "1712356f2503881b1116f64cf181d5b9569ff8a4dbbffed2ce3204bac1d6bb6f",
+        "size": 915
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow.json"
+    },
+    "returncode": 2,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "tweak"
+        },
+        "config": {
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat"
+        },
+        "current": "tw_change",
+        "development_review": {
+          "checkpoints": [
+            {
+              "compile_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "fixed_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+              "id": "CP1",
+              "status": "push_pending",
+              "title": "staged batch"
+            }
+          ],
+          "current_index": 0,
+          "delivery_base": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "last_reviewed_head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+          "mode": "staged",
+          "review_before_commit": false,
+          "status": "active",
+          "version": 1
+        },
+        "history": [],
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "[mae-flow] 当前分支没有上游；执行 git push -u origin HEAD\n",
+    "stdout": "[mae-flow] 开发节奏: staged；计划状态: active\n  CP1 [push_pending] staged batch\n"
   },
   "checkpoint_status": {
     "files": {
@@ -1222,6 +1506,68 @@
     "stderr": "",
     "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
   },
+  "moonlight_finalize_clean": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "80a88f09acba99550d502621968bc82913674ea58f3187b93855340f527bae92",
+        "size": 844
+      },
+      ".mae-flow.json": {
+        "sha256": "32554f2eb8c7af82193e63c18aaa522272055e099ed6e8d32cf1bb6d57c55815",
+        "size": 805
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "end",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "晨间检查完成",
+            "result": "moonlight:finalize",
+            "step": "moonlight_review"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 1,
+          "enabled": false,
+          "finalized_at": "2026-07-29 10:00:00",
+          "issues": [],
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "end": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
+  },
   "moonlight_push_failure": {
     "files": {
       ".mae-flow-work/moonlight-report.md": {
@@ -1365,6 +1711,78 @@
     },
     "stderr": "",
     "stdout": "[mae-flow] rf_codecheck moonlight-deferred → 进入 rf_ut\n\n═══ 当前步骤: rf_ut — 处理评审意见 — 增量单元测试 ═══\n🌙 月光宝盒运行中（第 1 轮）：禁止询问用户；能从需求、代码和仓库规则判断的直接采用保守结论并留痕。\n目标：尽力完成并推送当前分支。质量问题先真实修复；有限尝试后仍失败则登记遗留并继续，禁止伪装通过、删除测试、缩小测试范围或自动豁免。\n覆盖规则：下方普通步骤文字里的“询问用户 / AskUserQuestion / 等用户拍板”在本模式下一律不执行。分析和配置从用户原话、仓库预设、当前分支及代码事实中保守推断；质量裁决拿不准时不得替用户选择豁免，走本步的 moonlight defer。\n──── 月光宝盒启动需求（已持久化，断点恢复以此为准） ────\n开启月光宝盒继续开发\n──── 当前遗留（修复轮必须优先处理） ────\n- ML-001 [codecheck] CodeCheck tool unavailable after two verified retries\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n⚠ UT 写入边界:仓库未配置「测试路径」，当前使用内置保守规则硬拦非测试源码。若本仓测试目录不符合 tests/、test/、src/test/、*_test.*、*Test.java，请先在 .mae-flow-defaults.json 配置「测试路径」，禁止用 unlock 把长期目录差异当单次源码缺陷处理。\n──── 执行指令 ────\n评审意见处理阶段的独立增量 UT 步骤。harness 已冻结本轮基点，任务卡只列本轮文件。\n\n先直接尝试 done：本轮没有业务代码改动时机器自动放行；有业务代码改动则必须拿到 UT PASS。\n需要 UT 时：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task ut`；\n2. 把命令输出的**唯一一句启动话术原样**交给 ut-generator-agent，禁止自行拼任务；\n3. Agent 必须读取任务卡并按其中 `UT生成方式` 调用 Mae-Flow 插件自带的\n   AutoUT/java-autout Skill 或既有写法，参考 `UT运行命令` 真实执行测试；\n   该项写“随生成方式自带”时由对应 Skill 按项目决定；\n4. 只有 `UT_RESULT: PASS`、TASK_CARD_SHA256 和 GENERATOR_USED 合法，且 EXECUTED_UT 能对应到\n   本轮真实成功的测试调用，done 才放行。NEEDS_INPUT/FAIL 不能当通过。\n\nPENDING_QUESTIONS / SUSPECTED_BUGS 仍按主流程协议呈用户裁决；未经用户确认，UT agent 和主会话都不得修改被测源码。源码经 unlock 修复后执行 done，harness 会自动回流 rf_compile，强制重跑编译 → CodeCheck → UT；不接受仅重跑 UT 就推送。未经 unlock 却检测到被测源码变化会直接判越权。\n\n本仓未配「测试路径」时也不再放开任意源码写入：harness 使用 tests/、test/、src/test/、*_test.*、*Test.java 等保守默认规则。本仓是非标准测试目录时，先在 `.mae-flow-defaults.json` 补「测试路径」，不要用 unlock 长期绕过。\n\n──── 轻量编码预防（建议层，不新增门禁） ────\n写每个函数时主动控制：正式入参≤5（Python self/cls 不计）、有效代码行≤50（空行/纯注释/仅括号分隔行不计）、McCabe 圈复杂度≤5、本次新增/修改代码行≤120字符。长行禁止机械切字符串：优先仓库 formatter 配置，否则参考同文件附近同类参数列表/条件/链式调用的换行方式。\n提交 Hook 会自动执行轻量检查，无需主动调用或向用户展示 CLEAN 结果；只修 Hook 提示中高置信且属于本次范围的建议，最多修复并复查两轮。工具异常、超时、解析不确定或仅为基线旧债时直接留痕继续，不得扩大需求、不得让用户确认、不得把它当正式 CodeCheck。\n──── 尽力而为出口 ────\n先真实执行本步并尝试修复；确认继续尝试只会重复消耗后，提交当前有效改动，然后执行：\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight defer --reason \"<遗留现象、已尝试修复、当前风险>\"\n该命令会把问题写入晨间报告并继续下一阶段，不会把失败伪装成通过。\nUT 若经自查后明确指向被测源码缺陷，不需要等用户：先执行\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight unlock-source --reason \"<失败用例、规格依据、自查结论>\"\n再修源码并提交；done 会自动回流编译、CodeCheck 和 UT。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+  },
+  "moonlight_repair_issue": {
+    "files": {
+      ".mae-flow-work/moonlight-report.md": {
+        "sha256": "12d274b068b25221a1bce5aa61dc2a1c0e29c66268975d3f23e6d3653b2afcbc",
+        "size": 983
+      },
+      ".mae-flow.json": {
+        "sha256": "31411faa9d1fb1971b9bb2fb1c8fe8e0d679c06704f7cedcd0bb2894aaad7357",
+        "size": 1047
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/moonlight-report.md\n?? .mae-flow.json"
+    },
+    "returncode": 0,
+    "state": {
+      ".mae-flow.json": {
+        "choices": {
+          "workflow": "review"
+        },
+        "config": {
+          "CHANGE_NAME": "diff-change",
+          "分支名": "main",
+          "单号": "REQ-DIFF",
+          "单号类型": "feat",
+          "基线分支": "main"
+        },
+        "current": "rf_compile",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "ML-001",
+            "result": "moonlight:repair",
+            "step": "moonlight_review"
+          }
+        ],
+        "moonlight": {
+          "activated_at": "2026-07-29 10:00:00",
+          "cycle": 2,
+          "enabled": true,
+          "issues": [
+            {
+              "at": "2026-07-29 09:00:00",
+              "head": "",
+              "id": "ML-001",
+              "kind": "ut",
+              "reason": "one deterministic test remains unresolved",
+              "repair_cycle": 2,
+              "step": "rf_ut"
+            }
+          ],
+          "repair_started_at": "2026-07-29 10:00:00",
+          "request": "开启月光宝盒继续开发"
+        },
+        "revision": 2,
+        "schema_version": 2,
+        "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "rf_compile": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
+        "updated_at": "2026-07-29 10:00:00"
+      }
+    },
+    "stderr": "",
+    "stdout": "[mae-flow] 已根据报告开启第 2 轮修复，从 rf_compile 重新进入。先处理报告遗留，再完整重跑后续质量链并推送。\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n🌙 月光宝盒运行中（第 2 轮）：禁止询问用户；能从需求、代码和仓库规则判断的直接采用保守结论并留痕。\n目标：尽力完成并推送当前分支。质量问题先真实修复；有限尝试后仍失败则登记遗留并继续，禁止伪装通过、删除测试、缩小测试范围或自动豁免。\n覆盖规则：下方普通步骤文字里的“询问用户 / AskUserQuestion / 等用户拍板”在本模式下一律不执行。分析和配置从用户原话、仓库预设、当前分支及代码事实中保守推断；质量裁决拿不准时不得替用户选择豁免，走本步的 moonlight defer。\n──── 月光宝盒启动需求（已持久化，断点恢复以此为准） ────\n开启月光宝盒继续开发\n──── 当前遗留（修复轮必须优先处理） ────\n- ML-001 [ut] one deterministic test remains unresolved\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 尽力而为出口 ────\n先真实执行本步并尝试修复；确认继续尝试只会重复消耗后，提交当前有效改动，然后执行：\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight defer --reason \"<遗留现象、已尝试修复、当前风险>\"\n该命令会把问题写入晨间报告并继续下一阶段，不会把失败伪装成通过。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "moonlight_report_issue": {
     "files": {
@@ -1750,6 +2168,35 @@
     "state": {},
     "stderr": "",
     "stdout": "{\n  \"expires_epoch\": 4102444800,\n  \"id\": \"diff-action\",\n  \"kind\": \"ut\",\n  \"quality\": {},\n  \"rejections\": {},\n  \"revision\": 1,\n  \"schema_version\": 2,\n  \"tokens\": {},\n  \"work_dir\": \"<PROJECT>/.mae-flow-work/standalone/diff-action\"\n}\n"
+  },
+  "standalone_scope_confirmation": {
+    "files": {
+      ".mae-flow-work/standalone-action.json": {
+        "sha256": "cda24cb9bbeb7fc413f35896acdd9b131be895276e7e9fdb061a02a75b99bbf4",
+        "size": 1445
+      },
+      ".mae-flow-work/standalone/delivery-scope/ut-task.md": {
+        "sha256": "438960a6d84f973ba5841fec95d41da60766d025e198e959e42cb01436bcf36d",
+        "size": 1788
+      },
+      "README.md": {
+        "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
+        "size": 23
+      },
+      "src/main.py": {
+        "sha256": "aecc013c518523ca22b7e3780f87002f5cae13fabc369f2f59a1faf7058f8c76",
+        "size": 28
+      }
+    },
+    "git": {
+      "branch": "main",
+      "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
+      "status": "?? .mae-flow-work/standalone-action.json\n?? .mae-flow-work/standalone/delivery-scope/ut-task.md\n?? src/main.py"
+    },
+    "returncode": 0,
+    "state": {},
+    "stderr": "",
+    "stdout": "[mae-flow] 独立 UT 任务卡已生成: <PROJECT>/.mae-flow-work/standalone/delivery-scope/ut-task.md\n启动 ut-generator-agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/standalone/delivery-scope/ut-task.md\"；最终报告必须原样带 TASK_CARD_SHA256: <TASK_CARD_SHA256>\n"
   },
   "subagentstop_missing_task_card": {
     "files": {

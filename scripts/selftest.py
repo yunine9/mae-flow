@@ -58,6 +58,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/foundation/fingerprints.py",
           "scripts/mae_flow_core/foundation/source_paths.py",
           "scripts/mae_flow_core/foundation/git_intent.py",
+          "scripts/mae_flow_core/file_io.py",
           "scripts/mae_flow_core/guard/__init__.py",
           "scripts/mae_flow_core/guard/intent.py",
           "scripts/mae_flow_core/quality/__init__.py",
@@ -95,6 +96,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_workflow_definition.py",
           "scripts/tests/test_differential_harness.py",
           "scripts/tests/test_architecture.py",
+          "scripts/tests/test_file_io.py",
           "scripts/tests/architecture_rules.py",
           "scripts/tests/differential/__init__.py",
           "scripts/tests/differential/normalize.py",
@@ -208,7 +210,8 @@ check("CLI 命令路由契约回归",
        + command_dispatch_tests.stderr)[-5000:])
 for label, filename in (
         ("行为差分安全网", "test_differential_harness.py"),
-        ("重构架构边界", "test_architecture.py")):
+        ("重构架构边界", "test_architecture.py"),
+        ("受管文件句柄", "test_file_io.py")):
     result = subprocess.run(
         [sys.executable, os.path.join(
             ROOT, "scripts", "tests", filename)],

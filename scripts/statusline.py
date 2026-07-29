@@ -10,6 +10,7 @@
 import json, os, sys, threading
 
 from mae_flow_core import RuntimeMode, find_project_root, resolve_runtime
+from mae_flow_core.file_io import load_json
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -94,7 +95,7 @@ def main():
     title = sid
     try:
         here = os.path.dirname(os.path.abspath(__file__))
-        flow = json.load(open(os.path.join(here, "..", "flow", "flow.json"), encoding="utf-8"))
+        flow = load_json(os.path.join(here, "..", "flow", "flow.json"))
         title = flow["steps"].get(sid, {}).get("title", sid)
     except Exception:
         pass

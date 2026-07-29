@@ -87,6 +87,7 @@ from mae_flow_core.foundation.fingerprints import (
 )
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
+from mae_flow_core.file_io import load_json, read_bytes, read_lines, read_text, write_text
 from mae_flow_core.delivery import checkpoints as delivery_checkpoints
 from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
@@ -730,7 +731,7 @@ def _text_corruption_reason(text):
 def _read_text_source(path, normalize=False):
     """严格读取需求文本；normalize=True 时兼容常见 Windows 文本编码并返回编码名。"""
     try:
-        raw = open(path, "rb").read()
+        raw = read_bytes(path)
     except OSError as exc:
         return "", "", "无法读取: %s" % exc
     if not raw:
@@ -787,7 +788,7 @@ def _configured_source_patterns(st):
     try:
         # utf-8-sig:团队手写 defaults 常带 BOM;解析失败必须可见——
         # 「源码路径」静默失效等于门禁口径悄悄变宽。
-        v = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")).get("源码路径", [])
+        v = load_json(DEFAULTS_PATH, encoding="utf-8-sig").get("源码路径", [])
         if isinstance(v, str):
             return [x.strip() for x in v.split(",") if x.strip()]
         return v if isinstance(v, list) else []
@@ -1122,7 +1123,7 @@ def ev_spec_validate(spec, st):
                                + "。跑 spec validate 看全部并逐条修正")
         doc_path = os.path.join("openspec", "changes", cn, "change.md")
         if os.path.isfile(doc_path):
-            txt = open(doc_path, encoding="utf-8").read()
+            txt = read_text(doc_path)
             hit = [p for p in (spec.get("placeholders") or ["（待填"]) if p in txt]
             if hit:
                 return False, ("change.md 残留「%s…」骨架占位;"
@@ -1380,7 +1381,7 @@ def ev_agent_ran(spec, st):
         return False, msg + " " + _risk_option(kind, accept_why)
 
     try:
-        tok = json.loads(open(".mae-flow.json.tokens", encoding="utf-8").read()).get(kind, "")
+        tok = json.loads(read_text(".mae-flow.json.tokens")).get(kind, "")
     except Exception:
         tok = ""
     ts = tok.get("at", "") if isinstance(tok, dict) else tok
@@ -1418,7 +1419,7 @@ def ev_agent_ran(spec, st):
         return blocked(f"本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: {ts or '无'};本步始于 {entered})。"
                        "待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。")
     try:
-        rejects = json.load(open(STATE_PATH + ".agent-rejections", encoding="utf-8"))
+        rejects = load_json(STATE_PATH + ".agent-rejections")
         reject = rejects.get(kind, {}) or rejects.get("SUBAGENT", {})
     except Exception:
         reject = {}
@@ -1522,7 +1523,7 @@ def _task_structure_fingerprint(st):
             "docs", "review",
             "REVIEW-" + str((st.get("config", {}) or {}).get("单号", "")) + ".md")
         try:
-            text = open(path, encoding="utf-8", errors="replace").read()
+            text = read_text(path, errors="replace")
         except OSError:
             text = ""
         for raw in text.splitlines():
@@ -1827,7 +1828,7 @@ def ev_content_free(spec, st):
     files = globmod.glob(path)
     if not files:
         return False, "未找到文件: " + path
-    txt = open(files[0], encoding="utf-8", errors="replace").read()
+    txt = read_text(files[0], errors="replace")
     hit = [p for p in spec["patterns"] if re.search(p, txt)]
     if not hit:
         return True, ""
@@ -2109,7 +2110,7 @@ def ev_review_fix_committed(spec, st):
     """没有待修意见时允许空过；存在“修复(已确认)”则必须有本步骤的新提交。"""
     p = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
     try:
-        txt = open(p, encoding="utf-8", errors="replace").read()
+        txt = read_text(p, errors="replace")
     except OSError:
         return False, "评审裁决文档不存在: " + p
     # rf_triage 收尾时冻结「转规格轮次」数量。rf_fix 若把用户已经确认的
@@ -3121,7 +3122,7 @@ def _parse_codecheck_count(console, report):
 
 def _parse_codecheck_json(path):
     """兼容 CodeCheckCLI 的 JSON 结果：不依赖固定顶层字段，按带 UUID/规则/文件的告警对象去重。"""
-    data = json.load(open(path, encoding="utf-8", errors="replace"))
+    data = load_json(path, errors="replace")
     rows = []
 
     def walk(v):
@@ -3258,7 +3259,7 @@ def ev_codecheck_clean(spec, st):
             diag = manual.get("diagnostic", "")
             try:
                 same_diag = (os.path.isfile(diag)
-                             and hashlib.sha256(open(diag, "rb").read()).hexdigest()
+                             and hashlib.sha256(read_bytes(diag)).hexdigest()
                              == manual.get("diagnostic_sha256"))
             except OSError:
                 same_diag = False
@@ -3286,7 +3287,7 @@ def ev_codecheck_clean(spec, st):
         return False, (f"harness 现场复核实测遗留 {total} 条告警,且无豁免清单({ex})。"
                        "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),把「规则ID + 文件 + 用户原话」"
                        f"逐行写入 {ex} 并 commit 后重试——口头豁免无效")
-    extxt = open(ex, encoding="utf-8", errors="replace").read()
+    extxt = read_text(ex, errors="replace")
     bad = [f"{r}({f})" for r, f, _ln in pairs if not _exemption_text_has_pair(extxt, r, f)]
     if len(pairs) < total and bad == []:
         bad = [f"(另有 {total - len(pairs)} 条未解析出明细,无法核对豁免)"]
@@ -3348,8 +3349,8 @@ def ev_review_codecheck(spec, st):
         if not ok:
             return False, why
         try:
-            token = json.load(open(
-                STATE_PATH + ".tokens", encoding="utf-8")).get("CODECHECK", {})
+            token = load_json(
+                STATE_PATH + ".tokens").get("CODECHECK", {})
         except Exception:
             token = {}
         if isinstance(token, dict) and token.get("status") == "FAIL":
@@ -3488,7 +3489,7 @@ def _trusted_answer_candidates(text):
 
 def _all_ack_messages():
     try:
-        msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+        msgs = json.loads(read_text(STATE_PATH + ".usermsg") or "[]")
     except Exception:
         return []
     return msgs if isinstance(msgs, list) else []
@@ -3916,7 +3917,7 @@ def _step_md_text(sid, st):
     md = os.path.join(STEPS_DIR, sid + ".md")
     if not os.path.exists(md):
         return None
-    txt = open(md, encoding="utf-8").read().rstrip()
+    txt = read_text(md).rstrip()
     for ph, name in (("{STORY_TEMPLATE_PATH}", "STORY-TEMPLATE.md"),
                      ("{GRILL_PREP_TEMPLATE_PATH}", "GRILL-PREP-TEMPLATE.md"),
                      ("{REVIEW_TEMPLATE_PATH}", "REVIEW-TEMPLATE.md")):
@@ -3980,7 +3981,7 @@ def _defaults():
         return None, ""
     try:
         # utf-8-sig:Windows 编辑器手写的 JSON 常带 BOM,对无 BOM 文件无害
-        return json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")), ""
+        return load_json(DEFAULTS_PATH, encoding="utf-8-sig"), ""
     except Exception as e:
         return None, f"⚠ {DEFAULTS_PATH} 解析失败,已忽略(修复该 JSON 或删除): {e}"
 
@@ -4310,7 +4311,7 @@ def _standalone_config(terminal_state=None):
         candidates.append(STATE_PATH + ".last")
     if os.path.isfile(EXIT_PATH):
         try:
-            rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+            rec = load_json(EXIT_PATH)
             saved = os.path.join(rec.get("snapshot", ""), STATE_PATH)
             if os.path.isfile(saved):
                 candidates.append(saved)
@@ -4318,7 +4319,7 @@ def _standalone_config(terminal_state=None):
             pass
     for path in candidates:
         try:
-            cfg = json.load(open(path, encoding="utf-8")).get("config", {}) or {}
+            cfg = load_json(path).get("config", {}) or {}
             for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
                 if cfg.get(key):
                     merged[key] = cfg[key]
@@ -4330,7 +4331,7 @@ def _standalone_config(terminal_state=None):
             if cfg.get(key):
                 merged[key] = cfg[key]
     try:
-        defaults = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")) if os.path.isfile(DEFAULTS_PATH) else {}
+        defaults = load_json(DEFAULTS_PATH, encoding="utf-8-sig") if os.path.isfile(DEFAULTS_PATH) else {}
         for key in ("编译方式", "UT生成方式", "UT运行命令", "测试路径"):
             if defaults.get(key):
                 merged[key] = defaults[key]
@@ -5139,7 +5140,7 @@ def _direct_reentry_authorization(rec, ack="", message_id=""):
 
 def _read_exit_record():
     try:
-        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+        rec = load_json(EXIT_PATH)
         return rec if isinstance(rec, dict) else {}
     except Exception:
         return {}
@@ -5187,7 +5188,7 @@ def _resume_direct_mode(ack="", message_id=""):
               "init --new --message-id <messages输出的ID>；"
               "禁止把 .mae-flow.json.exited 改名成 .mae-flow.json。", 2)
     try:
-        st = json.load(open(saved_state, encoding="utf-8"))
+        st = load_json(saved_state)
     except Exception as exc:
         die("退出状态快照不可解析，不能自动恢复：%s" % exc, 2)
 
@@ -5295,7 +5296,7 @@ def _start_new_from_direct(flow, ack="", message_id=""):
     previous = None
     if saved_state and os.path.isfile(saved_state):
         try:
-            previous = json.load(open(saved_state, encoding="utf-8"))
+            previous = load_json(saved_state)
         except Exception:
             previous = None
     if previous:
@@ -5531,7 +5532,7 @@ def _gitignore():
     lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-work/"]
     # errors=replace:用户仓的 .gitignore 可能是 GBK 注释,严格解码会让 init 直接
     # 崩 traceback(且报错看不出和 .gitignore 有关);替换字符只影响去重判断,无害。
-    txt = (open(gi, encoding="utf-8", errors="replace").read()
+    txt = (read_text(gi, errors="replace")
            if os.path.exists(gi) else "")
     existing = {
         line.strip() for line in txt.splitlines()
@@ -5539,8 +5540,8 @@ def _gitignore():
     }
     add = [line for line in lines if line not in existing]
     if add:
-        open(gi, "a", encoding="utf-8").write(
-            ("\n" if txt and not txt.endswith("\n") else "") + "\n".join(add) + "\n")
+        body = ("\n" if txt and not txt.endswith("\n") else "") + "\n".join(add) + "\n"
+        write_text(gi, body, mode="a")
     _gitattributes()
 
 
@@ -5551,7 +5552,7 @@ def _gitattributes():
     ga = ".gitattributes"
     line = "openspec/** text eol=lf"
     try:
-        txt = (open(ga, encoding="utf-8", errors="replace").read()
+        txt = (read_text(ga, errors="replace")
                if os.path.exists(ga) else "")
         existing = {
             item.strip() for item in txt.splitlines()
@@ -5559,10 +5560,9 @@ def _gitattributes():
         }
         if line in existing:
             return
-        open(ga, "a", encoding="utf-8", newline="\n").write(
-            ("\n" if txt and not txt.endswith("\n") else "")
-            + "# mae-flow: comet 状态文件必须 LF(CRLF 检出会造成阶段状态读取分裂)\n"
-            + line + "\n")
+        body = (("\n" if txt and not txt.endswith("\n") else "") + "# mae-flow: comet 状态文件必须 LF(CRLF 检出会造成阶段状态读取分裂)\n"
+                + line + "\n")
+        write_text(ga, body, newline="\n", mode="a")
     except OSError as exc:
         print("[mae-flow] ⚠ 无法写 .gitattributes(%s);Windows autocrlf 环境请手动加入: %s"
               % (exc, line), file=sys.stderr)
@@ -5573,8 +5573,8 @@ def _friction_from_log(st):
     日志不可读返回空 dict(账本/报告按缺项处理,不阻塞)。"""
     gate = bounce = anom = 0
     try:
-        for line in open(os.path.join(tempfile.gettempdir(), "mae-flow-hook.log"),
-                         encoding="utf-8", errors="replace"):
+        log_path = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
+        for line in read_lines(log_path, errors="replace"):
             if line[:19] >= st.get("started", ""):
                 if "end pretooluse rc=2" in line:
                     gate += 1
@@ -5627,7 +5627,7 @@ def advance(flow, st, sid, step, tag, note=""):
     if sid == "rf_triage":
         review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
         try:
-            review_text = open(review_doc, encoding="utf-8", errors="replace").read()
+            review_text = read_text(review_doc, errors="replace")
         except OSError as exc:
             die("无法冻结评审裁决快照:" + str(exc), 2)
         st["review_triage_statuses"] = _review_statuses(review_text)
@@ -5725,7 +5725,7 @@ def _validated_pending_config(step, st, set_values):
 
 def _config_review_excerpt(path):
     try:
-        text = open(path, encoding="utf-8").read()
+        text = read_text(path)
     except OSError:
         return ""
     lines = [re.sub(r"\s+", " ", line).strip()
@@ -7297,7 +7297,7 @@ def _test_patterns(st):
                   if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
     else:
         try:
-            raw = json.load(open(DEFAULTS_PATH, encoding="utf-8-sig")).get("测试路径", [])
+            raw = load_json(DEFAULTS_PATH, encoding="utf-8-sig").get("测试路径", [])
             values = ([x.strip() for x in raw.split(",") if x.strip()]
                       if isinstance(raw, str) else list(raw) if isinstance(raw, list) else [])
         except Exception:
@@ -7366,7 +7366,7 @@ def _gate_die(st, sid, rule, subject, msg):
     用户在真实终端手动执行就是它们的逃生口。"""
     bid = _gate_block_id(rule, subject)
     try:
-        permits = json.load(open(GATE_PERMITS_PATH, encoding="utf-8"))
+        permits = load_json(GATE_PERMITS_PATH)
     except FileNotFoundError:
         permits = {}
     except Exception:
@@ -7724,7 +7724,7 @@ def cmd_allow(flow, st, args):
         die("流程未启用,gate 本来就不拦,无需放行令。", 2)
     bid = (args.block_id or "").strip()
     try:
-        recent = (json.load(open(GATE_STRIKES_PATH, encoding="utf-8")) or {}).get("recent", {})
+        recent = (load_json(GATE_STRIKES_PATH) or {}).get("recent", {})
     except Exception:
         recent = {}
     rec = recent.get(bid)
@@ -8513,8 +8513,8 @@ def cmd_agent_task(flow, st, args):
     notes_path = os.path.join("docs", "delivery-notes.md")
     if os.path.isfile(notes_path):
         try:
-            note_lines = [l.rstrip() for l in open(
-                notes_path, encoding="utf-8", errors="replace").read().splitlines()
+            note_lines = [l.rstrip() for l in read_text(
+                notes_path, errors="replace").splitlines()
                 if l.strip()][:40]
         except OSError:
             note_lines = []
@@ -8604,7 +8604,7 @@ def cmd_codecheck_scan(flow, st, args):
             die("无法核对规范检查入口 HEAD:" + why, 2)
         if changed:
             try:
-                tok = json.load(open(STATE_PATH + ".tokens", encoding="utf-8")).get("CODECHECK", {})
+                tok = load_json(STATE_PATH + ".tokens").get("CODECHECK", {})
             except Exception:
                 tok = {}
             legal_round = (isinstance(tok, dict) and tok.get("step") == sid
@@ -8870,7 +8870,7 @@ def cmd_codecheck_record(flow, st, args):
     files, err = _biz_changed_files(st)
     if err:
         die(err, 2)
-    digest = hashlib.sha256(open(diag, "rb").read()).hexdigest()
+    digest = hashlib.sha256(read_bytes(diag)).hexdigest()
     head = sh("git rev-parse --verify HEAD")
     rec = {"step": st["current"], "head": head, "files": files, "count": args.count,
            "diagnostic": diag, "diagnostic_sha256": digest, "reason": args.reason,
@@ -8919,7 +8919,7 @@ def cmd_approve_exemption(flow, st, args):
     ex = os.path.join("docs", "codecheck-exempt-" + st["config"].get("单号", "") + ".md")
     os.makedirs(os.path.dirname(ex), exist_ok=True)
     if not os.path.exists(ex):
-        open(ex, "w", encoding="utf-8").write("# CodeCheck 正式豁免记录\n\n")
+        write_text(ex, "# CodeCheck 正式豁免记录\n\n")
     safe_ack = re.sub(r"[\r\n|]+", " ", args.ack).strip()
     safe_reason = re.sub(r"[\r\n|]+", " ", args.reason).strip()
     with open(ex, "a", encoding="utf-8") as f:
@@ -9119,7 +9119,7 @@ def cmd_doctor(flow, st, args):
     guards = [p for p in comet_guard_paths(os.getcwd()) if os.path.isfile(p)]
     try:
         compat = bool(guards) and all(
-            COMET_COMPAT_BEGIN in open(p, encoding="utf-8", errors="strict").read()
+            COMET_COMPAT_BEGIN in read_text(p, errors="strict")
             for p in guards)
     except Exception:
         compat = False
@@ -9164,7 +9164,7 @@ def cmd_doctor(flow, st, args):
           + (" | ".join(sp) if sp else "未配置（使用跨仓扩展名、构建文件和通用目录规则）"))
     # 观测项(公司机金丝雀关注):ack 验真存储 与 UTRUN 令牌——两者依赖 harness payload 字段
     try:
-        captured = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+        captured = json.loads(read_text(STATE_PATH + ".usermsg") or "[]")
         n = len(captured)
         print(f"✅ ack 验真存储: {n} 条用户输入" if n else
               "❌ ack 验真存储: 空(确认步骤会拒绝推进；请让用户发送一条普通消息后重试)")
@@ -9180,7 +9180,7 @@ def cmd_doctor(flow, st, args):
         print("❌ ack 验真存储: 不存在(确认步骤会拒绝推进；检查 UserPromptSubmit hook，"
               "临时恢复方式是让用户发送普通确认消息后重试)")
     try:
-        failures = json.load(open(FAILURE_PATH, encoding="utf-8")) if os.path.exists(FAILURE_PATH) else {}
+        failures = load_json(FAILURE_PATH) if os.path.exists(FAILURE_PATH) else {}
         rec = failures.get("ack:" + sid, {})
         if rec:
             print(("❌" if int(rec.get("count", 0)) >= 2 else "⚠")
@@ -9189,13 +9189,13 @@ def cmd_doctor(flow, st, args):
     except Exception:
         pass
     try:
-        tok = json.loads(open(STATE_PATH + ".tokens", encoding="utf-8").read()).get("UTRUN", "")
+        tok = json.loads(read_text(STATE_PATH + ".tokens")).get("UTRUN", "")
         uts = tok.get("at") if isinstance(tok, dict) else tok
         print(("✅" if uts else "⚠") + f" UTRUN 令牌(UT 命令真实调起): {uts or '未记录(尚未跑 UT,或 PostToolUse-Bash 未触发)'}")
     except Exception:
         print("⚠ UTRUN 令牌: 无令牌文件")
     try:
-        strikes = json.load(open(GATE_STRIKES_PATH, encoding="utf-8")) if os.path.exists(GATE_STRIKES_PATH) else {}
+        strikes = load_json(GATE_STRIKES_PATH) if os.path.exists(GATE_STRIKES_PATH) else {}
         hot = [(r, e) for r, e in (strikes.get("counts", {}) or {}).items()
                if int(e.get("count", 0) or 0) >= GATE_STRIKE_LIMIT]
         for rule, entry in hot:
@@ -9326,7 +9326,7 @@ def _write_moonlight_report(flow, st):
 
 def _moonlight_latest_rejection(kind):
     try:
-        data = json.load(open(STATE_PATH + ".agent-rejections", encoding="utf-8"))
+        data = load_json(STATE_PATH + ".agent-rejections")
     except Exception:
         return ""
     label = {"compile": "COMPILE", "codecheck": "CODECHECK", "ut": "UT"}.get(kind, "")
@@ -9355,7 +9355,7 @@ def _consume_preinit_moonlight_intent(ack):
     if not ack:
         return False, "命令未携带 --ack", ""
     try:
-        rec = json.load(open(MOONLIGHT_INTENT_PATH, encoding="utf-8"))
+        rec = load_json(MOONLIGHT_INTENT_PATH)
     except Exception:
         return False, ("未捕获到本轮用户的月光宝盒授权。请让用户用普通消息明确说一次"
                        "“开启月光宝盒”，再执行本命令。"), ""
@@ -9394,7 +9394,7 @@ def _consume_preinit_moonlight_intent(ack):
 def _moonlight_request_from_messages(st, ack):
     """从当前步骤捕获的真实用户消息中取出完整启动原话，供断点恢复。"""
     try:
-        msgs = json.loads(open(STATE_PATH + ".usermsg", encoding="utf-8").read() or "[]")
+        msgs = json.loads(read_text(STATE_PATH + ".usermsg") or "[]")
     except Exception:
         msgs = []
     needle = re.sub(r"\s+", "", ack or "")
@@ -9528,7 +9528,7 @@ def cmd_moonlight(flow, st, args):
             # 直接开发模式的用户消息保存在退出记录中。允许 shell 只传“月光宝盒/moonlight”
             # 这个短词，但恢复函数仍使用捕获到的完整原文验真。
             try:
-                rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+                rec = load_json(EXIT_PATH)
                 needle = re.sub(r"\s+", "", args.ack or "")
                 full_ack = next(
                     (m.get("text", "") for m in reversed(rec.get("direct_messages", []) or [])
@@ -9814,7 +9814,7 @@ def cmd_report_all():
         print("[mae-flow] 暂无历史交付记录(每单交付完成后开下一单时自动记账)。")
         return
     recs = []
-    for line in open(HISTORY_PATH, encoding="utf-8", errors="replace"):
+    for line in read_lines(HISTORY_PATH, errors="replace"):
         try:
             recs.append(json.loads(line))
         except Exception:
@@ -10022,7 +10022,7 @@ def cmd_exit(flow, st, args):
         _print_exit_preview(flow, st)
     if intent_arg:
         try:
-            intent = json.load(open(EXIT_INTENT_PATH, encoding="utf-8"))
+            intent = load_json(EXIT_INTENT_PATH)
         except Exception as exc:
             die("退出事件凭据不可读或已消费：%s。不要循环重试；"
                 "用户可在真实终端执行 exit --interactive。" % exc, 2)
@@ -10142,7 +10142,7 @@ def cmd_exit(flow, st, args):
 
 def print_direct_mode_status():
     try:
-        rec = json.load(open(EXIT_PATH, encoding="utf-8"))
+        rec = load_json(EXIT_PATH)
     except Exception:
         rec = {}
     print("[mae-flow] 当前项目已退出流程，正在按普通开发方式工作。")
@@ -10208,7 +10208,7 @@ def cmd_exit_corrupt_state(args, state_error):
     ack, auth = "", ""
     if intent_arg:
         try:
-            intent = json.load(open(EXIT_INTENT_PATH, encoding="utf-8"))
+            intent = load_json(EXIT_INTENT_PATH)
             valid = (
                 intent.get("id") == intent_arg
                 and intent.get("step") == "__corrupt_state__"

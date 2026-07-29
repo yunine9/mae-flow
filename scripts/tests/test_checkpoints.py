@@ -25,7 +25,10 @@ DISPATCH_SPEC = importlib.util.spec_from_file_location(
     os.path.join(ROOT, "hooks", "dispatch.py"))
 dispatch = importlib.util.module_from_spec(DISPATCH_SPEC)
 DISPATCH_SPEC.loader.exec_module(dispatch)
-FLOW = json.load(open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8"))
+with open(
+        os.path.join(ROOT, "flow", "flow.json"),
+        encoding="utf-8") as stream:
+    FLOW = json.load(stream)
 mf.FLOW = FLOW
 
 

@@ -26,6 +26,7 @@ from architecture_rules import (  # noqa: E402
     line_count,
     new_module_size_violations,
     quality_complexity_violations,
+    unmanaged_runtime_open_violations,
     workflow_complexity_violations,
 )
 
@@ -64,6 +65,9 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
+
+    def test_runtime_entrypoints_have_no_unmanaged_open_calls(self):
+        self.assertEqual([], unmanaged_runtime_open_violations(ROOT))
 
     def test_foundation_rejects_relative_reverse_imports(self):
         root = self._write_foundation_fixture(
@@ -220,6 +224,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("test_quality_task_cards.py", text)
         self.assertIn("test_delivery_policies.py", text)
         self.assertIn("test_command_dispatch.py", text)
+        self.assertIn("test_file_io.py", text)
 
 
 if __name__ == "__main__":

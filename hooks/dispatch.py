@@ -47,6 +47,7 @@ from mae_flow_core.foundation.fingerprints import (
     review_path_fingerprint as _shared_review_path_fingerprint,
 )
 from mae_flow_core.foundation import source_paths
+from mae_flow_core.file_io import load_json, read_lines, read_text, write_text
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -202,7 +203,7 @@ def _session_notice_due(tag, d, ev):
     if ev != "sessionstart" and os.path.exists(marker):
         return False
     try:
-        open(marker, "w").close()
+        write_text(marker, "")
     except OSError:
         pass
     return True
@@ -258,7 +259,7 @@ def _gate_agent_dispatch(ti):
                   file=sys.stderr)
             sys.exit(2)
         try:
-            txt = open(task.get("path", ""), encoding="utf-8").read()
+            txt = read_text(task.get("path", ""))
             body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
             actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
         except Exception as exc:
@@ -317,7 +318,7 @@ def ev_pretooluse(d):
         sys.exit(0)
     if tool == "AskUserQuestion":
         try:
-            st = json.load(open(STATE, encoding="utf-8"))
+            st = load_json(STATE)
             moonlight = bool((st.get("moonlight") or {}).get("enabled"))
         except Exception:
             moonlight = False
@@ -477,7 +478,7 @@ def ev_subagentstop(d):
         tp = max(cand, key=os.path.getmtime) if cand else main_tp
     _log("subagentstop transcript: " + (os.path.basename(tp) or "?"))
     try:
-        lines = [json.loads(x) for x in open(tp, encoding="utf-8") if x.strip()]
+        lines = [json.loads(x) for x in read_lines(tp) if x.strip()]
     except Exception:
         sys.exit(0)
 
@@ -574,7 +575,7 @@ def ev_subagentstop(d):
     # 无标记:判定是否我方契约 agent——扫 transcript 头部(含 agent 系统提示,必带 agent 名/契约字样),
     # 不依赖任务 prompt 措辞(主模型派"定稿"类子任务时不会写 agent 名——已实际踩过)
     try:
-        head = open(tp, encoding="utf-8", errors="replace").read(16000)
+        head = read_text(tp, errors="replace", limit=16000)
     except OSError:
         head = prompt
     if standalone_expected:
@@ -947,7 +948,7 @@ def _maybe_utrun(d):
     try:
         if not os.path.exists(STATE):
             return
-        st = json.load(open(STATE, encoding="utf-8"))
+        st = load_json(STATE)
         if st.get("current") not in ("verify_ut", "rf_ut", "tw_ut"):
             return
         cmd = re.sub(r"\s+", " ", ((d.get("tool_input") or {}).get("command", "") or ""))
@@ -1158,7 +1159,8 @@ def _evidence_data():
     if action and not os.path.isfile(STATE):
         return dict(action.get("evidence", {}) or {})
     try:
-        return json.load(open(EVIDENCE_STATE, encoding="utf-8")) if os.path.exists(EVIDENCE_STATE) else {}
+        return load_json(
+            EVIDENCE_STATE) if os.path.exists(EVIDENCE_STATE) else {}
     except Exception:
         return {}
 
@@ -1257,7 +1259,7 @@ def _task_card_contract(kind, report, soft=False):
     if not m or m.group(1).lower() != task.get("sha256", "").lower():
         _contract_bail(kind, "最终报告缺少当前任务卡的 TASK_CARD_SHA256,说明启动信息不完整。", soft)
     try:
-        txt = open(task["path"], encoding="utf-8").read()
+        txt = read_text(task["path"])
         body = txt.rsplit("TASK_CARD_SHA256:", 1)[0]
         actual = hashlib.sha256(body.encode("utf-8")).hexdigest()
     except Exception as e:
@@ -2053,8 +2055,10 @@ def _source_like(path):
     patterns += ([x.strip() for x in value.split(",") if x.strip()]
                  if isinstance(value, str) else list(value or []))
     try:
-        value = json.load(open(
-            ".mae-flow-defaults.json", encoding="utf-8-sig")).get("源码路径", [])
+        value = load_json(
+            ".mae-flow-defaults.json",
+            encoding="utf-8-sig",
+        ).get("源码路径", [])
         patterns += ([x.strip() for x in value.split(",") if x.strip()]
                      if isinstance(value, str) else list(value or []))
     except FileNotFoundError:
@@ -2074,7 +2078,10 @@ def _test_like(path):
     try:
         # utf-8-sig:团队手写 defaults 常带 BOM;strict 失败必须留痕,
         # 否则「测试路径」静默失效会让 gate 口径变宽而无人知晓。
-        v = json.load(open(".mae-flow-defaults.json", encoding="utf-8-sig")).get("测试路径", [])
+        v = load_json(
+            ".mae-flow-defaults.json",
+            encoding="utf-8-sig",
+        ).get("测试路径", [])
         pats += [x.strip() for x in v.split(",") if x.strip()] if isinstance(v, str) else list(v or [])
     except FileNotFoundError:
         pass
@@ -2592,7 +2599,7 @@ def ev_posttooluse(d):
 
     def heads(f):
         return [re.sub(r"\s+", " ", h.strip()) for h in
-                re.findall(r"^#{1,3}\s+(.+)$", open(f, encoding="utf-8").read(), re.M)]
+                re.findall(r"^#{1,3}\s+(.+)$", read_text(f), re.M)]
 
     def matched(t, got):
         # 模板章节含 {占位符}(如 STORY-{单号})时按通配匹配——实例化后的标题不该被判缺失
@@ -2620,7 +2627,7 @@ def ev_stop(d):
     push 失败则由 push-failed 留痕。stop_hook_active 时放行，避免宿主递归触发形成死循环。
     """
     try:
-        st = json.load(open(STATE, encoding="utf-8"))
+        st = load_json(STATE)
     except Exception:
         sys.exit(0)
     ml = st.get("moonlight") or {}
@@ -2644,7 +2651,7 @@ def ev_stop(d):
     guard_path = STATE + ".stop-guard"
     guard = {}
     try:
-        guard = json.load(open(guard_path, encoding="utf-8"))
+        guard = load_json(guard_path)
     except Exception:
         guard = {}
     if d.get("stop_hook_active"):

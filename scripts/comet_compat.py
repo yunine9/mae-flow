@@ -4,6 +4,8 @@
 
 import os
 
+from mae_flow_core.file_io import read_text
+
 
 BEGIN = "# MAE-FLOW DIRECT MODE COMPAT BEGIN"
 BLOCK = r'''# MAE-FLOW DIRECT MODE COMPAT BEGIN
@@ -41,7 +43,7 @@ def ensure_direct_mode_compat(project_root="."):
             continue
         found.append(path)
         try:
-            text = open(path, encoding="utf-8", errors="strict").read()
+            text = read_text(path, errors="strict")
             if BEGIN in text:
                 continue
             anchor = "set -euo pipefail\n"

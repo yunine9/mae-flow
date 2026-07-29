@@ -24,6 +24,12 @@ LEGACY_OVERSIZED_CORE_MODULES = {
     "scripts/mae_flow_core/lightcheck.py",
     "scripts/mae_flow_core/specengine.py",
 }
+RUNTIME_ENTRYPOINTS = (
+    "scripts/mae-flow.py",
+    "hooks/dispatch.py",
+    "scripts/comet_compat.py",
+    "scripts/statusline.py",
+)
 
 
 def line_count(path):
@@ -40,6 +46,33 @@ def module_imports(path):
     return {
         name for name, _line in _import_nodes(_parse(path))
     }
+
+
+def unmanaged_runtime_open_violations(root):
+    root_path = Path(root)
+    violations = []
+    for relative in RUNTIME_ENTRYPOINTS:
+        path = root_path / relative
+        tree = _parse(os.fspath(path))
+        managed_calls = {
+            call
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.With, ast.AsyncWith))
+            for item in node.items
+            for call in ast.walk(item.context_expr)
+            if isinstance(call, ast.Call)
+        }
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "open"
+                and node not in managed_calls
+            ):
+                violations.append(
+                    "%s:%d: unmanaged open()" % (relative, node.lineno)
+                )
+    return sorted(violations)
 
 
 def _attribute_name(node):

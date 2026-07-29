@@ -94,13 +94,13 @@ class HookEventTests(unittest.TestCase):
                     [name for name, _args in calls if name != "log"][-1],
                 )
 
-    def test_standalone_only_owns_pretool_subagent_and_injection(self):
+    def test_standalone_owns_answer_capture_and_active_events(self):
         expected = {
             "pretooluse": "standalone_pretool",
             "subagentstop": "subagentstop",
             "userprompt": "standalone_inject",
             "sessionstart": "standalone_inject",
-            "posttooluse": "inactive",
+            "posttooluse": "posttool",
             "stop": "inactive",
         }
         for event, target in expected.items():

@@ -140,6 +140,52 @@ class RuntimeAndStateTests(unittest.TestCase):
                 ledger = json.load(stream)
             self.assertIn("src/feature.cpp", ledger["paths"])
 
+    def test_standalone_posttooluse_captures_scope_confirmation(self):
+        with tempfile.TemporaryDirectory() as td:
+            action_path = os.path.join(
+                td, ".mae-flow-work", "standalone-action.json")
+            work_dir = os.path.join(
+                td, ".mae-flow-work", "standalone", "scope-confirmation")
+            os.makedirs(work_dir, exist_ok=True)
+            save_versioned_json(action_path, {
+                "kind": "ut",
+                "id": "scope-confirmation",
+                "status": "awaiting_scope_confirmation",
+                "expires_epoch": time.time() + 3600,
+                "scope_proposed_epoch": time.time() - 1,
+                "work_dir": work_dir,
+                "files": ["src/feature.py"],
+                "sources": [],
+                "config": {},
+                "tokens": {},
+                "rejections": {},
+                "quality": {},
+                "user_messages": [],
+            }, "action", project_root=td)
+            payload = json.dumps({
+                "cwd": td,
+                "tool_name": "AskUserQuestion",
+                "tool_input": {},
+                "tool_response": "确认以上范围",
+            }, ensure_ascii=False) + "\n"
+            env = dict(os.environ)
+            env["PYTHONPYCACHEPREFIX"] = os.path.join(td, "pycache")
+            hook = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "hooks", "dispatch.py"), "posttooluse"],
+                cwd=td, input=payload, text=True, capture_output=True,
+                env=env, timeout=15)
+            self.assertEqual(0, hook.returncode, hook.stderr)
+            action = read_json(action_path)
+            self.assertEqual(
+                "确认以上范围",
+                action["user_messages"][-1]["text"],
+            )
+            self.assertEqual(
+                "CONFIRMED",
+                action["tokens"]["ASKUSER"]["status"],
+            )
+
     def test_terminal_flow_keeps_cli_state_but_all_hooks_bypass(self):
         with tempfile.TemporaryDirectory() as td:
             source = os.path.join(td, "src", "feature.cpp")

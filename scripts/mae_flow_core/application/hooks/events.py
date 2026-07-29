@@ -57,6 +57,8 @@ def _standalone_event(event, payload, ports):
         return ports.standalone_inject(payload, False)
     if event == "sessionstart":
         return ports.standalone_inject(payload, True)
+    if event == "posttooluse":
+        return ports.posttool(payload)
     return ports.inactive(event, payload)
 
 

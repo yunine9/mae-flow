@@ -90,6 +90,13 @@ from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core.file_io import load_json, read_bytes, read_lines, read_text, write_text
 from mae_flow_core.delivery import checkpoints as delivery_checkpoints
+from mae_flow_core.application.delivery.checkpoints import (
+    CheckpointPlanPorts,
+    CheckpointReadyPorts,
+    plan_checkpoint,
+    ready_checkpoint,
+)
+from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
     DeliveryEvidenceRules,
@@ -5173,60 +5180,29 @@ def _activate_checkpoint_plan(st, mode):
 
 
 def cmd_checkpoint_plan(st, args):
-    if st.get("current") not in PACE_STEPS:
-        die("checkpoint plan 只允许在开发节奏确认步骤执行；先按 current 完成方案/范围分析。", 2)
-    if _moonlight(st):
-        die("月光宝盒不需要人工开发节奏方案；状态机会自动旁路本步骤。", 2)
-    items = [re.sub(r"\s+", " ", str(x or "")).strip()
-             for x in (args.item or [])]
-    if not 1 <= len(items) <= 6 or any(len(x) < 2 for x in items):
-        die("检查点必须给出 1-6 个非空 --item；小改可 1 个，常规任务建议 2-4 个。", 2)
-    if len(set(items)) != len(items):
-        die("检查点标题/范围不能重复；请写出各批次可区分的业务边界。", 2)
-    dirty = _blocking_dirty_source_paths(st, FLOW)
-    if dirty:
-        die("开发节奏必须在写第一行代码前确认；当前已有本轮未提交源码: "
-            + "、".join(dirty[:8]) + "。先归因并处理，再重新生成方案。", 2)
-    task_sha, task_lines = _task_structure_fingerprint(st)
-    head = sh("git rev-parse --verify HEAD")
-    checkpoints = [
-        {"id": "CP%d" % (i + 1), "title": title, "status": "planned"}
-        for i, title in enumerate(items)
-    ]
-    plan_body = json.dumps({
-        "head": head, "task_sha256": task_sha,
-        "items": [{"id": x["id"], "title": x["title"]} for x in checkpoints],
-    }, ensure_ascii=False, sort_keys=True)
-    st["development_review"] = {
-        "version": 1,
-        # New deliveries freeze the uncommitted IDE diff first.  The explicit
-        # flag preserves old in-flight version-1 states on their proven route.
-        "review_before_commit": True,
-        "status": "plan_pending",
-        "plan_step": st.get("current"),
-        "plan_head": head,
-        "plan_sha256": hashlib.sha256(plan_body.encode("utf-8")).hexdigest(),
-        "task_structure_sha256": task_sha,
-        "task_count": len(task_lines),
-        "ack_cursor": _ack_message_cursor(),
-        "no_code_plan": (
-            (st.get("choices", {}) or {}).get("workflow") == "review"
-            and not task_lines),
-        "checkpoints": checkpoints,
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    result = plan_checkpoint(
+        current=st.get("current"),
+        workflow=(st.get("choices", {}) or {}).get("workflow"),
+        moonlight=_moonlight(st),
+        raw_items=args.item or (),
+        ports=CheckpointPlanPorts(
+            dirty_paths=lambda: _blocking_dirty_source_paths(st, FLOW),
+            task_structure=lambda: _task_structure_fingerprint(st),
+            head=lambda: sh("git rev-parse --verify HEAD"),
+            ack_cursor=_ack_message_cursor,
+            now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    for effect in result.effects:
+        if effect.kind != "set_development_review":
+            raise RuntimeError(
+                "unsupported checkpoint plan effect: " + effect.kind)
+        st["development_review"] = thaw_delivery_payload(effect.payload)
     save_state(st)
-    print("[mae-flow] 开发检查点方案（确认前尚未开始写码）")
-    print("  代码基点: " + head[:10])
-    print("  实现/评审任务数: %d（勾选状态和备注不计入结构指纹）" % len(task_lines))
-    for item in checkpoints:
-        print("  %s — %s" % (item["id"], item["title"]))
-    print("\n用 AskUserQuestion 提供三个固定选项：")
-    print("  - 按检查点分阶段开发、检视确认后提交并推送")
-    print("  - 一次完成全部代码，最终统一检视")
-    print("  - 调整检查点划分")
-    print("用户点选后执行 done --choice staged|continuous|adjust；"
-          "月光宝盒不会进入此确认。")
+    for line in result.stdout:
+        print(line)
 
 
 def _checkpoint_plan_drift(st):
@@ -5256,138 +5232,58 @@ def _print_checkpoint_decisions(final=False):
 
 
 def cmd_checkpoint_ready(flow, st, args):
-    data = _development_review(st)
-    if not data or data.get("status") != "active":
-        die("当前没有已确认的开发检查点方案；旧版在途流程继续按原有 review 节点执行。", 2)
-    if _moonlight(st):
-        die("月光宝盒不执行人工检查点；继续按当前质量链无人值守推进。", 2)
-    expected_step = _checkpoint_expected_code_step(st)
-    if st.get("current") != expected_step:
-        die("checkpoint ready 只允许在本工作流编码步骤 %s 执行；当前为 %s。"
-            % (expected_step or "(未知)", st.get("current")), 2)
-    item = _checkpoint_current(st)
-    if not item or item.get("id") != args.checkpoint_id:
-        die("当前应处理 %s，不是 %s。先执行 checkpoint status 查看计划。"
-            % ((item or {}).get("id", "无剩余检查点"), args.checkpoint_id), 2)
-    if item.get("status") not in ("coding",):
-        die("%s 当前状态为 %s，不能重复 ready；执行 checkpoint status 查看下一步。"
-            % (item["id"], item.get("status", "未知")), 2)
-    base = str(item.get("fixed_base") or data.get("delivery_base") or "")
-    head = sh("git rev-parse --verify HEAD")
-    if (not base or argv_out(["git", "cat-file", "-t", base]) != "commit"
-            or argv_out(["git", "merge-base", base, head]) != base):
-        die("检查点固定基点不在当前历史上，可能发生 rebase/reset；"
-            "不能用改写后的历史冒充原检查点。", 2)
-    mode = data.get("mode")
-    precommit_review = mode == "staged" and _review_before_commit(data)
-    if precommit_review:
-        if head != base:
-            die("%s 使用“先检视、后提交”，但固定基点之后已经产生提交。"
-                "旧提交不能冒充 IDE 未提交 diff；保留现场并让用户决定如何归因，"
-                "不要 amend/reset 自动改写历史。" % item["id"], 2)
-        snapshot = _checkpoint_worktree_snapshot(st, flow)
-        if not snapshot:
-            die("%s 没有本轮未提交交付差异；空批次应调整或合并，"
-                "不要制造空检视。" % item["id"], 2)
-        source_paths = [
-            path for path in snapshot
-            if _is_source_path(path, st, flow)
-        ]
-        task = (st.get("agent_tasks", {}) or {}).get("COMPILE", {})
-        if source_paths:
-            if (task.get("checkpoint") != item["id"]
-                    or not task.get("precommit_review")):
-                die("最后一次编译任务没有绑定当前未提交检查点 %s。先执行 agent-task "
-                    "compile --checkpoint %s --scope \"<本批模块/任务>\"，"
-                    "再启动 compile-agent。" % (item["id"], item["id"]), 2)
-            ok, why = ev_agent_ran(
-                {"agent": "COMPILE", "statuses": ["OK"]}, st)
-            if not ok:
-                die("检查点编译证据不足:" + why, 2)
-        # compile-agent may have made an allowed compile fix.  Freeze the exact
-        # post-build worktree that its token just proved, not the task input.
-        snapshot = _checkpoint_worktree_snapshot(st, flow)
-        receipt = {
-            "base": head,
-            "snapshot": snapshot,
-            "snapshot_sha256": _snapshot_sha256(snapshot),
-            "ack_cursor": _ack_message_cursor(),
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        item.update({
-            "compile_head": head,
-            "compile_task_sha256": (
-                task.get("sha256", "") if source_paths else ""),
-            "compile_skipped_no_source": not source_paths,
-            "head": head,
-            "receipt": receipt,
-            "status": "review_pending",
-            "task_structure_drift": _checkpoint_plan_drift(st),
-            "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        save_state(st)
-        print("\n".join(_checkpoint_worktree_review_lines(item)))
-        if item.get("task_structure_drift"):
-            print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
-        _print_checkpoint_decisions(final=False)
-        return
-    dirty = _blocking_dirty_source_paths(st, flow)
-    if dirty:
-        die("检查点编译收尾前仍有未提交源码/测试/构建文件: "
-            + "、".join(dirty[:8]) + "。只精确提交本批应入库文件后重试。", 2)
-    if not argv_out(["git", "log", "-1", "--format=%H", base + ".." + head]):
-        die("%s 自固定基点后没有新提交；空批次应调整/合并检查点，不制造空检视。"
-            % item["id"], 2)
-    ok, why = ev_commit_tagged({}, st)
-    if not ok:
-        die("检查点最新提交格式不合规:" + why, 2)
-    source_files = [
-        path for path in argv_out([
-            "git", "-c", "core.quotepath=false", "diff", "--name-only",
-            base, head]).splitlines()
-        if path and _is_source_path(path, st, flow)
-    ]
-    task = (st.get("agent_tasks", {}) or {}).get("COMPILE", {})
-    if source_files:
-        if task.get("checkpoint") != item["id"]:
-            die("最后一次编译任务没有绑定当前检查点 %s。先执行 agent-task compile "
-                "--checkpoint %s --scope \"<本批模块/任务>\"，再启动 compile-agent。"
-                % (item["id"], item["id"]), 2)
-        ok, why = ev_agent_ran({"agent": "COMPILE", "statuses": ["OK"]}, st)
-        if not ok:
-            die("检查点编译证据不足:" + why, 2)
-    item.update({
-        # ev_agent_ran has just proved the token still covers current source.
-        # The task-card head predates compile-agent fixes, so freezing it here
-        # would falsely treat the agent's own committed repair as post-compile.
-        "compile_head": head,
-        "compile_task_sha256": task.get("sha256", "") if source_files else "",
-        "compile_skipped_no_source": not source_files,
-        "head": head,
-        "task_structure_drift": _checkpoint_plan_drift(st),
-        "closed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    })
-    if mode == "continuous":
-        item["status"] = "completed"
-        item["completed_head"] = head
-        data["current_index"] = int(data.get("current_index", 0)) + 1
-        nxt = _checkpoint_current(st)
-        if nxt:
-            nxt["fixed_base"] = head
-        save_state(st)
-        print("[mae-flow] %s 已编译并记录范围 %s..%s；连续模式不 push、不等待，直接进入%s。"
-              % (item["id"], base[:10], head[:10],
-                 (" " + nxt["id"]) if nxt else "编码收尾"))
-        if item.get("task_structure_drift"):
-            print("⚠ 实现清单结构较确认时有变化，最终检视会显式标注；"
-                  "若业务边界发生实质变化，应主动呈用户调整计划。")
-        return
-    item["status"] = "push_pending"
+    result = ready_checkpoint(
+        review=_development_review(st),
+        current=st.get("current"),
+        workflow=(st.get("choices", {}) or {}).get("workflow"),
+        moonlight=_moonlight(st),
+        checkpoint_id=args.checkpoint_id,
+        agent_tasks=st.get("agent_tasks", {}) or {},
+        ports=CheckpointReadyPorts(
+            head=lambda: sh("git rev-parse --verify HEAD"),
+            object_type=lambda value: argv_out([
+                "git", "cat-file", "-t", value]),
+            merge_base=lambda base, head: argv_out([
+                "git", "merge-base", base, head]),
+            worktree_snapshot=lambda: _checkpoint_worktree_snapshot(
+                st, flow),
+            is_source_path=lambda path: _is_source_path(
+                path, st, flow),
+            agent_evidence=lambda: ev_agent_ran(
+                {"agent": "COMPILE", "statuses": ["OK"]}, st),
+            snapshot_sha256=_snapshot_sha256,
+            ack_cursor=_ack_message_cursor,
+            now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+            task_structure_drift=lambda: _checkpoint_plan_drift(st),
+            dirty_paths=lambda: _blocking_dirty_source_paths(st, flow),
+            has_commit=lambda base, head: bool(argv_out([
+                "git", "log", "-1", "--format=%H", base + ".." + head])),
+            commit_tagged=lambda: ev_commit_tagged({}, st),
+            source_files=lambda base, head: [
+                path for path in argv_out([
+                    "git", "-c", "core.quotepath=false",
+                    "diff", "--name-only", base, head,
+                ]).splitlines()
+                if path and _is_source_path(path, st, flow)
+            ],
+        ),
+    )
+    if result.exit_code:
+        die(result.stderr[0], result.exit_code)
+    render_items = []
+    for effect in result.effects:
+        if effect.kind == "set_development_review":
+            st["development_review"] = thaw_delivery_payload(effect.payload)
+        elif effect.kind == "render_worktree_review":
+            render_items.append(thaw_delivery_payload(effect.payload))
+        else:
+            raise RuntimeError(
+                "unsupported checkpoint ready effect: " + effect.kind)
     save_state(st)
-    print("[mae-flow] %s 编译通过，已冻结候选范围 %s..%s。现在小步推送："
-          % (item["id"], base[:10], head[:10]))
-    print("  git push -u origin HEAD")
-    print("推送成功后执行 checkpoint status；系统会核对真实上游 HEAD 后才开始检视。")
+    for item in render_items:
+        print("\n".join(_checkpoint_worktree_review_lines(item)))
+    for line in result.stdout:
+        print(line)
 
 
 def _refresh_staged_checkpoint(st, item):

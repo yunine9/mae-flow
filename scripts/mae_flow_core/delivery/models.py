@@ -1,5 +1,6 @@
 """Immutable values shared by Delivery application use cases."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -12,6 +13,19 @@ def freeze(value):
         return tuple(freeze(item) for item in value)
     if isinstance(value, (set, frozenset)):
         return frozenset(freeze(item) for item in value)
+    return value
+
+
+def thaw(value):
+    """Return an independent mutable copy of an effect payload."""
+    if isinstance(value, Mapping):
+        return {
+            key: thaw(item) for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [thaw(item) for item in value]
+    if isinstance(value, frozenset):
+        return {thaw(item) for item in value}
     return value
 
 

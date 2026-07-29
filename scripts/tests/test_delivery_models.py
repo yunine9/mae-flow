@@ -15,6 +15,7 @@ if SCRIPTS not in sys.path:
 from mae_flow_core.delivery.models import (  # noqa: E402
     DeliveryEffect,
     DeliveryResult,
+    thaw,
 )
 
 
@@ -48,6 +49,18 @@ class DeliveryModelTests(unittest.TestCase):
             DeliveryResult(effects=[], stdout=(), stderr=(), exit_code=0)
         with self.assertRaisesRegex(TypeError, "exit_code must be int"):
             DeliveryResult(effects=(), stdout=(), stderr=(), exit_code=False)
+
+    def test_thaw_returns_mutable_copy_of_frozen_payload(self):
+        effect = DeliveryEffect(
+            "save_state",
+            {"state": {"items": ["first"]}, "paths": {"a", "b"}},
+        )
+        mutable = thaw(effect.payload)
+        mutable["state"]["items"].append("second")
+        mutable["paths"].add("c")
+        self.assertEqual(["first", "second"], mutable["state"]["items"])
+        self.assertEqual({"a", "b", "c"}, mutable["paths"])
+        self.assertEqual(("first",), effect.payload["state"]["items"])
 
 
 if __name__ == "__main__":

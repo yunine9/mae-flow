@@ -87,6 +87,7 @@ from mae_flow_core.foundation.fingerprints import (
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core.guard import intent as guard_intent
+from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.workflow import advancement as workflow_advancement
 from mae_flow_core.workflow import completion as workflow_completion
 from mae_flow_core.workflow import definition as workflow_definition
@@ -8302,19 +8303,73 @@ def _requirement_sources(st):
     return list(dict.fromkeys(out))
 
 
+def _store_agent_task(flow, st, args, context):
+    kind = context["kind"]
+    sid = context["sid"]
+    document = context["document"]
+    digest = document.digest()
+    body = document.sealed_body()
+    directory = os.path.abspath(os.path.join(
+        ".mae-flow-work", "agent-tasks"))
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f"{sid}-{kind.lower()}.md")
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write(body)
+    lightcheck_result = context["lightcheck_result"]
+    st.setdefault("agent_tasks", {})[kind] = quality_task_cards.task_record(
+        step=sid, path=path, digest=digest, head=context["task_head"],
+        scope=args.scope or "", checkpoint=context["checkpoint_id"],
+        precommit_review=context["precommit_review"],
+        initial_compile_net=(
+            _working_source_net(context["task_head"], st, flow)
+            if context["precommit_review"] else 0),
+        source_snapshot=(
+            _source_snapshot_since(context["task_head"], st, flow)
+            if context["precommit_review"] else {}),
+        allowed_files=(
+            context["scan"].get("files", [])
+            if kind == "CODECHECK" else []),
+        task_files=context["task_files"],
+        execution_roots=[
+            root for root, _reason in _task_execution_roots(
+                context["execution_files"])[0]],
+        lightcheck=({
+            "status": lightcheck_result.get("status"),
+            "findings": len(lightcheck_result.get("findings") or []),
+            "report_path": lightcheck_result.get("report_path", ""),
+        } if lightcheck_result is not None else {}),
+        ut_targets=context["ut_targets"] if kind == "UT" else {},
+        unchanged_initial_dirty=context["inherited_dirty"],
+        at=time.strftime("%Y-%m-%d %H:%M:%S"))
+    if kind == "CODECHECK":
+        append_codecheck_event(
+            os.getcwd(), st, "agent.task_created", {
+                "task_path": os.path.abspath(path),
+                "task_sha256": digest,
+                "head": context["task_head"],
+                "allowed_files": context["scan"].get("files", []),
+                "scan_count": context["scan"].get("count"),
+                "scope": args.scope or "",
+            })
+    save_state(st)
+    print(f"[mae-flow] {kind} 任务卡已生成: {path}")
+    if kind == "COMPILE" and lightcheck_result is not None:
+        _print_lightcheck_result(lightcheck_result, quiet=True)
+    if kind == "CODECHECK":
+        print("[mae-flow] CodeCheck 详细日志: %s"
+              % norm(codecheck_log_path(os.getcwd(), st)))
+    print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
+
+
 def cmd_agent_task(flow, st, args):
     """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""
     kind = args.kind.upper()
-    expected_steps = {"COMPILE": {"build", "rf_fix", "rf_compile", "tw_change", "tw_compile",
-                                  "verify_recompile", "verify_post_ponytail_compile"},
-                      "CODECHECK": {"verify_codecheck", "tw_codecheck", "rf_codecheck", "rf_verify"},
-                      "UT": {"verify_ut", "rf_ut", "tw_ut", "rf_verify"}}
     sid = st["current"]
     checkpoint_id = str(getattr(args, "checkpoint", "") or "")
     task_diff_override = ""
     precommit_review = False
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
-    if sid not in expected_steps[kind]:
+    if not quality_task_cards.task_allowed(kind, sid):
         die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
     if checkpoint_id:
         if kind != "COMPILE":
@@ -8420,7 +8475,7 @@ def cmd_agent_task(flow, st, args):
     groups = _task_file_groups(task_files, st)
     cfg = st.get("config", {})
     task_head = sh("git rev-parse --verify HEAD")
-    lines = [
+    lines = quality_task_cards.TaskCardDocument([
         f"# Mae-Flow {kind} TASK CARD",
         "本文件由 harness 生成。不得猜测、替换或省略其中配置；缺项按 agent 契约 FAIL/BLOCKED 收尾。",
         f"项目根: {os.path.abspath(os.getcwd())}",
@@ -8436,7 +8491,7 @@ def cmd_agent_task(flow, st, args):
         f"UT生成方式: {cfg.get('UT生成方式', '')}",
         f"UT运行命令: {cfg.get('UT运行命令', '')}",
         "需求/规格依据:",
-    ]
+    ])
     if precommit_review:
         lines += [
             "检视/提交策略: 当前是分阶段“先检视、后提交”检查点。",
@@ -8551,55 +8606,14 @@ def cmd_agent_task(flow, st, args):
     else:
         lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 Mae-Flow"
                   " 插件自带的 build-fix Skill，禁止自己猜命令。"]
-    body = "\n".join(lines).rstrip() + "\n"
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    body += f"TASK_CARD_SHA256: {digest}\n"
-    d = os.path.abspath(os.path.join(".mae-flow-work", "agent-tasks"))
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"{sid}-{kind.lower()}.md")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(body)
-    st.setdefault("agent_tasks", {})[kind] = {
-        "step": sid, "path": path, "sha256": digest,
-        "head": task_head, "scope": args.scope or "",
-        "checkpoint": checkpoint_id,
-        "precommit_review": precommit_review,
-        "initial_compile_net": (
-            _working_source_net(task_head, st, flow)
-            if precommit_review else 0),
-        "source_snapshot": (
-            _source_snapshot_since(task_head, st, flow)
-            if precommit_review else {}),
-        "allowed_files": scan.get("files", []) if kind == "CODECHECK" else [],
-        "task_files": task_files,
-        "execution_roots": [root for root, _reason in _task_execution_roots(
-            execution_files)[0]],
-        "lightcheck": ({
-            "status": lightcheck_result.get("status"),
-            "findings": len(lightcheck_result.get("findings") or []),
-            "report_path": lightcheck_result.get("report_path", ""),
-        } if lightcheck_result is not None else {}),
-        "ut_targets": ut_targets if kind == "UT" else {},
-        "unchanged_initial_dirty": inherited_dirty,
-        "at": time.strftime("%Y-%m-%d %H:%M:%S")}
-    if kind == "CODECHECK":
-        append_codecheck_event(
-            os.getcwd(), st, "agent.task_created", {
-                "task_path": os.path.abspath(path),
-                "task_sha256": digest,
-                "head": task_head,
-                "allowed_files": scan.get("files", []),
-                "scan_count": scan.get("count"),
-                "scope": args.scope or "",
-            })
-    save_state(st)
-    print(f"[mae-flow] {kind} 任务卡已生成: {path}")
-    if kind == "COMPILE" and lightcheck_result is not None:
-        _print_lightcheck_result(lightcheck_result, quiet=True)
-    if kind == "CODECHECK":
-        print("[mae-flow] CodeCheck 详细日志: %s"
-              % norm(codecheck_log_path(os.getcwd(), st)))
-    print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
+    _store_agent_task(flow, st, args, {
+        "kind": kind, "sid": sid, "document": lines,
+        "task_head": task_head, "checkpoint_id": checkpoint_id,
+        "precommit_review": precommit_review, "scan": scan,
+        "task_files": task_files, "execution_files": execution_files,
+        "lightcheck_result": lightcheck_result, "ut_targets": ut_targets,
+        "inherited_dirty": inherited_dirty,
+    })
 
 
 def cmd_codecheck_scan(flow, st, args):

@@ -40,6 +40,13 @@ def task_allowed(kind, step):
 class TaskCardDocument:
     lines: list = field(default_factory=list)
 
+    def __iter__(self):
+        return iter(self.lines)
+
+    def __iadd__(self, lines):
+        self.extend(lines)
+        return self
+
     def append(self, line):
         self.lines.append(line)
 

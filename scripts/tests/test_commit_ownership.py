@@ -17,8 +17,10 @@ SPEC = importlib.util.spec_from_file_location(
     os.path.join(ROOT, "scripts", "mae-flow.py"))
 mf = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(mf)
-mf.FLOW = json.load(
-    open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8"))
+with open(
+        os.path.join(ROOT, "flow", "flow.json"),
+        encoding="utf-8") as flow_stream:
+    mf.FLOW = json.load(flow_stream)
 
 
 def git(cwd, *args):

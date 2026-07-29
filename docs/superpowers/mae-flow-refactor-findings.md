@@ -131,3 +131,51 @@
 - Regression: the full selftest now completes with `全部通过`
 - Product behavior: unchanged; the existing Direct-mode subprocess tests still
   verify bypass and answer capture through the public Hook process
+
+## MF-RF-008: Standalone PostToolUse answer capture was routed to inactive
+
+- Status: resolved by `7030e57`
+- Classification: refactor-introduced behavior regression
+- Trigger: complete `AskUserQuestion` while a Standalone Action is waiting for
+  scope confirmation
+- Evidence: the extracted runtime router sent Standalone `posttooluse` to the
+  inactive adapter, so neither `user_messages` nor the `ASKUSER` token changed
+- Impact: `action confirm-scope --ack "确认以上范围"` could not validate the
+  user's real answer even though the question had completed successfully
+- Root cause: the Standalone routing table preserved pretool, injection and
+  SubagentStop ownership but omitted the shared PostToolUse answer-capture path
+- Resolution: route Standalone PostToolUse through the same active posttool
+  use case while leaving Standalone Stop inactive
+- Regression: pure routing coverage and a real Hook subprocess test assert both
+  the captured answer and the signed `ASKUSER/CONFIRMED` token
+- Product behavior: restored to the pre-extraction behavior
+
+## MF-RF-009: Non-PASS UT results persisted reusable receipts
+
+- Status: resolved by `249c79b`
+- Classification: refactor-introduced side-effect ordering regression
+- Trigger: a UT Agent finishes with `NEEDS_INPUT` or `FAIL`
+- Evidence: the extracted adapter called `_record_ut_receipts` before the pure
+  contract evaluator validated the result status
+- Impact: evidence from a non-passing run could be persisted and considered for
+  a later retry, unlike the original early-return contract
+- Root cause: receipt collection was moved ahead of status validation while
+  separating platform effects from the pure evaluator
+- Resolution: validate the three supported statuses immediately after task-card
+  and scope checks; only `PASS` may collect or reuse UT receipts
+- Regression: adapter-order tests assert that `NEEDS_INPUT`, `FAIL`, and an
+  unknown status never touch receipt or configuration ports
+- Product behavior: restored to the pre-extraction receipt semantics
+
+## MF-RF-010: Commit-ownership fixture leaked its Flow file handle
+
+- Status: resolved during Stage 5 verification
+- Classification: test resource lifecycle defect
+- Trigger: run the complete unittest suite with
+  `-W error::ResourceWarning`
+- Evidence: `test_commit_ownership.py` initialized the CLI fixture with
+  `json.load(open(...))`; interpreter cleanup reported an unclosed
+  `flow/flow.json` handle
+- Resolution: initialize the shared Flow fixture through a context manager
+- Regression: the complete suite is run under strict ResourceWarning handling
+- Product behavior: unchanged; only the test fixture lifecycle changed

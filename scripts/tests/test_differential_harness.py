@@ -12,6 +12,17 @@ TESTS = os.path.join(ROOT, "scripts", "tests")
 if TESTS not in sys.path:
     sys.path.insert(0, TESTS)
 
+STAGE0_SCENARIOS = {
+    "direct_current",
+    "standalone_action_status",
+    "corrupt_exit_repair",
+    "terminal_pretooluse_bypass",
+    "checkpoint_status",
+    "moonlight_report_issue",
+    "active_pretooluse_edit",
+    "subagentstop_missing_task_card",
+}
+
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
     assert_matches_golden,
@@ -240,6 +251,46 @@ class DifferentialRunnerTests(unittest.TestCase):
             actual,
             goldens,
         )
+
+    def test_phase10_preserves_every_phase9_snapshot(self):
+        phase9 = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase9.json",
+        ))
+        phase10 = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase10.json",
+        ))
+        self.assertEqual(set(phase9), set(phase10) - STAGE0_SCENARIOS)
+        for name, expected in phase9.items():
+            with self.subTest(name=name):
+                self.assertEqual(expected, phase10[name])
+
+    def test_phase10_stage0_scenarios_match_fixed_baseline(self):
+        goldens = load_goldens(os.path.join(
+            ROOT,
+            "scripts",
+            "tests",
+            "differential",
+            "goldens",
+            "phase10.json",
+        ))
+        for name in sorted(STAGE0_SCENARIOS):
+            with self.subTest(name=name):
+                assert_matches_golden(
+                    self,
+                    name,
+                    run_scenario(ROOT, name),
+                    goldens,
+                )
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ from differential.coverage import (  # noqa: E402
     load_coverage,
     validate_coverage,
 )
+from differential.runner import load_goldens  # noqa: E402
 from differential.scenarios import SCENARIOS  # noqa: E402
 
 
@@ -65,6 +66,11 @@ class DifferentialCoverageContractTests(unittest.TestCase):
             [],
             validate_coverage(coverage, set(SCENARIOS)),
         )
+
+    def test_phase10_golden_covers_every_registered_scenario(self):
+        goldens = load_goldens(os.path.join(
+            TESTS, "differential", "goldens", "phase10.json"))
+        self.assertEqual(set(SCENARIOS), set(goldens))
 
     def test_coverage_rejects_unknown_domain_and_missing_scenario(self):
         coverage = {

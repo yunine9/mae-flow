@@ -147,6 +147,12 @@ from mae_flow_core.application.quality.codecheck import (
     CodeCheckRunPorts,
     run_codecheck as execute_codecheck,
 )
+from mae_flow_core.application.quality import (
+    task_cards as quality_task_card_use_cases,
+)
+from mae_flow_core.application.quality import (
+    task_card_documents as quality_task_card_documents,
+)
 from mae_flow_core.delivery.models import thaw as thaw_delivery_payload
 from mae_flow_core.delivery.evidence import (
     DeliveryEvidencePorts,
@@ -3690,92 +3696,89 @@ def _action_task_card(action, kind, stage=""):
     files = action.get("files", [])
     groups = _task_file_groups(files, {"config": config})
     scan = action.get("quality", {}).get("codecheck_scan", {})
-    lines = [
-        f"# Mae-Flow Standalone {label} TASK CARD",
-        "本文件由 harness 生成。运行模式是独立任务：不启动完整交付流程，不得自行扩大范围。",
-        f"独立任务ID: {action['id']}",
-        f"运行模式: standalone",
-        f"当前步骤: {sid}",
-        f"项目根: {os.path.abspath(os.getcwd())}",
-        f"任务卡基点 HEAD: {head}",
-        f"提交策略: 禁止提交（保留工作区改动给用户检查）",
-        f"任务说明: {action.get('request', '') or '按任务卡文件范围完成本项工作'}",
-        f"本次子任务范围: {'、'.join(files) if files else action.get('request', '用户描述范围')}",
-        f"编译方式: {config.get('编译方式', '')}",
-        f"UT生成方式: {config.get('UT生成方式', '')}",
-        f"UT运行命令: {config.get('UT运行命令', '')}",
-    ]
-    if stage:
-        lines.append("质询检查阶段: " + stage)
-    lines.append("需求/规格依据:")
-    sources = action.get("sources", [])
-    lines.extend("- " + os.path.abspath(x) for x in sources)
-    if not sources:
-        lines.append("- 用户未提供独立文档；以任务说明和点名代码为依据，不得发明业务要求")
-    lines.append("任务相关文件（独立任务只允许使用以下冻结范围）:")
-    _append_task_files(lines, "被测/业务源码", groups["business"])
-    _append_task_files(lines, "测试文件", groups["tests"])
-    _append_task_files(lines, "构建/依赖文件", groups["build"])
-    if label in ("UT", "CODECHECK"):
-        execution_files = groups["business"] or groups["tests"] or groups["build"]
-        _append_execution_context(lines, execution_files, label)
-    if label == "CODECHECK":
-        lines += [
-            f"Harness首检告警数: {scan.get('count', '未执行')}",
-            "Harness首检文件: " + "、".join(scan.get("files", [])),
-            "Harness首检告警(规则|文件): "
-            + _render_warning_pairs(scan.get("pairs", [])),
-            "职责:仅处理首检范围内业务代码告警；修复后按配置编译并重新 fullcheck；禁止自动豁免。",
-        ]
-    elif label == "UT":
-        standalone_targets = _hunk_targets_for_diff(
-            action.get("base_head", "HEAD"), groups["business"])
-        lines.append("UT覆盖目标（硬边界，不等于整个文件）:")
-        for business_file in groups["business"]:
-            targets = standalone_targets.get(norm(business_file), [])
-            if not targets:
-                lines.append("- %s | 当前工作区无可定位 diff；只覆盖任务说明点名的函数/行为，"
-                             "若任务说明也未点明则 NEEDS_INPUT，禁止给整个文件补存量覆盖"
-                             % business_file)
-            for target in targets:
-                span = ("%d" % target["start"] if target["start"] == target["end"]
-                        else "%d-%d" % (target["start"], target["end"]))
-                context = target.get("context") or "按该行附近确认所属函数/行为"
-                lines.append("- %s | 行 %s | %s" % (
-                    business_file, span, context))
-        lines += [
-            "职责:仅新增/修改测试代码；按配置调用 UT 生成能力并真实运行测试；"
-            "覆盖对象仅限上面的函数/行为与任务说明，禁止扩成整个文件；"
-            "疑似源码问题完成自查后上报，禁止自行改被测源码。",
-            "独立任务默认不 commit；PASS 不以 commit 为条件，但测试必须真实全绿。",
-        ]
-    elif label == "GRILL":
-        lines += [
-            "职责:只读审查需求材料、代码勘察笔记和当前澄清文档，寻找遗漏的需求决策分支；"
-            "禁止替用户拍板、禁止修改任何文件。",
-        ]
-    body = "\n".join(lines).rstrip() + "\n"
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    body += f"TASK_CARD_SHA256: {digest}\n"
+    execution_files = (
+        groups["business"]
+        or groups["tests"]
+        or groups["build"]
+    )
+    roots, unresolved = _task_execution_roots(execution_files)
+    execution_plan = quality_task_card_use_cases.ExecutionRootPlan(
+        roots=tuple(roots),
+        unresolved=tuple(unresolved),
+    )
+    standalone_targets = (
+        _hunk_targets_for_diff(
+            action.get("base_head", "HEAD"),
+            groups["business"],
+        )
+        if label == "UT" else {}
+    )
+    lines = quality_task_card_documents.build_standalone_task_document({
+        "label": label,
+        "action_id": action["id"],
+        "kind": action["kind"],
+        "stage": stage,
+        "project_root": os.path.abspath(os.getcwd()),
+        "head": head,
+        "request": action.get("request", ""),
+        "files": tuple(files),
+        "config": config,
+        "sources": tuple(
+            os.path.abspath(path)
+            for path in action.get("sources", [])
+        ),
+        "groups": quality_task_card_use_cases.TaskFileGroups(
+            business=tuple(groups["business"]),
+            tests=tuple(groups["tests"]),
+            build=tuple(groups["build"]),
+        ),
+        "execution_plan": execution_plan,
+        "scan": scan,
+        "ut_targets": standalone_targets,
+    })
     work = _action_dir(action)
-    os.makedirs(work, exist_ok=True)
     suffix = ("-" + stage) if stage else ""
-    path = os.path.join(work, f"{label.lower()}{suffix}-task.md")
-    atomic_write_text(path, body)
+    artifact = quality_task_card_use_cases.store_task_card(
+        lines,
+        work,
+        f"{label.lower()}{suffix}-task.md",
+        quality_task_card_use_cases.TaskCardStorePorts(
+            absolute=os.path.abspath,
+            make_directory=lambda path: os.makedirs(
+                path, exist_ok=True),
+            write_text=atomic_write_text,
+        ),
+    )
+    path = artifact.path
+    digest = artifact.digest
     initial = {
         p: _path_fingerprint(p)
         for p in _dirty_paths()
         if _is_source_path(p, {}, FLOW or {})
     }
-    action.setdefault("agent_tasks", {})[label] = {
-        "step": sid, "path": path, "sha256": digest, "head": head,
-        "scope": action.get("request", ""), "allowed_files": scan.get("files", []) if label == "CODECHECK" else [],
-        "task_files": files,
-        "execution_roots": [root for root, _reason in _task_execution_roots(
-            groups["business"] or groups["tests"] or groups["build"])[0]],
-        "initial_source_fingerprints": initial, "standalone": True, "stage": stage,
-        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    action.setdefault("agent_tasks", {})[label] = (
+        quality_task_card_use_cases.standalone_task_record(
+            step=sid,
+            path=path,
+            digest=digest,
+            head=head,
+            scope=action.get("request", ""),
+            allowed_files=(
+                scan.get("files", [])
+                if label == "CODECHECK" else []),
+            task_files=files,
+            execution_roots=[
+                root for root, _reason
+                in _task_execution_roots(
+                    groups["business"]
+                    or groups["tests"]
+                    or groups["build"])[0]
+            ],
+            initial_source_fingerprints=initial,
+            stage=stage,
+            at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+    )
     action.setdefault("tokens", {}).pop(label, None)
     action.setdefault("rejections", {}).pop(label, None)
     if label == "CODECHECK":
@@ -6717,139 +6720,87 @@ def _task_scope(st, diff_override=""):
 
 def _task_file_groups(files, st):
     """把子任务范围拆成业务源码、测试、构建三组；文档根本不应传进来。"""
-    groups = {"business": [], "tests": [], "build": []}
-    for path in files:
-        if _is_build_path(path):
-            key = "build"
-        elif _is_test_file(path, st):
-            key = "tests"
-        else:
-            key = "business"
-        if path not in groups[key]:
-            groups[key].append(path)
-    return groups
-
-
-def _build_root_marker(directory):
-    """返回目录中的显式构建入口；只读一层，避免为了定位模块递归扫大仓。"""
-    try:
-        names = os.listdir(directory)
-    except OSError:
-        return ""
-    for name in sorted(names, key=str.lower):
-        low = name.lower()
-        full = os.path.join(directory, name)
-        if (os.path.isfile(full)
-                and (low in SOURCE_FILENAMES
-                or (low.startswith("requirements") and low.endswith(".txt"))
-                or low.endswith(BUILD_DESCRIPTOR_EXTS))):
-            return name
-    return ""
+    return quality_task_card_use_cases.task_file_groups(
+        files,
+        is_build=_is_build_path,
+        is_test=lambda path: _is_test_file(path, st),
+    ).as_legacy()
 
 
 def _execution_root_for_file(path):
-    """从相关代码向上找最近构建根；找不到时只回退到源码目录，绝不猜仓库根。"""
-    repo = os.path.abspath(os.getcwd())
-    absolute = os.path.abspath(path)
-    directory = absolute if os.path.isdir(absolute) else os.path.dirname(absolute)
-    if _is_build_path(path):
-        rel = norm(os.path.relpath(directory, repo))
-        return (rel if rel != "." else "."), "变更文件本身是构建入口"
-    current = directory
-    while current == repo or current.startswith(repo + os.sep):
-        marker = _build_root_marker(current)
-        if marker:
-            rel = norm(os.path.relpath(current, repo))
-            return (rel if rel != "." else "."), "检测到 " + marker
-        if current == repo:
-            break
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-    if directory != repo and directory.startswith(repo + os.sep):
-        return norm(os.path.relpath(directory, repo)), "未找到构建入口，按相关源码所在目录定位"
+    """Legacy adapter for diagnostics that inspect one task file."""
+    roots, _unresolved = _task_execution_roots((path,))
+    if roots:
+        return roots[0]
     return "", "未找到可证明的模块目录"
 
 
 def _task_execution_roots(files):
     """生成去重的模块执行目录和依据，供任务卡阻止根目录意外全量构建。"""
-    roots = []
-    seen = set()
-    unresolved = []
-    for path in files:
-        root, reason = _execution_root_for_file(path)
-        if not root:
-            unresolved.append(path)
-            continue
-        if root not in seen:
-            roots.append((root, reason))
-            seen.add(root)
-    return roots, unresolved
+    plan = quality_task_card_use_cases.execution_roots(
+        files,
+        quality_task_card_use_cases.ExecutionRootPorts(
+            repository=os.path.abspath(os.getcwd()),
+            absolute=os.path.abspath,
+            is_directory=os.path.isdir,
+            list_directory=os.listdir,
+            is_file=os.path.isfile,
+            is_build_path=_is_build_path,
+            relative=os.path.relpath,
+            dirname=os.path.dirname,
+            join=os.path.join,
+            separator=os.sep,
+            source_filenames=tuple(
+                str(name).lower()
+                for name in SOURCE_FILENAMES),
+            descriptor_suffixes=tuple(BUILD_DESCRIPTOR_EXTS),
+        ),
+    )
+    return list(plan.roots), list(plan.unresolved)
 
 
 def _append_task_files(lines, title, files):
-    lines.append(title + ":")
-    if files:
-        lines.extend("- " + path for path in files)
-    else:
-        lines.append("- （无）")
+    quality_task_card_use_cases.append_task_files(
+        lines, title, files)
 
 
 def _append_execution_context(lines, files, kind):
     """把代码范围翻译成 Agent 可直接使用的 cwd；CodeCheck 扫描仍固定在项目根。"""
     roots, unresolved = _task_execution_roots(files)
-    label = "修复后编译执行目录" if kind == "CODECHECK" else "编译/UT执行目录"
-    lines.append(label + ":")
-    for root, reason in roots:
-        lines.append("- %s（%s）" % (root, reason))
-    if unresolved:
-        lines.append("- 未确定（相关文件: %s）" % "、".join(unresolved))
-    if not roots:
-        lines.append("- 未确定")
-    if len(roots) > 1:
-        lines.append("执行目录策略: 涉及多个模块，按上述目录分别定向验证；"
-                     "禁止退回项目根执行一次全仓构建来代替分模块验证。")
-    elif unresolved:
-        lines.append("执行目录策略: 无法确定模块目录时按 NEEDS_INPUT/FAIL 如实上报；"
-                     "禁止默认在项目根执行全量构建。")
-    else:
-        lines.append("执行目录策略: 从上述目录执行任务卡配置的编译/UT入口；"
-                     "不得自行扩大为项目根全量构建。")
+    quality_task_card_use_cases.append_execution_context(
+        lines,
+        kind=kind,
+        roots=roots,
+        unresolved=unresolved,
+    )
 
 
 def _requirement_sources(st):
-    out = []
-    doc = st.get("config", {}).get("需求文档", "")
-    if doc and os.path.exists(doc):
-        out.append(os.path.abspath(doc))
-    cn = st.get("config", {}).get("CHANGE_NAME", "")
-    if cn:
-        # 双布局:v5 的规格在 change.md 规格条目节,legacy 在 specs/<域>/spec.md;
-        # 归档后两者都随目录进 archive。审计实锤:漏掉 change.md 时,v5 单的
-        # COMPILE/CODECHECK/UT 任务卡「需求/规格依据」永远缺规格。
-        pats = [f"openspec/changes/{cn}/change.md",
-                f"openspec/changes/{cn}/specs/*/spec.md",
-                f"openspec/changes/archive/*{cn}*/change.md",
-                f"openspec/changes/archive/*{cn}*/specs/*/spec.md",
-                f"openspec/archive/*{cn}*/change.md",
-                f"openspec/archive/*{cn}*/specs/*/spec.md"]
-        for p in pats:
-            out.extend(os.path.abspath(x) for x in globmod.glob(p))
-    return list(dict.fromkeys(out))
+    return list(quality_task_card_use_cases.requirement_sources(
+        st.get("config", {}),
+        exists=os.path.exists,
+        absolute=os.path.abspath,
+        glob_paths=globmod.glob,
+    ))
 
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
     document = context["document"]
-    digest = document.digest()
-    body = document.sealed_body()
-    directory = os.path.abspath(os.path.join(
-        ".mae-flow-work", "agent-tasks"))
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, f"{sid}-{kind.lower()}.md")
-    with open(path, "w", encoding="utf-8") as stream:
-        stream.write(body)
+    artifact = quality_task_card_use_cases.store_task_card(
+        document,
+        os.path.join(".mae-flow-work", "agent-tasks"),
+        f"{sid}-{kind.lower()}.md",
+        quality_task_card_use_cases.TaskCardStorePorts(
+            absolute=os.path.abspath,
+            make_directory=lambda path: os.makedirs(
+                path, exist_ok=True),
+            write_text=lambda path, body: write_text(
+                path, body, encoding="utf-8"),
+        ),
+    )
+    digest = artifact.digest
+    path = artifact.path
     lightcheck_result = context["lightcheck_result"]
     st.setdefault("agent_tasks", {})[kind] = quality_task_cards.task_record(
         step=sid, path=path, digest=digest, head=context["task_head"],
@@ -7009,137 +6960,62 @@ def cmd_agent_task(flow, st, args):
     groups = _task_file_groups(task_files, st)
     cfg = st.get("config", {})
     task_head = sh("git rev-parse --verify HEAD")
-    lines = quality_task_cards.TaskCardDocument([
-        f"# Mae-Flow {kind} TASK CARD",
-        "本文件由 harness 生成。不得猜测、替换或省略其中配置；缺项按 agent 契约 FAIL/BLOCKED 收尾。",
-        f"项目根: {os.path.abspath(os.getcwd())}",
-        f"当前步骤: {sid}",
-        f"任务卡基点 HEAD: {task_head}",
-        f"单号: {cfg.get('单号', '')}",
-        f"单号类型: {cfg.get('单号类型', '')}",
-        f"需求基线分支: {cfg.get('基线分支', '')}",
-        f"本轮检查范围: {diff}",
-        f"本次子任务范围: {args.scope or '任务卡文件清单全部'}",
-        f"开发检查点: {checkpoint_id or '无（主流程质量节点）'}",
-        f"编译方式: {cfg.get('编译方式', '')}",
-        f"UT生成方式: {cfg.get('UT生成方式', '')}",
-        f"UT运行命令: {cfg.get('UT运行命令', '')}",
-        "需求/规格依据:",
-    ])
-    if precommit_review:
-        lines += [
-            "检视/提交策略: 当前是分阶段“先检视、后提交”检查点。",
-            "任务卡范围是当前未提交工作区（含 staged/unstaged/untracked）；"
-            "允许为真实编译错误修复业务源码，但禁止 git commit、git push。",
-            "编译成功后保留全部代码为未提交状态，由主流程冻结快照并让用户在 IDE 检视；"
-            "用户确认后才会精确提交。",
-        ]
-    if inherited_dirty:
-        lines.append("流程启动前已脏但指纹未变(不属于本任务,保持可见): "
-                     + "、".join(inherited_dirty))
     sources = _requirement_sources(st)
-    lines.extend("- " + x for x in sources)
-    if not sources:
-        if kind == "UT":
-            lines.append("- （未找到；UT agent 必须 FAIL，禁止对着实现猜测试）")
-        else:
-            lines.append("- （未找到；本任务不据此扩大代码范围）")
-    lines.append("任务相关文件（已排除 Markdown、规格历史、评审记录和其他过程文档）:")
-    _append_task_files(lines, "被测/业务源码", groups["business"])
-    _append_task_files(lines, "测试文件", groups["tests"])
-    _append_task_files(lines, "构建/依赖文件", groups["build"])
-    ignored_count = max(0, len(changes) - len(task_files))
-    lines.append("未传给子 Agent 的非任务变更: %d 项" % ignored_count)
-    execution_files = (task_files if kind == "COMPILE"
-                       else (groups["business"] or groups["tests"] or groups["build"]))
-    _append_execution_context(lines, execution_files, kind)
-    if kind == "COMPILE" and lightcheck_result is not None:
-        lines += [
-            "Mae-Flow轻量编码预检: %s（%d 个本轮新触发建议；"
-            "不替代正式 CodeCheck，不是编译门禁）" % (
-                lightcheck_result.get("status", "UNKNOWN"),
-                len(lightcheck_result.get("findings") or [])),
-            "轻量预检报告: "
-            + (lightcheck_result.get("report_path") or "报告写入失败，已自动放行"),
-            "边界:compile-agent 不得为了轻量建议扩大职责；只处理真实编译错误。"
-            "主会话在后续写码时按建议预防/修正。",
-        ]
-    # compound 沉淀统一在任务卡装载:一处注入,主流程/评审/小改三条质量链全部受益
-    # (原先只有主流程 build/verify 的步骤文引用,rf/tw 的 agent 拿不到踩坑经验)。
+    execution_files = (
+        task_files if kind == "COMPILE"
+        else (
+            groups["business"]
+            or groups["tests"]
+            or groups["build"]
+        )
+    )
+    roots, unresolved = _task_execution_roots(execution_files)
+    execution_plan = quality_task_card_use_cases.ExecutionRootPlan(
+        roots=tuple(roots),
+        unresolved=tuple(unresolved),
+    )
+    notes = []
     notes_path = os.path.join("docs", "delivery-notes.md")
     if os.path.isfile(notes_path):
         try:
-            note_lines = [l.rstrip() for l in read_text(
-                notes_path, errors="replace").splitlines()
-                if l.strip()][:40]
+            notes = [
+                line.rstrip()
+                for line in read_text(
+                    notes_path, errors="replace").splitlines()
+                if line.strip()
+            ][:40]
         except OSError:
-            note_lines = []
-        if note_lines:
-            lines.append("本仓沉淀经验(按需参考;与本任务卡指令冲突时以任务卡为准):")
-            lines.extend("- " + x.lstrip("- ") for x in note_lines)
-    if kind == "CODECHECK":
-        lines += [f"Harness首检告警数: {scan.get('count', '未执行')}",
-                  "用户已确认不涉及本次修改的告警数: "
-                  + (str(scan.get("stock_excluded"))
-                     if isinstance(scan.get("stock_excluded"), int)
-                     else "无法区分（本轮按 raw 全量计入）"),
-                  "Harness首检分批数: %d（复验保持相同文件分批，禁止漏批或只跑最后一批）"
-                  % max(1, len(scan.get("commands") or [])),
-                  "Harness首检文件（仅是 CLI 扫描输入，不代表整文件都可修）: "
-                  + "、".join(scan.get("files", [])),
-                  "Harness首检告警(规则|文件): " + _render_warning_pairs(scan.get("pairs", [])),
-                  "CodeCheck修复目标（硬边界，仅以下告警）:"]
-        reason_rows = scan.get("scope_reasons") or []
-        for pair in scan.get("pairs", []):
-            rule, warning_file = pair[0], pair[1]
-            warning_line = pair[2] if len(pair) > 2 else None
-            reason = next((
-                item.get("reason", "") for item in reason_rows
-                if item.get("rule") == rule and item.get("file") == warning_file
-                and item.get("line") == warning_line
-            ), "缺少可细分行号/归属信息，按 Harness 保守纳入")
-            lines.append("- %s | %s:%s | %s" % (
-                rule, warning_file,
-                warning_line if warning_line is not None else "?", reason))
-        lines.append("职责:只修上列精确告警；即使同一文件还有其他告警也不得顺手处理。"
-                     "主会话不得代修；修复后按任务卡编译方式验证并复验。")
-    elif kind == "UT":
-        # 覆盖口径(用户拍板):测试对象=本次修改的函数,不为文件中未修改的
-        # 存量函数补测——范围蔓延等于每单背整个文件的测试债。
-        ut_targets, target_err = _changed_hunk_targets(st, groups["business"])
+            notes = []
+    if kind == "UT":
+        ut_targets, target_err = _changed_hunk_targets(
+            st, groups["business"])
         if target_err:
             die("无法计算 UT 函数级范围：" + target_err, 2)
-        lines.append("UT覆盖目标（硬边界，不等于整个文件）:")
-        if groups["business"]:
-            for business_file in groups["business"]:
-                targets = ut_targets.get(norm(business_file), [])
-                if not targets:
-                    lines.append("- %s | 无新增行范围（删除/重命名场景）；"
-                                 "只验证本次移除或迁移行为，不给其他存量函数补测"
-                                 % business_file)
-                    continue
-                for target in targets:
-                    span = ("删除位置" if target.get("deletion_only")
-                            else ("%d" % target["start"]
-                                  if target["start"] == target["end"]
-                                  else "%d-%d" % (target["start"], target["end"])))
-                    context = target.get("context") or "Git 未识别函数名，按该行附近确认所属函数/行为"
-                    suffix = ("（纯删除 hunk；只验证本次移除或迁移行为）"
-                              if target.get("deletion_only") else "")
-                    lines.append("- %s | 行 %s | %s%s" % (
-                        business_file, span, context, suffix))
-        else:
-            lines.append("- 本轮无业务源码修改；只验证已变更测试/构建入口，"
-                         "禁止为任意存量业务函数新增覆盖")
-        lines += ["职责:只对任务卡范围补/改测试；**测试对象=本次修改的函数/行为"
-                  "(上面硬边界所在函数)+规格条目 EARS 条目,禁止为文件中未修改的"
-                  "存量函数补测**；必须调用任务卡指定的 Mae-Flow 自带"
-                  " AutoUT/java-autout Skill（或明确配置的既有写法），并真实执行测试。"
-                  "写“随生成方式自带”时由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。",
-                  "评审意见处理不修改规格，测试依据使用上面列出的既有需求/规格。"]
-    else:
-        lines += ["职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 Mae-Flow"
-                  " 插件自带的 build-fix Skill，禁止自己猜命令。"]
+    lines = quality_task_card_documents.build_full_task_document({
+        "kind": kind,
+        "sid": sid,
+        "project_root": os.path.abspath(os.getcwd()),
+        "head": task_head,
+        "config": cfg,
+        "diff": diff,
+        "scope": args.scope or "",
+        "checkpoint_id": checkpoint_id,
+        "precommit_review": precommit_review,
+        "inherited_dirty": tuple(inherited_dirty),
+        "sources": tuple(sources),
+        "groups": quality_task_card_use_cases.TaskFileGroups(
+            business=tuple(groups["business"]),
+            tests=tuple(groups["tests"]),
+            build=tuple(groups["build"]),
+        ),
+        "change_count": len(changes),
+        "task_file_count": len(task_files),
+        "execution_plan": execution_plan,
+        "lightcheck": lightcheck_result,
+        "notes": tuple(notes),
+        "scan": scan,
+        "ut_targets": ut_targets,
+    })
     _store_agent_task(flow, st, args, {
         "kind": kind, "sid": sid, "document": lines,
         "task_head": task_head, "checkpoint_id": checkpoint_id,

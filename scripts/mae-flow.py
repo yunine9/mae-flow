@@ -93,6 +93,10 @@ from mae_flow_core.delivery import moonlight as delivery_moonlight
 from mae_flow_core.guard import intent as guard_intent
 from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.workflow import advancement as workflow_advancement
+from mae_flow_core.workflow.agent_evidence import (
+    AgentEvidencePorts,
+    AgentEvidenceRules,
+)
 from mae_flow_core.workflow import completion as workflow_completion
 from mae_flow_core.workflow import definition as workflow_definition
 from mae_flow_core.workflow.evidence_rules import (
@@ -1167,92 +1171,6 @@ def _risk_acceptance(kind, st):
     return True, ""
 
 
-def _risk_option(kind, expired=""):
-    me = os.path.abspath(sys.argv[0])
-    risk = RISK_AGENT_LABELS.get(kind, f"{kind} 专项 Agent 没有可验证的质量证据")
-    prefix = ("已有风险确认已失效(" + expired + ")。" if expired else "")
-    return (prefix + "如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：" + risk
-            + "。用户确认承担风险后执行: python \"" + me + "\" accept-risk " + kind.lower()
-            + " --reason \"" + risk + "\" --ack \"<用户确认原话>\"；"
-              "它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。")
-
-
-def ev_agent_ran(spec, st):
-    """默认硬证据:本步期间对应子 agent 真实收尾过。令牌由 SubagentStop hook(harness 调用)在
-    契约标记验证通过后写入,模型无法伪造(令牌文件被 gate 双拦,手动调 dispatch 也被拦)。
-    新格式令牌绑定签发时 HEAD:签发后源码再变(提交或未提交),证据即过期——旧证据不背新代码的书。
-    旧格式(纯时间戳字符串)仅验时间,兼容在途单。宿主异常或重跑代价过高时，用户可显式承担风险，
-    只替代当前步骤、当前任务卡与当前 HEAD 的这一枚令牌；其他证据仍由各自 evaluator 检查。"""
-    kind = spec["agent"]
-    if kind == "ASKUSER" and _moonlight(st):
-        # 月光宝盒开启时，启动指令本身是本轮统一授权。内容证据仍照常检查；
-        # 这里只替代必须在线点选的交互令牌，不替代文档和代码结果。
-        return True, ""
-    # 校准实锤:history[-1] 不是"本步进入时间"——spec 登记/phase/accept-risk/
-    # gate 放行都会 append history,open 步按法定顺序(问完用户再 spec phase
-    # design)必然把刚签的 ASKUSER 令牌判成"本步之前",逼用户重新拍板。
-    # 与 _risk_acceptance 同源用真实步骤转移时间;跨步复用由 token_step 拦、
-    # 跨轮复用由令牌绑 HEAD 拦,收敛 entered 不开任何造假通道。
-    entered = _step_entered_at(st)
-    accepted, accept_why = _risk_acceptance(kind, st)
-    if accepted:
-        return True, ""
-
-    def blocked(msg):
-        return False, msg + " " + _risk_option(kind, accept_why)
-
-    try:
-        tok = json.loads(read_text(".mae-flow.json.tokens")).get(kind, "")
-    except Exception:
-        tok = ""
-    ts = tok.get("at", "") if isinstance(tok, dict) else tok
-    head = tok.get("head", "") if isinstance(tok, dict) else ""
-    status = tok.get("status", "") if isinstance(tok, dict) else ""
-    token_step = tok.get("step", "") if isinstance(tok, dict) else ""
-    token_snapshot = tok.get("source_snapshot") if isinstance(tok, dict) else None
-    if ts and ts >= entered:
-        if token_step and token_step != st.get("current"):
-            return blocked(f"{kind} 令牌属于步骤 {token_step}，当前是 {st.get('current')}。"
-                           "每个步骤必须重新执行，不能复用上一关同一秒签发的令牌。")
-        wanted = spec.get("statuses") or ([spec["status"]] if spec.get("status") else [])
-        if wanted and status not in wanted:
-            return blocked(f"{kind} 子 agent 虽已收尾,但结果为 {status or '旧令牌未记录状态'},"
-                           f"本步只接受 {'/'.join(wanted)}。FAIL/BLOCKED/NEEDS_INPUT 是有效上报,"
-                           "但不是质量通过证据;处理报告中的问题后重启 agent。")
-        if head and isinstance(token_snapshot, dict):
-            current_snapshot = _source_snapshot_since(head, st)
-            if current_snapshot != token_snapshot:
-                return blocked(
-                    f"{kind} 证据已过期:令牌签发后的未提交代码快照已变化。"
-                    "重新启动对应 agent 对当前工作区收尾；旧证据不能背书另一份 diff。")
-        elif head:
-            changed, err = _source_changed_since(head, st)
-            if err:
-                return blocked(f"{kind} 证据新鲜度无法核实({err})。"
-                               "重新启动对应 agent(ASKUSER 则重新向用户提问)签发绑定当前代码状态的新令牌。")
-            if changed:
-                more = "…" if len(changed) > 5 else ""
-                return blocked(f"{kind} 证据已过期:令牌签发后源码发生变更({'、'.join(changed[:5])}{more})。"
-                               "变更若属本单成果先按规范 commit,然后重新启动对应 agent"
-                               "(ASKUSER 则重新向用户确认)对最新代码收尾——旧证据对新代码无效。")
-        return True, ""
-    if kind == "ASKUSER":
-        return blocked(f"本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: {ts or '无'};本步始于 {entered})。"
-                       "待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。")
-    try:
-        rejects = load_json(STATE_PATH + ".agent-rejections")
-        reject = rejects.get(kind, {}) or rejects.get("SUBAGENT", {})
-    except Exception:
-        reject = {}
-    if reject.get("at", "") >= entered and reject.get("step") in ("", st.get("current")):
-        return blocked(f"{kind} 子 agent 已运行但未签发令牌。真实拒签原因: {reject.get('reason', '未知')} "
-                       "如果只是最终报告写法不合规且已有执行凭证，保持源码不变后重答即可复用；"
-                       "只有缺少真实执行证据或源码又变化时才需要重跑。")
-    return blocked(f"本步内未检测到 {kind} 子 agent 的合法收尾(最近令牌: {ts or '无'};本步始于 {entered})。"
-                   "请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。"
-                   "主会话代写或口头汇报不算执行证据。")
-
-
 def _source_files_for_diff(diff, st, include_tests=True):
     """指定 Git 范围内所有源码/构建入口变化，包含删除项。"""
     out = argv_out([
@@ -1269,53 +1187,6 @@ def _changed_source_files(st, include_tests=True):
     if err:
         return None, err
     return _source_files_for_diff(diff, st, include_tests)
-
-
-def ev_agent_or_no_source(spec, st):
-    """本轮没有任何源码/构建文件改动时自动放行，否则必须拿到专项 agent 的成功令牌。"""
-    files, err = _changed_source_files(st)
-    if err:
-        return False, err
-    if not files:
-        return True, ""
-    return ev_agent_ran(spec, st)
-
-
-def ev_review_agent_or_no_code(spec, st):
-    """旧流程证据名兼容层。"""
-    return ev_agent_or_no_source(spec, st)
-
-
-def ev_review_snapshot(spec, st):
-    """用户确认只能背书进入检视节点时展示的那一版代码。
-
-    检视期间若 HEAD 或源码工作区变化，旧展示立即失效，必须回到对应编码环节，
-    重新提交、编译并生成新检视收据，不能确认 A 后让 B 继续。
-    """
-    sid = st.get("current", "")
-    entered = (st.get("step_heads", {}) or {}).get(sid, "")
-    current = sh("git rev-parse --verify HEAD")
-    if not entered or argv_out(["git", "cat-file", "-t", entered]) != "commit":
-        return False, f"缺少 {sid} 的检视入口 HEAD，无法确定用户看到的是哪版代码"
-    if current != entered:
-        return False, (
-            f"检视期间 HEAD 已从 {entered[:10]} 变为 {current[:10] or '未知'}。"
-            "旧展示已失效；回到对应编码环节，重新编译后再让用户检视。")
-    base_step = spec.get("base_step", "")
-    base = (st.get("step_heads", {}) or {}).get(base_step, "")
-    if not base or argv_out(["git", "cat-file", "-t", base]) != "commit":
-        return False, f"缺少 {base_step} 的入口 HEAD，无法生成本轮完整代码差异"
-    if argv_out(["git", "merge-base", base, current]) != base:
-        return False, (
-            f"本轮检视基点 {base[:10]} 已不在当前 HEAD 历史上，可能发生了 rebase/reset。"
-            "必须重新进入编码和编译环节建立可信范围。")
-    dirty = _blocking_dirty_source_paths(st)
-    if dirty:
-        return False, (
-            "用户检视期间源码/测试/构建文件又发生未提交变化: "
-            + "、".join(dirty[:8])
-            + "。旧编译和检视收据均已失效；先回到对应编码环节处理。")
-    return True, ""
 
 
 def _development_review(st):
@@ -3150,6 +3021,42 @@ def run_env_checks(force_all=False):
     """Compatibility view of self-contained runtime diagnostics."""
     checks = capability_diagnostics(os.getcwd(), include_codecheck=False)
     return [item["name"] for item in checks if not item["ok"]]
+
+
+def _agent_token_data():
+    try:
+        return json.loads(read_text(".mae-flow.json.tokens"))
+    except Exception:
+        return {}
+
+
+def _agent_rejection_data():
+    try:
+        return load_json(STATE_PATH + ".agent-rejections")
+    except Exception:
+        return {}
+
+
+_AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
+    moonlight=_moonlight,
+    step_entered=_step_entered_at,
+    risk_acceptance=_risk_acceptance,
+    script_path=lambda: sys.argv[0],
+    risk_labels=RISK_AGENT_LABELS,
+    tokens=_agent_token_data,
+    rejections=_agent_rejection_data,
+    source_snapshot_since=_source_snapshot_since,
+    source_changed_since=_source_changed_since,
+    changed_source_files=_changed_source_files,
+    shell_output=sh,
+    argv_output=argv_out,
+    blocking_dirty_source_paths=_blocking_dirty_source_paths,
+))
+
+ev_agent_ran = _AGENT_EVIDENCE.agent_ran
+ev_agent_or_no_source = _AGENT_EVIDENCE.agent_or_no_source
+ev_review_agent_or_no_code = _AGENT_EVIDENCE.review_agent_or_no_code
+ev_review_snapshot = _AGENT_EVIDENCE.review_snapshot
 
 
 _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(

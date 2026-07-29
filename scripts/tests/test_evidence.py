@@ -26,6 +26,9 @@ class EvidenceResultTests(unittest.TestCase):
         passed, reason = result
         self.assertTrue(passed)
         self.assertEqual("", reason)
+        self.assertEqual(2, len(result))
+        self.assertTrue(result[0])
+        self.assertEqual("", result[1])
         with self.assertRaises(FrozenInstanceError):
             result.reason = "changed"
 

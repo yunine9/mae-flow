@@ -19,3 +19,9 @@ class EvidenceResult:
     def __iter__(self):
         yield self.passed
         yield self.reason
+
+    def __len__(self):
+        return 2
+
+    def __getitem__(self, index):
+        return (self.passed, self.reason)[index]

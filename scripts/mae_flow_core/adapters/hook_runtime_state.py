@@ -397,5 +397,3 @@ class HookStateMixin:
     def _codecheck_log_event(self, event, details=None):
         return append_codecheck_event(
             os.getcwd(), self._codecheck_log_state(), event, details, source="hook")
-
-

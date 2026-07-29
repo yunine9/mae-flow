@@ -243,4 +243,3 @@ class HookSourceMixin:
 HookSourceMixin._path_fingerprint.__wrapped__ = _shared_path_fingerprint
 HookSourceMixin._review_path_fingerprint.__wrapped__ = (
     _shared_review_path_fingerprint)
-

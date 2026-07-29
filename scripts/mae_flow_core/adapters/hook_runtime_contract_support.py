@@ -134,7 +134,7 @@ class HookContractSupportMixin:
         return rec
 
 
-    def _record_codecheck_fullcheck_receipt(self, 
+    def _record_codecheck_fullcheck_receipt(self,
             task, command_count, raw_counts, scan, expected_raw=None,
             result_hashes=None):
         """保存最终分批的执行事实，供“只修报告”跨 agent 复用。
@@ -230,7 +230,6 @@ class HookContractSupportMixin:
             source_error=err,
         )
 
-
     def _reusable_codecheck_build_receipt(self, task):
         """仅同任务卡、同步骤且源码未变化时复用；代码一变就必须重新编译。"""
         rec = self._evidence_data().get("CODECHECK_BUILD", {})
@@ -261,4 +260,3 @@ class HookContractSupportMixin:
             changed_paths=changed,
             source_error=err,
         )
-

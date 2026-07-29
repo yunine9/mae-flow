@@ -237,4 +237,3 @@ class HookContractsMixin:
         ))
         if not decision.accepted:
             bail(decision.reason)
-

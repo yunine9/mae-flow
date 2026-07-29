@@ -32,7 +32,7 @@ class HookTraceMixin:
         return summary
 
 
-    def _record_codecheck_agent_trace(self, 
+    def _record_codecheck_agent_trace(self,
             status, report, tool_calls, transcript_path, retry=False):
         """Persist the agent's commands, results and actual Git delta.
 
@@ -244,5 +244,3 @@ class HookTraceMixin:
         print("[mae-flow] " + label + " 契约违规:" + msg
               + " 请按 agent 定义的 Return format 重新真实收尾。", file=sys.stderr)
         sys.exit(2)
-
-

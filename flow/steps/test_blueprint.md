@@ -8,12 +8,16 @@
 3. 执行
    `python "{MAEFLOW_PATH}" quality-artifact register blueprint ".mae-flow-work/test-blueprint-{单号}.md"`；
 4. 对照全部规格 Scenario 检查覆盖和内部一致性；
-5. 首轮向用户展示完整蓝图，并提供：
+5. 执行
+   `python "{MAEFLOW_PATH}" quality-artifact present blueprint`
+   冻结本次将展示的蓝图版本和回答游标；
+6. 向用户展示该收据绑定的完整蓝图，并提供：
    - `UT 行为蓝图已确认，继续`
    - `需要调整 UT 行为蓝图`
 
 用户可以直接提出修改，不必先点“需要调整”。收到反馈后先复述本轮理解，再把用户原话和旧蓝图路径
 交给新鲜 Test Design 修订实例；重新校验、登记，只展示差异和受影响场景。修改轮次不设上限。
+每次修订后都必须重新执行 `quality-artifact present blueprint`；旧回答不能确认新版本。
 
 蓝图只写场景来源、前置状态、动作、可观察结果、禁止副作用、分类、测试层级和依赖策略；
 禁止出现具体类名、函数名、测试文件、Fixture、Mock API 或 private 调用。

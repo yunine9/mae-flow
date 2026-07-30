@@ -12,8 +12,11 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.quality.spec2code_artifacts import (  # noqa: E402
     ArtifactPorts,
+    ConfirmationPorts,
     confirm_artifacts,
+    prepare_confirmation,
     register_artifact,
+    verify_confirmation,
 )
 from mae_flow_core.delivery.models import thaw  # noqa: E402
 from test_spec2code_artifacts import BLUEPRINT  # noqa: E402
@@ -142,6 +145,104 @@ class Spec2CodeArtifactUseCaseTests(unittest.TestCase):
         self.assertEqual(2, result.exit_code)
         self.assertIn("plan", result.stderr[0])
         self.assertEqual((), result.effects)
+
+    def test_confirmation_receipt_binds_files_review_and_ack_cursor(self):
+        registered = thaw(self.call().effects[0].payload)
+        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
+        files = {
+            registered["blueprint"]["path"]: BLUEPRINT,
+            review_path: "review-v1",
+        }
+        ports = ConfirmationPorts(
+            is_file=lambda path: path in files,
+            read_text=lambda path: files[path],
+            digest=lambda text: hashlib.sha256(
+                text.encode("utf-8")).hexdigest(),
+            ack_cursor=lambda: ("answer-before-presentation",),
+            now=lambda: "2026-07-30 12:05:00",
+        )
+
+        result = prepare_confirmation(
+            registered,
+            "test_blueprint",
+            ("blueprint",),
+            review_path,
+            ports,
+        )
+
+        self.assertEqual(0, result.exit_code)
+        process = thaw(result.effects[0].payload)
+        receipt = process["confirmation_receipts"]["test_blueprint"]
+        self.assertEqual(
+            ["answer-before-presentation"],
+            receipt["ack_cursor"],
+        )
+        self.assertEqual(
+            hashlib.sha256(b"review-v1").hexdigest(),
+            receipt["review_sha256"],
+        )
+        verified = verify_confirmation(
+            process,
+            "test_blueprint",
+            ("blueprint",),
+            review_path,
+            ports,
+        )
+        self.assertEqual(
+            ("answer-before-presentation",),
+            verified,
+        )
+
+        files[review_path] = "review-v2"
+        with self.assertRaisesRegex(ValueError, "展示后发生变化"):
+            verify_confirmation(
+                process,
+                "test_blueprint",
+                ("blueprint",),
+                review_path,
+                ports,
+            )
+
+    def test_reregistered_artifact_invalidates_confirmation_receipt(self):
+        registered = thaw(self.call().effects[0].payload)
+        files = {registered["blueprint"]["path"]: BLUEPRINT}
+        ports = ConfirmationPorts(
+            is_file=lambda path: path in files,
+            read_text=lambda path: files[path],
+            digest=lambda text: hashlib.sha256(
+                text.encode("utf-8")).hexdigest(),
+            ack_cursor=lambda: (),
+            now=lambda: "2026-07-30 12:05:00",
+        )
+        presented = thaw(prepare_confirmation(
+            registered,
+            "test_blueprint",
+            ("blueprint",),
+            "",
+            ports,
+        ).effects[0].payload)
+        changed = thaw(register_artifact(
+            presented,
+            "blueprint",
+            registered["blueprint"]["path"],
+            "REQ-1",
+            ArtifactPorts(
+                is_file=lambda _path: True,
+                read_text=lambda _path: BLUEPRINT + "\n",
+                normalize_path=lambda value: value,
+                now=lambda: "2026-07-30 12:06:00",
+            ),
+        ).effects[0].payload)
+        files[registered["blueprint"]["path"]] = BLUEPRINT + "\n"
+
+        with self.assertRaisesRegex(ValueError, "重新展示"):
+            verify_confirmation(
+                changed,
+                "test_blueprint",
+                ("blueprint",),
+                "",
+                ports,
+            )
 
 
 if __name__ == "__main__":

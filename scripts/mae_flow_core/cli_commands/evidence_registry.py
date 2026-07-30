@@ -7,7 +7,8 @@ from .shared import (
     append_codecheck_event, build_evidence_registry, globmod, hashlib, os,
     read_bytes,
     read_text, spec2code_artifact_path, spec2code_review_requires_rework,
-    specengine, sys, time, validate_spec2code_review, EvidenceResult,
+    spec2code_review_requires_human_decision, specengine, sys, time,
+    validate_spec2code_review, EvidenceResult,
 )
 from .wiring import api
 
@@ -158,6 +159,16 @@ def _spec2code_plan_review(spec, state):
         return EvidenceResult(
             False,
             "PLAN Review 记录无效: " + "；".join(errors),
+        )
+    if (
+        api._moonlight(state)
+        and spec2code_review_requires_human_decision(review_text)
+    ):
+        return EvidenceResult(
+            False,
+            "PLAN Reviewer 存在“人工裁决”项，月光宝盒不得代替用户拍板；"
+            "执行 moonlight blocked --reason "
+            '"<CP、Finding、候选方案和当前风险>"，保留现场到早晨处理。',
         )
     if spec2code_review_requires_rework(review_text):
         return EvidenceResult(

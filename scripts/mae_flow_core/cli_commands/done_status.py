@@ -67,11 +67,20 @@ def _done_validate_choice_and_ack(step, st, args, sid):
             or api._moonlight(st)):
         return
     if step.get("choice_key"):
-        pace_state = api._development_review(st) if sid in PACE_STEPS else None
+        if sid in ("test_blueprint", "build_plan"):
+            ack_cursor = api._spec2code_confirmation_cursor(st, sid)
+        else:
+            pace_state = (
+                api._development_review(st)
+                if sid in PACE_STEPS else None
+            )
+            ack_cursor = (
+                (pace_state or {}).get("ack_cursor")
+                if pace_state else None
+            )
         ok, why = api._choice_verified(
             step, st, args.choice,
-            (pace_state or {}).get("ack_cursor")
-            if pace_state else None)
+            ack_cursor)
     elif step.get("confirmation_answers"):
         ok, why = api._implicit_ack_verified(step, st)
     elif args.ack:

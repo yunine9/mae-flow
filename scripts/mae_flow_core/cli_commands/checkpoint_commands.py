@@ -180,6 +180,7 @@ def cmd_checkpoint_prepare(st, args):
         args.review,
         ticket,
         _checkpoint_quality_ports(st),
+        moonlight=api._moonlight(st),
     )
     _apply_checkpoint_quality_result(st, result)
 

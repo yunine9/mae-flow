@@ -185,6 +185,9 @@ def parse_args(argv=None):
     quality_register.add_argument(
         "kind", choices=["blueprint", "roadmap", "plan"])
     quality_register.add_argument("path")
+    quality_present = quality_artifact_actions.add_parser("present")
+    quality_present.add_argument(
+        "kind", choices=["blueprint", "plan"])
     quality_artifact_actions.add_parser("show")
     role_task = sub.add_parser("role-task")
     role_task.add_argument("role", choices=[

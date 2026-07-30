@@ -201,6 +201,31 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertEqual(2, result.exit_code)
         self.assertIn("已登记 plan 摘要不一致", result.stderr[0])
 
+    def test_moonlight_plan_rejects_human_decision_finding(self):
+        plan_path = ".mae-flow-work/plan-REQ-1.md"
+        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
+        result = prepare_checkpoint_plan(
+            self.state(),
+            "CP1",
+            plan_path,
+            review_path,
+            "REQ-1",
+            self.ports({
+                plan_path: PLAN,
+                review_path: review(
+                    mode="PLAN",
+                    disposition="人工裁决",
+                    status="已解决",
+                    target_sha=hashlib.sha256(
+                        PLAN.encode("utf-8")).hexdigest(),
+                ),
+            }),
+            moonlight=True,
+        )
+
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("月光宝盒不得代替用户拍板", result.stderr[0])
+
     def test_craft_review_rework_or_advances(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
         pending_files = {

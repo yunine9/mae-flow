@@ -269,6 +269,72 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
                 ),
             )
 
+    def present(self, kind):
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_quality_artifact(
+                None,
+                self.state,
+                types.SimpleNamespace(
+                    quality_action="present",
+                    kind=kind,
+                ),
+            )
+
+    def user_messages(self, rows):
+        self.write(
+            ".mae-flow.json.usermsg",
+            json.dumps(rows, ensure_ascii=False),
+        )
+
+    def test_done_rejects_old_answer_after_blueprint_reregistration(self):
+        path = ".mae-flow-work/test-blueprint-REQ-1.md"
+        self.write(path, BLUEPRINT)
+        self.register("blueprint", path)
+        self.present("blueprint")
+        old_answer = {
+            "id": "answer-a",
+            "step": "test_blueprint",
+            "at": "2026-07-30 15:00:00",
+            "text": "UT 行为蓝图已确认，继续",
+        }
+        self.user_messages([old_answer])
+
+        self.write(path, BLUEPRINT + "\n")
+        self.register("blueprint", path)
+        args = types.SimpleNamespace(
+            choice="continue",
+            ack=None,
+            set=[],
+        )
+        with self.assertRaises(SystemExit) as stale_receipt:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_done(FLOW, self.state, args)
+        self.assertEqual(2, stale_receipt.exception.code)
+
+        self.present("blueprint")
+        with self.assertRaises(SystemExit) as stale_answer:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_done(FLOW, self.state, args)
+        self.assertEqual(2, stale_answer.exception.code)
+
+        self.user_messages([
+            old_answer,
+            {
+                "id": "answer-b",
+                "step": "test_blueprint",
+                "at": "2026-07-30 15:01:00",
+                "text": "UT 行为蓝图已确认，继续",
+            },
+        ])
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_done(FLOW, self.state, args)
+        self.assertEqual("story_ask", self.state["current"])
+        blueprint = self.state["spec2code"]["blueprint"]
+        self.assertEqual(
+            blueprint["revision"],
+            blueprint["confirmed_revision"],
+        )
+
     def test_real_cli_orders_roadmap_task_analysis_plan_and_reviewer(self):
         test_card, _ = self.role("test-design")
         self.assertIn("docs/requirement.md", test_card)
@@ -327,6 +393,37 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
             mf.check_evidence(
                 FLOW["steps"]["build_plan"], self.state),
         )
+        self.present("plan")
+        receipt = self.state["spec2code"][
+            "confirmation_receipts"]["build_plan"]
+        self.assertEqual(
+            review_path,
+            receipt["review_path"],
+        )
+        self.assertTrue(receipt["review_sha256"])
+        self.write(review_path, review(
+            findings=1,
+            disposition="人工裁决",
+            status="已解决",
+            mode="PLAN",
+            task_card_sha=review_task["sha256"],
+            target_sha=plan_sha,
+        ))
+        self.state["moonlight"] = {"enabled": True}
+        failures = mf.check_evidence(
+            FLOW["steps"]["build_plan"], self.state)
+        self.assertTrue(any(
+            "月光宝盒不得代替用户拍板" in failure
+            for failure in failures
+        ))
+        self.state.pop("moonlight")
+        self.write(review_path, review(
+            findings=0,
+            result="CLEAN",
+            mode="PLAN",
+            task_card_sha=review_task["sha256"],
+            target_sha=plan_sha,
+        ))
         self.write(plan_path, PLAN + "\n")
         self.register("plan", plan_path)
         self.assertEqual(

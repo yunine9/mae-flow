@@ -21,11 +21,15 @@
    需要修订时交回 Task Analyst，修订后重新登记 plan、重新签发 craft-plan，旧任务卡和 Review 均失效；
 6. Reviewer 闭环后执行：
    - `python "{MAEFLOW_PATH}" spec set plan ".mae-flow-work/plan-{单号}.md"`
-7. 首轮向用户展示完整 CP 地图、CP1 Task 摘要、Scenario 覆盖和全部延后落点。
+7. 执行 `python "{MAEFLOW_PATH}" quality-artifact present plan`，冻结当前 roadmap、
+   plan、CP1 PLAN Review 和回答游标；
+8. 向用户展示该收据绑定的完整 CP 地图、CP1 Task 摘要、Scenario 覆盖和全部延后落点。
 
 用户直接提出修改时，复述理解、修订、做一致性检查并重新登记；涉及 plan 时必须重新签发
 PLAN Reviewer 任务卡并复查，后续展示差异和受影响部分。
 任何“后续处理”都必须指向具体 `CPn / Task`，无法定位就是计划缺口。修改轮次不设上限。
+每次 roadmap、plan 或 PLAN Review 变化后都必须重新执行 `quality-artifact present plan`；
+旧回答不能确认新版本。
 
 用户明确继续后执行 `python "{MAEFLOW_PATH}" done --choice continue`；要求修改时执行
 `python "{MAEFLOW_PATH}" done --choice revise`。`done` 会校验 CP1 PLAN Reviewer 任务卡、

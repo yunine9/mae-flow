@@ -168,6 +168,8 @@ from mae_flow_core.quality import task_cards as quality_task_cards
 from mae_flow_core.quality.spec2code_artifacts import (
     artifact_path as spec2code_artifact_path,
     checkpoint_review_context,
+    review_requires_human_decision as
+        spec2code_review_requires_human_decision,
     review_requires_rework as spec2code_review_requires_rework,
     validate_review as validate_spec2code_review,
 )

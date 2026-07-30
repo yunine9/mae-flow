@@ -22,6 +22,15 @@ class ArtifactPorts:
     now: Callable[[], str]
 
 
+@dataclass(frozen=True)
+class ConfirmationPorts:
+    is_file: Callable[[str], bool]
+    read_text: Callable[[str], str]
+    digest: Callable[[str], str]
+    ack_cursor: Callable[[], object]
+    now: Callable[[], str]
+
+
 _VALIDATORS = {
     "blueprint": validate_blueprint,
     "roadmap": validate_roadmap,
@@ -36,6 +45,95 @@ def _failure(message):
         stderr=(message,),
         exit_code=2,
     )
+
+
+def _confirmation_snapshot(process, kinds, review_path, ports):
+    artifacts = {}
+    for kind in kinds:
+        record = (process or {}).get(kind) or {}
+        path = str(record.get("path", "") or "")
+        expected = str(record.get("sha256", "") or "")
+        revision = int(record.get("revision", 0) or 0)
+        if not path or not expected or not revision:
+            raise ValueError("尚未登记待展示过程件: " + kind)
+        if not ports.is_file(path):
+            raise ValueError("待展示过程件不存在: " + path)
+        try:
+            actual = ports.digest(ports.read_text(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("待展示过程件无法读取: %s" % exc) from exc
+        if actual != expected:
+            raise ValueError(
+                "%s 登记后内容已变化；重新登记后再展示。" % kind)
+        artifacts[kind] = {
+            "path": path,
+            "sha256": expected,
+            "revision": revision,
+        }
+    review_sha256 = ""
+    if review_path:
+        if not ports.is_file(review_path):
+            raise ValueError("待展示 Review 不存在: " + review_path)
+        try:
+            review_sha256 = ports.digest(ports.read_text(review_path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("待展示 Review 无法读取: %s" % exc) from exc
+    return artifacts, review_sha256
+
+
+def prepare_confirmation(
+        process, step_id, kinds, review_path, ports):
+    """Freeze the exact artifact/review versions shown before asking a user."""
+    try:
+        artifacts, review_sha256 = _confirmation_snapshot(
+            process, kinds, review_path, ports)
+    except ValueError as exc:
+        return _failure(str(exc))
+    updated = deepcopy(process) if isinstance(process, dict) else {}
+    updated.setdefault("confirmation_receipts", {})[step_id] = {
+        "artifacts": artifacts,
+        "review_path": review_path,
+        "review_sha256": review_sha256,
+        "ack_cursor": list(ports.ack_cursor() or ()),
+        "at": ports.now(),
+    }
+    return DeliveryResult(
+        effects=(DeliveryEffect("set_spec2code", updated),),
+        stdout=(
+            "[mae-flow] 已冻结 %s 展示版本；后续用户回答只对本收据有效。"
+            % step_id,
+        ),
+        stderr=(),
+        exit_code=0,
+    )
+
+
+def verify_confirmation(
+        process, step_id, kinds, review_path, ports):
+    """Return the presentation cursor only while every displayed byte is fresh."""
+    receipt = (
+        ((process or {}).get("confirmation_receipts") or {}).get(step_id)
+        or {}
+    )
+    if not receipt:
+        raise ValueError(
+            "尚未冻结本轮展示版本；先执行 quality-artifact present。")
+    try:
+        artifacts, review_sha256 = _confirmation_snapshot(
+            process, kinds, review_path, ports)
+    except ValueError as exc:
+        raise ValueError(
+            "%s 旧展示收据失效，必须重新展示并取得新回答。"
+            % exc) from exc
+    if (
+        receipt.get("artifacts") != artifacts
+        or str(receipt.get("review_path", "") or "") != review_path
+        or str(receipt.get("review_sha256", "") or "") != review_sha256
+    ):
+        raise ValueError(
+            "过程件或 Review 在展示后发生变化；"
+            "旧回答不能确认新版本，必须重新展示并取得新回答。")
+    return tuple(receipt.get("ack_cursor") or ())
 
 
 def confirm_artifacts(process, kinds, actor, now):

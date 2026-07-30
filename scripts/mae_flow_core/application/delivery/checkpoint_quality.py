@@ -71,7 +71,8 @@ def _read_expected(path, expected, ports):
 
 
 def prepare_checkpoint_plan(
-        review, checkpoint, plan_path, review_path, ticket, ports):
+        review, checkpoint, plan_path, review_path, ticket, ports,
+        moonlight=False):
     updated = deepcopy(review)
     item = _current(updated, checkpoint)
     if not item or item.get("status") != "planned":
@@ -105,6 +106,11 @@ def prepare_checkpoint_plan(
     )
     if errors:
         return _failure("PLAN Reviewer 记录校验失败: " + "；".join(errors))
+    if moonlight and review_requires_human_decision(review_text):
+        return _failure(
+            "PLAN Reviewer 存在“人工裁决”项，月光宝盒不得代替用户拍板；"
+            "执行 moonlight blocked --reason "
+            '"<CP、Finding、候选方案和当前风险>"，保留现场到早晨处理。')
     if review_requires_rework(review_text):
         return _failure(
             "PLAN Reviewer 仍有待处理意见；先由主 Agent 核实并修订计划。")

@@ -33,6 +33,11 @@ class QualityArtifactCliTests(unittest.TestCase):
             "show",
             parse_args(["quality-artifact", "show"]).quality_action,
         )
+        presented = parse_args([
+            "quality-artifact", "present", "blueprint",
+        ])
+        self.assertEqual("present", presented.quality_action)
+        self.assertEqual("blueprint", presented.kind)
 
     def test_register_saves_spec2code_state(self):
         original_save = getattr(api, "save_state", None)

@@ -54,6 +54,11 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("禁止重新发明测试场景", text)
 
     def test_build_prompts_use_registered_plan_and_role_loops(self):
+        blueprint = read("flow/steps/test_blueprint.md")
+        self.assertIn(
+            "quality-artifact present blueprint",
+            blueprint,
+        )
         planning = read("flow/steps/build_plan.md")
         roadmap_register = planning.index(
             "quality-artifact register roadmap")
@@ -63,6 +68,7 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertLess(roadmap_register, analyst)
         self.assertLess(analyst, plan_register)
         self.assertLess(plan_register, reviewer)
+        self.assertIn("quality-artifact present plan", planning)
         pace = read("flow/steps/build_pace.md")
         self.assertIn("--roadmap", pace)
         self.assertIn("--plan", pace)

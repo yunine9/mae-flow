@@ -253,6 +253,10 @@ Review 文件顶部还必须包含：
 零条 Finding 只允许配合显式 `CLEAN`；`FINDINGS` 至少一条。摘要与当前冻结对象
 不一致时拒绝推进。
 
+初始顺序固定为：Coordinator 生成并登记 roadmap → Task Analyst 写 plan → 登记 plan
+→ 签发 PLAN Reviewer 卡。plan 每次修订后都重新登记并重新签发 Reviewer；用户确认
+当前 CP 前再读 plan/Review 文件并核对展示收据摘要，变化即退回 Loop。
+
 - [ ] **Step 5: 运行测试**
 
 Run: `python scripts/tests/test_spec2code_artifacts.py`

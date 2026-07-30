@@ -20,6 +20,7 @@ class RoleTaskContext:
     diff: str = ""
     review_output: str = ""
     review_target_sha256: str = ""
+    write_output: str = ""
 
 
 _MARKERS = {
@@ -31,11 +32,15 @@ _MARKERS = {
 }
 
 _INPUTS = {
-    "test-design": (),
+    "test-design": ("blueprint",),
     "task-analysis": ("blueprint", "roadmap", "plan"),
     "craft-plan": ("blueprint", "roadmap", "plan"),
     "cp-implement": ("blueprint", "roadmap", "plan"),
     "craft-code": ("roadmap", "plan"),
+}
+_OPTIONAL_INPUTS = {
+    "test-design": {"blueprint"},
+    "task-analysis": {"plan"},
 }
 
 
@@ -44,6 +49,8 @@ def _append_artifacts(document, role, artifacts):
     for kind in _INPUTS[role]:
         ref = artifacts.get(kind)
         if ref is None:
+            if kind in _OPTIONAL_INPUTS.get(role, set()):
+                continue
             document.append("- %s: （未登记）" % kind)
         else:
             document.append(
@@ -79,12 +86,17 @@ def _append_role_contract(document, role, context):
         document.extend([
             "职责:只生成或修订 UT 行为蓝图；不写测试或业务源码。",
             "禁止确定测试文件、Fixture、Mock API、类名、函数名或 private 调用。",
+            "唯一允许写入的过程件: "
+            + (context.write_output or "（缺失；返回 NEEDS_INPUT）"),
         ])
     elif role == "task-analysis":
         document.extend([
             "职责:只展开当前 CP 的细粒度 Task；不写业务源码。",
             "每个 Task 必须包含目标文件、符号/签名、状态所有权、复用、"
             "禁止事项、注释计划和蓝图场景。",
+            "唯一允许写入的过程件: "
+            + (context.write_output or "（缺失；返回 NEEDS_INPUT）"),
+            "只更新当前 CP Task；不得修改已确认路线图或其他 CP 合同。",
         ])
     elif role == "craft-plan":
         document.extend([

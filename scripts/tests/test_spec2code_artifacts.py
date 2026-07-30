@@ -245,6 +245,14 @@ class Spec2CodeArtifactTests(unittest.TestCase):
             REVIEW_TARGET_SHA,
         )
         self.assertTrue(any("TASK_CARD_SHA256" in error for error in mismatched))
+        unsigned = validate_review(
+            review(),
+            "code",
+            "CP1",
+            "",
+            REVIEW_TARGET_SHA,
+        )
+        self.assertTrue(any("未签发" in error for error in unsigned))
         contradictory = validate_review(
             review(findings=0, result="FINDINGS"),
             "code",

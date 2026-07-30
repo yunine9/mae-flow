@@ -132,6 +132,21 @@ def prepare_checkpoint_plan(
     )
 
 
+def _plan_receipt_fresh(receipt, ports):
+    for prefix in ("plan", "review"):
+        path = str(receipt.get(prefix + "_path", "") or "")
+        expected = str(receipt.get(prefix + "_sha256", "") or "")
+        if not path or not expected or not ports.is_file(path):
+            return False
+        try:
+            text = ports.read_text(path)
+        except (OSError, UnicodeDecodeError):
+            return False
+        if ports.digest(text) != expected:
+            return False
+    return True
+
+
 def decide_checkpoint_plan(review, choice, ack, ports):
     updated = deepcopy(review)
     items = updated.get("checkpoints") or []
@@ -147,7 +162,18 @@ def decide_checkpoint_plan(review, choice, ack, ports):
         return _failure("计划裁决只能是 continue 或 revise。")
     if ack != expected:
         return _failure("选择原文必须精确为「%s」。" % expected)
-    ok, why = ports.verify_ack(item.get("plan_receipt") or {}, expected)
+    receipt = item.get("plan_receipt") or {}
+    if not _plan_receipt_fresh(receipt, ports):
+        item["status"] = "planned"
+        item.pop("plan_receipt", None)
+        return _success(
+            updated,
+            (
+                "[mae-flow] 已展示的 CP 计划或 PLAN Review 发生变化；"
+                "旧确认收据已失效，必须重新登记、走读并展示。",
+            ),
+        )
+    ok, why = ports.verify_ack(receipt, expected)
     if not ok:
         return _failure("CP 计划用户裁决验真失败:" + why)
     if choice == "continue":

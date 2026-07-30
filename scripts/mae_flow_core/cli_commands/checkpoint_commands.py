@@ -105,6 +105,19 @@ def _role_task_sha(st, role, checkpoint):
     record = (st.get("role_tasks") or {}).get(role) or {}
     if record.get("checkpoint") != checkpoint:
         return ""
+    expected_target = (
+        str(
+            ((st.get("spec2code") or {}).get("plan") or {}).get(
+                "sha256", "")
+            or "")
+        if role == "craft-plan"
+        else str(
+            (api._checkpoint_current(st) or {}).get(
+                "compile_source_sha256", "")
+            or "")
+    )
+    if record.get("review_target_sha256") != expected_target:
+        return ""
     return str(record.get("sha256", "") or "")
 
 

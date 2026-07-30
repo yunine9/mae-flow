@@ -32,14 +32,14 @@ ARTIFACTS = {
 }
 
 
-def build(role):
+def build(role, artifacts=ARTIFACTS):
     return build_role_task_document(
         role=role,
         project_root="/repo",
         ticket="REQ-1",
         checkpoint="CP1",
         context=RoleTaskContext(
-            artifacts=ARTIFACTS,
+            artifacts=artifacts,
             files=("src/service.py",),
             context_paths=(
                 "/repo/docs/requirement.md",
@@ -53,6 +53,7 @@ diff --git a/src/service.py b/src/service.py
             review_output=(
                 "/repo/.mae-flow-work/reviews/REQ-1/CP1-code.md"),
             review_target_sha256="d" * 64,
+            write_output="/repo/.mae-flow-work/plan-REQ-1.md",
         ),
     ).body()
 
@@ -90,10 +91,24 @@ class RoleTaskDocumentTests(unittest.TestCase):
         self.assertNotIn("允许修改:", body)
 
     def test_test_designer_reads_requirement_and_survey_not_future_blueprint(self):
-        body = build("test-design")
+        artifacts = {
+            kind: ref for kind, ref in ARTIFACTS.items()
+            if kind != "blueprint"
+        }
+        body = build("test-design", artifacts)
         self.assertIn("/repo/docs/requirement.md", body)
         self.assertIn("/repo/.mae-flow-work/survey-REQ-1.md", body)
         self.assertNotIn("- blueprint:", body)
+
+    def test_task_analyst_writes_plan_before_plan_reviewer_reads_it(self):
+        artifacts = {
+            kind: ref for kind, ref in ARTIFACTS.items()
+            if kind != "plan"
+        }
+        body = build("task-analysis", artifacts)
+        self.assertIn("唯一允许写入的过程件", body)
+        self.assertIn("/repo/.mae-flow-work/plan-REQ-1.md", body)
+        self.assertNotIn("- plan: （未登记）", body)
 
     def test_unknown_role_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知角色"):

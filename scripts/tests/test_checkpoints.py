@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -16,6 +17,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import fingerprints
 from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 from mae_flow_core import cli_runtime as mf
+from test_spec2code_artifacts import BLUEPRINT, PLAN, ROADMAP, review
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as stream:
@@ -105,6 +107,86 @@ class CheckpointTests(unittest.TestCase):
         git(self.repo, "commit", "-qm", message)
         return git(self.repo, "rev-parse", "HEAD")
 
+    def write_process_artifacts(self, state):
+        paths = {
+            "blueprint": ".mae-flow-work/test-blueprint-REQ1.md",
+            "roadmap": ".mae-flow-work/roadmap-REQ1.md",
+            "plan": ".mae-flow-work/plan-REQ1.md",
+        }
+        texts = {
+            "blueprint": BLUEPRINT,
+            "roadmap": ROADMAP,
+            "plan": PLAN,
+        }
+        os.makedirs(".mae-flow-work", exist_ok=True)
+        state["spec2code"] = {"version": 1}
+        for kind, path in paths.items():
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write(texts[kind])
+            digest = hashlib.sha256(
+                texts[kind].encode("utf-8")).hexdigest()
+            state["spec2code"][kind] = {
+                "path": path,
+                "sha256": digest,
+                "revision": 1,
+                "confirmed_revision": 1,
+                "confirmed_sha256": digest,
+                "confirmed_by": "user",
+                "confirmed_at": "2026-07-30 10:00:00",
+            }
+
+    def v2_state(self, mode):
+        state = self.state(current="build")
+        state["choices"]["workflow"] = "full"
+        state["development_review"] = {
+            "version": 2,
+            "status": "active",
+            "mode": mode,
+            "review_before_commit": mode == "staged",
+            "delivery_base": self.base,
+            "roadmap_path": ".mae-flow-work/roadmap-REQ1.md",
+            "plan_path": ".mae-flow-work/plan-REQ1.md",
+            "current_index": 0,
+            "checkpoints": [{
+                "id": "CP1",
+                "title": "core",
+                "status": "coding",
+                "fixed_base": self.base,
+            }],
+        }
+        self.write_process_artifacts(state)
+        return state
+
+    def code_review(self, state):
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_role_task(
+                FLOW,
+                state,
+                types.SimpleNamespace(
+                    role="craft-code",
+                    checkpoint="CP1",
+                ),
+            )
+        item = state["development_review"]["checkpoints"][0]
+        task_sha = state["role_tasks"]["craft-code"]["sha256"]
+        review_path = ".mae-flow-work/reviews/REQ1/CP1-code.md"
+        os.makedirs(os.path.dirname(review_path), exist_ok=True)
+        with open(review_path, "w", encoding="utf-8") as stream:
+            stream.write(review(
+                findings=0,
+                result="CLEAN",
+                task_card_sha=task_sha,
+                target_sha=item["compile_source_sha256"],
+            ))
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_craft_reviewed(
+                state,
+                types.SimpleNamespace(
+                    checkpoint_id="CP1",
+                    review=review_path,
+                ),
+            )
+
     def compile_receipt(self, state, checkpoint):
         head = git(self.repo, "rev-parse", "HEAD")
         task_sha256 = "task-" + checkpoint
@@ -186,6 +268,71 @@ class CheckpointTests(unittest.TestCase):
                 )
         self.assertEqual(2, caught.exception.code)
         self.assertNotIn("development_review", state)
+
+    def test_v2_continuous_cli_closes_real_code_review(self):
+        state = self.save(self.v2_state("continuous"))
+        self.commit_source(
+            "int v2_continuous = 2;",
+            "[REQ1][fix]v2 continuous",
+        )
+        state = mf.load_state()
+        self.compile_receipt(state, "CP1")
+        state = mf.load_state()
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_ready(
+                FLOW,
+                state,
+                types.SimpleNamespace(checkpoint_id="CP1"),
+            )
+        state = mf.load_state()
+        self.assertEqual(
+            "craft_pending",
+            state["development_review"]["checkpoints"][0]["status"],
+        )
+        self.code_review(state)
+        self.assertEqual(
+            "completed",
+            state["development_review"]["checkpoints"][0]["status"],
+        )
+
+    def test_v2_staged_cli_reviews_uncommitted_code_before_user(self):
+        state = self.save(self.v2_state("staged"))
+        with open("src/main.cpp", "a", encoding="utf-8") as stream:
+            stream.write("int v2_staged = 3;\n")
+        snapshot = mf._source_snapshot_since(self.base, state)
+        state.setdefault("agent_tasks", {})["COMPILE"] = {
+            "step": "build",
+            "head": self.base,
+            "sha256": "task-CP1",
+            "scope": "CP1",
+            "checkpoint": "CP1",
+            "precommit_review": True,
+            "source_snapshot": snapshot,
+        }
+        state = self.save(state)
+        with open(mf.STATE_PATH + ".tokens", "w", encoding="utf-8") as stream:
+            json.dump({"COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": "build",
+                "head": self.base,
+                "status": "OK",
+                "source_snapshot": snapshot,
+                "task_sha256": "task-CP1",
+            }}, stream)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_ready(
+                FLOW,
+                state,
+                types.SimpleNamespace(checkpoint_id="CP1"),
+            )
+        state = mf.load_state()
+        self.code_review(state)
+        item = state["development_review"]["checkpoints"][0]
+        self.assertEqual("review_pending", item["status"])
+        card_path = state["role_tasks"]["craft-code"]["path"]
+        with open(card_path, encoding="utf-8") as stream:
+            card = stream.read()
+        self.assertIn("+int v2_staged = 3;", card)
 
     def test_review_with_no_confirmed_fixes_does_not_deadlock_on_empty_checkpoint(self):
         state = self.state(current="rf_pace")

@@ -106,6 +106,39 @@ class RoleTaskCliTests(unittest.TestCase):
         self.assertIn("### 未跟踪文件: src/new.py", body)
         self.assertIn("NEW = True", body)
 
+    def test_survey_neighbor_files_are_frozen_as_context_refs(self):
+        with tempfile.TemporaryDirectory() as repository:
+            os.makedirs(os.path.join(repository, ".mae-flow-work"))
+            os.makedirs(os.path.join(repository, "src"))
+            with open(
+                    os.path.join(repository, "src", "service.py"),
+                    "w",
+                    encoding="utf-8",
+            ) as stream:
+                stream.write("VALUE = 1\n")
+            with open(
+                    os.path.join(
+                        repository,
+                        ".mae-flow-work",
+                        "survey-REQ-1.md",
+                    ),
+                    "w",
+                    encoding="utf-8",
+            ) as stream:
+                stream.write("关键邻近代码：`src/service.py`\n")
+            previous = os.getcwd()
+            try:
+                os.chdir(repository)
+                refs = role_task_cli._existing_context_paths(
+                    {"config": {"单号": "REQ-1"}},
+                    (),
+                )
+            finally:
+                os.chdir(previous)
+        body = "\n".join(refs)
+        self.assertIn("/src/service.py | SHA256 ", body)
+        self.assertIn("/survey-REQ-1.md | SHA256 ", body)
+
 
 if __name__ == "__main__":
     unittest.main()

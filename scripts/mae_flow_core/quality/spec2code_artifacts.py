@@ -245,9 +245,11 @@ def _validate_review_envelope(
             ("REVIEW_TARGET_SHA256", review_target_sha256),
     ):
         value = envelope[field]
-        if not _SHA256_RE.fullmatch(value):
+        if not expected:
+            errors.append("%s 对应的冻结对象尚未签发" % field)
+        elif not _SHA256_RE.fullmatch(value):
             errors.append("%s 必须是 64 位小写 SHA256" % field)
-        elif expected and value != expected:
+        elif value != expected:
             errors.append("%s 与任务卡冻结值不匹配" % field)
     return errors
 

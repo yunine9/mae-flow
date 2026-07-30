@@ -143,6 +143,37 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertEqual("planned", revised_item["status"])
         self.assertNotIn("plan_receipt", revised_item)
 
+    def test_user_plan_confirmation_rejects_changed_displayed_files(self):
+        plan_path = ".mae-flow-work/plan-REQ-1.md"
+        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
+        paths = {
+            plan_path: PLAN,
+            review_path: review(
+                mode="PLAN",
+                target_sha=hashlib.sha256(
+                    PLAN.encode("utf-8")).hexdigest(),
+            ),
+        }
+        prepared = prepare_checkpoint_plan(
+            self.state(),
+            "CP1",
+            plan_path,
+            review_path,
+            "REQ-1",
+            self.ports(paths),
+        )
+        paths[plan_path] = PLAN + "\n<!-- changed after display -->\n"
+        result = decide_checkpoint_plan(
+            thaw(prepared.effects[0].payload),
+            "continue",
+            PLAN_CONTINUE_ACK,
+            self.ports(paths),
+        )
+        item = thaw(result.effects[0].payload)["checkpoints"][0]
+        self.assertEqual("planned", item["status"])
+        self.assertNotIn("plan_receipt", item)
+        self.assertIn("发生变化", result.stdout[0])
+
     def test_craft_review_rework_or_advances(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
         pending_files = {

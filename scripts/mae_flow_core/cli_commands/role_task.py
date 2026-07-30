@@ -14,8 +14,17 @@ from mae_flow_core.application.quality.task_cards import (
 )
 from mae_flow_core.quality.role_tasks import role_allowed
 
-from .shared import os, read_text, time, write_text
+from .shared import hashlib, os, read_text, time, write_text
 from .wiring import api
+
+
+_REQUIRED_ARTIFACTS = {
+    "test-design": (),
+    "task-analysis": ("blueprint", "roadmap"),
+    "craft-plan": ("blueprint", "roadmap", "plan"),
+    "cp-implement": ("blueprint", "roadmap", "plan"),
+    "craft-code": ("roadmap", "plan"),
+}
 
 
 def _artifact_refs(state):
@@ -31,6 +40,19 @@ def _artifact_refs(state):
                 str(record["sha256"]),
             )
     return refs
+
+
+def _require_artifact_refs(role, refs):
+    missing = [
+        kind for kind in _REQUIRED_ARTIFACTS[role]
+        if kind not in refs
+    ]
+    if missing:
+        api.die(
+            "%s 角色任务卡缺少已登记过程件: %s。"
+            % (role, "、".join(missing)),
+            2,
+        )
 
 
 def _plan_files(state, checkpoint):
@@ -69,28 +91,57 @@ def _plan_files(state, checkpoint):
     return tuple(files)
 
 
+def _survey_neighbors(path):
+    if not path or not os.path.isfile(path):
+        return ()
+    text = read_text(path, encoding="utf-8", errors="replace")
+    tokens = re.findall(
+        r"`([^`\n]+)`|(?<![\w:/])([\w.@+-]+(?:/[\w.@+-]+)+)",
+        text,
+    )
+    result = []
+    for pair in tokens:
+        value = next((item for item in pair if item), "")
+        value = value.rstrip(".,，。:：;；)")
+        if value and os.path.isfile(value) and value not in result:
+            result.append(value)
+    return tuple(result)
+
+
+def _context_ref(path):
+    absolute = os.path.abspath(path)
+    try:
+        with open(path, "rb") as stream:
+            digest = hashlib.sha256(stream.read()).hexdigest()
+    except OSError:
+        return ""
+    return "%s | SHA256 %s" % (absolute, digest)
+
+
 def _existing_context_paths(state, files):
     config = state.get("config") or {}
     ticket = str(config.get("单号", "") or "")
     change = str(config.get("CHANGE_NAME", "") or "")
     spec = state.get("spec") or {}
+    survey = os.path.join(".mae-flow-work", "survey-%s.md" % ticket)
     candidates = (
         config.get("需求文档", ""),
         os.path.join("openspec", "changes", change, "change.md")
         if change else "",
         spec.get("design_doc", ""),
         os.path.join("docs", "clarifications-%s.md" % ticket),
-        os.path.join(".mae-flow-work", "survey-%s.md" % ticket),
+        survey,
         "runtime/standards/comment-standard-v1.md",
+        *_survey_neighbors(survey),
         *tuple(files),
     )
     result = []
     for path in candidates:
         value = str(path or "")
         if value and os.path.isfile(value):
-            absolute = os.path.abspath(value)
-            if absolute not in result:
-                result.append(absolute)
+            reference = _context_ref(value)
+            if reference and reference not in result:
+                result.append(reference)
     return tuple(result)
 
 
@@ -177,6 +228,17 @@ def _review_target_sha(state, role):
     return ""
 
 
+def _write_output(ticket, role):
+    kind = {
+        "test-design": "blueprint",
+        "task-analysis": "plan",
+    }.get(role)
+    return (
+        os.path.abspath(artifact_path(kind, ticket))
+        if kind else ""
+    )
+
+
 def cmd_role_task(_flow, state, args):
     role = args.role
     step = str(state.get("current", "") or "")
@@ -213,18 +275,21 @@ def cmd_role_task(_flow, state, args):
         )
     ticket = str((state.get("config") or {}).get("单号", "") or "")
     plan_files = _plan_files(state, checkpoint)
+    artifact_refs = _artifact_refs(state)
+    _require_artifact_refs(role, artifact_refs)
     document = build_role_task_document(
         role=role,
         project_root=os.path.abspath(os.getcwd()),
         ticket=ticket,
         checkpoint=checkpoint,
         context=RoleTaskContext(
-            artifacts=_artifact_refs(state),
+            artifacts=artifact_refs,
             files=plan_files,
             context_paths=_existing_context_paths(state, plan_files),
             diff=_role_diff(state, role, plan_files),
             review_output=_review_output(ticket, checkpoint, role),
             review_target_sha256=_review_target_sha(state, role),
+            write_output=_write_output(ticket, role),
         ),
     )
     suffix = ("-" + checkpoint.lower()) if checkpoint else ""
@@ -244,6 +309,7 @@ def cmd_role_task(_flow, state, args):
         "checkpoint": checkpoint,
         "path": artifact.path,
         "sha256": artifact.digest,
+        "review_target_sha256": _review_target_sha(state, role),
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     api.save_state(state)

@@ -13,8 +13,10 @@
   维度不同、互不替代,这一维只有它管;高风险变更经用户同意可升 thorough)。
 每个 CP 严格执行：
 
-1. 状态为 `planned`：分别生成 `role-task task-analysis --checkpoint CPn` 和
-   `role-task craft-plan --checkpoint CPn`，由新鲜实例展开 Task、完成 PLAN 只读走读；
+1. 状态为 `planned`：先生成 `role-task task-analysis --checkpoint CPn`，由新鲜实例把当前 CP
+   Task 写入 plan；完成后重新执行 `quality-artifact register plan "<plan>"`，再生成
+   `role-task craft-plan --checkpoint CPn` 进行 PLAN 只读走读。Reviewer 要求修改时交回
+   Task Analyst，随后重新登记 plan、重新签发 Reviewer，旧卡和旧 Review 不得复用；
    主 Agent 核实 Reviewer 意见后执行 `checkpoint prepare CPn --plan "<plan>" --review "<CPn-plan.md>"`。
    分阶段模式展示计划并执行 `checkpoint plan-decide continue|revise`，用户可反复要求修改；
    连续模式按已选节奏自动进入编码。

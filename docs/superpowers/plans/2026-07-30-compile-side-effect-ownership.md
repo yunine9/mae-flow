@@ -253,7 +253,18 @@ git add \
   scripts/mae_flow_core/adapters/hook_runtime_dependencies.py \
   scripts/tests/test_quality_task_cards.py \
   scripts/tests/test_state_core.py \
-  scripts/tests/test_hook_compile_contract.py
+  scripts/tests/test_hook_compile_contract.py \
+  scripts/tests/test_task_scope.py \
+  scripts/tests/differential/goldens/phase6.json \
+  scripts/tests/differential/goldens/phase7.json \
+  scripts/tests/differential/goldens/phase8.json \
+  scripts/tests/differential/goldens/phase9.json \
+  scripts/tests/differential/goldens/phase10.json \
+  scripts/tests/differential/goldens/phase11.json \
+  scripts/tests/differential/goldens/phase12.json \
+  scripts/tests/differential/goldens/phase13.json \
+  scripts/tests/differential/goldens/phase14.json \
+  scripts/tests/differential/goldens/phase15.json
 git commit -m "feat: record compile task side effects"
 ```
 
@@ -439,10 +450,14 @@ Run:
 
 ```bash
 git status --short
-git log --oneline --decorate -6
-git diff HEAD~4..HEAD --stat
+git log --oneline --decorate -9
+git diff 7910bfc..HEAD --stat
+git diff --name-status 7910bfc..HEAD
 ```
 
-Expected: clean worktree, six implementation/closure commits after the
-design/plan commits (including the Task 2 and Task 3 review-fix commits), and
-only files listed in this plan changed.
+Expected: clean worktree. `89aabe9` is the design commit and `7910bfc` is the
+plan commit; the feature diff deliberately starts after the plan. The next six
+commits are the planned Task 1–4 implementation/closure sequence, including the
+Task 2 and Task 3 review-fix commits. Any later review-fix commit is additional
+closure evidence and must be identified separately. The stat and complete
+name-status output must contain only files listed in this plan.

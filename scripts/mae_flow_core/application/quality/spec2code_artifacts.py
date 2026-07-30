@@ -47,38 +47,47 @@ def _failure(message):
     )
 
 
+def _artifact_confirmation_snapshot(process, kind, ports):
+    record = (process or {}).get(kind) or {}
+    path = str(record.get("path", "") or "")
+    expected = str(record.get("sha256", "") or "")
+    revision = int(record.get("revision", 0) or 0)
+    if not path or not expected or not revision:
+        raise ValueError("尚未登记待展示过程件: " + kind)
+    if not ports.is_file(path):
+        raise ValueError("待展示过程件不存在: " + path)
+    try:
+        actual = ports.digest(ports.read_text(path))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("待展示过程件无法读取: %s" % exc) from exc
+    if actual != expected:
+        raise ValueError(
+            "%s 登记后内容已变化；重新登记后再展示。" % kind)
+    return {
+        "path": path,
+        "sha256": expected,
+        "revision": revision,
+    }
+
+
+def _review_confirmation_digest(review_path, ports):
+    if not review_path:
+        return ""
+    if not ports.is_file(review_path):
+        raise ValueError("待展示 Review 不存在: " + review_path)
+    try:
+        return ports.digest(ports.read_text(review_path))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("待展示 Review 无法读取: %s" % exc) from exc
+
+
 def _confirmation_snapshot(process, kinds, review_path, ports):
-    artifacts = {}
-    for kind in kinds:
-        record = (process or {}).get(kind) or {}
-        path = str(record.get("path", "") or "")
-        expected = str(record.get("sha256", "") or "")
-        revision = int(record.get("revision", 0) or 0)
-        if not path or not expected or not revision:
-            raise ValueError("尚未登记待展示过程件: " + kind)
-        if not ports.is_file(path):
-            raise ValueError("待展示过程件不存在: " + path)
-        try:
-            actual = ports.digest(ports.read_text(path))
-        except (OSError, UnicodeDecodeError) as exc:
-            raise ValueError("待展示过程件无法读取: %s" % exc) from exc
-        if actual != expected:
-            raise ValueError(
-                "%s 登记后内容已变化；重新登记后再展示。" % kind)
-        artifacts[kind] = {
-            "path": path,
-            "sha256": expected,
-            "revision": revision,
-        }
-    review_sha256 = ""
-    if review_path:
-        if not ports.is_file(review_path):
-            raise ValueError("待展示 Review 不存在: " + review_path)
-        try:
-            review_sha256 = ports.digest(ports.read_text(review_path))
-        except (OSError, UnicodeDecodeError) as exc:
-            raise ValueError("待展示 Review 无法读取: %s" % exc) from exc
-    return artifacts, review_sha256
+    artifacts = {
+        kind: _artifact_confirmation_snapshot(process, kind, ports)
+        for kind in kinds
+    }
+    return artifacts, _review_confirmation_digest(
+        review_path, ports)
 
 
 def prepare_confirmation(

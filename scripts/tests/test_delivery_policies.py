@@ -22,6 +22,9 @@ from mae_flow_core.delivery.moonlight import (  # noqa: E402
     finalize_target,
     issue_id,
 )
+from mae_flow_core.cli_commands.checkpoint_facts import (  # noqa: E402
+    _development_review,
+)
 
 
 class CheckpointPolicyTests(unittest.TestCase):
@@ -56,6 +59,10 @@ class CheckpointPolicyTests(unittest.TestCase):
         self.assertEqual("CP1", locked_item(state)["id"])
         self.assertTrue(review_locked(state, moonlight=False))
         self.assertFalse(review_pending(state, moonlight=False))
+        self.assertIs(
+            state["development_review"],
+            _development_review(state),
+        )
 
     def test_locked_item_prefers_current_then_final_review(self):
         state = {

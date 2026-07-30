@@ -48,7 +48,14 @@ def _development_review(st):
     must keep its original build_review/tw_review/rf_review behavior.
     """
     data = st.get("development_review")
-    return data if isinstance(data, dict) and data.get("version") == 1 else None
+    return (
+        data
+        if (
+            isinstance(data, dict)
+            and data.get("version") in (1, 2)
+        )
+        else None
+    )
 
 def _development_checkpoints_enabled(st):
     protocols = st.get("protocols") or {}

@@ -195,6 +195,73 @@ def main():
           r.returncode != 0 and generated in (r.stdout + r.stderr),
           (r.stdout + r.stderr)[-300:])
 
+    root = make_repo(base, "compile-side-effect-staged", "build")
+    subprocess.run(
+        ["git", "-c", "user.email=probe@test.invalid",
+         "-c", "user.name=Probe Gate", "commit", "--allow-empty", "-qm", "base"],
+        cwd=root, check=True, capture_output=True)
+    generated = "internal/generated/staged.properties"
+    write(root, generated, "compiled=true\n")
+    write(root, ".mae-flow.json.agent-writes", json.dumps({
+        "paths": {},
+        "compile_side_effects": {generated: {"task_sha256": "compile-probe"}},
+    }, ensure_ascii=False))
+    subprocess.run(["git", "add", generated], cwd=root, check=True,
+                   capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]编译副作用"')
+    output = r.stdout + r.stderr
+    check("提交产物:已暂存 COMPILE 副作用给出 restore 且不写 strike/permit",
+          r.returncode != 0 and "git restore --staged --" in output
+          and not os.path.exists(os.path.join(root, ".mae-flow.json.gate-strikes"))
+          and not os.path.exists(os.path.join(root, ".mae-flow.json.gate-permits")),
+          output[-300:])
+    subprocess.run(["git", "restore", "--staged", "--", generated], cwd=root,
+                   check=True, capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]已纠正"')
+    check("提交产物:restore 后本地文件保留且下一次提交门禁放行",
+          r.returncode == 0 and os.path.isfile(os.path.join(root, generated)),
+          (r.stdout + r.stderr)[-300:])
+
+    root = make_repo(base, "compile-side-effect-compound", "build")
+    generated = "internal/generated/compound.properties"
+    write(root, generated, "compiled=true\n")
+    write(root, ".mae-flow.json.agent-writes", json.dumps({
+        "paths": {},
+        "compile_side_effects": {generated: {"task_sha256": "compile-probe"}},
+    }, ensure_ascii=False))
+    r = gate_bash(
+        root,
+        'git add internal/generated/compound.properties && git commit -m "[REQ probe][fix]编译副作用"')
+    output = r.stdout + r.stderr
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"], cwd=root, text=True,
+        check=True, capture_output=True).stdout
+    check("提交产物:复合命令在暂存前阻断并要求移出 add 清单",
+          r.returncode != 0 and generated in output and "git add" in output
+          and "git restore --staged --" not in output and not staged.strip(),
+          output[-300:])
+
+    root = make_repo(base, "compile-side-effect-many", "build")
+    generated_paths = ["internal/generated/output-%d.properties" % index
+                       for index in range(9)]
+    for generated in generated_paths:
+        write(root, generated, "compiled=true\n")
+    write(root, ".mae-flow.json.agent-writes", json.dumps({
+        "paths": {},
+        "compile_side_effects": {
+            generated: {"task_sha256": "compile-probe"}
+            for generated in generated_paths
+        },
+    }, ensure_ascii=False))
+    subprocess.run(["git", "add", *generated_paths], cwd=root, check=True,
+                   capture_output=True)
+    r = gate_bash(root, 'git commit -m "[REQ probe][fix]编译副作用"')
+    output = r.stdout + r.stderr
+    check("提交产物:九个 COMPILE 副作用全部列出并可 restore",
+          r.returncode != 0 and "git restore --staged --" in output
+          and all(generated in output for generated in generated_paths),
+          output[-600:])
+
     # ---------- 2. 证据全路径（importlib 直调，selftest 同款） ----------
     def st(cn="probe-x"):
         return {"config": {"CHANGE_NAME": cn}, "choices": {"workflow": "full"}}

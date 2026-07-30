@@ -85,6 +85,8 @@ def _gate_commit_candidates(c, st, jdie):
         inherited=(),
         foreign_openspec=(),
         compile_side_effects=(),
+        staged_compile_side_effects=(),
+        command_compile_side_effects=(),
         strong_artifacts=(),
         unproven_paths=(),
         artifact_hints=(),
@@ -94,6 +96,20 @@ def _gate_commit_candidates(c, st, jdie):
     (inherited, foreign_openspec, compile_side_effects, strong_artifacts,
      unproven_paths, artifact_hints) = api._pending_commit_files(
          c, st, candidate_snapshot)
+    staged_paths = {
+        api._repo_path_identity(path)
+        for path in candidate_snapshot.get("staged_paths", ())
+    }
+    command_paths = {
+        api._repo_path_identity(path)
+        for path in candidate_snapshot.get("working_paths", ())
+    }
+    staged_compile_side_effects = tuple(
+        path for path in compile_side_effects
+        if api._repo_path_identity(path) in staged_paths)
+    command_compile_side_effects = tuple(
+        path for path in compile_side_effects
+        if api._repo_path_identity(path) in command_paths)
     decision = decide_ownership(OwnershipFacts(
         review_required=False,
         expected_snapshot={},
@@ -102,6 +118,8 @@ def _gate_commit_candidates(c, st, jdie):
         inherited=tuple(inherited),
         foreign_openspec=tuple(foreign_openspec),
         compile_side_effects=tuple(compile_side_effects),
+        staged_compile_side_effects=staged_compile_side_effects,
+        command_compile_side_effects=command_compile_side_effects,
         strong_artifacts=tuple(strong_artifacts),
         unproven_paths=tuple(unproven_paths),
         artifact_hints=tuple(artifact_hints),

@@ -27,6 +27,8 @@ class OwnershipPolicyTests(unittest.TestCase):
             "inherited": (),
             "foreign_openspec": (),
             "compile_side_effects": (),
+            "staged_compile_side_effects": (),
+            "command_compile_side_effects": (),
             "strong_artifacts": (),
             "unproven_paths": (),
             "artifact_hints": (),
@@ -84,6 +86,48 @@ class OwnershipPolicyTests(unittest.TestCase):
         self.assertIn("config/generated.properties", result.block.message)
         self.assertIn(
             "git restore --staged -- <上述路径>", result.block.message)
+
+    def test_compile_side_effect_message_lists_every_staged_path(self):
+        paths = tuple("config/generated-%d.properties" % index
+                      for index in range(9))
+
+        result = decide_ownership(self.facts(
+            compile_side_effects=paths,
+            staged_compile_side_effects=paths,
+        ))
+
+        self.assertEqual("bash-compile-side-effects", result.block.rule)
+        self.assertTrue(all(path in result.block.message for path in paths))
+        self.assertIn("git restore --staged --", result.block.message)
+        self.assertNotIn("…", result.block.message)
+
+    def test_command_only_compile_side_effect_says_to_remove_the_command_path(self):
+        generated = "internal/generated/build.properties"
+
+        result = decide_ownership(self.facts(
+            compile_side_effects=(generated,),
+            command_compile_side_effects=(generated,),
+        ))
+
+        self.assertEqual("bash-compile-side-effects", result.block.rule)
+        self.assertIn(generated, result.block.message)
+        self.assertIn("git add", result.block.message)
+        self.assertNotIn("git restore --staged --", result.block.message)
+
+    def test_mixed_compile_side_effects_have_separate_recovery_actions(self):
+        staged = "config/staged.properties"
+        command_only = "internal/generated/build.properties"
+
+        result = decide_ownership(self.facts(
+            compile_side_effects=(staged, command_only),
+            staged_compile_side_effects=(staged,),
+            command_compile_side_effects=(command_only,),
+        ))
+
+        self.assertIn(staged, result.block.message)
+        self.assertIn(command_only, result.block.message)
+        self.assertIn("git restore --staged --", result.block.message)
+        self.assertIn("git add", result.block.message)
 
     def test_advisories_are_ordered_and_non_blocking(self):
         result = decide_ownership(self.facts(

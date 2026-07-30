@@ -282,7 +282,8 @@ def _commit_worktree_candidates(command):
 
 def _pending_commit_candidates(command=""):
     """Return exact staged/compound-add candidates before a commit runs."""
-    candidates, new_candidates = _staged_commit_candidates()
+    staged_paths, new_candidates = _staged_commit_candidates()
+    candidates = list(staged_paths)
     pending, pending_new = _compound_add_candidates(command)
     commit_working, commit_only = _commit_worktree_candidates(command)
     if commit_only:
@@ -298,6 +299,7 @@ def _pending_commit_candidates(command=""):
     return {
         "paths": candidates,
         "new_paths": set(new_candidates),
+        "staged_paths": set(staged_paths),
         "working_paths": set(pending) | set(commit_working),
     }
 

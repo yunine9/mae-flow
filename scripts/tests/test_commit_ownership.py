@@ -88,6 +88,8 @@ class CommitOwnershipTests(unittest.TestCase):
             inherited=tuple(inherited),
             foreign_openspec=tuple(foreign_openspec),
             compile_side_effects=tuple(compile_side_effects),
+            staged_compile_side_effects=tuple(compile_side_effects),
+            command_compile_side_effects=(),
             strong_artifacts=tuple(strong_artifacts),
             unproven_paths=tuple(unproven_paths),
             artifact_hints=tuple(artifact_hints),
@@ -146,6 +148,43 @@ class CommitOwnershipTests(unittest.TestCase):
 
         self.assertEqual([], compile_side_effects)
         self.assertIsNone(decision.block)
+
+    def test_malformed_legacy_sidecar_fails_open(self):
+        generated = "config/generated.properties"
+        write(self.repo, generated, "legacy=true\n")
+        write(self.repo, ".mae-flow.json.agent-writes", "{not json\n")
+        git(self.repo, "add", generated)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([], compile_side_effects)
+        self.assertIsNone(decision.block)
+
+    def test_snapshot_separates_staged_and_compound_add_candidates(self):
+        staged = "config/staged.properties"
+        command_only = "internal/generated/build.properties"
+        write(self.repo, staged, "staged=true\n")
+        write(self.repo, command_only, "compiled=true\n")
+        self.write_sidecar({
+            staged: {"task_sha256": "compile"},
+            command_only: {"task_sha256": "compile"},
+        })
+        git(self.repo, "add", staged)
+        command = "git add %s && git commit -m '[REQ123][fix]compile'" % command_only
+        snapshot = mf._pending_commit_candidates(command)
+        (inherited, foreign_openspec, compile_side_effects,
+         strong_artifacts, unproven_paths, artifact_hints) = (
+             mf._pending_commit_files(command, self.state(), snapshot))
+
+        self.assertFalse(inherited)
+        self.assertFalse(foreign_openspec)
+        self.assertEqual([staged, command_only], compile_side_effects)
+        self.assertEqual({staged}, snapshot["staged_paths"])
+        self.assertEqual({command_only}, snapshot["working_paths"])
+        self.assertFalse(strong_artifacts)
+        self.assertIn(staged, unproven_paths)
+        self.assertIn(command_only, unproven_paths)
+        self.assertFalse(artifact_hints)
 
     def test_unrelated_ambiguous_artifact_remains_warning_only(self):
         artifact = "dist/app.js"

@@ -35,7 +35,10 @@ def _development_review(state):
     data = state.get("development_review")
     return (
         data
-        if isinstance(data, dict) and data.get("version") == 1
+        if (
+            isinstance(data, dict)
+            and data.get("version") in (1, 2)
+        )
         else None
     )
 

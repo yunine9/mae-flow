@@ -108,15 +108,17 @@ class WorkflowAdvancementPolicyTests(unittest.TestCase):
             },
         }
         cases = [
-            ("staged", "分阶段检查点已检视"),
-            ("continuous", "一次完成模式改在质量链后统一检视"),
+            (1, "staged", "分阶段检查点已检视"),
+            (1, "continuous", "一次完成模式改在质量链后统一检视"),
+            (2, "staged", "分阶段检查点已检视"),
+            (2, "continuous", "一次完成模式改在质量链后统一检视"),
         ]
-        for mode, note in cases:
-            with self.subTest(mode=mode):
+        for version, mode, note in cases:
+            with self.subTest(version=version, mode=mode):
                 state = {
                     "choices": {},
                     "development_review": {
-                        "version": 1,
+                        "version": version,
                         "status": "active",
                         "mode": mode,
                     },

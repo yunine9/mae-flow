@@ -135,6 +135,19 @@ def _agent_written_paths():
         if isinstance(path, str) and _repo_path_identity(path)
     }
 
+def _compile_side_effect_paths():
+    """Return normalized COMPILE side-effect ledger keys, if available."""
+    raw, err = safe_read_json(AGENT_WRITES_PATH)
+    if err or not isinstance(raw, dict):
+        return set()
+    entries = raw.get("compile_side_effects")
+    if not isinstance(entries, dict):
+        return set()
+    return {
+        _repo_path_identity(path) for path in entries
+        if isinstance(path, str) and _repo_path_identity(path)
+    }
+
 def _is_story_document(path):
     """Recognize STORY content even when an agent writes it to the wrong tree."""
     p = re.sub(r"^(?:\./)+", "", norm(path))
@@ -301,6 +314,7 @@ def _pending_commit_files(command="", st=None, candidate_snapshot=None):
     candidates = candidate_snapshot["paths"]
     new_candidates = candidate_snapshot["new_paths"]
     written = _agent_written_paths()
+    compile_side_effects = _compile_side_effect_paths()
 
     def has_provenance(path):
         return (_repo_path_identity(path) in written
@@ -316,6 +330,10 @@ def _pending_commit_files(command="", st=None, candidate_snapshot=None):
         if path.startswith("openspec/")
         and not _trusted_harness_commit_path(path, st)
     ]
+    recorded_compile_side_effects = [
+        path for path in candidates
+        if _repo_path_identity(path) in compile_side_effects
+    ]
     unproven = [path for path in candidates if not has_provenance(path)]
     strong_unproven = [
         path for path in unproven
@@ -325,4 +343,5 @@ def _pending_commit_files(command="", st=None, candidate_snapshot=None):
         path for path in candidates
         if path not in strong_unproven and _build_artifact_confidence(path)
     ]
-    return inherited, foreign_openspec, strong_unproven, unproven, artifact_hints
+    return (inherited, foreign_openspec, recorded_compile_side_effects,
+            strong_unproven, unproven, artifact_hints)

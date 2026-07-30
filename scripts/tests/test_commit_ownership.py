@@ -12,6 +12,7 @@ import unittest
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core import cli_runtime as mf
+from mae_flow_core.guard.ownership import OwnershipFacts, decide_ownership
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:
@@ -69,6 +70,30 @@ class CommitOwnershipTests(unittest.TestCase):
         state["initial_dirty"].append(path)
         state["initial_dirty_fingerprints"][path] = mf._path_fingerprint(path)
 
+    def write_sidecar(self, compile_side_effects=None, paths=None):
+        sidecar = {"paths": paths or {}}
+        if compile_side_effects is not None:
+            sidecar["compile_side_effects"] = compile_side_effects
+        write(self.repo, ".mae-flow.json.agent-writes", json.dumps(sidecar))
+
+    def decide_pending_files(self, state):
+        (inherited, foreign_openspec, compile_side_effects,
+         strong_artifacts, unproven_paths, artifact_hints) = (
+             mf._pending_commit_files("", state))
+        decision = decide_ownership(OwnershipFacts(
+            review_required=False,
+            expected_snapshot={},
+            current_snapshot={},
+            candidate_paths=tuple(mf._pending_commit_candidates()["paths"]),
+            inherited=tuple(inherited),
+            foreign_openspec=tuple(foreign_openspec),
+            compile_side_effects=tuple(compile_side_effects),
+            strong_artifacts=tuple(strong_artifacts),
+            unproven_paths=tuple(unproven_paths),
+            artifact_hints=tuple(artifact_hints),
+        ))
+        return compile_side_effects, decision
+
     def test_unchanged_previous_story_is_blocked_before_commit(self):
         old_story = "openspec/changes/old/STORY-REQ122.md"
         write(self.repo, old_story, "# STORY-REQ122\n\n上一单。\n")
@@ -76,14 +101,65 @@ class CommitOwnershipTests(unittest.TestCase):
         self.mark_initial(state, old_story)
         git(self.repo, "add", old_story)
 
-        inherited, foreign, strong, unproven, hints = (
+        inherited, foreign, compile_side_effects, strong, unproven, hints = (
             mf._pending_commit_files("", state))
 
         self.assertEqual([old_story], inherited)
         self.assertEqual([old_story], foreign)
+        self.assertFalse(compile_side_effects)
         self.assertFalse(strong)
         self.assertIn(old_story, unproven)
         self.assertFalse(hints)
+
+    def test_recorded_compile_side_effect_blocks_new_configuration_file(self):
+        generated = "config/generated.properties"
+        write(self.repo, generated, "compiled=true\n")
+        self.write_sidecar({"./" + generated: {"task_sha256": "compile"}})
+        git(self.repo, "add", generated)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([generated], compile_side_effects)
+        self.assertEqual("bash-compile-side-effects", decision.block.rule)
+
+    def test_recorded_compile_side_effect_blocks_tracked_configuration_file(self):
+        generated = "config/runtime.properties"
+        write(self.repo, generated, "compiled=false\n")
+        git(self.repo, "add", generated)
+        git(self.repo, "commit", "-qm", "track runtime config")
+        write(self.repo, generated, "compiled=true\n")
+        self.write_sidecar({generated: {"task_sha256": "compile"}})
+        git(self.repo, "add", generated)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([generated], compile_side_effects)
+        self.assertEqual("bash-compile-side-effects", decision.block.rule)
+
+    def test_old_sidecar_without_compile_effects_stays_compatible(self):
+        generated = "config/generated.properties"
+        write(self.repo, generated, "legacy=true\n")
+        self.write_sidecar(paths={generated: {"tool": "file-write"}})
+        git(self.repo, "add", generated)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([], compile_side_effects)
+        self.assertIsNone(decision.block)
+
+    def test_unrelated_ambiguous_artifact_remains_warning_only(self):
+        artifact = "dist/app.js"
+        write(self.repo, artifact, "console.log('release');\n")
+        self.write_sidecar({"internal/generated/build.properties": {
+            "task_sha256": "different-compile",
+        }})
+        git(self.repo, "add", artifact)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([], compile_side_effects)
+        self.assertIsNone(decision.block)
+        self.assertTrue(decision.advisories)
 
     def test_openspec_trust_is_limited_to_current_delivery(self):
         current = "openspec/changes/current-change/change.md"

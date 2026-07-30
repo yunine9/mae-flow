@@ -13,6 +13,7 @@ class OwnershipFacts:
     candidate_paths: tuple
     inherited: tuple
     foreign_openspec: tuple
+    compile_side_effects: tuple
     strong_artifacts: tuple
     unproven_paths: tuple
     artifact_hints: tuple
@@ -77,6 +78,15 @@ def _candidate_block(facts):
             + ("…" if len(facts.foreign_openspec) > 8 else "")
             + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
             "选择不入库后由流程移入 .mae-flow-work/story。",
+        )
+    if facts.compile_side_effects:
+        return GateDecision(
+            "block",
+            "bash-compile-side-effects",
+            "提交前检测到由 COMPILE 命令产生或改写、且 Agent 未直接修改的文件: "
+            + "、".join(facts.compile_side_effects[:8])
+            + "。这些文件只能保留在本地构建现场，禁止进入本次提交。"
+            "执行 git restore --staged -- <上述路径> 只移出暂存区。",
         )
     if facts.strong_artifacts:
         return GateDecision(

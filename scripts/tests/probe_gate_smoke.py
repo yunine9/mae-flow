@@ -179,6 +179,22 @@ def main():
           r.returncode == 0 and "实际改写的候选范围" in (r.stdout + r.stderr),
           (r.stdout + r.stderr)[-300:])
 
+    root = make_repo(base, "compile-side-effect", "build")
+    generated = "internal/generated/build.properties"
+    write(root, generated, "compiled=true\n")
+    write(root, ".mae-flow.json.agent-writes", json.dumps({
+        "paths": {},
+        "compile_side_effects": {
+            generated: {"task_sha256": "compile-probe"},
+        },
+    }, ensure_ascii=False))
+    r = gate_bash(
+        root,
+        'git add internal/generated/build.properties && git commit -m "[REQ probe][fix]编译副作用"')
+    check("提交产物:记录的 COMPILE 副作用阻断精确提交",
+          r.returncode != 0 and generated in (r.stdout + r.stderr),
+          (r.stdout + r.stderr)[-300:])
+
     # ---------- 2. 证据全路径（importlib 直调，selftest 同款） ----------
     def st(cn="probe-x"):
         return {"config": {"CHANGE_NAME": cn}, "choices": {"workflow": "full"}}

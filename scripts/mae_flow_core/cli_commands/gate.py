@@ -84,13 +84,14 @@ def _gate_commit_candidates(c, st, jdie):
         candidate_paths=tuple(candidate_snapshot.get("paths") or []),
         inherited=(),
         foreign_openspec=(),
+        compile_side_effects=(),
         strong_artifacts=(),
         unproven_paths=(),
         artifact_hints=(),
     ))
     if review.block:
         jdie(review.block.rule, review.block.message)
-    (inherited, foreign_openspec, strong_artifacts,
+    (inherited, foreign_openspec, compile_side_effects, strong_artifacts,
      unproven_paths, artifact_hints) = api._pending_commit_files(
          c, st, candidate_snapshot)
     decision = decide_ownership(OwnershipFacts(
@@ -100,11 +101,17 @@ def _gate_commit_candidates(c, st, jdie):
         candidate_paths=tuple(candidate_snapshot.get("paths") or []),
         inherited=tuple(inherited),
         foreign_openspec=tuple(foreign_openspec),
+        compile_side_effects=tuple(compile_side_effects),
         strong_artifacts=tuple(strong_artifacts),
         unproven_paths=tuple(unproven_paths),
         artifact_hints=tuple(artifact_hints),
     ))
     if decision.block:
+        if decision.block.rule == "bash-compile-side-effects":
+            # This exact index state is the whole violation. Do not create a
+            # permit/strike record: `git restore --staged` clears the next
+            # commit attempt without deleting the local build output.
+            api.die(decision.block.message, 2)
         jdie(decision.block.rule, decision.block.message)
     for message in decision.advisories:
         print(message, file=sys.stderr)

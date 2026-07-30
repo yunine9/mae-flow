@@ -26,6 +26,7 @@ class OwnershipPolicyTests(unittest.TestCase):
             "candidate_paths": (),
             "inherited": (),
             "foreign_openspec": (),
+            "compile_side_effects": (),
             "strong_artifacts": (),
             "unproven_paths": (),
             "artifact_hints": (),
@@ -59,11 +60,30 @@ class OwnershipPolicyTests(unittest.TestCase):
         result = decide_ownership(self.facts(
             inherited=("legacy.txt",),
             foreign_openspec=("openspec/changes/other/change.md",),
+            compile_side_effects=("config/generated.properties",),
             strong_artifacts=("build/a.o",),
         ))
         self.assertEqual(
             "bash-cross-delivery-carryover", result.block.rule)
         self.assertIn("legacy.txt", result.block.message)
+
+        result = decide_ownership(self.facts(
+            foreign_openspec=("openspec/changes/other/change.md",),
+            compile_side_effects=("config/generated.properties",),
+            strong_artifacts=("build/a.o",),
+        ))
+        self.assertEqual("bash-foreign-openspec", result.block.rule)
+
+    def test_compile_side_effects_block_before_fallback_artifacts(self):
+        result = decide_ownership(self.facts(
+            compile_side_effects=("config/generated.properties",),
+            strong_artifacts=("build/a.o",),
+        ))
+
+        self.assertEqual("bash-compile-side-effects", result.block.rule)
+        self.assertIn("config/generated.properties", result.block.message)
+        self.assertIn(
+            "git restore --staged -- <上述路径>", result.block.message)
 
     def test_advisories_are_ordered_and_non_blocking(self):
         result = decide_ownership(self.facts(

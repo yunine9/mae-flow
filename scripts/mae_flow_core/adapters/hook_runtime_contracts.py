@@ -237,3 +237,4 @@ class HookContractsMixin:
         ))
         if not decision.accepted:
             bail(decision.reason)
+        self._record_compile_side_effects(task, tool_calls)

@@ -57,6 +57,11 @@ def _resolve_requirement_sources_from_runtime(st):
         glob_paths=globmod.glob,
     ))
 
+
+def _compile_worktree_snapshot(kind, head):
+    return api._worktree_snapshot_since(head) if kind == "COMPILE" else {}
+
+
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
@@ -86,6 +91,8 @@ def _store_agent_task(flow, st, args, context):
         source_snapshot=(
             api._source_snapshot_since(context["task_head"], st, flow)
             if context["precommit_review"] else {}),
+        worktree_snapshot=_compile_worktree_snapshot(
+            kind, context["task_head"]),
         allowed_files=(
             context["scan"].get("files", [])
             if kind == "CODECHECK" else []),

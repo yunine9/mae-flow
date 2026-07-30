@@ -40,6 +40,7 @@ class QualityTaskCardTests(unittest.TestCase):
     def test_task_record_detaches_mutable_inputs(self):
         files = ["src/main.cpp"]
         roots = ["src"]
+        worktree_snapshot = {"generated/build.properties": "before"}
         record = task_record(
             step="build",
             path="/tmp/card.md",
@@ -50,6 +51,7 @@ class QualityTaskCardTests(unittest.TestCase):
             precommit_review=True,
             initial_compile_net=2,
             source_snapshot={"src/main.cpp": "hash"},
+            worktree_snapshot=worktree_snapshot,
             allowed_files=files,
             task_files=files,
             execution_roots=roots,
@@ -60,8 +62,13 @@ class QualityTaskCardTests(unittest.TestCase):
         )
         files.append("src/later.cpp")
         roots.append(".")
+        worktree_snapshot["generated/build.properties"] = "after"
         self.assertEqual(["src/main.cpp"], record["task_files"])
         self.assertEqual(["src"], record["execution_roots"])
+        self.assertEqual(
+            {"generated/build.properties": "before"},
+            record["worktree_snapshot"],
+        )
         self.assertEqual("abc", record["sha256"])
 
 

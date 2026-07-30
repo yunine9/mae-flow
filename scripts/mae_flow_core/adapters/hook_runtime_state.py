@@ -133,6 +133,9 @@ class HookStateMixin:
                     "at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "tool": "file-write",
                 }
+                compile_side_effects = data.get("compile_side_effects")
+                if isinstance(compile_side_effects, dict):
+                    compile_side_effects.pop(relative, None)
                 # A flow should rarely touch this many files. Bound stale/corrupt
                 # growth without changing the provenance semantics.
                 if len(paths) > 2000:
@@ -148,6 +151,52 @@ class HookStateMixin:
                 recover_corrupt=True)
         except Exception as exc:
             self.log("agent write ledger EXC: %s" % exc)
+
+
+    def _record_compile_side_effects(self, task, tool_calls):
+        """Persist accepted COMPILE changes not owned by direct Agent edits."""
+        try:
+            baseline = task.get("worktree_snapshot")
+            if not isinstance(baseline, dict):
+                self.log("COMPILE side-effect ledger skipped: missing baseline")
+                return
+            current = self._worktree_snapshot(task.get("head", ""))
+            direct_paths = _successful_direct_write_paths(
+                self._tool_call_values(tool_calls), os.getcwd())
+            side_effect_paths = _compile_side_effect_paths(
+                baseline, current, direct_paths)
+            if not side_effect_paths:
+                return
+            recorded_at = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            def update_side_effects(data):
+                effects = data.setdefault("compile_side_effects", {})
+                if not isinstance(effects, dict):
+                    effects = {}
+                    data["compile_side_effects"] = effects
+                for path in side_effect_paths:
+                    effects[path] = {
+                        "at": recorded_at,
+                        "task_sha256": task.get("sha256", ""),
+                        "fingerprint": current[path],
+                    }
+                if len(effects) > 2000:
+                    data["compile_side_effects"] = dict(sorted(
+                        effects.items(),
+                        key=lambda item: (
+                            str((item[1] or {}).get("at", "")), item[0]),
+                        reverse=True,
+                    )[:2000])
+                return data
+
+            update_json(
+                self.AGENT_WRITES_STATE,
+                update_side_effects,
+                default={"paths": {}, "compile_side_effects": {}},
+                recover_corrupt=True,
+            )
+        except Exception as exc:
+            self.log("COMPILE side-effect ledger EXC: %s" % exc)
 
 
     def _capture_usermsg(self, text):

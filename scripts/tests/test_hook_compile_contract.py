@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Tests for the pure COMPILE Agent contract."""
 
+import contextlib
+import hashlib
+import io
+import json
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 
 
@@ -18,6 +24,8 @@ from mae_flow_core.quality.compile_contract import (  # noqa: E402
     evaluate_compile_contract,
 )
 from mae_flow_core.quality.tool_transcript import ToolCall  # noqa: E402
+from mae_flow_core import save_versioned_json  # noqa: E402
+from mae_flow_core.adapters.hook_runtime import HookRuntimeAdapter  # noqa: E402
 
 
 def call(name, value, result="", seen=True, error=False):
@@ -28,6 +36,104 @@ def call(name, value, result="", seen=True, error=False):
         result_seen=seen,
         is_error=error,
         result=result,
+    )
+
+
+@contextlib.contextmanager
+def in_directory(path):
+    original = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(original)
+
+
+def initialize_repository(root):
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "mae-flow@test.invalid"],
+        cwd=root, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Mae Flow Test"],
+        cwd=root, check=True,
+    )
+    with open(os.path.join(root, ".gitignore"), "w", encoding="utf-8") as stream:
+        stream.write(".mae-flow*\n")
+    config_path = os.path.join(root, "config", "runtime.json")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as stream:
+        stream.write('{"runtime": "before"}\n')
+    subprocess.run(
+        ["git", "add", ".gitignore", "config/runtime.json"],
+        cwd=root, check=True,
+    )
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=root, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+
+
+def runtime_for(root):
+    return HookRuntimeAdapter(
+        state=os.path.join(root, ".mae-flow.json"),
+        exit_state=os.path.join(root, ".mae-flow.json.exited"),
+        action_state=os.path.join(root, ".mae-flow-work", "action.json"),
+        rejection_state=os.path.join(root, ".mae-flow.json.agent-rejections"),
+        evidence_state=os.path.join(root, ".mae-flow.json.agent-evidence"),
+        agent_writes_state=os.path.join(root, ".mae-flow.json.agent-writes"),
+        moonlight_intent=os.path.join(root, ".mae-flow.json.moonlight-intent"),
+        exit_intent=os.path.join(root, ".mae-flow.json.exit-intent"),
+        maeflow=os.path.join(ROOT, "scripts", "mae-flow.py"),
+        log=lambda _message: None,
+    )
+
+
+def compile_task(root, head, worktree_snapshot):
+    body = "# COMPILE fixture task\n"
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    task_path = os.path.join(root, ".mae-flow-work", "compile-task.md")
+    os.makedirs(os.path.dirname(task_path), exist_ok=True)
+    with open(task_path, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(body)
+        stream.write("TASK_CARD_SHA256: %s\n" % digest)
+    return {
+        "step": "tw_compile",
+        "path": task_path,
+        "sha256": digest,
+        "head": head,
+        "worktree_snapshot": worktree_snapshot,
+    }
+
+
+def save_compile_state(root, task):
+    save_versioned_json(
+        os.path.join(root, ".mae-flow.json"),
+        {
+            "current": "tw_compile",
+            "config": {"编译方式": "python build.py"},
+            "choices": {},
+            "history": [],
+            "started": "2026-07-30 10:00:00",
+            "agent_tasks": {"COMPILE": task},
+        },
+        "flow",
+        project_root=root,
+    )
+
+
+def accepted_report(task):
+    return (
+        "COMPILE_RESULT: OK\n"
+        "TASK_CARD_SHA256: %s\n"
+        "EXECUTED_BUILD: python build.py\n"
+        "BUILD_ERRORS: 0"
+        % task["sha256"]
     )
 
 
@@ -136,6 +242,90 @@ class CompileContractTests(unittest.TestCase):
             status="FAIL",
         ))
         self.assertTrue(decision.accepted)
+
+    def test_accepted_compile_records_only_non_direct_worktree_effects(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            runtime = runtime_for(td)
+            baseline = runtime._worktree_snapshot(head)
+            task = compile_task(td, head, baseline)
+            save_compile_state(td, task)
+            generated = os.path.join(td, "generated", "build.properties")
+            os.makedirs(os.path.dirname(generated), exist_ok=True)
+            with open(generated, "w", encoding="utf-8") as stream:
+                stream.write("compiled=true\n")
+            with open(
+                    os.path.join(td, "config", "runtime.json"),
+                    "w", encoding="utf-8") as stream:
+                stream.write('{"runtime": "after"}\n')
+            with open(
+                    os.path.join(td, ".mae-flow.json.agent-writes"),
+                    "w", encoding="utf-8") as stream:
+                json.dump(
+                    {"paths": {"legacy/write.cpp": {"tool": "file-write"}}},
+                    stream,
+                )
+
+            runtime._compile_contract(
+                "OK",
+                accepted_report(task),
+                [
+                    {
+                        "name": "Bash",
+                        "input": {"command": "python build.py"},
+                        "result_seen": True,
+                        "result": "build complete\nexit code: 0",
+                    },
+                    {
+                        "name": "Edit",
+                        "input": {"file_path": "config/runtime.json"},
+                        "result_seen": True,
+                        "result": "updated runtime",
+                    },
+                ],
+            )
+
+            with open(
+                    os.path.join(td, ".mae-flow.json.agent-writes"),
+                    encoding="utf-8") as stream:
+                ledger = json.load(stream)
+            self.assertEqual(["generated/build.properties"], sorted(
+                ledger["compile_side_effects"]))
+            self.assertEqual(
+                task["sha256"],
+                ledger["compile_side_effects"]
+                ["generated/build.properties"]["task_sha256"],
+            )
+            self.assertIn("legacy/write.cpp", ledger["paths"])
+
+            runtime._record_agent_write("generated/build.properties")
+            with open(
+                    os.path.join(td, ".mae-flow.json.agent-writes"),
+                    encoding="utf-8") as stream:
+                superseded = json.load(stream)
+            self.assertNotIn(
+                "generated/build.properties",
+                superseded["compile_side_effects"],
+            )
+            self.assertIn("generated/build.properties", superseded["paths"])
+
+    def test_rejected_compile_contract_does_not_record_side_effects(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            runtime = runtime_for(td)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            generated = os.path.join(td, "generated", "build.properties")
+            os.makedirs(os.path.dirname(generated), exist_ok=True)
+            with open(generated, "w", encoding="utf-8") as stream:
+                stream.write("compiled=true\n")
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as rejected:
+                    runtime._compile_contract("OK", accepted_report(task), [])
+            self.assertEqual(2, rejected.exception.code)
+            self.assertFalse(os.path.exists(
+                os.path.join(td, ".mae-flow.json.agent-writes")))
 
 
 if __name__ == "__main__":

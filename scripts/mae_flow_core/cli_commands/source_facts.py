@@ -137,6 +137,15 @@ def _source_snapshot_since(head, st=None, flow=None):
     return _source_fingerprints(
         _changed_paths_since_head(head), st, flow)
 
+
+def _worktree_snapshot_since(head):
+    """Fingerprint every Git-visible change for a COMPILE provenance baseline."""
+    return {
+        path: api._review_path_fingerprint(path)
+        for path in _changed_paths_since_head(head)
+    }
+
+
 def _checkpoint_candidate_path(path, st, flow=None):
     if api._is_source_path(path, st, flow or api.FLOW):
         return True

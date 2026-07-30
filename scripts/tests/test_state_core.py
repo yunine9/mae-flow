@@ -120,6 +120,10 @@ class RuntimeAndStateTests(unittest.TestCase):
                 {"current": "build", "config": {}, "choices": {},
                  "history": [], "started": "2026-07-26 12:00:00"},
                 "flow", project_root=td)
+            atomic_write_json(
+                os.path.join(td, ".mae-flow.json.agent-writes"),
+                {"paths": {"legacy/write.cpp": {"tool": "file-write"}}},
+            )
             payload = json.dumps({
                 "cwd": td,
                 "tool_name": "Edit",
@@ -139,6 +143,7 @@ class RuntimeAndStateTests(unittest.TestCase):
                     encoding="utf-8") as stream:
                 ledger = json.load(stream)
             self.assertIn("src/feature.cpp", ledger["paths"])
+            self.assertIn("legacy/write.cpp", ledger["paths"])
 
     def test_standalone_posttooluse_captures_scope_confirmation(self):
         with tempfile.TemporaryDirectory() as td:

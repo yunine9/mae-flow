@@ -57,6 +57,10 @@ from mae_flow_core.quality.codecheck_contract import (
 from mae_flow_core.quality.compile_contract import (
     evaluate_compile_contract as _evaluate_compile_contract,
 )
+from mae_flow_core.quality.compile_side_effects import (
+    compile_side_effect_paths as _compile_side_effect_paths,
+    successful_direct_write_paths as _successful_direct_write_paths,
+)
 from mae_flow_core.quality.grill_contract import (
     evaluate_grill_contract as _evaluate_grill_contract,
 )

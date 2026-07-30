@@ -166,6 +166,14 @@ class HookSourceMixin:
         }
 
 
+    def _worktree_snapshot(self, head):
+        """Fingerprint every Git-visible change for COMPILE provenance."""
+        return {
+            path: self._review_path_fingerprint(path)
+            for path in self._changed_paths_since(head)
+        }
+
+
     _TEST_PAT = re.compile(
         r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/|"
         r"(^|/)src/test/|(^|/)test_[^/]+\.py$|"

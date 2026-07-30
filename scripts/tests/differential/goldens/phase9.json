@@ -107,8 +107,8 @@
         "size": 624
       },
       ".mae-flow.json": {
-        "sha256": "cbc6f85d659857e5ecba9185342e1ebd4fe5acc6aaf6db5b2e3bad8aea653641",
-        "size": 1379
+        "sha256": "fe4af6d99e64395c3c9181ba5b17aff154e09d75e6c95bcacdc074c58f9c6612",
+        "size": 1410
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -152,7 +152,8 @@
               "src/main.py"
             ],
             "unchanged_initial_dirty": [],
-            "ut_targets": {}
+            "ut_targets": {},
+            "worktree_snapshot": {}
           }
         },
         "choices": {

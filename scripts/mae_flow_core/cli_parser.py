@@ -178,6 +178,14 @@ def parse_args(argv=None):
     task.add_argument(
         "--checkpoint",
         help="编译任务所属检查点，如 CP1；仅开发节奏已确认的编码步骤使用")
+    quality_artifact = sub.add_parser("quality-artifact")
+    quality_artifact_actions = quality_artifact.add_subparsers(
+        dest="quality_action", required=True)
+    quality_register = quality_artifact_actions.add_parser("register")
+    quality_register.add_argument(
+        "kind", choices=["blueprint", "roadmap", "plan"])
+    quality_register.add_argument("path")
+    quality_artifact_actions.add_parser("show")
     lightcheck = sub.add_parser("lightcheck")
     lightcheck.add_argument(
         "--quiet", action="store_true",

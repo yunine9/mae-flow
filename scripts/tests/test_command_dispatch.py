@@ -50,6 +50,7 @@ class CommandDispatchTests(unittest.TestCase):
             "moonlight": "cmd_moonlight",
             "checkpoint": "cmd_checkpoint",
             "agent-task": "cmd_agent_task",
+            "quality-artifact": "cmd_quality_artifact",
             "codecheck-scan": "cmd_codecheck_scan",
             "codecheck-scope": "cmd_codecheck_scope",
             "codecheck-record": "cmd_codecheck_record",

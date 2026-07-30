@@ -125,6 +125,7 @@ ev_glob = _WORKFLOW_EVIDENCE.glob
 ev_branch_ok = _WORKFLOW_EVIDENCE.branch_ok
 ev_tasks_checked = _WORKFLOW_EVIDENCE.tasks_checked
 ev_spec_field = _WORKFLOW_EVIDENCE.spec_field
+ev_spec2code_artifact = _WORKFLOW_EVIDENCE.spec2code_artifact
 ev_tier_scope = _WORKFLOW_EVIDENCE.tier_scope
 ev_spec_validate = _WORKFLOW_EVIDENCE.spec_validate
 ev_content_free = _WORKFLOW_EVIDENCE.content_free

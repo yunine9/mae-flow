@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for generic workflow Evidence rules."""
 
+import hashlib
 import os
 import sys
 import unittest
@@ -45,6 +46,33 @@ def make_ports(**overrides):
 
 
 class WorkflowEvidenceRuleTests(unittest.TestCase):
+    def test_spec2code_artifact_requires_registered_fresh_file(self):
+        text = "# artifact\n"
+        state = {
+            "spec2code": {
+                "blueprint": {
+                    "path": ".mae-flow-work/test-blueprint-REQ-1.md",
+                    "sha256": hashlib.sha256(
+                        text.encode("utf-8")).hexdigest(),
+                },
+            },
+        }
+        rules = WorkflowEvidenceRules(make_ports(
+            is_file=lambda _path: True,
+            read_text=lambda _path: text,
+        ))
+        self.assertTrue(rules.spec2code_artifact(
+            {"kind": "blueprint"}, state).passed)
+        stale = WorkflowEvidenceRules(make_ports(
+            is_file=lambda _path: True,
+            read_text=lambda _path: text + "changed",
+        ))
+        self.assertIn(
+            "摘要已变化",
+            stale.spec2code_artifact(
+                {"kind": "blueprint"}, state).reason,
+        )
+
     def test_substitute_and_glob_keep_legacy_placeholder_semantics(self):
         self.assertEqual(
             "docs/REQ-7/change.md",

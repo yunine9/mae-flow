@@ -26,6 +26,7 @@ from .cli_commands import gate_permit_state as _gate_permit_state
 from .cli_commands import spec as _spec
 from .cli_commands import gate as _gate
 from .cli_commands import agent_task as _agent_task
+from .cli_commands import quality_artifacts as _quality_artifacts
 from .cli_commands import codecheck_commands as _codecheck_commands
 from .cli_commands import story_diag as _story_diag
 from .cli_commands import moonlight_commands as _moonlight_commands
@@ -55,6 +56,7 @@ _COMMAND_MODULES = (
     _spec,
     _gate,
     _agent_task,
+    _quality_artifacts,
     _codecheck_commands,
     _story_diag,
     _moonlight_commands,

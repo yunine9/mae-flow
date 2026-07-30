@@ -36,6 +36,8 @@ FLOW_ROUTES = MappingProxyType({
         "cmd_checkpoint", ("flow", "state", "args")),
     "agent-task": CommandRoute(
         "cmd_agent_task", ("flow", "state", "args")),
+    "quality-artifact": CommandRoute(
+        "cmd_quality_artifact", ("flow", "state", "args")),
     "codecheck-scan": CommandRoute(
         "cmd_codecheck_scan", ("flow", "state", "args")),
     "codecheck-scope": CommandRoute(

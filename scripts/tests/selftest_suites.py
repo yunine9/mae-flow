@@ -5,6 +5,8 @@ import subprocess
 
 
 REFACTOR_SAFETY_SUITES = (
+    ("Spec2Code 固定 Prompt 与注释规范",
+     ("scripts/tests/test_spec2code_prompt_resources.py",), 180, 5000),
     ("共享状态内核回归",
      ("scripts/tests/test_state_core.py",), 90, 3000),
     ("内嵌能力完整生命周期回归",

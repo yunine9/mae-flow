@@ -186,6 +186,15 @@ def parse_args(argv=None):
         "kind", choices=["blueprint", "roadmap", "plan"])
     quality_register.add_argument("path")
     quality_artifact_actions.add_parser("show")
+    role_task = sub.add_parser("role-task")
+    role_task.add_argument("role", choices=[
+        "test-design",
+        "task-analysis",
+        "craft-plan",
+        "cp-implement",
+        "craft-code",
+    ])
+    role_task.add_argument("--checkpoint")
     lightcheck = sub.add_parser("lightcheck")
     lightcheck.add_argument(
         "--quiet", action="store_true",

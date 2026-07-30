@@ -51,6 +51,7 @@ class CommandDispatchTests(unittest.TestCase):
             "checkpoint": "cmd_checkpoint",
             "agent-task": "cmd_agent_task",
             "quality-artifact": "cmd_quality_artifact",
+            "role-task": "cmd_role_task",
             "codecheck-scan": "cmd_codecheck_scan",
             "codecheck-scope": "cmd_codecheck_scope",
             "codecheck-record": "cmd_codecheck_record",

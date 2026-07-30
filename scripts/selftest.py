@@ -284,6 +284,7 @@ if flow:
               "story_ask", "hf_open", "tw_open", "archive_confirm",
               "build_review", "tw_review", "rf_review",
               "build_pace", "tw_pace", "rf_pace",
+              "test_blueprint", "build_plan",
           }, str(sorted(actual_ack_steps)))
     check("三条新流程均在写码前确认开发节奏且月光旁路",
           steps.get("hf_open", {}).get("next") == "build_pace"
@@ -323,7 +324,7 @@ if flow:
           story_ask.get("choices") == ["commit", "local", "no"]
           and story_ask.get("next", {}).get("commit") == "story"
           and story_ask.get("next", {}).get("local") == "story"
-          and story_ask.get("next", {}).get("no") == "build_pace"
+          and story_ask.get("next", {}).get("no") == "build_plan"
           and story_ask.get("choice_sets", {}).get("commit", {}).get("STORY入库")
           and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库")
           and story_ask.get("choice_sets", {}).get("no", {}).get("STORY入库") == "不生成")
@@ -956,7 +957,7 @@ if flow:
                 types.SimpleNamespace(ack=None, choice="no", set=[]))
             no_story = mf.load_state()
             check("STORY 返工改选不生成会覆盖旧入库状态",
-                  no_story.get("current") == "build_pace"
+                  no_story.get("current") == "build_plan"
                   and no_story.get("config", {}).get("STORY入库") == "不生成")
 
             os.makedirs("docs/review", exist_ok=True)

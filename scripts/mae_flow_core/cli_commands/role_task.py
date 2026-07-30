@@ -77,6 +77,28 @@ def cmd_role_task(_flow, state, args):
     checkpoint = str(args.checkpoint or "")
     if role != "test-design" and not checkpoint:
         api.die("%s 任务卡必须指定 --checkpoint CPn。" % role, 2)
+    item = api._checkpoint_current(state) or {}
+    expected_status = {
+        "task-analysis": "planned",
+        "craft-plan": "planned",
+        "cp-implement": "coding",
+        "craft-code": "craft_pending",
+    }.get(role)
+    if expected_status and step == "build" and (
+        item.get("id") != checkpoint
+        or item.get("status") != expected_status
+    ):
+        api.die(
+            "%s 只允许用于当前 %s 状态的 %s；当前为 %s@%s。"
+            % (
+                role,
+                expected_status,
+                checkpoint,
+                item.get("id", "无"),
+                item.get("status", "无"),
+            ),
+            2,
+        )
     document = build_role_task_document(
         role=role,
         project_root=os.path.abspath(os.getcwd()),

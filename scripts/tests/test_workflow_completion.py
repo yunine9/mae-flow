@@ -220,6 +220,25 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
             )),
         )
 
+    def test_moonlight_build_plan_prepares_checkpoints_before_advance(self):
+        state = {"moonlight": {"enabled": True}}
+        self.assertEqual(
+            [
+                CompletionEvent("prepare_moonlight_checkpoint"),
+                CompletionEvent(
+                    "advance",
+                    note="月光宝盒自动决策",
+                ),
+            ],
+            list(completion_events(
+                "build_plan",
+                {"user_ack": True},
+                state,
+                "continue",
+                "",
+            )),
+        )
+
     def test_policy_does_not_mutate_inputs(self):
         step = {
             "choice_key": "pace",

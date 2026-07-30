@@ -1,5 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
+from mae_flow_core.quality.spec2code_recovery import (
+    recovery_guidance,
+)
+
 from .shared import (
     CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STEPS_DIR, json,
     load_json, os, re, read_text, render_pack, subst, sys, time, workflow_transitions,
@@ -197,6 +201,14 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
+    if st.get("spec2code") and sid in {
+            "test_blueprint", "build_plan", "build", "verify_ut"}:
+        print("\n".join(recovery_guidance(
+            st,
+            is_file=os.path.isfile,
+            read_text=lambda path: read_text(
+                path, encoding="utf-8"),
+        )))
     checkpoint_state = api._development_review(st)
     if checkpoint_state and checkpoint_state.get("status") == "active":
         mode_label = ("分阶段先检视、后提交并 push"
@@ -235,17 +247,11 @@ def print_current(flow, st):
                     "base", ""))
                 print("   用户已授权拆回错误提交；执行 git reset --mixed %s，"
                       "然后 checkpoint status。" % base)
-            elif current_checkpoint.get("status") == "review_pending":
-                if api._review_before_commit(checkpoint_state):
-                    print("\n".join(api._checkpoint_worktree_review_lines(
-                        current_checkpoint)))
-                else:
-                    receipt = current_checkpoint.get("receipt") or {}
-                    print("\n".join(api._checkpoint_review_lines(
-                        receipt.get("base", ""), receipt.get("head", ""),
-                        "%s 等待用户检视" % current_checkpoint.get("id"),
-                        receipt.get("remote_ref", ""))))
-                api._print_checkpoint_decisions(final=False)
+            elif current_checkpoint.get("status") in {
+                    "planned", "plan_review_pending",
+                    "craft_pending", "review_pending"}:
+                api._show_checkpoint_review(
+                    st, checkpoint_state, current_checkpoint)
         elif (sid == api._checkpoint_expected_code_step(st)
               and (checkpoint_state.get("final_rework") or {}).get("status")
               == "coding"):

@@ -82,6 +82,14 @@ from mae_flow_core.application.delivery.checkpoint_recovery import (
     refresh_final_review,
     reviewed_worktree_fresh,
 )
+from mae_flow_core.application.delivery.checkpoint_quality import (
+    PLAN_CONTINUE_ACK,
+    PLAN_REVISE_ACK,
+    CheckpointQualityPorts,
+    decide_checkpoint_plan,
+    prepare_checkpoint_plan,
+    record_craft_review,
+)
 from mae_flow_core.application.delivery.standalone import (
     cancel_standalone,
     confirm_standalone_scope,
@@ -157,6 +165,9 @@ from mae_flow_core.guard.bash import (
     decide_pre_commit,
 )
 from mae_flow_core.quality import task_cards as quality_task_cards
+from mae_flow_core.quality.spec2code_artifacts import (
+    checkpoint_review_context,
+)
 from mae_flow_core.quality import codecheck as quality_codecheck
 from mae_flow_core.quality.evidence import (
     QualityEvidencePorts,

@@ -118,6 +118,9 @@ def completion_events(
             choice,
         )
 
+    if step_id == "build_plan" and moonlight_enabled(state):
+        yield CompletionEvent("prepare_moonlight_checkpoint")
+
     kind = moonlight_step_kind(step_id)
     if kind:
         yield CompletionEvent("resolve_moonlight", kind)

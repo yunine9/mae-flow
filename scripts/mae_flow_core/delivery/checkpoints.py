@@ -9,6 +9,8 @@ CODE_STEPS = {
 }
 
 LOCKED_STATUSES = {
+    "plan_review_pending",
+    "craft_pending",
     "review_pending",
     "commit_pending",
     "commit_recovery",
@@ -22,7 +24,7 @@ def development_review(state):
     return (
         data
         if isinstance(data, dict)
-        and data.get("version") == 1
+        and data.get("version") in (1, 2)
         else None
     )
 

@@ -40,6 +40,23 @@ class CheckpointPolicyTests(unittest.TestCase):
         self.assertEqual("CP2", current_item(state)["id"])
         self.assertEqual("tw_change", expected_code_step(state))
 
+    def test_v2_plan_and_craft_states_are_visible_and_locked(self):
+        state = {
+            "current": "build",
+            "choices": {"workflow": "full"},
+            "development_review": {
+                "version": 2,
+                "current_index": 0,
+                "checkpoints": [
+                    {"id": "CP1", "status": "craft_pending"},
+                ],
+            },
+        }
+        self.assertEqual("CP1", current_item(state)["id"])
+        self.assertEqual("CP1", locked_item(state)["id"])
+        self.assertTrue(review_locked(state, moonlight=False))
+        self.assertFalse(review_pending(state, moonlight=False))
+
     def test_locked_item_prefers_current_then_final_review(self):
         state = {
             "current": "build",

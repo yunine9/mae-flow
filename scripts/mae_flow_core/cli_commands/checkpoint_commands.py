@@ -1,8 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    CheckpointDecisionPorts, FinalReviewPorts, activate_final_rework,
-    decide_checkpoint, inspect_checkpoint_status, prepare_final_review, re,
+    CheckpointDecisionPorts, CheckpointQualityPorts, FinalReviewPorts,
+    activate_final_rework, decide_checkpoint, decide_checkpoint_plan,
+    hashlib, inspect_checkpoint_status, os, prepare_checkpoint_plan,
+    prepare_final_review, read_text, record_craft_review, re,
     refresh_checkpoint, refresh_final_review, thaw_delivery_payload, time,
 )
 from .wiring import api
@@ -92,6 +94,106 @@ def _checkpoint_ack(st, ack, expected, receipt):
     count = api._ack_failure(st, why)
     return False, why + api._ack_retry_guidance(count)
 
+
+def _local_process_path(path):
+    return os.path.normpath(
+        os.path.relpath(os.path.realpath(path), os.path.realpath(os.getcwd()))
+    ).replace("\\", "/")
+
+
+def _checkpoint_quality_ports(st, ack=""):
+    return CheckpointQualityPorts(
+        is_file=os.path.isfile,
+        read_text=lambda path: read_text(path, encoding="utf-8"),
+        normalize_path=_local_process_path,
+        digest=lambda text: hashlib.sha256(
+            text.encode("utf-8")).hexdigest(),
+        ack_cursor=api._ack_message_cursor,
+        verify_ack=lambda receipt, expected: _checkpoint_ack(
+            st, ack, expected, receipt),
+        now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+
+def _apply_checkpoint_quality_result(st, result):
+    if result.exit_code:
+        api.die(result.stderr[0], result.exit_code)
+    show_review = False
+    changed = False
+    for effect in result.effects:
+        payload = thaw_delivery_payload(effect.payload)
+        if effect.kind == "set_development_review":
+            st["development_review"] = payload
+            changed = True
+        elif effect.kind == "append_history":
+            st.setdefault("history", []).append(payload)
+            changed = True
+        elif effect.kind == "invalidate_quality":
+            _invalidate_quality_for_rework(st)
+            changed = True
+        elif effect.kind == "show_checkpoint_review":
+            show_review = True
+        else:
+            raise RuntimeError(
+                "unsupported checkpoint quality effect: " + effect.kind)
+    if changed:
+        api.save_state(st)
+    for line in result.stdout:
+        print(line)
+    if show_review:
+        data = api._development_review(st)
+        api._show_checkpoint_review(st, data, api._checkpoint_current(st))
+
+
+def cmd_checkpoint_prepare(st, args):
+    ticket = str((st.get("config") or {}).get("单号", "") or "")
+    result = prepare_checkpoint_plan(
+        api._development_review(st),
+        args.checkpoint_id,
+        args.plan,
+        args.review,
+        ticket,
+        _checkpoint_quality_ports(st),
+    )
+    _apply_checkpoint_quality_result(st, result)
+
+
+def cmd_checkpoint_plan_decide(st, args):
+    result = decide_checkpoint_plan(
+        api._development_review(st),
+        args.choice,
+        args.ack,
+        _checkpoint_quality_ports(st, args.ack),
+    )
+    _apply_checkpoint_quality_result(st, result)
+
+
+def _current_craft_source_sha(st):
+    item = api._checkpoint_current(st) or {}
+    receipt = item.get("receipt") or {}
+    if receipt.get("snapshot_sha256"):
+        current = api._checkpoint_worktree_snapshot(st, api.FLOW)
+        return api._snapshot_sha256(current)
+    base = str(item.get("fixed_base", "") or "")
+    head = api.sh("git rev-parse --verify HEAD")
+    return hashlib.sha256(
+        (base + "\0" + head).encode("utf-8")
+    ).hexdigest()
+
+
+def cmd_checkpoint_craft_reviewed(st, args):
+    ticket = str((st.get("config") or {}).get("单号", "") or "")
+    result = record_craft_review(
+        api._development_review(st),
+        args.checkpoint_id,
+        args.review,
+        ticket,
+        _current_craft_source_sha(st),
+        _checkpoint_quality_ports(st),
+        moonlight=api._moonlight(st),
+    )
+    _apply_checkpoint_quality_result(st, result)
+
 def _invalidate_quality_for_rework(st):
     st.pop("unlock", None)
     st.pop("risk_acceptances", None)
@@ -166,6 +268,12 @@ def cmd_checkpoint(flow, st, args):
         return cmd_checkpoint_status(st)
     if action == "ready":
         return api.cmd_checkpoint_ready(flow, st, args)
+    if action == "prepare":
+        return cmd_checkpoint_prepare(st, args)
+    if action == "plan-decide":
+        return cmd_checkpoint_plan_decide(st, args)
+    if action == "craft-reviewed":
+        return cmd_checkpoint_craft_reviewed(st, args)
     if action == "final":
         return cmd_checkpoint_final(st)
     if action == "decide":

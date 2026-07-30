@@ -13,6 +13,11 @@ from typing import Callable
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
 from mae_flow_core.workflow.advancement import PACE_STEPS
+from mae_flow_core.quality.spec2code_artifacts import (
+    roadmap_checkpoints,
+    validate_plan,
+    validate_roadmap,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,7 @@ class CheckpointPlanPorts:
     head: Callable[[], str]
     ack_cursor: Callable[[], object]
     now: Callable[[], str]
+    process_artifacts: Callable[[], object] = lambda: {}
 
 
 @dataclass(frozen=True)
@@ -51,38 +57,49 @@ def _failure(message):
     )
 
 
-def plan_checkpoint(
-        current, workflow, moonlight, raw_items, ports):
-    """Validate and create a checkpoint plan without mutating state."""
-    if current not in PACE_STEPS:
-        return _failure(
-            "checkpoint plan 只允许在开发节奏确认步骤执行；"
-            "先按 current 完成方案/范围分析。")
-    if moonlight:
-        return _failure(
-            "月光宝盒不需要人工开发节奏方案；状态机会自动旁路本步骤。")
-    items = [
-        re.sub(r"\s+", " ", str(item or "")).strip()
-        for item in (raw_items or ())
-    ]
+def _checkpoint_items(raw_items, ports):
+    if raw_items:
+        return (
+            [
+                re.sub(r"\s+", " ", str(item or "")).strip()
+                for item in raw_items
+            ],
+            {},
+            "",
+        )
+    artifacts = dict(ports.process_artifacts() or {})
+    roadmap = dict(artifacts.get("roadmap") or {})
+    plan = dict(artifacts.get("plan") or {})
+    errors = (
+        validate_roadmap(roadmap.get("text", ""))
+        + validate_plan(plan.get("text", ""))
+    )
+    if errors:
+        return [], {}, "路线图/计划结构校验失败:" + "；".join(errors)
+    pairs = roadmap_checkpoints(roadmap.get("text", ""))
+    expected = tuple(
+        "CP%d" % index for index in range(1, len(pairs) + 1))
+    if tuple(item[0] for item in pairs) != expected:
+        return [], {}, "路线图 CP 必须从 CP1 开始连续编号。"
+    return [item[1] for item in pairs], artifacts, ""
+
+
+def _checkpoint_items_error(items):
     if not 1 <= len(items) <= 6 or any(
             len(item) < 2 for item in items):
-        return _failure(
+        return (
             "检查点必须给出 1-6 个非空 --item；"
             "小改可 1 个，常规任务建议 2-4 个。")
     if len(set(items)) != len(items):
-        return _failure(
-            "检查点标题/范围不能重复；请写出各批次可区分的业务边界。")
+        return "检查点标题/范围不能重复；请写出各批次可区分的业务边界。"
+    return ""
 
-    dirty = tuple(ports.dirty_paths())
-    if dirty:
-        return _failure(
-            "开发节奏必须在写第一行代码前确认；当前已有本轮未提交源码: "
-            + "、".join(dirty[:8])
-            + "。先归因并处理，再重新生成方案。")
 
-    task_sha, task_lines = ports.task_structure()
-    head = ports.head()
+def _checkpoint_review_state(request, artifacts, task, ports):
+    current = request["current"]
+    workflow = request["workflow"]
+    items = request["items"]
+    task_sha, task_lines, head = task
     checkpoints = [
         {
             "id": "CP%d" % (index + 1),
@@ -100,7 +117,7 @@ def plan_checkpoint(
         ],
     }, ensure_ascii=False, sort_keys=True)
     review = {
-        "version": 1,
+        "version": 2 if artifacts else 1,
         "review_before_commit": True,
         "status": "plan_pending",
         "plan_step": current,
@@ -114,6 +131,52 @@ def plan_checkpoint(
         "checkpoints": checkpoints,
         "created_at": ports.now(),
     }
+    if artifacts:
+        review.update({
+            "roadmap_path": artifacts["roadmap"]["path"],
+            "roadmap_sha256": artifacts["roadmap"]["sha256"],
+            "plan_path": artifacts["plan"]["path"],
+            "plan_sha256": artifacts["plan"]["sha256"],
+        })
+    return review
+
+
+def plan_checkpoint(
+        current, workflow, moonlight, raw_items, ports):
+    """Validate and create a checkpoint plan without mutating state."""
+    if current not in PACE_STEPS:
+        return _failure(
+            "checkpoint plan 只允许在开发节奏确认步骤执行；"
+            "先按 current 完成方案/范围分析。")
+    if moonlight:
+        return _failure(
+            "月光宝盒不需要人工开发节奏方案；状态机会自动旁路本步骤。")
+    items, artifacts, error = _checkpoint_items(
+        raw_items, ports)
+    error = error or _checkpoint_items_error(items)
+    if error:
+        return _failure(error)
+
+    dirty = tuple(ports.dirty_paths())
+    if dirty:
+        return _failure(
+            "开发节奏必须在写第一行代码前确认；当前已有本轮未提交源码: "
+            + "、".join(dirty[:8])
+            + "。先归因并处理，再重新生成方案。")
+
+    task_sha, task_lines = ports.task_structure()
+    head = ports.head()
+    review = _checkpoint_review_state(
+        {
+            "current": current,
+            "workflow": workflow,
+            "items": items,
+        },
+        artifacts,
+        (task_sha, task_lines, head),
+        ports,
+    )
+    checkpoints = review["checkpoints"]
     output = [
         "[mae-flow] 开发检查点方案（确认前尚未开始写码）",
         "  代码基点: " + head[:10],
@@ -263,7 +326,12 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
         "compile_skipped_no_source": not source_paths,
         "head": head,
         "receipt": receipt,
-        "status": "review_pending",
+        "status": (
+            "craft_pending"
+            if review.get("version") == 2
+            else "review_pending"
+        ),
+        "compile_source_sha256": ports.snapshot_sha256(snapshot),
         "task_structure_drift": ports.task_structure_drift(),
         "closed_at": ports.now(),
     })
@@ -272,12 +340,18 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
         stdout.append(
             "⚠ 实现清单结构在开发中发生变化，"
             "请重点核对新增/删除任务是否仍符合确认范围。")
-    stdout.extend(_review_decision_lines())
+    if review.get("version") == 2:
+        stdout.append(
+            "[mae-flow] 首次编译已冻结；执行 role-task craft-code "
+            "--checkpoint %s，完成独立 CODE 走读后登记结果。"
+            % item["id"])
+    else:
+        stdout.extend(_review_decision_lines())
+    effects = [_review_effect(review)]
+    if review.get("version") != 2:
+        effects.append(DeliveryEffect("render_worktree_review", item))
     return DeliveryResult(
-        effects=(
-            _review_effect(review),
-            DeliveryEffect("render_worktree_review", item),
-        ),
+        effects=tuple(effects),
         stdout=tuple(stdout),
         stderr=(),
         exit_code=0,
@@ -320,6 +394,21 @@ def _ready_committed(
         "task_structure_drift": ports.task_structure_drift(),
         "closed_at": ports.now(),
     })
+    if review.get("version") == 2:
+        item["compile_source_sha256"] = hashlib.sha256(
+            (base + "\0" + head).encode("utf-8")
+        ).hexdigest()
+        item["status"] = "craft_pending"
+        return DeliveryResult(
+            effects=(_review_effect(review),),
+            stdout=(
+                "[mae-flow] %s 首次编译已冻结；执行 role-task craft-code "
+                "--checkpoint %s，完成独立 CODE 走读后登记结果。"
+                % (item["id"], item["id"]),
+            ),
+            stderr=(),
+            exit_code=0,
+        )
     stdout = []
     if mode == "continuous":
         item["status"] = "completed"

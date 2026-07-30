@@ -245,11 +245,14 @@ def _resume_direct_mode(ack="", message_id=""):
         if review_state:
             item = api._checkpoint_current(st)
             if item and item.get("status") in (
+                    "plan_review_pending", "craft_pending",
                     "push_pending", "review_pending", "commit_pending",
                     "commit_recovery", "reset_pending"):
                 item["status"] = "coding"
                 for key in ("receipt", "head", "compile_head",
-                            "compile_task_sha256"):
+                            "compile_task_sha256",
+                            "compile_source_sha256",
+                            "craft_review"):
                     item.pop(key, None)
             review_state.pop("final_review", None)
     old_step = st.get("current", "")

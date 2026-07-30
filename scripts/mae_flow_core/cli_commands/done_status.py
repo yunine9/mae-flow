@@ -219,6 +219,8 @@ def _done_finalize(flow, st, args, sid, step):
             return
         if event.kind == "activate_checkpoint":
             api._activate_checkpoint_plan(st, event.value)
+        elif event.kind == "prepare_moonlight_checkpoint":
+            api._prepare_moonlight_checkpoint_plan(st)
         elif event.kind == "resolve_moonlight":
             api._moonlight_resolve_kind(st, event.value)
         elif event.kind == "localize_story":

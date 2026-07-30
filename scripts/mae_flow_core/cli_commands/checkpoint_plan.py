@@ -4,8 +4,9 @@ from .shared import (
     CHECKPOINT_CODE_STEPS, CHECKPOINT_CONTINUE_ACK, CHECKPOINT_CONTINUOUS_ACK,
     CHECKPOINT_LOCKED_STATUSES, CHECKPOINT_REVISE_ACK, CheckpointPlanPorts,
     CheckpointReadyPorts, CheckpointRecoveryPorts, checkpoint_commit_commands,
-    plan_checkpoint, ready_checkpoint, reviewed_worktree_fresh, thaw_delivery_payload,
-    time,
+    checkpoint_review_context, hashlib, os, plan_checkpoint, read_text,
+    ready_checkpoint,
+    reviewed_worktree_fresh, thaw_delivery_payload, time,
 )
 from .wiring import api
 
@@ -21,13 +22,15 @@ def _activate_checkpoint_plan(st, mode):
         "configured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     })
     no_code = bool(data.get("no_code_plan"))
+    version = int(data.get("version", 1) or 1)
     for index, item in enumerate(data.get("checkpoints") or []):
         for key in ("head", "compile_head", "compile_task_sha256",
                     "receipt", "accepted_head", "completed_head"):
             item.pop(key, None)
         item["status"] = (
             ("accepted" if mode == "staged" else "completed")
-            if no_code else "coding")
+            if no_code
+            else ("coding" if version == 1 or index == 0 else "planned"))
         item["attempt"] = 1
         item["fixed_base"] = head if index == 0 else ""
         if no_code:
@@ -37,20 +40,70 @@ def _activate_checkpoint_plan(st, mode):
     if no_code:
         data["current_index"] = len(data.get("checkpoints") or [])
 
-def cmd_checkpoint_plan(st, args):
-    result = plan_checkpoint(
+def _registered_process_artifacts(st, supplied_paths):
+    records = st.get("spec2code") or {}
+    result = {}
+    for kind in ("roadmap", "plan"):
+        supplied = str(
+            supplied_paths.get(kind)
+            or (records.get(kind) or {}).get("path")
+            or "")
+        if not supplied:
+            api.die(
+                "新 full 流程缺少已登记的 %s；先完成 build_plan。"
+                % kind,
+                2,
+            )
+        record = records.get(kind) or {}
+        normalized = os.path.normpath(
+            os.path.relpath(
+                os.path.realpath(supplied),
+                os.path.realpath(os.getcwd()),
+            )
+        ).replace("\\", "/")
+        if normalized != record.get("path"):
+            api.die(
+                "%s 未登记或路径不匹配；先执行 quality-artifact register。"
+                % kind,
+                2,
+            )
+        text = read_text(supplied, encoding="utf-8")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if digest != record.get("sha256"):
+            api.die(
+                "%s 登记后内容已变化；重新校验并登记。" % kind,
+                2,
+            )
+        result[kind] = {
+            "path": normalized,
+            "sha256": digest,
+            "text": text,
+        }
+    return result
+
+
+def _checkpoint_plan_result(
+        st, raw_items, supplied_paths, moonlight=None):
+    return plan_checkpoint(
         current=st.get("current"),
         workflow=(st.get("choices", {}) or {}).get("workflow"),
-        moonlight=api._moonlight(st),
-        raw_items=args.item or (),
+        moonlight=(
+            api._moonlight(st)
+            if moonlight is None else moonlight),
+        raw_items=raw_items,
         ports=CheckpointPlanPorts(
             dirty_paths=lambda: api._blocking_dirty_source_paths(st, api.FLOW),
             task_structure=lambda: api._task_structure_fingerprint(st),
             head=lambda: api.sh("git rev-parse --verify HEAD"),
             ack_cursor=api._ack_message_cursor,
             now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+            process_artifacts=lambda: _registered_process_artifacts(
+                st, supplied_paths),
         ),
     )
+
+
+def _apply_checkpoint_plan_result(st, result):
     if result.exit_code:
         api.die(result.stderr[0], result.exit_code)
     for effect in result.effects:
@@ -61,6 +114,46 @@ def cmd_checkpoint_plan(st, args):
     api.save_state(st)
     for line in result.stdout:
         print(line)
+
+
+def cmd_checkpoint_plan(st, args):
+    supplied = {
+        "roadmap": getattr(args, "roadmap", ""),
+        "plan": getattr(args, "plan", ""),
+    }
+    raw_items = getattr(args, "item", ()) or ()
+    if not raw_items and (
+            not supplied["roadmap"] or not supplied["plan"]):
+        api.die(
+            "新 full 流程须传 --roadmap 与 --plan；"
+            "旧流程可继续使用 --item。",
+            2,
+        )
+    _apply_checkpoint_plan_result(
+        st,
+        _checkpoint_plan_result(
+            st, raw_items, supplied),
+    )
+
+
+def _prepare_moonlight_checkpoint_plan(st):
+    """Freeze CP artifacts while bypassing only the human pace choice."""
+    original = st.get("current")
+    st["current"] = "build_pace"
+    try:
+        result = _checkpoint_plan_result(
+            st, (), {}, moonlight=False)
+    finally:
+        st["current"] = original
+    _apply_checkpoint_plan_result(st, result)
+    _activate_checkpoint_plan(st, "continuous")
+    st.setdefault("history", []).append({
+        "step": "build_pace",
+        "result": "moonlight:checkpoint-continuous",
+        "note": "保留 Task 分析和 PLAN/CODE Reviewer，仅旁路人工节奏确认",
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    api.save_state(st)
 
 def _checkpoint_plan_drift(st):
     data = api._development_review(st) or {}
@@ -158,6 +251,23 @@ def _checkpoint_commit_command(st, item):
         item, st.get("config", {}) or {})
 
 def _show_pending_checkpoint_review(st, data, item):
+    if data.get("version") == 2:
+        try:
+            roadmap = read_text(data.get("roadmap_path"), encoding="utf-8")
+            plan = read_text(data.get("plan_path"), encoding="utf-8")
+            receipt = item.get("receipt") or {}
+            diff = (
+                "HEAD（当前未提交快照）"
+                if receipt.get("snapshot")
+                else "%s..%s" % (
+                    receipt.get("base", ""),
+                    receipt.get("head", ""),
+                )
+            )
+            print("\n".join(checkpoint_review_context(
+                roadmap, plan, item.get("id", ""), diff)))
+        except (OSError, UnicodeDecodeError) as exc:
+            api.die("CP 检视上下文无法读取:" + str(exc), 2)
     if api._review_before_commit(data):
         fresh, why = _reviewed_worktree_fresh(st, item)
         if not fresh:
@@ -187,6 +297,20 @@ def _show_checkpoint_review(st, data, item):
         _show_pending_checkpoint_review(st, data, item)
     elif item.get("status") == "coding":
         _show_coding_checkpoint(data, item)
+    elif item.get("status") == "planned":
+        print(
+            "%s 等待即时展开细粒度 Task；生成 task-analysis 与 craft-plan "
+            "角色卡，完成后执行 checkpoint prepare。"
+            % item.get("id", "当前 CP"))
+    elif item.get("status") == "plan_review_pending":
+        print(
+            "%s 计划等待用户检视；选择后执行 checkpoint plan-decide。"
+            % item.get("id", "当前 CP"))
+    elif item.get("status") == "craft_pending":
+        print(
+            "%s 首次编译已完成，等待新鲜 Craft Reviewer CODE 走读；"
+            "登记后才能展示用户 CP 检视卡。"
+            % item.get("id", "当前 CP"))
 
 def _final_drifted_checkpoints(data):
     return [

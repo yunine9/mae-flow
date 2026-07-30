@@ -1,24 +1,39 @@
 仓库存在 docs/delivery-notes.md 时先通读(往单沉淀的仓库事实:构建陷阱/告警高发点/mock 策略),写码时主动规避。
 代码事实先查 .mae-flow-work/survey-{单号}.md(勘察笔记),只做增量探索,禁止全量重读代码。
-**中断/上下文重置(/clear)后恢复,先按序重读再动手**:①superpowers 计划文档 ②change.md 实现清单(勾选与备注=进度真相)
-③change.md 方案节与规格条目(在途旧布局单为 tasks.md/design.md/delta spec) ④git log {基线分支}..HEAD 与最近 diff。禁止只凭本条指令闷头续写。
-按下方内嵌的实现计划与连续执行规则生成计划并实施，不调用外部 Skill；禁止手工编辑流程状态文件。
-计划由主会话**亲自**按内嵌 writing-plans 方法生成——禁止把"制定计划"派给子代理:子代理上下文里
-没有本页能力包文本,产出会丢失 bite-sized/No Placeholders 纪律(下方原文如出现"派发计划子代理"
-字样,以本条为准)。计划的任务步骤**不包含写测试步骤**:测试统一由 verify 阶段 AutoUT 按 EARS
-条目补齐(tdd_mode=direct 已获授权),计划里织入"先写失败测试"步骤=与验证台账失配。
+**中断/上下文重置(/clear)后恢复,先按序重读再动手**:
+①change.md 规格与方案 ②UT 行为蓝图 ③全局 CP 路线图 ④当前 plan
+⑤当前 CP 的 Plan/Code Reviewer 记录 ⑥git log 与当前 diff。禁止只凭会话记忆续写。
+计划已在 build_plan 由用户确认，本步禁止重新发明计划或另建 Task 文档；禁止手工编辑流程状态文件。
+测试统一由 verify 阶段 AutoUT 按已确认蓝图补齐(tdd_mode=direct 已获授权)，实现计划不插入写测试步骤。
 原方法中的执行方式选择按公司标准固定，禁止现场即兴:
 - 隔离方式=branch(分支已在 branch_create 建好,直接沿用,不新建、不用 worktree);
 - 执行方式=executing-plans(如用户明确要求 subagent-driven,派发契约中必须注明 commit 格式为 [单号][类型]描述,否则子 agent 的提交会被拦截);
 - tdd_mode=direct 且 direct_override=true(公司用 AutoUT 在 verify 阶段事后补测,不走 TDD);
 - 正确性审查(查**正确性/漏洞/边界**,与 CodeCheck 的规范、Ponytail 的复杂度
   维度不同、互不替代,这一维只有它管;高风险变更经用户同意可升 thorough)。
-开工自查(计划评审通过后、写第一行码前,自己过一遍不问用户):实现清单逐项能指到方案节/规格条目的出处吗?
-三者有矛盾或遗漏 → 走上面的回流通道,**不带病开工**——现在对齐五分钟,verify 阶段返工半天。
+每个 CP 严格执行：
+
+1. 状态为 `planned`：分别生成 `role-task task-analysis --checkpoint CPn` 和
+   `role-task craft-plan --checkpoint CPn`，由新鲜实例展开 Task、完成 PLAN 只读走读；
+   主 Agent 核实 Reviewer 意见后执行 `checkpoint prepare CPn --plan "<plan>" --review "<CPn-plan.md>"`。
+   分阶段模式展示计划并执行 `checkpoint plan-decide continue|revise`，用户可反复要求修改；
+   连续模式按已选节奏自动进入编码。
+2. 状态为 `coding`：执行 `role-task cp-implement --checkpoint CPn`，让同一新鲜 CP Implementer
+   连续完成当前 CP 全部 Task。任务卡注入 Comment Standard v1、固定 Coding Charter 和动态注释计划。
+3. 完成实现后执行 `agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`；
+   Compile Agent OK 后执行 `checkpoint ready CPn`。
+4. 状态为 `craft_pending`：执行 `role-task craft-code --checkpoint CPn`，派新鲜 Craft Reviewer CODE。
+   Reviewer 每轮最多五条，只写 `.mae-flow-work/reviews/{单号}/CPn-code.md`，不改源码。
+5. 主 Agent按“修改/验证后修改/人工裁决/拒绝暂缓”核实并补全处置。执行
+   `checkpoint craft-reviewed CPn --review "<CPn-code.md>"`；存在已接受待处理项时交回同一 CP Implementer，
+   修改后重新编译并仅复查接受项和直接回归。
+6. CODE 走读闭环后才展示用户 CP 检视卡。用户意见仍交同一 CP Implementer 修改、重编译、定向复查；
+   用户明确继续后才进入下一 CP。
+
+写第一行码前确认当前 Task 能指到方案、规格和蓝图；矛盾或遗漏进入对应上游 Loop，不带病开工。
 批次边界严格沿用编码前已经确认的 CP1/CP2…方案，不按行数、文件数或每个 commit 临时切分。
-每批边界执行 `agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`，compile-agent OK 后执行
-`checkpoint ready CPn`：分阶段模式保持代码未提交，先冻结工作区 diff 让用户在 IDE 检视；用户确认后
-才精确 commit，再普通 push；一次完成模式仍按既有小步 commit 记录批次，直接进入下一批，不 push、不等待。
+分阶段模式保持代码未提交，CODE 走读和用户检视完成后才精确 commit、普通 push；
+一次完成模式仍按既有小步 commit 记录批次，完成 CODE 走读后进入下一批，不 push、不等待。
 分阶段模式在用户确认并完成精确 commit 后、一次完成模式在每批 commit 后，是**安全的 /clear 点**:
 会话已明显冗长时主动向用户提议"/clear 后说继续";
 批次交接必须**盘上自足**——本批的结论/偏离/踩坑写进实现清单对应任务的缩进备注行,
@@ -60,12 +75,10 @@ mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(
 实现中发现**设计或规格条目本身有误**(实现揭出的矛盾/遗漏/做不到)——这是实现阶段的正常发现,不是事故:
 停手,呈报用户(问题+影响+建议修法),经确认后 goto design(设计误)或 goto open(spec 误)--ack "用户原话"
 回流修订,修订后顺流回来;**禁止不吭声地偏离设计"先做出来再说"**——偏离没有记录,评审和 verify 都会被骗过。
-计划文档写到 **.mae-flow-work/plan-{单号}.md**(过程件不入库,git 本地排除已覆盖;禁止写进 docs/ 或 openspec/),生成后执行：
-`python "{MAEFLOW_PATH}" spec set plan ".mae-flow-work/plan-{单号}.md"`
-
 全部完成、任务全勾选且最后一轮 compile-agent 已 OK，且分阶段模式最后一批已检视、精确提交并 push 后:
 展示任务状态与产物摘要后执行 done(状态机以任务清单、提交和编译令牌为证据,不重跑长编译)。
-新启动的普通流程按编码前选择执行检查点：分阶段模式的每批已经完成远端检视，一次完成模式留到质量链后统一检视；
+新启动的普通流程按编码前选择执行检查点：分阶段模式每批完成计划、CODE 走读和人工检视，
+一次完成模式每批完成计划与 CODE 走读、质量链后统一人工检视；
 旧版在途流程仍进入原有 build_review，不会被升级强行改轨。所有普通流程在规格定稿前还会核对质量阶段是否产生
 未检视代码增量。月光宝盒完全旁路人工检视。
 

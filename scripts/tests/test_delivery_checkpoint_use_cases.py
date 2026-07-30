@@ -53,6 +53,9 @@ class CheckpointPlanUseCaseTests(unittest.TestCase):
                 now=supplied(
                     "now",
                     overrides.pop("now", "2026-07-30 10:00:00")),
+                process_artifacts=supplied(
+                    "process_artifacts",
+                    overrides.pop("process_artifacts", {})),
             ),
         }
         values.update(overrides)
@@ -112,6 +115,31 @@ class CheckpointPlanUseCaseTests(unittest.TestCase):
             result.stdout[0],
         )
         self.assertIn("  CP2 — regression coverage", result.stdout)
+
+    def test_builds_v2_plan_from_registered_roadmap(self):
+        from test_spec2code_artifacts import PLAN, ROADMAP
+        result, _calls = self.call(
+            raw_items=(),
+            process_artifacts={
+                "roadmap": {
+                    "path": ".mae-flow-work/roadmap-REQ-1.md",
+                    "sha256": "roadmap-sha",
+                    "text": ROADMAP,
+                },
+                "plan": {
+                    "path": ".mae-flow-work/plan-REQ-1.md",
+                    "sha256": "plan-sha",
+                    "text": PLAN,
+                },
+            },
+        )
+        review = thaw(result.effects[0].payload)
+        self.assertEqual(2, review["version"])
+        self.assertEqual("创建核心对象", review["checkpoints"][0]["title"])
+        self.assertEqual(
+            ".mae-flow-work/roadmap-REQ-1.md",
+            review["roadmap_path"],
+        )
 
 
 class CheckpointReadyUseCaseTests(unittest.TestCase):
@@ -199,6 +227,25 @@ class CheckpointReadyUseCaseTests(unittest.TestCase):
         self.assertEqual("render_worktree_review", result.effects[1].kind)
         self.assertNotIn("agent_evidence", calls)
         self.assertEqual(2, calls.count("snapshot"))
+
+    def test_v2_precommit_waits_for_craft_review_before_user_review(self):
+        review = self.review()
+        review["version"] = 2
+        result, _calls = self.call(review=review)
+        updated = thaw(result.effects[0].payload)
+        item = updated["checkpoints"][0]
+        self.assertEqual("craft_pending", item["status"])
+        self.assertEqual(
+            "snapshot-sha",
+            item["compile_source_sha256"],
+        )
+        self.assertNotIn(
+            "render_worktree_review",
+            [effect.kind for effect in result.effects],
+        )
+        self.assertTrue(any(
+            "craft-code" in line for line in result.stdout
+        ))
 
     def test_continuous_committed_checkpoint_advances_next_batch(self):
         review = self.review(mode="continuous", precommit=False, count=2)

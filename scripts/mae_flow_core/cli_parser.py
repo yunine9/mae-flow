@@ -204,11 +204,24 @@ def parse_args(argv=None):
         dest="checkpoint_action", required=True)
     checkpoint_plan = checkpoint_actions.add_parser("plan")
     checkpoint_plan.add_argument(
-        "--item", action="append", required=True,
+        "--item", action="append", default=[],
         help="按顺序给出检查点标题/范围；可重复 1-6 次")
+    checkpoint_plan.add_argument("--roadmap")
+    checkpoint_plan.add_argument("--plan")
     checkpoint_actions.add_parser("status")
     checkpoint_ready = checkpoint_actions.add_parser("ready")
     checkpoint_ready.add_argument("checkpoint_id", help="当前检查点，如 CP1")
+    checkpoint_prepare = checkpoint_actions.add_parser("prepare")
+    checkpoint_prepare.add_argument("checkpoint_id", help="当前检查点，如 CP1")
+    checkpoint_prepare.add_argument("--plan", required=True)
+    checkpoint_prepare.add_argument("--review", required=True)
+    checkpoint_plan_decide = checkpoint_actions.add_parser("plan-decide")
+    checkpoint_plan_decide.add_argument(
+        "choice", choices=["continue", "revise"])
+    checkpoint_plan_decide.add_argument("--ack", required=True)
+    checkpoint_craft = checkpoint_actions.add_parser("craft-reviewed")
+    checkpoint_craft.add_argument("checkpoint_id", help="当前检查点，如 CP1")
+    checkpoint_craft.add_argument("--review", required=True)
     checkpoint_actions.add_parser("final")
     checkpoint_decide = checkpoint_actions.add_parser("decide")
     checkpoint_decide.add_argument(

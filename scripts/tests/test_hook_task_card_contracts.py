@@ -130,6 +130,21 @@ class TaskCardContractTests(unittest.TestCase):
         )
         self.assertIn("用户先检视未提交 diff", committed.reason)
 
+    def test_completion_rejects_any_compile_task_that_advanced_head(self):
+        advanced = verify_completion_task(
+            "COMPILE",
+            self.report(),
+            self.state,
+            self.ports(
+                current_head=lambda: "b" * 40,
+                merge_base=lambda _base, _current: HEAD,
+            ),
+        )
+
+        self.assertFalse(advanced.accepted)
+        self.assertIn("COMPILE 任务期间 HEAD 已变化", advanced.reason)
+        self.assertIn("禁止 git commit", advanced.reason)
+
     def test_scope_enforces_each_agent_write_boundary(self):
         cases = (
             (
@@ -164,6 +179,7 @@ class TaskCardContractTests(unittest.TestCase):
                     task,
                     self.state,
                     self.ports(changed_paths_since=lambda _head: changed),
+                    direct_write_paths=changed if kind == "UT" else (),
                 )
                 self.assertFalse(decision.accepted)
                 self.assertIn(reason, decision.reason)
@@ -182,6 +198,43 @@ class TaskCardContractTests(unittest.TestCase):
         )
         self.assertTrue(decision.accepted)
         self.assertEqual((), decision.changed_paths)
+
+    def test_ut_command_side_effects_have_non_unlock_recovery(self):
+        changed = ("src/main/resources/audit.properties",)
+        command_effect = verify_agent_scope(
+            "UT",
+            {"head": HEAD},
+            self.state,
+            self.ports(
+                changed_paths_since=lambda _head: changed,
+                source_like=lambda _path: True,
+            ),
+            direct_write_paths=(),
+        )
+        self.assertFalse(command_effect.accepted)
+        self.assertIn("UT 命令产生了非测试文件副作用", command_effect.reason)
+        self.assertIn("不要使用 unlock source 或 accept-risk", command_effect.reason)
+        self.assertIn("不要询问用户", command_effect.reason)
+        self.assertIn("任务签发时干净", command_effect.reason)
+        self.assertIn("恢复性移出交付范围", command_effect.reason)
+
+        direct_edit = verify_agent_scope(
+            "UT",
+            {"head": HEAD},
+            self.state,
+            self.ports(
+                changed_paths_since=lambda _head: changed,
+                source_like=lambda _path: True,
+            ),
+            direct_write_paths=changed,
+        )
+        self.assertFalse(direct_edit.accepted)
+        self.assertIn(
+            "ut-generator-agent 修改了非测试源码",
+            direct_edit.reason,
+        )
+        self.assertIn("源码缺陷必须先交用户裁决", direct_edit.reason)
+        self.assertNotIn("UT 命令产生了非测试文件副作用", direct_edit.reason)
 
     def test_dispatch_rejects_missing_and_stale_task_before_agent_runs(self):
         missing = verify_dispatch_task(

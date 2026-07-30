@@ -170,8 +170,62 @@ class HookSourceMixin:
         """Fingerprint every Git-visible change for COMPILE provenance."""
         return {
             path: self._review_path_fingerprint(path)
-            for path in self._changed_paths_since(head)
+            for path in self._provenance_changed_paths(head)
+            if (
+                os.path.lexists(path)
+                and not source_paths.is_flow_control_path(path)
+            )
         }
+
+    def _provenance_git_out(self, arguments):
+        """Run one required provenance Git read without empty-output collapse."""
+        try:
+            result = subprocess.run(
+                ["git", "-c", "core.quotepath=false", *arguments],
+                shell=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "COMPILE provenance Git command failed: %s" % exc
+            ) from exc
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip()
+            raise RuntimeError(
+                "COMPILE provenance Git command exited %s%s"
+                % (
+                    result.returncode,
+                    (": " + detail) if detail else "",
+                )
+            )
+        return result.stdout or ""
+
+    def _provenance_changed_paths(self, head):
+        if not head:
+            raise RuntimeError("COMPILE provenance task HEAD is missing")
+        if self._provenance_git_out(
+                ["cat-file", "-t", head]).strip() != "commit":
+            raise RuntimeError(
+                "COMPILE provenance task HEAD is not a commit")
+        paths = self._provenance_git_out([
+            "diff", "--name-only", "--no-renames", head, "HEAD",
+        ]).splitlines()
+        paths.extend(self._provenance_git_out([
+            "diff", "--name-only", "--no-renames", "HEAD",
+        ]).splitlines())
+        for line in self._provenance_git_out([
+                "status", "--porcelain", "--untracked-files=all",
+        ]).splitlines():
+            fields = line.split(None, 1)
+            if len(fields) == 2:
+                paths.append(
+                    fields[1].split(" -> ")[-1].strip().strip('"'))
+        return list(dict.fromkeys(
+            path.replace("\\", "/") for path in paths if path))
 
 
     _TEST_PAT = re.compile(
@@ -240,9 +294,15 @@ class HookSourceMixin:
         return False
 
 
-    def _enforce_agent_scope(self, kind, task, bail):
+    def _enforce_agent_scope(
+            self, kind, task, bail, direct_write_paths=()):
         decision = _verify_agent_scope(
-            kind, task, self._contract_state(), self.task_card_ports_factory())
+            kind,
+            task,
+            self._contract_state(),
+            self.task_card_ports_factory(),
+            direct_write_paths=direct_write_paths,
+        )
         if not decision.accepted:
             bail(decision.reason)
         return list(decision.changed_paths)

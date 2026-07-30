@@ -2,6 +2,8 @@
 
 import os
 
+from ..foundation.source_paths import repository_path_identity
+
 
 _DIRECT_WRITE_TOOLS = ("Write", "Edit", "MultiEdit")
 
@@ -9,10 +11,11 @@ _DIRECT_WRITE_TOOLS = ("Write", "Edit", "MultiEdit")
 def _repository_relative_path(value, repository_root):
     if not isinstance(value, str) or not value:
         return None
-    root = os.path.abspath(str(repository_root).replace("\\", "/"))
+    root = os.path.realpath(
+        os.path.abspath(str(repository_root).replace("\\", "/")))
     path = value.replace("\\", "/")
-    candidate = os.path.abspath(
-        path if os.path.isabs(path) else os.path.join(root, path))
+    candidate = os.path.realpath(os.path.abspath(
+        path if os.path.isabs(path) else os.path.join(root, path)))
     try:
         if os.path.commonpath((root, candidate)) != root:
             return None
@@ -42,8 +45,18 @@ def successful_direct_write_paths(calls, repository_root):
 
 def compile_side_effect_paths(baseline, current, direct_paths):
     """Return changed current paths not owned by successful direct writes."""
-    direct = set(direct_paths)
+    before = {
+        repository_path_identity(path): fingerprint
+        for path, fingerprint in baseline.items()
+    }
+    direct = {
+        repository_path_identity(path)
+        for path in direct_paths
+    }
     return tuple(sorted(
         path for path, fingerprint in current.items()
-        if baseline.get(path) != fingerprint and path not in direct
+        if (
+            before.get(repository_path_identity(path)) != fingerprint
+            and repository_path_identity(path) not in direct
+        )
     ))

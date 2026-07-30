@@ -83,6 +83,13 @@ def _state_replacements(states):
             )
             if digest:
                 replacements[digest] = "<TASK_CARD_SHA256>"
+            issuance_id = (
+                task.get("issuance_id", "")
+                if isinstance(task, dict)
+                else ""
+            )
+            if issuance_id:
+                replacements[issuance_id] = "<TASK_ISSUANCE_ID>"
     return replacements
 
 

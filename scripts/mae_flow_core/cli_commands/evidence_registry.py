@@ -48,7 +48,8 @@ _DELIVERY_EVIDENCE = DeliveryEvidenceRules(DeliveryEvidencePorts(
         state),
     committed_delivery_paths=lambda state: api._committed_delivery_paths(state),
     trusted_harness_commit_path=lambda path, state:
-        api._trusted_harness_commit_path(path, state),
+        api._trusted_harness_commit_path(
+            path, state, include_user_authorized=True),
     dirty_paths=lambda: api._dirty_paths(),
     path_fingerprint=lambda path: api._path_fingerprint(path),
     repo_path_identity=lambda path: api._repo_path_identity(path),

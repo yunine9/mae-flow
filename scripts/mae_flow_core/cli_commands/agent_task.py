@@ -1,5 +1,7 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
+import hashlib
+
 from .shared import (
     BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
     codecheck_log_path, globmod, os, quality_task_card_documents,
@@ -61,22 +63,23 @@ def _resolve_requirement_sources_from_runtime(st):
 
 def _compile_worktree_snapshot(kind, head):
     if kind != "COMPILE":
-        return {}
+        return {}, False
     try:
-        return api._worktree_snapshot_since(head)
+        return api._worktree_snapshot_since(head), True
     except Exception as exc:
         print(
             "[mae-flow] COMPILE provenance baseline unavailable; "
-            "issuing task with empty snapshot: %s" % exc,
+            "issuing task with invalid baseline: %s" % exc,
             file=sys.stderr,
         )
-        return {}
+        return {}, False
 
 
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
     document = context["document"]
+    api._drop_agent_token(kind, strict=True)
     artifact = quality_task_card_use_cases.store_task_card(
         document,
         os.path.join(".mae-flow-work", "agent-tasks"),
@@ -91,7 +94,20 @@ def _store_agent_task(flow, st, args, context):
     )
     digest = artifact.digest
     path = artifact.path
+    issuance_id = hashlib.sha256(
+        (
+            kind
+            + "\0"
+            + digest
+            + "\0"
+            + str(st.get("revision", ""))
+            + "\0"
+            + str(time.time_ns())
+        ).encode("utf-8")
+    ).hexdigest()[:24]
     lightcheck_result = context["lightcheck_result"]
+    worktree_snapshot, worktree_snapshot_valid = (
+        _compile_worktree_snapshot(kind, context["task_head"]))
     st.setdefault("agent_tasks", {})[kind] = quality_task_cards.task_record(
         step=sid, path=path, digest=digest, head=context["task_head"],
         scope=args.scope or "", checkpoint=context["checkpoint_id"],
@@ -102,8 +118,8 @@ def _store_agent_task(flow, st, args, context):
         source_snapshot=(
             api._source_snapshot_since(context["task_head"], st, flow)
             if context["precommit_review"] else {}),
-        worktree_snapshot=_compile_worktree_snapshot(
-            kind, context["task_head"]),
+        worktree_snapshot=worktree_snapshot,
+        worktree_snapshot_valid=worktree_snapshot_valid,
         allowed_files=(
             context["scan"].get("files", [])
             if kind == "CODECHECK" else []),
@@ -118,7 +134,8 @@ def _store_agent_task(flow, st, args, context):
         } if lightcheck_result is not None else {}),
         ut_targets=context["ut_targets"] if kind == "UT" else {},
         unchanged_initial_dirty=context["inherited_dirty"],
-        at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        issuance_id=issuance_id)
     if kind == "CODECHECK":
         append_codecheck_event(
             os.getcwd(), st, "agent.task_created", {

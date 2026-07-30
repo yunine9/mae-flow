@@ -5,6 +5,7 @@ import types
 from .cli_commands import shared
 from .cli_commands.shared import *  # noqa: F401,F403
 from .cli_commands.wiring import api
+from .cli_commands import git_authorization as _git_authorization
 from .cli_commands import git_ownership as _git_ownership
 from .cli_commands import state_config as _state_config
 from .cli_commands import source_facts as _source_facts
@@ -21,6 +22,7 @@ from .cli_commands import advancement as _advancement
 from .cli_commands import checkpoint_plan as _checkpoint_plan
 from .cli_commands import checkpoint_commands as _checkpoint_commands
 from .cli_commands import done_status as _done_status
+from .cli_commands import gate_permit_state as _gate_permit_state
 from .cli_commands import spec as _spec
 from .cli_commands import gate as _gate
 from .cli_commands import agent_task as _agent_task
@@ -32,6 +34,7 @@ from .cli_commands import dispatch as _dispatch
 
 api.register(shared)
 _COMMAND_MODULES = (
+    _git_authorization,
     _git_ownership,
     _state_config,
     _source_facts,
@@ -48,6 +51,7 @@ _COMMAND_MODULES = (
     _checkpoint_plan,
     _checkpoint_commands,
     _done_status,
+    _gate_permit_state,
     _spec,
     _gate,
     _agent_task,

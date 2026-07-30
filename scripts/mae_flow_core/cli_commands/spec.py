@@ -2,11 +2,20 @@
 
 from .shared import (
     DEFAULTS_PATH, DEFAULT_TEST_PATS, GATE_PERMITS_PATH, GATE_STRIKES_PATH,
-    GATE_STRIKE_LIMIT, SPEC_PHASES, SPEC_REGISTER_FIELDS, check_permit, json,
-    load_json, os, permit_block_id, re, record_strike, specengine, strike_escalation,
-    sys, time, update_json,
+    SPEC_PHASES, SPEC_REGISTER_FIELDS, json, load_json, os, re, specengine, sys,
+    time, update_json,
 )
 from .wiring import api
+
+_USER_GIT_AUTHORIZATION_RULES = {
+    "bash-cross-delivery-carryover",
+    "bash-foreign-openspec",
+    "bash-specs",
+    "bash-source",
+    "bash-tests-only",
+    "bash-wipe-worktree",
+    "bash-git-revert-user-authorization",
+}
 
 def _test_patterns(st):
     """仓库测试路径配置：config「测试路径」逗号分隔正则优先，否则读 defaults 数组。
@@ -59,88 +68,6 @@ def _business_source_changed_since_step(st, sid):
         if not api._is_test_file(path, st):
             out.append(raw)
     return list(dict.fromkeys(out)), ""
-
-def _gate_block_id(rule, subject):
-    return permit_block_id(rule, subject)
-
-def _gate_die(st, sid, rule, subject, msg):
-    """裁决类拦截的统一出口:break-glass 一次性放行令 + 三振熔断。
-
-    gate 的误报不可能降到零(静态文本判断动态行为),兜底纪律是:
-    ①有效放行令 → 消费后放过本条规则,其余规则继续检查;
-    ②同一规则同步骤连拦 ≥GATE_STRIKE_LIMIT 次 → 报错升级,附本次动作的放行令
-      签发指引——出口不提前广告,卡死的那一刻自己出现;
-    ③月光模式改为指向 blocked/defer 留痕(夜里没有用户消息,放行令天然签不出来);
-    ④每次三振与放行都留痕:兜底机制同时是误报采集器(doctor 展示)。
-    绝对类规则(密钥/危险命令/状态文件/伪造通道)不走这里,没有放行令——
-    用户在真实终端手动执行就是它们的逃生口。"""
-    bid = _gate_block_id(rule, subject)
-    try:
-        permits = load_json(GATE_PERMITS_PATH)
-    except FileNotFoundError:
-        permits = {}
-    except Exception:
-        # 实测:放行令存储损坏是唯一"用户说了不算"的场景,且曾全静默——
-        # 当场隔离坏文件并明示,重新 allow 一步即恢复(同意原话仍可验真)。
-        permits = {}
-        try:
-            os.replace(GATE_PERMITS_PATH, GATE_PERMITS_PATH + ".corrupt."
-                       + time.strftime("%Y%m%d-%H%M%S"))
-            print("[mae-flow] ⚠ 放行令存储损坏,已隔离;若刚签发过放行令,"
-                  "重新执行同一条 allow 命令即可重签。", file=sys.stderr)
-        except OSError:
-            pass
-    rec = permits.get(bid)
-    if rec and not rec.get("used") and rec.get("step") == sid:
-        head = api.sh("git rev-parse --verify HEAD")
-        permit = check_permit(permits, bid, sid, head)
-        if permit.kind == "stale":
-            # 实测:HEAD 变化后放行令静默作废,拦截消息与普通三振无差别,
-            # Agent 会误判"放行没生效"盲目循环——显式说明作废原因与恢复路。
-            msg = ("已有放行令 %s 因代码版本变化作废(签发于 %s)。需重新征得"
-                   "用户同意后 allow 重签。" % (bid, rec.get("head", "")[:8])
-                   ) + msg
-        if permit.kind == "valid":
-            def consume(data):
-                entry = (data or {}).get(bid) or {}
-                entry["used"] = True
-                entry["used_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                data[bid] = entry
-                return data
-            try:
-                update_json(GATE_PERMITS_PATH, consume, default={}, recover_corrupt=True)
-            except Exception:
-                pass
-            try:
-                st.setdefault("history", []).append({
-                    "step": sid, "result": "gate:allowed-by-user",
-                    "note": rule + " " + bid,
-                    "at": time.strftime("%Y-%m-%d %H:%M:%S")})
-                api.save_state(st)
-            except Exception:
-                pass
-            print("[mae-flow] 用户放行令 %s 生效(一次性,已作废):规则 %s 放过此动作,"
-                  "其余规则继续检查。" % (bid, rule), file=sys.stderr)
-            return
-    count = 1
-    try:
-        def bump(data):
-            result, _count = record_strike(
-                data, rule, sid, bid, subject,
-                time.strftime("%Y-%m-%d %H:%M:%S"))
-            return result
-        data = update_json(GATE_STRIKES_PATH, bump, default={}, recover_corrupt=True)
-        count = int(((data or {}).get("counts", {}).get(rule) or {}).get("count", 1) or 1)
-    except Exception:
-        count = 1
-    msg += strike_escalation(
-        count,
-        GATE_STRIKE_LIMIT,
-        api._moonlight(st or {}),
-        bid,
-        os.path.abspath(sys.argv[0]),
-    )
-    api.die(msg, 2)
 
 def cmd_spec(flow, st, args):
     """交付登记与阶段推进(v3 取代 comet-state)。
@@ -435,6 +362,26 @@ def cmd_allow(flow, st, args):
         api.die("放行令签发验真失败:" + why
             + "。必须先把动作原文和拦截原因展示给用户,取得用户明确同意的原话。", 2)
     head = api.sh("git rev-parse --verify HEAD")
+    action = {}
+    if rec.get("rule") in _USER_GIT_AUTHORIZATION_RULES:
+        modeled_action = api._git_authorization_action(
+            rec.get("sample", ""),
+            st,
+            rec.get("rule", ""),
+        )
+        if modeled_action is not None:
+            action = api._git_authorization_record(
+                modeled_action)
+        if (
+                action
+                and not api._authorization_ack_covers(
+                    action, args.ack or "")):
+            api.die(
+                "该 Git 放行必须绑定用户原话中明确写出的 exact path/commit；"
+                "当前原话未覆盖本动作的全部路径，已拒绝扩大授权。"
+                "请执行 messages 核对原话；不得让 Agent 补写或概括用户授权。",
+                2,
+            )
 
     def issue(data):
         data = data or {}
@@ -442,6 +389,8 @@ def cmd_allow(flow, st, args):
                      "head": head, "sample": rec.get("sample", ""),
                      "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                      "ack": (args.ack or "")[:200], "used": False}
+        if action:
+            data[bid]["git_action"] = action
         return data
     update_json(GATE_PERMITS_PATH, issue, default={}, recover_corrupt=True)
     st.setdefault("history", []).append({

@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core import cli_runtime as mf
+from mae_flow_core.cli_commands import source_facts
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:
@@ -235,6 +236,137 @@ class TaskScopeTests(unittest.TestCase):
                 "git add 'unterminated", "add"),
         )
 
+    def test_git_subcommand_parser_accepts_global_options_and_git_exe(self):
+        matrix = (
+            (
+                "git -c user.name=Fixture commit -m message",
+                [["-m", "message"]],
+            ),
+            (
+                "git -C . commit --all -m message",
+                [["--all", "-m", "message"]],
+            ),
+            (
+                "git --no-pager commit -m message",
+                [["-m", "message"]],
+            ),
+            (
+                "git.exe commit -m message",
+                [["-m", "message"]],
+            ),
+            (
+                "/usr/local/bin/git.exe --no-pager commit -m message",
+                [["-m", "message"]],
+            ),
+        )
+        for command, expected in matrix:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    expected,
+                    git_intent.git_subcommand_tokens(command, "commit"),
+                )
+
+    def test_git_subcommand_parser_handles_pipelines_and_quoted_separators(self):
+        self.assertEqual(
+            [["-F", "-"]],
+            git_intent.git_subcommand_tokens(
+                "git diff --cached | git commit -F -",
+                "commit",
+            ),
+        )
+        self.assertEqual(
+            [["-m", "[REQ123][fix]part one; part two"]],
+            git_intent.git_subcommand_tokens(
+                'git commit -m "[REQ123][fix]part one; part two"',
+                "commit",
+            ),
+        )
+        self.assertEqual(
+            [["-m", "[REQ123][fix]part && two || three"]],
+            git_intent.git_subcommand_tokens(
+                'git commit -m "[REQ123][fix]part && two || three"',
+                "commit",
+            ),
+        )
+        continuations = (
+            'git \\\ncommit -m "[REQ123][fix]continued"',
+            'git\\\n commit -m "[REQ123][fix]continued"',
+        )
+        for command in continuations:
+            with self.subTest(command=repr(command)):
+                self.assertEqual(
+                    [["-m", "[REQ123][fix]continued"]],
+                    git_intent.git_subcommand_tokens(
+                        command, "commit"),
+                )
+        single_quoted = "printf '%s' 'git \\\ncommit -m x'"
+        self.assertEqual(
+            (),
+            git_intent.git_invocations(single_quoted),
+        )
+        self.assertIn(
+            "git \\\ncommit -m x",
+            git_intent.shell_command_groups(single_quoted)[0],
+        )
+
+    def test_same_digest_compile_task_reissue_has_a_new_state_issuance(self):
+        write(
+            "services/anr/src/Logic.cpp",
+            "int changedFunction() {\n  return 2;\n}\n",
+        )
+        self.commit("feature source")
+        state = self.state("build")
+
+        first_card, first_task = self.task(state, "compile")
+        second_card, second_task = self.task(mf.load_state(), "compile")
+
+        self.assertEqual(first_card, second_card)
+        self.assertEqual(first_task["sha256"], second_task["sha256"])
+        self.assertNotEqual(
+            first_task["issuance_id"],
+            second_task["issuance_id"],
+        )
+        self.assertNotIn("issuance", second_card.lower())
+        self.assertNotIn("签发轮次", second_card)
+
+    def test_new_task_fails_closed_when_old_token_cannot_be_dropped(self):
+        state = self.state("build")
+        mf.save_state(state)
+        write(".mae-flow.json.tokens", json.dumps({
+            "COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": "build",
+                "status": "OK",
+                "task_sha256": "old-card",
+            },
+        }))
+
+        with mock.patch(
+                "mae_flow_core.cli_commands.state_config.update_json",
+                side_effect=OSError("sidecar locked")):
+            with self.assertRaises(SystemExit) as caught:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    mf.cmd_agent_task(
+                        FLOW,
+                        mf.load_state(),
+                        types.SimpleNamespace(
+                            kind="compile",
+                            scope=None,
+                            checkpoint=None,
+                        ),
+                    )
+
+        self.assertEqual(2, caught.exception.code)
+        self.assertNotIn(
+            "COMPILE",
+            (mf.load_state().get("agent_tasks", {}) or {}),
+        )
+        with open(".mae-flow.json.tokens", encoding="utf-8") as stream:
+            self.assertEqual(
+                "old-card",
+                json.load(stream)["COMPILE"]["task_sha256"],
+            )
+
     def test_ut_card_filters_docs_and_freezes_function_and_module_scope(self):
         write("services/anr/src/Logic.cpp",
               "int changedFunction() {\n  return 2;\n}\n\n"
@@ -365,7 +497,60 @@ class TaskScopeTests(unittest.TestCase):
 
         task = mf.load_state()["agent_tasks"]["COMPILE"]
         self.assertEqual({}, task["worktree_snapshot"])
+        self.assertFalse(task["worktree_snapshot_valid"])
         self.assertIn("COMPILE provenance baseline unavailable", stderr.getvalue())
+
+    def test_compile_snapshot_surfaces_git_command_failures(self):
+        failed_git = mock.Mock(
+            returncode=1,
+            stdout="",
+            stderr="fixture git failure",
+        )
+        subprocess_module = mock.Mock()
+        subprocess_module.run.return_value = failed_git
+        with mock.patch.object(
+                source_facts,
+                "subprocess",
+                subprocess_module,
+                create=True,
+        ):
+            with self.assertRaises(RuntimeError):
+                mf._worktree_snapshot_since(self.base)
+
+    def test_every_full_flow_compile_card_keeps_fixes_uncommitted(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() {\n  return 2;\n}\n\n"
+              "int untouchedFunction() {\n  return 9;\n}\n")
+        self.commit("compile card instruction")
+
+        card, task = self.task(self.state("build"), "compile")
+
+        self.assertTrue(task["worktree_snapshot_valid"])
+        self.assertIn(
+            "compile-agent 禁止执行 git commit、git push；"
+            "直接修复必须保留为未提交工作区改动",
+            card,
+        )
+
+    def test_issuing_new_compile_task_invalidates_old_completion_token(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() {\n  return 2;\n}\n\n"
+              "int untouchedFunction() {\n  return 9;\n}\n")
+        self.commit("new compile task")
+        state = self.state("build")
+        mf.save_state(state)
+        with open(mf.STATE_PATH + ".tokens", "w", encoding="utf-8") as stream:
+            json.dump({"COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": "build",
+                "status": "OK",
+                "task_sha256": "old-task",
+            }}, stream)
+
+        self.task(state, "compile")
+
+        with open(mf.STATE_PATH + ".tokens", encoding="utf-8") as stream:
+            self.assertNotIn("COMPILE", json.load(stream))
 
     def test_precommit_checkpoint_card_uses_tracked_and_untracked_worktree(self):
         write("services/anr/src/Logic.cpp",

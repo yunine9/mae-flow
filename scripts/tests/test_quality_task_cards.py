@@ -52,6 +52,7 @@ class QualityTaskCardTests(unittest.TestCase):
             initial_compile_net=2,
             source_snapshot={"src/main.cpp": "hash"},
             worktree_snapshot=worktree_snapshot,
+            worktree_snapshot_valid=True,
             allowed_files=files,
             task_files=files,
             execution_roots=roots,
@@ -59,6 +60,7 @@ class QualityTaskCardTests(unittest.TestCase):
             ut_targets={},
             unchanged_initial_dirty=["src/old.cpp"],
             at="2026-07-29 10:00:00",
+            issuance_id="issuance-123",
         )
         files.append("src/later.cpp")
         roots.append(".")
@@ -69,7 +71,9 @@ class QualityTaskCardTests(unittest.TestCase):
             {"generated/build.properties": "before"},
             record["worktree_snapshot"],
         )
+        self.assertTrue(record["worktree_snapshot_valid"])
         self.assertEqual("abc", record["sha256"])
+        self.assertEqual("issuance-123", record["issuance_id"])
 
 
 if __name__ == "__main__":

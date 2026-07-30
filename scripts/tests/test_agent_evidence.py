@@ -85,6 +85,89 @@ class AgentEvidenceRuleTests(unittest.TestCase):
             ).reason,
         )
 
+    def test_token_must_match_the_current_task_digest(self):
+        token = {
+            "COMPILE": {
+                "at": "2026-07-29 10:00:01",
+                "step": "tw_compile",
+                "status": "OK",
+                "head": "a" * 40,
+                "task_sha256": "stale-task",
+            }
+        }
+        state = {
+            "current": "tw_compile",
+            "agent_tasks": {
+                "COMPILE": {"sha256": "current-task"},
+            },
+        }
+
+        result = AgentEvidenceRules(make_ports(
+            tokens=lambda: token,
+        )).agent_ran(
+            {"agent": "COMPILE", "statuses": ["OK"]},
+            state,
+        )
+
+        self.assertFalse(result.passed)
+        self.assertIn("令牌不属于当前任务卡", result.reason)
+
+    def test_compile_token_must_match_same_digest_task_issuance(self):
+        token = {
+            "COMPILE": {
+                "at": "2026-07-29 10:00:01",
+                "step": "tw_compile",
+                "status": "OK",
+                "head": "a" * 40,
+                "task_sha256": "same-card-digest",
+                "task_issuance_id": "old-issuance",
+            },
+        }
+        state = {
+            "current": "tw_compile",
+            "agent_tasks": {
+                "COMPILE": {
+                    "sha256": "same-card-digest",
+                    "issuance_id": "new-issuance",
+                },
+            },
+        }
+
+        result = AgentEvidenceRules(make_ports(
+            tokens=lambda: token,
+        )).agent_ran(
+            {"agent": "COMPILE", "statuses": ["OK"]},
+            state,
+        )
+
+        self.assertFalse(result.passed)
+        self.assertIn("令牌不属于当前任务卡", result.reason)
+
+    def test_legacy_non_compile_token_compatibility_is_unchanged(self):
+        token = {
+            "CODECHECK": {
+                "at": "2026-07-29 10:00:01",
+                "step": "verify_codecheck",
+                "status": "OK",
+                "head": "a" * 40,
+            }
+        }
+        state = {
+            "current": "verify_codecheck",
+            "agent_tasks": {
+                "CODECHECK": {"sha256": "existing-task"},
+            },
+        }
+
+        result = AgentEvidenceRules(make_ports(
+            tokens=lambda: token,
+        )).agent_ran(
+            {"agent": "CODECHECK", "statuses": ["OK"]},
+            state,
+        )
+
+        self.assertTrue(result.passed, result.reason)
+
     def test_no_source_short_circuits_agent_requirement(self):
         rules = AgentEvidenceRules(make_ports(
             changed_source_files=lambda _state: ([], "")))

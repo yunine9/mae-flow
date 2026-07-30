@@ -6,6 +6,7 @@ import re
 from typing import Callable
 
 from mae_flow_core.application.hooks.models import accepted, rejected
+from mae_flow_core.foundation.source_paths import repository_path_identity
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,28 @@ def _card_digest(ports, task):
     text = ports.read_text(task["path"])
     body = text.rsplit("TASK_CARD_SHA256:", 1)[0]
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _completion_head_rejection(kind, task, current, head):
+    if current == head:
+        return ""
+    if task.get("standalone"):
+        return (
+            "独立任务禁止自动 commit，但当前 HEAD 已变化。"
+            "保留代码后结束本任务并由用户自行决定是否提交。"
+        )
+    if task.get("precommit_review"):
+        return (
+            "当前检查点要求用户先检视未提交 diff；子 Agent 禁止自动 commit。"
+            "保留工作区代码并重新按真实结果收尾。"
+        )
+    if kind == "COMPILE":
+        return (
+            "COMPILE 任务期间 HEAD 已变化，说明子 Agent 执行了或绕过门禁完成了"
+            " git commit。compile-agent 禁止 git commit、git push；"
+            "保留直接修复为未提交改动并重新生成任务卡。"
+        )
+    return ""
 
 
 def verify_completion_task(kind, report, state, ports):
@@ -72,18 +95,10 @@ def verify_completion_task(kind, report, state, ports):
             "请重新生成任务卡。",
             task,
         )
-    if task.get("standalone") and current != head:
-        return rejected(
-            "独立任务禁止自动 commit，但当前 HEAD 已变化。"
-            "保留代码后结束本任务并由用户自行决定是否提交。",
-            task,
-        )
-    if task.get("precommit_review") and current != head:
-        return rejected(
-            "当前检查点要求用户先检视未提交 diff；子 Agent 禁止自动 commit。"
-            "保留工作区代码并重新按真实结果收尾。",
-            task,
-        )
+    head_rejection = _completion_head_rejection(
+        kind, task, current, head)
+    if head_rejection:
+        return rejected(head_rejection, task)
     return accepted(task)
 
 
@@ -235,7 +250,35 @@ def _codecheck_scope_rejection(task, changed):
     )
 
 
-def _ut_scope_rejection(changed, ports):
+def _ut_command_side_effect_rejection(paths):
+    return (
+        "UT 命令产生了非测试文件副作用: "
+        + "、".join(paths[:5])
+        + "。不要使用 unlock source 或 accept-risk，不要询问用户。"
+        "只恢复任务签发时干净的路径；本次新增输出应恢复性移出交付范围后"
+        "重试收尾。任务基线已有的用户脏文件不得删除或覆盖。"
+    )
+
+
+def _ut_non_test_changes(changed, ports, direct_write_paths):
+    bad = [path for path in changed if not ports.test_like(path)]
+    direct = {
+        repository_path_identity(path)
+        for path in direct_write_paths
+    }
+    return (
+        [
+            path for path in bad
+            if repository_path_identity(path) in direct
+        ],
+        [
+            path for path in bad
+            if repository_path_identity(path) not in direct
+        ],
+    )
+
+
+def _ut_scope_rejection(changed, ports, direct_write_paths):
     deleted = [
         path for path in changed
         if ports.test_like(path) and not ports.path_exists(path)
@@ -246,22 +289,32 @@ def _ut_scope_rejection(changed, ports):
             + "、".join(deleted[:5])
             + "；不能通过删测试取得 PASS。"
         )
-    bad = [path for path in changed if not ports.test_like(path)]
-    return (
+    intentional, command_effects = _ut_non_test_changes(
+        changed, ports, direct_write_paths)
+    if not intentional and not command_effects:
+        return ""
+    message = (
         "ut-generator-agent 修改了非测试源码: "
-        + "、".join(bad[:5])
+        + "、".join(intentional[:5])
         + "；源码缺陷必须先交用户裁决。"
-        if bad else ""
+        if intentional else ""
     )
+    if command_effects:
+        message += (
+            (" 此外，" if message else "")
+            + _ut_command_side_effect_rejection(command_effects)
+        )
+    return message
 
 
-def _scope_rejection(kind, task, changed, ports):
+def _scope_rejection(kind, task, changed, ports, direct_write_paths):
     if kind == "COMPILE":
         return _compile_scope_rejection(changed, ports)
     if kind == "CODECHECK":
         return _codecheck_scope_rejection(task, changed)
     if kind == "UT":
-        return _ut_scope_rejection(changed, ports)
+        return _ut_scope_rejection(
+            changed, ports, direct_write_paths)
     if kind == "GRILL" and changed:
         return (
             "grill-critic-agent 是只读审查角色，却修改了文件: "
@@ -270,10 +323,12 @@ def _scope_rejection(kind, task, changed, ports):
     return ""
 
 
-def verify_agent_scope(kind, task, state, ports):
+def verify_agent_scope(
+        kind, task, state, ports, direct_write_paths=()):
     """Apply the four Agent write boundaries to frozen repository facts."""
     changed = _changed_source_paths(task, state, ports)
-    reason = _scope_rejection(kind, task, changed, ports)
+    reason = _scope_rejection(
+        kind, task, changed, ports, direct_write_paths)
     return (
         rejected(reason, task, changed)
         if reason else accepted(task, changed)

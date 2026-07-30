@@ -27,6 +27,32 @@ class OwnershipDecision:
     advisories: tuple = ()
 
 
+def decide_compile_task_commit(step, task, token):
+    """Close the issued-COMPILE/pre-completion commit window."""
+    if (
+            not isinstance(task, dict)
+            or task.get("step") != step):
+        return None
+    digest = str(task.get("sha256", "") or "")
+    issuance_id = str(task.get("issuance_id", "") or "")
+    if (
+            digest
+            and isinstance(token, dict)
+            and token.get("step") == step
+            and token.get("task_sha256") == digest
+            and (
+                not issuance_id
+                or token.get("task_issuance_id") == issuance_id)):
+        return None
+    return GateDecision(
+        "block",
+        "bash-compile-task-pending",
+        "当前步骤的 COMPILE 任务已签发但尚无匹配此任务卡的合法完成令牌。"
+        "先完成当前 COMPILE 任务并让 SubagentStop 验收；compile-agent 的"
+        "直接修复保持未提交，随后由主流程按正常候选规则提交。",
+    )
+
+
 def _review_block(facts):
     if not facts.review_required:
         return None
@@ -99,7 +125,7 @@ def _compile_side_effect_block(facts):
     )
 
 
-def _candidate_block(facts):
+def _inherited_block(facts):
     if facts.inherited:
         return GateDecision(
             "block",
@@ -112,6 +138,10 @@ def _candidate_block(facts):
             "执行 git restore --staged -- <上述路径> 只移出暂存区；"
             "若本单确实需要某文件，让 Agent 按本单需求实际修改并检视后再提交。",
         )
+    return None
+
+
+def _foreign_block(facts):
     if facts.foreign_openspec:
         return GateDecision(
             "block",
@@ -123,13 +153,16 @@ def _candidate_block(facts):
             + "。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，"
             "选择不入库后由流程移入 .mae-flow-work/story。",
         )
-    if facts.compile_side_effects:
-        return _compile_side_effect_block(facts)
+    return None
+
+
+def _strong_artifact_block(facts):
     if facts.strong_artifacts:
         return GateDecision(
             "block",
             "bash-build-artifacts",
-            "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时编译产物: "
+            "提交前检测到既非 Agent 直接改写、又属于本次新增的高置信临时"
+            "编译产物或显式 force-add 的忽略文件: "
             + "、".join(facts.strong_artifacts[:8])
             + ("…" if len(facts.strong_artifacts) > 8 else "")
             + "。这些文件通常不应进入 MR。若已暂存，执行 "
@@ -138,6 +171,39 @@ def _candidate_block(facts):
             "从 git add 清单中移除这些路径。",
         )
     return None
+
+
+def _ownership_blocks(facts):
+    # Integrity and irreversible side-effect boundaries are not user permits.
+    # They must win before inherited/foreign ownership choices that do have an
+    # exact authorization route.
+    return tuple(block for block in (
+        _review_block(facts),
+        (
+            _compile_side_effect_block(facts)
+            if facts.compile_side_effects else None
+        ),
+        _strong_artifact_block(facts),
+        _inherited_block(facts),
+        _foreign_block(facts),
+    ) if block)
+
+
+def _aggregate_block(blocks):
+    primary = blocks[0]
+    if len(blocks) == 1:
+        return primary
+    details = "\n".join(
+        "- [%s] %s" % (block.rule, block.message)
+        for block in blocks[1:]
+    )
+    return GateDecision(
+        primary.kind,
+        primary.rule,
+        primary.message
+        + "\n同时检测到其他独立问题，请一次处理后再重试：\n"
+        + details,
+    )
 
 
 def _advisories(facts):
@@ -159,7 +225,8 @@ def _advisories(facts):
 
 
 def decide_ownership(facts):
-    block = _review_block(facts) or _candidate_block(facts)
+    blocks = _ownership_blocks(facts)
+    block = _aggregate_block(blocks) if blocks else None
     return OwnershipDecision(
         block=block,
         advisories=() if block else _advisories(facts),

@@ -3,8 +3,9 @@
 from .shared import (
     BashGateContext, BashWriteContext, EditGateContext, HERE, OwnershipFacts,
     WRITEISH_STRONG, WRITEISH_WEAK, decide_bash_write, decide_commit_branch,
-    decide_edit, decide_ownership, decide_post_commit, decide_pre_commit, guard_intent,
-    os, re, replace, sys,
+    decide_compile_task_commit, decide_edit, decide_ownership,
+    decide_post_commit, decide_pre_commit, git_intent, guard_intent, os, re,
+    replace, sys,
 )
 from .wiring import api
 
@@ -92,14 +93,28 @@ def _compile_candidate_groups(candidate_snapshot, compile_side_effects):
 
 def _enforce_commit_ownership(decision, jdie):
     if decision.block:
-        if decision.block.rule == "bash-compile-side-effects":
-            # This exact index state is the whole violation. Do not create a
-            # permit/strike record: `git restore --staged` clears the next
-            # commit attempt without deleting the local build output.
+        if decision.block.rule in {
+                "bash-compile-side-effects",
+                "bash-build-artifacts",
+                "bash-checkpoint-reviewed-snapshot",
+                "bash-checkpoint-reviewed-files"}:
+            # Integrity/provenance hard blocks are not user-decision permits.
+            # Keep their recovery local and write no strike/permit state.
             api.die(decision.block.message, 2)
         jdie(decision.block.rule, decision.block.message)
     for message in decision.advisories:
         print(message, file=sys.stderr)
+
+
+def _gate_compile_task_window(st):
+    tokens = api._agent_token_data()
+    decision = decide_compile_task_commit(
+        st.get("current", ""),
+        (st.get("agent_tasks", {}) or {}).get("COMPILE"),
+        (tokens if isinstance(tokens, dict) else {}).get("COMPILE"),
+    )
+    if decision:
+        api.die(decision.message, 2)
 
 
 def _gate_commit_candidates(c, st, jdie):
@@ -109,33 +124,17 @@ def _gate_commit_candidates(c, st, jdie):
     review_required = (
         item.get("status") == "commit_pending"
         and bool(receipt.get("snapshot")))
-    review = decide_ownership(OwnershipFacts(
-        review_required=review_required,
-        expected_snapshot=receipt.get("snapshot") or {},
-        current_snapshot=(
-            api._reviewed_snapshot_current(st, item)
-            if review_required else {}),
-        candidate_paths=tuple(candidate_snapshot.get("paths") or []),
-        inherited=(),
-        foreign_openspec=(),
-        compile_side_effects=(),
-        staged_compile_side_effects=(),
-        command_compile_side_effects=(),
-        strong_artifacts=(),
-        unproven_paths=(),
-        artifact_hints=(),
-    ))
-    if review.block:
-        jdie(review.block.rule, review.block.message)
     (inherited, foreign_openspec, compile_side_effects, strong_artifacts,
      unproven_paths, artifact_hints) = api._pending_commit_files(
          c, st, candidate_snapshot)
     (staged_compile_side_effects, command_compile_side_effects) = (
         _compile_candidate_groups(candidate_snapshot, compile_side_effects))
     decision = decide_ownership(OwnershipFacts(
-        review_required=False,
-        expected_snapshot={},
-        current_snapshot={},
+        review_required=review_required,
+        expected_snapshot=receipt.get("snapshot") or {},
+        current_snapshot=(
+            api._reviewed_snapshot_current(st, item)
+            if review_required else {}),
         candidate_paths=tuple(candidate_snapshot.get("paths") or []),
         inherited=tuple(inherited),
         foreign_openspec=tuple(foreign_openspec),
@@ -207,6 +206,91 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
         print(decision.message, file=sys.stderr)
     sys.exit(0)
 
+
+def _git_actions_preflight(command):
+    wrapped_git = git_intent.wrapped_git_mutations(command)
+    if wrapped_git:
+        api.die(
+            "Agent Bash 禁止用 Python/PowerShell/cmd/sh 等解释器或子进程"
+            "换壳执行 git add/commit/push 来绕过 Hook。检测到: "
+            + "、".join(wrapped_git)
+            + "。保留现场并直接使用可见的 git 命令，让 Gate 正常裁决；"
+            "若是用户本人决定在外部终端操作，应把命令和风险交给用户，"
+            "不得由 Agent 代执行。",
+            2,
+        )
+    alias_mutations = list(
+        git_intent.inline_git_alias_mutations(command))
+    for operation, _arguments in git_intent.git_invocations(command):
+        expansion = api.argv_out([
+            "git", "config", "--get", "alias." + operation,
+        ])
+        mutation = git_intent.git_alias_mutation(expansion)
+        if mutation:
+            alias_mutations.append(mutation)
+    if alias_mutations:
+        api.die(
+            "Agent Bash 禁止用 mutating Git alias 隐藏真实写动作。"
+            "检测到 alias 最终指向: "
+            + "、".join(dict.fromkeys(alias_mutations))
+            + "。请改用可见的 canonical git add/commit/push/"
+            "restore/rm/revert 命令，让 Gate 预检 exact action；"
+            "只读 alias 不受影响，用户外部终端不受 Hook 约束。",
+            2,
+        )
+    opaque_pathspecs = git_intent.opaque_pathspec_mutations(
+        command)
+    if opaque_pathspecs:
+        api.die(
+            "Agent Git 写动作禁止使用 --pathspec-from-file/"
+            "--pathspec-file-nul：Gate 无法在执行前核对其 exact candidates。"
+            "检测到: " + "、".join(opaque_pathspecs)
+            + "。请改为显式 `-- <paths>`，逐项展示并接受 ownership"
+            " 检查；用户外部终端不受 Hook 约束。",
+            2,
+        )
+    actions = git_intent.git_actions(
+        command, actor="agent-hook")
+    head_mutations = [
+        action for action in actions
+        if action.operation in ("commit", "revert")
+    ]
+    if len(head_mutations) > 1:
+        api.die(
+            "Agent 单条 Bash 中只能执行每次一个可审计的 "
+            "git commit/revert；检测到 %d 个 HEAD 改写动作。"
+            "请拆成独立命令，让 Gate 对每个 GitAction 的 message、"
+            "paths 与 ownership 分别预检。用户在外部终端的操作"
+            "不受此 Hook 约束。"
+            % len(head_mutations),
+            2,
+        )
+    return actions
+
+
+def _gate_head_actions(actions, st, jdie):
+    commit_present = any(
+        action.operation == "commit" for action in actions)
+    revert_actions = [
+        action for action in actions
+        if action.operation == "revert"
+    ]
+    if commit_present or revert_actions:
+        # Issued COMPILE is a transient child-task boundary. It must win
+        # before format/branch/checkpoint rules that create strikes.
+        _gate_compile_task_window(st)
+    if revert_actions:
+        target = revert_actions[-1].commit or "非精确提交"
+        jdie(
+            "bash-git-revert-user-authorization",
+            "Agent 发起 git revert 会直接改写 HEAD，必须绑定用户明确要求"
+            "回退的 exact commit。当前目标: " + target
+            + "。若用户原话已明确包含该 commit，使用本次拦截编号签发"
+            "一次性 exact 放行；否则先让用户裁决。",
+        )
+    return commit_present
+
+
 def cmd_gate(flow, st, args):
     # 全局安装只是提供能力，不代表用户授权接管当前仓库。没有状态时必须 fail-open；
     # 真正启用流程只认 init 创建的 .mae-flow.json。
@@ -230,6 +314,10 @@ def cmd_gate(flow, st, args):
         return _gate_edit(flow, st, sid, step, intent, jdie)
     if args.what == "bash":
         c = intent.subject
+        git_command = args.arg
+        git_actions = _git_actions_preflight(git_command)
+        commit_present = _gate_head_actions(
+            git_actions, st, jdie)
         # 按 token 匹配路径类 pattern:整串匹配时 `(^|/)src/` 对空格后的相对路径
         # (如 `sed -i ... src/main.c`)永远不命中
         toks = intent.tokens
@@ -243,15 +331,11 @@ def cmd_gate(flow, st, args):
             r"|\.mae-flow-work/moonlight-report\.md)$")
         branch = intent.branch
         item = api._checkpoint_locked_item(st) or {}
-        message_match = re.search(
-            r"git\s+commit\b.*?(?:-m|--message[= ])\s*"
-            r"(?:\"([^\"]*)\"|'([^']*)'|(\S+))", c)
-        commit_message = (
-            (message_match.group(1) or message_match.group(2)
-             or message_match.group(3) or "")
-            if message_match else "")
+        message_present, commit_message = (
+            git_intent.git_commit_message(git_command))
         wanted = st["config"].get("分支名", "")
-        add_paths, _add_force = api._git_add_pathspecs(c)
+        add_paths, _add_force = api._git_add_pathspecs(
+            git_command)
         context = BashGateContext(
             command=c,
             has_internal_state_path=internal_state,
@@ -265,7 +349,7 @@ def cmd_gate(flow, st, args):
                 "id", item.get("title", "最终检视")),
             checkpoint_status=item.get("status", ""),
             ticket=st["config"].get("单号", ""),
-            commit_message_present=bool(message_match),
+            commit_message_present=message_present,
             commit_message=commit_message,
             current_branch="",
             add_paths=tuple(add_paths),
@@ -278,7 +362,7 @@ def cmd_gate(flow, st, args):
             api.die(pre.message, 2)
         if pre.kind == "block":
             jdie(pre.rule, pre.message)
-        if (message_match and wanted
+        if (message_present and wanted
                 and sid not in (
                     "config_confirm", "workflow_select", "branch_create")):
             context = replace(
@@ -288,8 +372,8 @@ def cmd_gate(flow, st, args):
             branch_decision = decide_commit_branch(context)
             if branch_decision.kind == "block":
                 jdie(branch_decision.rule, branch_decision.message)
-        if re.search(r"(?:^|[\s;&|(])git\s+commit\b", c, re.I):
-            _gate_commit_candidates(c, st, jdie)
+        if commit_present:
+            _gate_commit_candidates(git_command, st, jdie)
         post = decide_post_commit(context)
         if post.kind == "absolute":
             api.die(post.message, 2)

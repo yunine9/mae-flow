@@ -37,6 +37,7 @@ from mae_flow_core.application.hooks.task_cards import (
 )
 from mae_flow_core.file_io import load_json
 from mae_flow_core.foundation import source_paths
+from mae_flow_core.guard.permits import block_id as _permit_block_id
 from mae_flow_core.foundation.fingerprints import (
     path_fingerprint as _shared_path_fingerprint,
     review_path_fingerprint as _shared_review_path_fingerprint,

@@ -281,7 +281,7 @@
 ## MF-RF-017: Compile-owned normal and tracked files escaped the commit block
 
 - Status: resolved by `b61116d`, `d8b2aca`, `fd2b674`, `0a0ab29`, and
-  `573dc4b`
+  `573dc4b`; lifecycle/provenance closure completed in the final review fix wave
 - Classification: reproducible guard coverage defect
 - Baseline: `7910bfc` (491 tests passed)
 - Trigger: a validated COMPILE task creates a normal-looking configuration
@@ -295,7 +295,11 @@
 - Root cause: the Agent-write sidecar proved direct file-tool edits but did not
   record the complementary COMPILE-owned delta. The Gate inferred ownership
   from file naming, new-file status, and absence of a direct edit rather than
-  from the validated COMPILE boundary
+  from the validated COMPILE boundary. Final review additionally found that
+  enforcement began only after `SubagentStop`, failed baselines were encoded as
+  trustworthy `{}`, transcript-only direct edits could return before removing
+  old records, capture and Gate disagreed on Windows identity, and missing
+  paths were fingerprinted as outputs
 - Resolution: COMPILE task cards now retain a detached all-path fingerprint
   baseline; accepted completion computes the post-COMPILE delta, excludes
   successful observed `Write`/`Edit`/`MultiEdit` calls, and stores exact paths
@@ -304,7 +308,18 @@
   edit supersedes the recorded COMPILE ownership. Final release verification
   also split candidate grouping/enforcement and recovery-message assembly into
   focused helpers, restoring the established adapter and guard complexity
-  limits without changing policy
+  limits without changing policy. The final closure adds the universal
+  no-commit/push instruction, rejects COMPILE completion after a HEAD advance,
+  invalidates tokens on new issuance, binds tokens to the exact task digest,
+  and transiently blocks commits until that matching token exists without
+  strike/permit state. Baselines carry explicit validity; provenance Git
+  failures surface; absent paths are excluded; and attribution,
+  transcript/PostToolUse supersession, and Gate matching share one
+  slash-normalized, Windows-case-folded identity. Old-key removal and new
+  attribution occur in one locked atomic mutation even with a zero new delta.
+  Exact ephemeral process state is excluded, but repository-owned
+  `.mae-flow-defaults.json` remains delivery provenance and is hard-blocked if
+  COMPILE changes it
 - Regression: `test_compile_side_effects.py` covers normal/tracked deltas,
   failed and unobserved direct-write results, path normalization, and
   out-of-repository rejection; `test_hook_compile_contract.py` covers accepted
@@ -313,12 +328,40 @@
   tracked files, legacy/corrupt sidecars, same-command candidates, ambiguous
   artifacts, and case-insensitive ledger identity; pure ownership tests and
   real Gate probes cover blocking precedence and recovery guidance
+- Final-review regression: task-card/contract/evidence tests cover the
+  no-commit instruction, HEAD advance, task digest, stale token invalidation,
+  and invalid baseline behavior; real repository lifecycle tests cover new and
+  tracked ordinary configuration files before and after exact completion with
+  no strike/permit state; Hook/pure tests cover zero-delta transcript
+  supersession, uppercase/backslash Windows spelling, strict Git failures, and
+  tracked/pre-existing deletions remaining committable. The release-blocker
+  wave additionally covers global Git options/`git.exe`, pipelines, quoted
+  separators and line continuation; literal and variable-argv interpreter
+  wrappers; repository/inline mutating aliases; opaque pathspec files;
+  multiple commit/revert actions; staged-D recreation; force-added ignored
+  files; hard-block ordering/aggregation; and exact defaults-file ownership
 - Availability boundary: snapshot, comparison, or sidecar-update failures are
   logged and fail open; they do not reject an otherwise accepted COMPILE.
   With a normal exact ledger, only the illegal commit attempt is rejected.
   Recovery removes affected paths from the index or current command without
-  deleting local files or creating a persistent lock
+  deleting local files or creating a persistent lock. The corrupt-sidecar
+  diagnostic pre-read can race only in log wording; the authoritative
+  read-modify-write remains locked and atomically replaced
 - Behavior boundary: high-confidence naming remains the fallback when exact
   provenance is absent. Legitimate move/delete behavior and unrelated golden
   scenarios are unchanged; exact provenance adds blocks only for recorded
-  COMPILE paths
+  COMPILE paths. The only task-card body/digest change is the COMPILE
+  no-commit instruction. Agent Git user-decision permits now leave exact
+  actor-bound receipts: PostToolUse finalizes only a matching single
+  commit/revert result, and push/done revalidates status, object, ancestry, and
+  last touch. Extra paths and later same-path commits remain blocked; a legal
+  user-external current delivery needs no Agent provenance. Permit-class rules
+  display the exact one-shot exit on the first block, while review/COMPILE/
+  strong-artifact integrity blocks precede and aggregate ownership findings
+  without strike/permit state
+- Parser boundary: direct Git actions recognize `git.exe`, global options,
+  shell groups, quoted separators, and line continuation. Mutating aliases,
+  opaque pathspec inputs, multiple HEAD mutations, and high-confidence
+  interpreter wrappers are rejected. Arbitrary code/string obfuscation is not
+  statically decidable; committed/pushed evidence remains the authoritative
+  backstop

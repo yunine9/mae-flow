@@ -4,16 +4,6 @@ from .hook_runtime_dependencies import *  # noqa: F401,F403
 
 
 class HookStateMixin:
-    def _git_head(self):
-        """当前 HEAD sha(令牌新鲜度绑定用)。拿不到返回空串=该令牌不做新鲜度校验(fail-open)。"""
-        try:
-            r = subprocess.run("git rev-parse --verify HEAD", shell=True, capture_output=True,
-                               text=True, encoding="utf-8", errors="replace", timeout=5)
-            return r.stdout.strip() if r.returncode == 0 else ""
-        except Exception:
-            return ""
-
-
     def _flow_task_for_token(self, kind):
         try:
             raw, err = safe_read_json(self.STATE)
@@ -24,13 +14,19 @@ class HookStateMixin:
         except Exception:
             return {}
 
-
     def _flow_token_source_snapshot(self, kind, fallback_head):
         task = self._flow_task_for_token(kind)
         if task.get("precommit_review"):
             return self._source_snapshot(task.get("head", fallback_head))
         return None
 
+    def _validated_report_task_digest(self, report):
+        match = re.search(
+            r"^TASK_CARD_SHA256:\s*([0-9a-f]{64})\s*$",
+            report or "",
+            re.M | re.I,
+        )
+        return match.group(1).lower() if match else ""
 
     def _record_agent_token(self, kind, status="", report=""):
         """子 agent 合法收尾的硬令牌:仅由本 hook(harness 调用)写入,是模型无法伪造的证据源——
@@ -38,6 +34,14 @@ class HookStateMixin:
         mae-flow 的 agent_ran 证据据此判定"本步期间该 agent 真实跑过"。
         令牌同时绑定签发时 HEAD(新鲜度):签发后源码再变,证据即过期(mae-flow 侧校验)。"""
         try:
+            validated_task = self._validated_task_bindings.pop(
+                kind, {})
+            validated_digest = (
+                str(validated_task.get("sha256", "") or "")
+                or self._validated_report_task_digest(report)
+            )
+            validated_issuance = str(
+                validated_task.get("issuance_id", "") or "")
             action = self._load_action() if not os.path.isfile(self.STATE) else None
             if action:
                 head = self._git_head()
@@ -51,8 +55,13 @@ class HookStateMixin:
                     current.setdefault("tokens", {})[kind] = {
                         "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
                         "status": status, "step": "standalone_" + current.get("kind", ""),
-                        "task_sha256": task.get("sha256", ""), "report_path": report_path,
+                        "task_sha256": (
+                            validated_digest or task.get("sha256", "")),
+                        "report_path": report_path,
                     }
+                    if validated_issuance:
+                        current["tokens"][kind][
+                            "task_issuance_id"] = validated_issuance
                     current.setdefault("rejections", {}).pop(kind, None)
                     current["rejections"].pop("SUBAGENT", None)
                     return current
@@ -71,6 +80,7 @@ class HookStateMixin:
             p = ".mae-flow.json.tokens"
             head = self._git_head()
             step = ""
+            task = self._flow_task_for_token(kind)
             try:
                 raw, err = safe_read_json(self.STATE)
                 step = normalize_document(raw, "flow").get("current", "") if not err and raw else ""
@@ -81,7 +91,11 @@ class HookStateMixin:
                 token = {
                     "at": time.strftime("%Y-%m-%d %H:%M:%S"), "head": head,
                     "status": status, "step": step,
+                    "task_sha256": (
+                        validated_digest or task.get("sha256", "")),
                 }
+                if validated_issuance:
+                    token["task_issuance_id"] = validated_issuance
                 source_snapshot = self._flow_token_source_snapshot(kind, head)
                 if source_snapshot is not None:
                     token["source_snapshot"] = source_snapshot
@@ -99,7 +113,6 @@ class HookStateMixin:
         except Exception as e:
             self.log("token EXC: %s" % e)
 
-
     def _text_of(self, v):
         """tool_response 可能是 str/dict/list,统一转文本(供 ack 验真存储)。"""
         if isinstance(v, str):
@@ -108,7 +121,6 @@ class HookStateMixin:
             return json.dumps(v, ensure_ascii=False) if v else ""
         except Exception:
             return ""
-
 
     def _record_agent_write(self, path):
         """Record a successful direct Agent file edit as a commit candidate.
@@ -140,7 +152,11 @@ class HookStateMixin:
                 }
                 compile_side_effects = data.get("compile_side_effects")
                 if isinstance(compile_side_effects, dict):
-                    compile_side_effects.pop(relative, None)
+                    identity = source_paths.repository_path_identity(relative)
+                    for recorded in list(compile_side_effects):
+                        if source_paths.repository_path_identity(
+                                recorded) == identity:
+                            compile_side_effects.pop(recorded, None)
                 # A flow should rarely touch this many files. Bound stale/corrupt
                 # growth without changing the provenance semantics.
                 if len(paths) > 2000:
@@ -157,20 +173,31 @@ class HookStateMixin:
         except Exception as exc:
             self.log("agent write ledger EXC: %s" % exc)
 
-
     def _record_compile_side_effects(self, task, tool_calls):
         """Persist accepted COMPILE changes not owned by direct Agent edits."""
         try:
-            baseline = task.get("worktree_snapshot")
-            if not isinstance(baseline, dict):
-                self.log("COMPILE side-effect ledger skipped: missing baseline")
-                return
-            current = self._worktree_snapshot(task.get("head", ""))
             direct_paths = _successful_direct_write_paths(
                 self._tool_call_values(tool_calls), os.getcwd())
-            side_effect_paths = _compile_side_effect_paths(
-                baseline, current, direct_paths)
-            if not side_effect_paths:
+            baseline = task.get("worktree_snapshot")
+            baseline_valid = (
+                task.get("worktree_snapshot_valid") is True
+                and isinstance(baseline, dict)
+            )
+            if baseline_valid:
+                try:
+                    current = self._worktree_snapshot(
+                        task.get("head", ""))
+                    side_effect_paths = _compile_side_effect_paths(
+                        baseline, current, direct_paths)
+                except Exception as exc:
+                    current, side_effect_paths = {}, ()
+                    self.log(
+                        "COMPILE side-effect ledger EXC: %s" % exc)
+            else:
+                current, side_effect_paths = {}, ()
+                self.log(
+                    "COMPILE side-effect attribution skipped: invalid baseline")
+            if not side_effect_paths and not direct_paths:
                 return
             _existing, sidecar_error = safe_read_json(self.AGENT_WRITES_STATE)
             if sidecar_error:
@@ -178,12 +205,26 @@ class HookStateMixin:
                     "COMPILE side-effect ledger recovering unreadable sidecar: "
                     + sidecar_error)
             recorded_at = time.strftime("%Y-%m-%d %H:%M:%S")
+            direct_identities = {
+                source_paths.repository_path_identity(path)
+                for path in direct_paths
+            }
+            effect_identities = {
+                source_paths.repository_path_identity(path)
+                for path in side_effect_paths
+            }
 
             def update_side_effects(data):
                 effects = data.setdefault("compile_side_effects", {})
                 if not isinstance(effects, dict):
                     effects = {}
                     data["compile_side_effects"] = effects
+                for path in list(effects):
+                    identity = source_paths.repository_path_identity(path)
+                    if (
+                            identity in direct_identities
+                            or identity in effect_identities):
+                        effects.pop(path, None)
                 for path in side_effect_paths:
                     effects[path] = {
                         "at": recorded_at,

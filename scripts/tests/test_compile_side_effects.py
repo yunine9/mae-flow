@@ -4,6 +4,7 @@
 import os
 import sys
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -16,9 +17,22 @@ from mae_flow_core.quality.compile_side_effects import (  # noqa: E402
     successful_direct_write_paths,
 )
 from mae_flow_core.quality.tool_transcript import ToolCall  # noqa: E402
+from mae_flow_core.foundation import source_paths  # noqa: E402
 
 
 class CompileSideEffectTests(unittest.TestCase):
+    def test_repo_defaults_are_not_ephemeral_flow_control_state(self):
+        self.assertFalse(source_paths.is_flow_control_path(
+            ".mae-flow-defaults.json"))
+        for path in (
+                ".mae-flow.json",
+                ".mae-flow.json.tokens",
+                ".mae-flow.json.agent-writes",
+                ".mae-flow-work/agent-tasks/compile.md"):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    source_paths.is_flow_control_path(path))
+
     def test_normal_named_compile_outputs_are_attributed_by_delta(self):
         self.assertEqual(
             ("config/generated.properties", "tracked/settings.json"),
@@ -72,6 +86,19 @@ class CompileSideEffectTests(unittest.TestCase):
             ("config/generated.properties", "nested/settings.json"),
             successful_direct_write_paths(calls, "/repo"),
         )
+
+    def test_windows_path_identity_excludes_uppercase_backslash_direct_write(self):
+        windows_os = mock.Mock(wraps=os)
+        windows_os.name = "nt"
+        with mock.patch.object(source_paths, "os", windows_os):
+            self.assertEqual(
+                (),
+                compile_side_effect_paths(
+                    {"CONFIG\\RUNTIME.JSON": "before"},
+                    {"config/runtime.json": "after"},
+                    ("CONFIG\\RUNTIME.JSON",),
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -227,6 +227,9 @@ def build_full_task_document(facts):
     append_execution_context(
         document, kind, plan.roots, plan.unresolved)
     if kind == "COMPILE":
+        document.append(
+            "提交边界:compile-agent 禁止执行 git commit、git push；"
+            "直接修复必须保留为未提交工作区改动，合法收尾后由主流程提交。")
         _append_lightcheck(
             document, facts["lightcheck"])
     _append_notes(document, facts["notes"])

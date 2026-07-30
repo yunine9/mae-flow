@@ -540,16 +540,20 @@
   "compile_task_card": {
     "files": {
       ".mae-flow-work/agent-tasks/build-compile.md": {
-        "sha256": "2baad398ee50c6ad788d26ca00d79876a8bc85dd5c4c13f24223cb426c8e2290",
-        "size": 1771
+        "sha256": "b65e33c7518e1440f278f8d13704f62071ab9edb22c32fb254f69cdcbb15f769",
+        "size": 1926
       },
       ".mae-flow-work/lightcheck/latest.md": {
         "sha256": "c7a9bd4f0355d848436c78fce23b020466d502b1f6ec33ad90bb8a75741dfdd3",
         "size": 624
       },
       ".mae-flow.json": {
-        "sha256": "fe4af6d99e64395c3c9181ba5b17aff154e09d75e6c95bcacdc074c58f9c6612",
-        "size": 1410
+        "sha256": "133d666a656b2ba95714a88bbbc9cbf5f5ab1c1df586c555d5f4862e301db3e7",
+        "size": 1498
+      },
+      ".mae-flow.json.tokens": {
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -563,7 +567,7 @@
     "git": {
       "branch": "main",
       "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
-      "status": "?? .mae-flow-work/agent-tasks/build-compile.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json"
+      "status": "?? .mae-flow-work/agent-tasks/build-compile.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json\n?? .mae-flow.json.tokens"
     },
     "returncode": 0,
     "state": {
@@ -578,6 +582,7 @@
             ],
             "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
             "initial_compile_net": 0,
+            "issuance_id": "<TASK_ISSUANCE_ID>",
             "lightcheck": {
               "findings": 0,
               "report_path": "<PROJECT>/.mae-flow-work/lightcheck/latest.md",
@@ -594,7 +599,8 @@
             ],
             "unchanged_initial_dirty": [],
             "ut_targets": {},
-            "worktree_snapshot": {}
+            "worktree_snapshot": {},
+            "worktree_snapshot_valid": true
           }
         },
         "choices": {
@@ -615,7 +621,8 @@
         "schema_version": 2,
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
-      }
+      },
+      ".mae-flow.json.tokens": {}
     },
     "stderr": "",
     "stdout": "[mae-flow] COMPILE 任务卡已生成: <PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\n启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\"；最终报告必须原样带 TASK_CARD_SHA256: <TASK_CARD_SHA256>\n"
@@ -1329,7 +1336,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 已有放行令 c5c7463462 因代码版本变化作废(签发于 00000000)。需重新征得用户同意后 allow 重签。配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 requirement-record --message-id；已有文本用 requirement-record --source。\n",
+    "stderr": "[mae-flow] 已有放行令 c5c7463462 因代码版本变化作废(签发于 00000000)。需重新征得用户同意后 allow 重签。配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 requirement-record --message-id；已有文本用 requirement-record --source。\n⚠ 本规则本次拦截编号 c5c7463462。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow c5c7463462 --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "guard_internal_state_edit": {
@@ -1430,7 +1437,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。\n",
+    "stderr": "[mae-flow] 配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。\n⚠ 本规则本次拦截编号 e3115d5a7d。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow e3115d5a7d --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {
@@ -1958,7 +1965,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec 文件: openspec/changes/other-change/change.md。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，选择不入库后由流程移入 .mae-flow-work/story。\n",
+    "stderr": "[mae-flow] 提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec 文件: openspec/changes/other-change/change.md。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，选择不入库后由流程移入 .mae-flow-work/story。\n⚠ 本规则本次拦截编号 f68c690a5f。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow f68c690a5f --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "quality_agent_task_missing_scan": {

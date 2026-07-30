@@ -4,7 +4,7 @@ from .shared import (
     AGENT_WRITES_PATH, BUILD_ARTIFACT_AMBIGUOUS_DIRS,
     BUILD_ARTIFACT_AMBIGUOUS_SUFFIXES, BUILD_ARTIFACT_STRONG_DIRS,
     BUILD_ARTIFACT_STRONG_NAMES, BUILD_ARTIFACT_STRONG_SUFFIXES, EXIT_PATH, git_intent,
-    os, re, safe_read_json, source_paths, time,
+    os, re, safe_read_json, source_paths, subprocess, time,
 )
 from .wiring import api
 
@@ -19,10 +19,12 @@ def _repo_path_identity(path, case_insensitive=None):
     caller's spelling. On Windows those names address the same file, so exact
     string comparison would lose Agent-write provenance.
     """
-    value = re.sub(r"^(?:\./)+", "", norm(path).strip().strip("\"'"))
     if case_insensitive is None:
         case_insensitive = os.name == "nt"
-    return value.casefold() if case_insensitive else value
+    return source_paths.repository_path_identity(
+        path,
+        case_insensitive=case_insensitive,
+    )
 
 def _clear_broken_exit_marker():
     """写退出标记前收殓坏旧标记(实测死角:坏标记的 CAS 校验曾让三条退出
@@ -88,6 +90,19 @@ def _git_status_paths(pathspecs, include_ignored=False):
             continue
         paths.append(norm(path.split(" -> ")[-1].strip().strip('"')))
     return list(dict.fromkeys(paths))
+
+def _git_ignored_paths(pathspecs):
+    if not pathspecs:
+        return []
+    out = api.argv_out([
+        "git", "-c", "core.quotepath=false", "status", "--porcelain",
+        "--untracked-files=all", "--ignored=matching", "--", *pathspecs,
+    ])
+    return list(dict.fromkeys(
+        norm(line.split(None, 1)[1].strip().strip('"'))
+        for line in out.splitlines()
+        if line.startswith("!! ") and len(line.split(None, 1)) == 2
+    ))
 
 def _git_add_pathspecs(command):
     """Extract explicit pathspecs from git-add segments in a compound command."""
@@ -167,7 +182,8 @@ def _is_story_document(path):
             return False
     return bool(re.search(r"(?mi)^#\s*STORY[-：:]|Story转测自检表", sample))
 
-def _trusted_harness_commit_path(path, st=None):
+def _trusted_harness_commit_path(
+        path, st=None, include_user_authorized=False):
     """Paths the current delivery may create without an Edit/Write event.
 
     OpenSpec is deliberately scoped to the active change/archive. Treating the
@@ -175,6 +191,10 @@ def _trusted_harness_commit_path(path, st=None):
     ``git add openspec/`` without even a provenance warning.
     """
     p = re.sub(r"^(?:\./)+", "", norm(path))
+    if (
+            include_user_authorized
+            and api._authorized_delivery_path(p, st)):
+        return True
     if p in {".gitignore", ".gitattributes"}:
         return True
     if (p.startswith("docs/req/") or p.startswith("docs/review/")
@@ -223,16 +243,23 @@ def _staged_commit_candidates():
         "git", "-c", "core.quotepath=false", "diff", "--cached",
         "--name-only", "--diff-filter=A", "--no-renames", "--",
     ]).splitlines()
+    staged_deleted = api.argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--cached",
+        "--name-only", "--diff-filter=D", "--no-renames", "--",
+    ]).splitlines()
     return (
         [norm(path) for path in staged_all if path],
         [norm(path) for path in staged_new if path],
+        [norm(path) for path in staged_deleted if path],
     )
 
-def _git_diff_name_args(diff, pathspecs, cached):
+def _git_diff_name_args(diff, pathspecs, cached, diff_filter=""):
     args = [
         "git", "-c", "core.quotepath=false", "diff",
         "--name-only", "--no-renames",
     ]
+    if diff_filter:
+        args.append("--diff-filter=" + diff_filter)
     if cached:
         args.append("--cached")
     if diff:
@@ -240,8 +267,10 @@ def _git_diff_name_args(diff, pathspecs, cached):
     args += ["--", *(pathspecs or [])]
     return args
 
-def _git_diff_names(diff="HEAD", pathspecs=None, cached=False):
-    args = _git_diff_name_args(diff, pathspecs, cached)
+def _git_diff_names(
+        diff="HEAD", pathspecs=None, cached=False, diff_filter=""):
+    args = _git_diff_name_args(
+        diff, pathspecs, cached, diff_filter)
     return [
         norm(path) for path in api.argv_out(args).splitlines()
         if path
@@ -263,44 +292,131 @@ def _untracked_candidate_paths(paths):
             "git", "ls-files", "--error-unmatch", "--", path])
     ]
 
+def _head_tracked_paths(paths):
+    if not paths:
+        return set()
+    out = api.argv_out([
+        "git", "-c", "core.quotepath=false",
+        "ls-tree", "-r", "--name-only", "HEAD", "--", *paths,
+    ])
+    return {
+        _repo_path_identity(path)
+        for path in out.splitlines() if path
+    }
+
 def _compound_add_candidates(command):
-    pending, new_candidates = [], []
-    for intent in _git_add_intents(command):
+    pending, new_candidates, deleted, forced, present = (
+        [], [], [], [], [])
+    for operation, arguments in git_intent.git_invocations(command):
+        if operation == "commit":
+            break
+        if operation != "add":
+            continue
+        intent = _git_add_intent(list(arguments))
         current = _intent_candidate_paths(intent)
         pending.extend(current)
-        new_candidates.extend(_untracked_candidate_paths(current))
-    return list(dict.fromkeys(pending)), list(dict.fromkeys(new_candidates))
+        current_present = [
+            path for path in current
+            if os.path.lexists(path)
+        ]
+        present_identities = {
+            _repo_path_identity(path) for path in current_present
+        }
+        current_deleted = [
+            path for path in current
+            if _repo_path_identity(path) not in present_identities
+        ]
+        deleted.extend(current_deleted)
+        present.extend(current_present)
+        tracked_at_head = _head_tracked_paths(current_present)
+        new_candidates.extend(
+            path for path in current_present
+            if _repo_path_identity(path) not in tracked_at_head
+        )
+        if intent["force"]:
+            forced.extend(_git_ignored_paths(intent["pathspecs"]))
+    return (
+        list(dict.fromkeys(pending)),
+        list(dict.fromkeys(new_candidates)),
+        list(dict.fromkeys(deleted)),
+        list(dict.fromkeys(forced)),
+        list(dict.fromkeys(present)),
+    )
 
 def _commit_worktree_candidates(command):
     intent = _git_commit_intent(command)
     pathspecs = intent["pathspecs"]
     if intent["all"]:
-        return _git_diff_names("HEAD"), False
+        return (
+            _git_diff_names("HEAD"),
+            False,
+            _git_diff_names("HEAD", diff_filter="D"),
+        )
     if pathspecs:
-        return _git_diff_names("HEAD", pathspecs), not intent["include"]
-    return [], False
+        return (
+            _git_diff_names("HEAD", pathspecs),
+            not intent["include"],
+            _git_diff_names("HEAD", pathspecs, diff_filter="D"),
+        )
+    return [], False, []
 
 def _pending_commit_candidates(command=""):
     """Return exact staged/compound-add candidates before a commit runs."""
-    staged_paths, new_candidates = _staged_commit_candidates()
+    staged_paths, new_candidates, staged_deleted = (
+        _staged_commit_candidates())
     candidates = list(staged_paths)
-    pending, pending_new = _compound_add_candidates(command)
-    commit_working, commit_only = _commit_worktree_candidates(command)
+    pending, pending_new, pending_deleted, forced, pending_present = (
+        _compound_add_candidates(command))
+    commit_working, commit_only, commit_deleted = (
+        _commit_worktree_candidates(command))
     if commit_only:
         candidates = list(commit_working)
         new_candidates = [
             path for path in new_candidates if path in candidates
         ]
+        deleted = list(commit_deleted)
+        forced = [path for path in forced if path in candidates]
     else:
         candidates.extend(pending)
         candidates.extend(commit_working)
         new_candidates.extend(pending_new)
+        deleted = (
+            list(staged_deleted)
+            + list(pending_deleted)
+            + list(commit_deleted)
+        )
+        present_overrides = {
+            _repo_path_identity(path)
+            for path in (
+                list(pending_present)
+                + [
+                    path for path in commit_working
+                    if _repo_path_identity(path) not in {
+                        _repo_path_identity(item)
+                        for item in commit_deleted
+                    }
+                ]
+            )
+        }
+        deleted = [
+            path for path in deleted
+            if _repo_path_identity(path) not in present_overrides
+        ]
     candidates = list(dict.fromkeys(candidates))
+    deleted_identities = {
+        _repo_path_identity(path) for path in deleted
+    }
     return {
         "paths": candidates,
+        "present_paths": [
+            path for path in candidates
+            if _repo_path_identity(path) not in deleted_identities
+        ],
+        "deleted_paths": set(deleted),
         "new_paths": set(new_candidates),
         "staged_paths": set(staged_paths),
         "working_paths": set(pending) | set(commit_working),
+        "forced_paths": set(forced),
     }
 
 def _pending_commit_files(command="", st=None, candidate_snapshot=None):
@@ -314,7 +430,10 @@ def _pending_commit_files(command="", st=None, candidate_snapshot=None):
     if candidate_snapshot is None:
         candidate_snapshot = _pending_commit_candidates(command)
     candidates = candidate_snapshot["paths"]
+    present_candidates = candidate_snapshot.get(
+        "present_paths", candidates)
     new_candidates = candidate_snapshot["new_paths"]
+    forced_candidates = candidate_snapshot.get("forced_paths", set())
     written = _agent_written_paths()
     compile_side_effects = _compile_side_effect_paths()
 
@@ -323,26 +442,33 @@ def _pending_commit_files(command="", st=None, candidate_snapshot=None):
                 or _trusted_harness_commit_path(path, st))
 
     inherited = [
-        path for path in candidates
+        path for path in present_candidates
         if api._unchanged_initial_dirty(path, st or {})
         and _repo_path_identity(path) not in written
     ]
     foreign_openspec = [
-        path for path in candidates
+        path for path in present_candidates
         if path.startswith("openspec/")
         and not _trusted_harness_commit_path(path, st)
     ]
     recorded_compile_side_effects = [
-        path for path in candidates
+        path for path in present_candidates
         if _repo_path_identity(path) in compile_side_effects
     ]
-    unproven = [path for path in candidates if not has_provenance(path)]
+    unproven = [
+        path for path in present_candidates if not has_provenance(path)]
     strong_unproven = [
         path for path in unproven
-        if path in new_candidates and _build_artifact_confidence(path) == "strong"
+        if (
+            path in forced_candidates
+            or (
+                path in new_candidates
+                and _build_artifact_confidence(path) == "strong"
+            )
+        )
     ]
     artifact_hints = [
-        path for path in candidates
+        path for path in present_candidates
         if path not in strong_unproven and _build_artifact_confidence(path)
     ]
     return (inherited, foreign_openspec, recorded_compile_side_effects,

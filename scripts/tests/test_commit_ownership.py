@@ -6,11 +6,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+MAE = os.path.join(ROOT, "scripts", "mae-flow.py")
+DISPATCH = os.path.join(ROOT, "hooks", "dispatch.py")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core import cli_runtime as mf
 from mae_flow_core.cli_commands import git_ownership
@@ -78,6 +81,157 @@ class CommitOwnershipTests(unittest.TestCase):
             sidecar["compile_side_effects"] = compile_side_effects
         write(self.repo, ".mae-flow.json.agent-writes", json.dumps(sidecar))
 
+    def gate_bash(self, command):
+        return subprocess.run(
+            [sys.executable, MAE, "gate", "bash", command],
+            cwd=self.repo,
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+
+    def posttool_bash(self, command):
+        payload = json.dumps({
+            "cwd": self.repo,
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": {"exit_code": 0, "stdout": ""},
+        }, ensure_ascii=False) + "\n"
+        result = subprocess.run(
+            [sys.executable, DISPATCH, "posttooluse"],
+            cwd=self.repo,
+            input=payload,
+            text=True,
+            capture_output=True,
+            timeout=15,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        return result
+
+    def save_pending_compile(self, state=None):
+        state = state or self.state()
+        state["agent_tasks"] = {"COMPILE": {
+            "step": state["current"],
+            "head": git(self.repo, "rev-parse", "HEAD"),
+            "sha256": "current-compile-task",
+        }}
+        mf.save_state(state)
+        write(self.repo, ".mae-flow.json.tokens", json.dumps({
+            "COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": state["current"],
+                "status": "OK",
+                "task_sha256": "stale-compile-task",
+            },
+        }))
+        return state
+
+    def push_to_new_remote(self):
+        remote = os.path.join(self.tmp, "remote.git")
+        git(self.tmp, "init", "--bare", "-q", remote)
+        git(self.repo, "remote", "add", "origin", remote)
+        git(self.repo, "push", "-qu", "origin", "HEAD")
+
+    def capture_user_message(self, state, text):
+        write(self.repo, ".mae-flow.json.usermsg", json.dumps([{
+            "id": "user-git-authorization",
+            "step": state["current"],
+            "at": "9999-12-31 23:59:59",
+            "text": text,
+        }], ensure_ascii=False))
+
+    def authorize_blocked_command(self, command, rule, ack):
+        blocked = self.gate_bash(command)
+        output = blocked.stdout + blocked.stderr
+        self.assertNotEqual(0, blocked.returncode, output)
+        permit_id = mf._gate_block_id(rule, command)
+        state = mf.load_state()
+        self.capture_user_message(state, ack)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_allow(
+                mf.FLOW,
+                state,
+                types.SimpleNamespace(
+                    block_id=permit_id,
+                    ack=ack,
+                ),
+            )
+        return output, permit_id
+
+    def assert_compile_commit_lifecycle(self, path, tracked):
+        if tracked:
+            write(self.repo, path, "compiled=false\n")
+            git(self.repo, "add", path)
+            git(self.repo, "commit", "-qm", "track configuration")
+        task_head = git(self.repo, "rev-parse", "HEAD")
+        write(self.repo, path, "compiled=true\n")
+        state = self.state()
+        state["agent_tasks"] = {"COMPILE": {
+            "step": "build",
+            "head": task_head,
+            "sha256": "current-compile-task",
+        }}
+        mf.save_state(state)
+        write(self.repo, ".mae-flow.json.tokens", json.dumps({
+            "COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": "build",
+                "status": "OK",
+                "task_sha256": "stale-compile-task",
+            },
+        }))
+        command = (
+            'git add -- "%s" && git commit -m "[REQ123][fix]compile"'
+            % path
+        )
+        original_head = git(self.repo, "rev-parse", "HEAD")
+
+        pending = self.gate_bash(command)
+
+        pending_output = pending.stdout + pending.stderr
+        self.assertNotEqual(0, pending.returncode, pending_output)
+        self.assertIn("先完成当前 COMPILE 任务", pending_output)
+        self.assertEqual(original_head, git(self.repo, "rev-parse", "HEAD"))
+        self.assertEqual("", git(
+            self.repo, "diff", "--cached", "--name-only"))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.gate-strikes")))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.gate-permits")))
+
+        write(self.repo, ".mae-flow.json.tokens", json.dumps({
+            "COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": "build",
+                "status": "OK",
+                "task_sha256": "current-compile-task",
+            },
+        }))
+        self.write_sidecar({
+            path: {"task_sha256": "current-compile-task"},
+        })
+
+        attributed = self.gate_bash(command)
+
+        attributed_output = attributed.stdout + attributed.stderr
+        self.assertNotEqual(0, attributed.returncode, attributed_output)
+        self.assertNotIn("先完成当前 COMPILE 任务", attributed_output)
+        self.assertIn("由 COMPILE 命令产生或改写", attributed_output)
+        self.assertEqual(original_head, git(self.repo, "rev-parse", "HEAD"))
+
+        self.write_sidecar(paths={
+            path: {"tool": "file-write"},
+        })
+        completed = self.gate_bash(command)
+        self.assertEqual(
+            0,
+            completed.returncode,
+            completed.stdout + completed.stderr,
+        )
+        git(self.repo, "add", "--", path)
+        git(self.repo, "commit", "-qm", "[REQ123][fix]compile")
+        self.assertNotEqual(original_head, git(self.repo, "rev-parse", "HEAD"))
+
     def decide_pending_files(self, state):
         (inherited, foreign_openspec, compile_side_effects,
          strong_artifacts, unproven_paths, artifact_hints) = (
@@ -139,6 +293,227 @@ class CommitOwnershipTests(unittest.TestCase):
 
         self.assertEqual([generated], compile_side_effects)
         self.assertEqual("bash-compile-side-effects", decision.block.rule)
+
+    def test_new_configuration_cannot_commit_before_compile_completion(self):
+        self.assert_compile_commit_lifecycle(
+            "config/generated.properties",
+            tracked=False,
+        )
+
+    def test_tracked_configuration_cannot_commit_before_compile_completion(self):
+        self.assert_compile_commit_lifecycle(
+            "config/runtime.properties",
+            tracked=True,
+        )
+
+    def test_tracked_repo_defaults_cannot_commit_as_a_compile_side_effect(self):
+        self.assert_compile_commit_lifecycle(
+            ".mae-flow-defaults.json",
+            tracked=True,
+        )
+
+    def test_pending_compile_blocks_git_global_options_and_git_exe(self):
+        self.save_pending_compile()
+        original_head = git(self.repo, "rev-parse", "HEAD")
+        commands = (
+            'git -c user.name=Fixture commit -m "[REQ123][fix]compile"',
+            'git -C . commit -m "[REQ123][fix]compile"',
+            'git --no-pager commit -m "[REQ123][fix]compile"',
+            'git.exe commit -m "[REQ123][fix]compile"',
+            "git diff --cached | git commit -F -",
+            'git commit -m "[REQ123][fix]part one; part two"',
+            'git \\\ncommit -m "[REQ123][fix]continued"',
+            'git\\\n commit -m "[REQ123][fix]continued"',
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("先完成当前 COMPILE 任务", output)
+                self.assertEqual(
+                    original_head, git(self.repo, "rev-parse", "HEAD"))
+                self.assertFalse(os.path.exists(
+                    os.path.join(
+                        self.repo, ".mae-flow.json.gate-strikes")))
+                self.assertFalse(os.path.exists(
+                    os.path.join(
+                        self.repo, ".mae-flow.json.gate-permits")))
+
+    def test_pending_compile_precedes_commit_format_and_branch_strikes(self):
+        state = self.state()
+        state["config"]["分支名"] = "expected-feature"
+        self.save_pending_compile(state)
+
+        result = self.gate_bash("git commit -m malformed")
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, output)
+        self.assertIn("先完成当前 COMPILE 任务", output)
+        self.assertNotIn("commit message", output)
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.gate-strikes")))
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.gate-permits")))
+
+    def test_multiple_head_mutations_in_one_bash_are_rejected(self):
+        path = "config/runtime.properties"
+        write(self.repo, path, "baseline=true\n")
+        git(self.repo, "add", "--", path)
+        git(self.repo, "commit", "-qm", "track runtime config")
+        write(self.repo, path, "compiled=true\n")
+        self.write_sidecar({
+            path: {"task_sha256": "compile-task"},
+        })
+        mf.save_state(self.state())
+        commands = (
+            (
+                'git commit -m "[REQ123][fix]first" -- "%s" && '
+                'git commit -m "[REQ123][fix]second"' % path
+            ),
+            (
+                'git commit -m malformed && '
+                'git commit -m "[REQ123][fix]second"'
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("每次一个", output)
+                self.assertIn("commit/revert", output)
+                self.assertFalse(os.path.exists(os.path.join(
+                    self.repo, ".mae-flow.json.gate-strikes")))
+                self.assertFalse(os.path.exists(os.path.join(
+                    self.repo, ".mae-flow.json.gate-permits")))
+
+    def test_mutating_git_aliases_cannot_hide_a_pending_commit(self):
+        self.save_pending_compile()
+        git(self.repo, "config", "alias.ci", "commit")
+        commands = (
+            'git ci -m "[REQ123][fix]aliased commit"',
+            (
+                'git -c alias.ci=commit ci '
+                '-m "[REQ123][fix]inline aliased commit"'
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("alias", output.lower())
+                self.assertIn("commit", output)
+                self.assertFalse(os.path.exists(os.path.join(
+                    self.repo, ".mae-flow.json.gate-strikes")))
+
+        git(self.repo, "config", "alias.lg", "log --oneline")
+        read_only = self.gate_bash("git lg")
+        self.assertEqual(
+            0,
+            read_only.returncode,
+            read_only.stdout + read_only.stderr,
+        )
+
+    def test_opaque_pathspec_file_is_rejected_for_git_writes(self):
+        path = "config/runtime.properties"
+        write(self.repo, path, "baseline=true\n")
+        git(self.repo, "add", "--", path)
+        git(self.repo, "commit", "-qm", "track runtime config")
+        write(self.repo, path, "compiled=true\n")
+        write(self.repo, "paths.txt", path + "\n")
+        self.write_sidecar({
+            path: {"task_sha256": "compile-task"},
+        })
+        mf.save_state(self.state())
+        commands = (
+            (
+                'git commit --pathspec-from-file=paths.txt '
+                '-m "[REQ123][fix]opaque commit"'
+            ),
+            (
+                'git add --pathspec-from-file=paths.txt && '
+                'git commit -m "[REQ123][fix]opaque add"'
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("pathspec-from-file", output)
+                self.assertIn("显式", output)
+                self.assertFalse(os.path.exists(os.path.join(
+                    self.repo, ".mae-flow.json.gate-strikes")))
+
+    def test_agent_python_subprocess_cannot_rewrap_git_mutations(self):
+        mf.save_state(self.state())
+        original_head = git(self.repo, "rev-parse", "HEAD")
+        commands = (
+            (
+                'python -c "import subprocess; '
+                "subprocess.run(['git','add','openspec/changes/current-change']); "
+                "subprocess.run(['git','commit','-m','[REQ123][fix]wrapped'])\""
+            ),
+            (
+                'python -c "import os; '
+                "os.execvp('git',['git','commit','-m',"
+                "'[REQ123][fix]wrapped'])\""
+            ),
+            (
+                'python -c "import subprocess; g=\'git\'; '
+                "subprocess.run([g,'commit','-m','[REQ123][fix]wrapped'])\""
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("解释器", output)
+                self.assertIn("绕过", output)
+                self.assertEqual(
+                    original_head,
+                    git(self.repo, "rev-parse", "HEAD"),
+                )
+                self.assertEqual("", git(
+                    self.repo, "diff", "--cached", "--name-only"))
+
+    def test_shell_wrappers_with_value_bearing_git_globals_are_blocked(self):
+        self.save_pending_compile()
+        original_head = git(self.repo, "rev-parse", "HEAD")
+        commands = (
+            (
+                "sh -c 'git -c user.name=Fixture commit "
+                '-m "[REQ123][fix]wrapped" --allow-empty\''
+            ),
+            (
+                'powershell -Command "git -c user.name=Fixture commit '
+                "-m '[REQ123][fix]wrapped' --allow-empty\""
+            ),
+            (
+                'cmd /c "git -c user.name=Fixture commit '
+                '-m [REQ123][fix]wrapped --allow-empty"'
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                result = self.gate_bash(command)
+                output = result.stdout + result.stderr
+                self.assertNotEqual(0, result.returncode, output)
+                self.assertIn("解释器", output)
+                self.assertIn("commit", output)
+                self.assertEqual(
+                    original_head,
+                    git(self.repo, "rev-parse", "HEAD"),
+                )
 
     def test_case_insensitive_identity_matches_compile_ledger_spelling(self):
         generated = "config/runtime.properties"
@@ -222,6 +597,184 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertIsNone(decision.block)
         self.assertTrue(decision.advisories)
 
+    def test_tracked_deletion_without_compile_ledger_remains_committable(self):
+        path = "config/runtime.properties"
+        write(self.repo, path, "compiled=false\n")
+        git(self.repo, "add", path)
+        git(self.repo, "commit", "-qm", "track runtime")
+        os.remove(os.path.join(self.repo, path))
+        git(self.repo, "add", "-u", "--", path)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([], compile_side_effects)
+        self.assertIsNone(decision.block)
+
+    def test_preexisting_task_deletion_without_ledger_remains_committable(self):
+        path = "config/preexisting.properties"
+        write(self.repo, path, "compiled=false\n")
+        git(self.repo, "add", path)
+        git(self.repo, "commit", "-qm", "track preexisting runtime")
+        os.remove(os.path.join(self.repo, path))
+        self.write_sidecar(compile_side_effects={})
+        git(self.repo, "add", "-u", "--", path)
+
+        compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([], compile_side_effects)
+        self.assertIsNone(decision.block)
+
+    def test_recorded_compile_effect_deletions_are_not_delivery_outputs(self):
+        staged = "config/staged.properties"
+        commit_all = "config/commit-all.properties"
+        pathspec = "config/pathspec.properties"
+        for path in (staged, commit_all, pathspec):
+            write(self.repo, path, "compiled=true\n")
+        git(self.repo, "add", "config")
+        git(self.repo, "commit", "-qm", "track compile outputs")
+        self.write_sidecar({
+            path: {"task_sha256": "older-compile"}
+            for path in (staged, commit_all, pathspec)
+        })
+        for path in (staged, commit_all, pathspec):
+            os.remove(os.path.join(self.repo, path))
+        git(self.repo, "add", "-u", "--", staged)
+
+        commands = (
+            "",
+            'git commit -am "[REQ123][fix]remove output"',
+            'git commit -m "[REQ123][fix]remove output" -- ' + pathspec,
+        )
+        for command in commands:
+            with self.subTest(command=command or "staged"):
+                snapshot = mf._pending_commit_candidates(command)
+                values = mf._pending_commit_files(
+                    command, self.state(), snapshot)
+                self.assertEqual([], values[2])
+
+    def test_compound_add_recreated_staged_deletion_is_a_compile_output(self):
+        path = "config/runtime.properties"
+        write(self.repo, path, "baseline=true\n")
+        git(self.repo, "add", "--", path)
+        git(self.repo, "commit", "-qm", "track runtime config")
+        self.write_sidecar({
+            path: {"task_sha256": "compile-task"},
+        })
+        os.remove(os.path.join(self.repo, path))
+        git(self.repo, "add", "-u", "--", path)
+        write(self.repo, path, "recreated=true\n")
+        mf.save_state(self.state())
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]recreated output"' % path
+        )
+
+        snapshot = mf._pending_commit_candidates(command)
+        result = self.gate_bash(command)
+
+        self.assertIn(path, snapshot["present_paths"])
+        self.assertNotIn(path, snapshot["deleted_paths"])
+        self.assertNotIn(path, snapshot["new_paths"])
+        output = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, output)
+        self.assertIn(path, output)
+        self.assertIn("COMPILE", output)
+
+    def test_compound_add_recreated_staged_deletion_is_foreign_openspec(self):
+        path = "openspec/changes/foreign-change/change.md"
+        write(self.repo, path, "# baseline foreign\n")
+        git(self.repo, "add", "--", path)
+        git(self.repo, "commit", "-qm", "track foreign change")
+        os.remove(os.path.join(self.repo, path))
+        git(self.repo, "add", "-u", "--", path)
+        write(self.repo, path, "# recreated foreign\n")
+        mf.save_state(self.state())
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]recreated foreign"' % path
+        )
+
+        snapshot = mf._pending_commit_candidates(command)
+        result = self.gate_bash(command)
+
+        self.assertIn(path, snapshot["present_paths"])
+        self.assertNotIn(path, snapshot["deleted_paths"])
+        output = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, output)
+        self.assertIn(path, output)
+
+    def test_foreign_openspec_deletion_is_not_a_delivery_output(self):
+        foreign = "openspec/changes/retired-change/change.md"
+        write(self.repo, foreign, "# retired\n")
+        git(self.repo, "add", foreign)
+        git(self.repo, "commit", "-qm", "track retired change")
+        os.remove(os.path.join(self.repo, foreign))
+        git(self.repo, "add", "-u", "--", foreign)
+
+        values = mf._pending_commit_files("", self.state())
+
+        self.assertEqual([], values[1])
+
+    def test_force_added_ignored_config_stays_blocked_without_provenance(self):
+        write(self.repo, ".gitignore", "*.compile-local\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore compile-local files")
+        path = "config/runtime.compile-local"
+        write(self.repo, path, "generated=true\n")
+        state = self.save_pending_compile()
+        command = (
+            'git add -f -- "%s" && '
+            'git commit -m "[REQ123][fix]compile output"' % path
+        )
+
+        pending = self.gate_bash(command)
+        self.assertIn(
+            "先完成当前 COMPILE 任务",
+            pending.stdout + pending.stderr,
+        )
+        write(self.repo, ".mae-flow.json.tokens", json.dumps({
+            "COMPILE": {
+                "at": "9999-12-31 23:59:59",
+                "step": state["current"],
+                "status": "OK",
+                "task_sha256": "current-compile-task",
+            },
+        }))
+
+        completed = self.gate_bash(command)
+
+        output = completed.stdout + completed.stderr
+        self.assertNotEqual(0, completed.returncode, output)
+        self.assertIn(path, output)
+        self.assertIn("force", output.lower())
+        self.assertEqual("", git(
+            self.repo, "diff", "--cached", "--name-only"))
+
+    def test_compile_hard_block_precedes_foreign_authorization(self):
+        path = "openspec/changes/foreign-generated/change.md"
+        write(self.repo, path, "# compile-generated foreign\n")
+        self.write_sidecar({
+            path: {"task_sha256": "compile-task"},
+        })
+        mf.save_state(self.state())
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]combined ownership"' % path
+        )
+
+        result = self.gate_bash(command)
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, output)
+        self.assertIn("COMPILE", output)
+        self.assertIn("foreign-generated", output)
+        self.assertIn("同时检测到其他独立问题", output)
+        self.assertNotIn(" allow ", output)
+        self.assertFalse(os.path.exists(os.path.join(
+            self.repo, ".mae-flow.json.gate-strikes")))
+        self.assertFalse(os.path.exists(os.path.join(
+            self.repo, ".mae-flow.json.gate-permits")))
+
     def test_openspec_trust_is_limited_to_current_delivery(self):
         current = "openspec/changes/current-change/change.md"
         foreign = "openspec/changes/another-change/change.md"
@@ -275,16 +828,417 @@ class CommitOwnershipTests(unittest.TestCase):
         write(self.repo, disguised, "# STORY-REQ123\n\n不应入库。\n")
         git(self.repo, "add", disguised)
         git(self.repo, "commit", "-qm", "[REQ123][fix]current")
-        remote = os.path.join(self.tmp, "remote.git")
-        git(self.tmp, "init", "--bare", "-q", remote)
-        git(self.repo, "remote", "add", "origin", remote)
-        git(self.repo, "push", "-qu", "origin", "HEAD")
+        self.push_to_new_remote()
 
         ok, why = mf.ev_pushed({}, state)
 
         self.assertFalse(ok)
         self.assertIn(disguised, why)
         self.assertIn("不属于当前", why)
+
+    def test_push_allows_eight_deleted_historical_openspec_paths(self):
+        prefix = "openspec/changes/resend-condition-change"
+        historical = [
+            prefix + "/" + name
+            for name in (
+                "change.md",
+                "design.md",
+                "proposal.md",
+                "tasks.md",
+                "specs/nsa/spec.md",
+                "specs/storage/spec.md",
+                "specs/neighbor/spec.md",
+                "notes/decision.md",
+            )
+        ]
+        for path in historical:
+            write(self.repo, path, "# historical\n")
+        git(self.repo, "add", prefix)
+        git(self.repo, "commit", "-qm", "historical fixture")
+        git(self.repo, "branch", "-f", "main", "HEAD")
+        for path in historical:
+            os.remove(os.path.join(self.repo, path))
+        git(self.repo, "add", "-u", "--", prefix)
+        git(self.repo, "commit", "-qm", "[REQ123][fix]historical cleanup")
+        self.push_to_new_remote()
+        state = self.state(current="push")
+        state["config"]["CHANGE_NAME"] = "nsa-storage-neighbor-fix"
+
+        ok, why = mf.ev_pushed({}, state)
+
+        self.assertTrue(ok, why)
+
+    def test_push_still_blocks_added_foreign_openspec(self):
+        foreign = "openspec/changes/resend-condition-change/change.md"
+        write(self.repo, foreign, "# foreign added\n")
+        git(self.repo, "add", foreign)
+        git(self.repo, "commit", "-qm", "[REQ123][fix]foreign add")
+        self.push_to_new_remote()
+        state = self.state(current="push")
+        state["config"]["CHANGE_NAME"] = "nsa-storage-neighbor-fix"
+
+        ok, why = mf.ev_pushed({}, state)
+
+        self.assertFalse(ok)
+        self.assertIn(foreign, why)
+
+    def test_push_still_blocks_modified_foreign_openspec(self):
+        foreign = "openspec/changes/resend-condition-change/change.md"
+        write(self.repo, foreign, "# baseline foreign\n")
+        git(self.repo, "add", foreign)
+        git(self.repo, "commit", "-qm", "foreign fixture")
+        git(self.repo, "branch", "-f", "main", "HEAD")
+        write(self.repo, foreign, "# modified foreign\n")
+        git(self.repo, "add", foreign)
+        git(self.repo, "commit", "-qm", "[REQ123][fix]foreign modify")
+        self.push_to_new_remote()
+        state = self.state(current="push")
+        state["config"]["CHANGE_NAME"] = "nsa-storage-neighbor-fix"
+
+        ok, why = mf.ev_pushed({}, state)
+
+        self.assertFalse(ok)
+        self.assertIn(foreign, why)
+
+    def test_exact_user_authorization_survives_gate_into_pushed_evidence(self):
+        foreign = "openspec/changes/user-selected-change/change.md"
+        write(self.repo, foreign, "# user-selected foreign change\n")
+        state = self.state(current="build")
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized change"'
+            % foreign
+        )
+        ack = "我明确授权 Agent 提交 " + foreign
+
+        first_output, _permit_id = self.authorize_blocked_command(
+            command,
+            "bash-foreign-openspec",
+            ack,
+        )
+        self.assertIn(" allow ", first_output)
+        allowed = self.gate_bash(command)
+        self.assertEqual(
+            0, allowed.returncode, allowed.stdout + allowed.stderr)
+        git(self.repo, "add", "--", foreign)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user-authorized change",
+        )
+        self.posttool_bash(command)
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertTrue(ok, why)
+
+    def test_exact_carryover_authorization_survives_into_pushed_evidence(self):
+        carryover = "docs/user-selected-carryover.md"
+        write(self.repo, carryover, "# user-selected carryover\n")
+        state = self.state(current="build")
+        self.mark_initial(state, carryover)
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized carryover"'
+            % carryover
+        )
+        ack = "我明确授权 Agent 提交 " + carryover
+
+        self.authorize_blocked_command(
+            command,
+            "bash-cross-delivery-carryover",
+            ack,
+        )
+        allowed = self.gate_bash(command)
+        self.assertEqual(
+            0, allowed.returncode, allowed.stdout + allowed.stderr)
+        git(self.repo, "add", "--", carryover)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user-authorized carryover",
+        )
+        self.posttool_bash(command)
+        finalized = [
+            record for record in (
+                mf.load_state().get("git_authorizations", ()) or ())
+            if record.get("rule") == "bash-cross-delivery-carryover"
+        ]
+        self.assertEqual(1, len(finalized))
+        self.assertTrue(finalized[0].get("finalized"))
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertTrue(ok, why)
+
+    def test_exact_carryover_authorization_does_not_cover_an_extra_path(self):
+        carryover = "docs/user-selected-carryover.md"
+        extra = "docs/unapproved-carryover.md"
+        write(self.repo, carryover, "# user-selected carryover\n")
+        write(self.repo, extra, "# unapproved carryover\n")
+        state = self.state(current="build")
+        self.mark_initial(state, carryover)
+        self.mark_initial(state, extra)
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized carryover"'
+            % carryover
+        )
+        ack = "我明确授权 Agent 提交 " + carryover
+        self.authorize_blocked_command(
+            command,
+            "bash-cross-delivery-carryover",
+            ack,
+        )
+        self.assertEqual(0, self.gate_bash(command).returncode)
+        git(self.repo, "add", "--", carryover)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user-authorized carryover",
+        )
+        self.posttool_bash(command)
+        receipt = mf.load_state()["git_authorizations"][0]
+        self.assertEqual([carryover], receipt.get("paths"))
+        git(self.repo, "add", "--", extra)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]unapproved carryover",
+        )
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertFalse(ok)
+        self.assertIn(extra, why)
+
+    def test_exact_carryover_authorization_expires_after_later_path_commit(self):
+        carryover = "docs/user-selected-carryover.md"
+        write(self.repo, carryover, "# authorized version\n")
+        state = self.state(current="build")
+        self.mark_initial(state, carryover)
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized carryover"'
+            % carryover
+        )
+        ack = "我明确授权 Agent 提交 " + carryover
+        self.authorize_blocked_command(
+            command,
+            "bash-cross-delivery-carryover",
+            ack,
+        )
+        self.assertEqual(0, self.gate_bash(command).returncode)
+        git(self.repo, "add", "--", carryover)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user-authorized carryover",
+        )
+        self.posttool_bash(command)
+        receipt = mf.load_state()["git_authorizations"][0]
+        self.assertTrue(receipt.get("finalized"))
+        write(self.repo, carryover, "# later unapproved version\n")
+        git(self.repo, "add", "--", carryover)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]later carryover change",
+        )
+        write(self.repo, carryover, "# authorized version\n")
+        git(self.repo, "add", "--", carryover)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]restore original carryover",
+        )
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertFalse(ok)
+        self.assertIn(carryover, why)
+
+    def test_exact_user_authorization_accepts_a_path_with_spaces(self):
+        foreign = "openspec/changes/user selected/change.md"
+        write(self.repo, foreign, "# user-selected foreign change\n")
+        state = self.state(current="build")
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized spaced path"'
+            % foreign
+        )
+        ack = "我明确授权 Agent 提交 " + foreign
+
+        self.authorize_blocked_command(
+            command,
+            "bash-foreign-openspec",
+            ack,
+        )
+        allowed = self.gate_bash(command)
+
+        self.assertEqual(
+            0,
+            allowed.returncode,
+            allowed.stdout + allowed.stderr,
+        )
+
+    def test_exact_authorization_does_not_trust_a_later_same_path_commit(self):
+        foreign = "openspec/changes/user-selected-change/change.md"
+        write(self.repo, foreign, "# authorized version\n")
+        state = self.state(current="build")
+        mf.save_state(state)
+        command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized change"'
+            % foreign
+        )
+        ack = "我明确授权 Agent 提交 " + foreign
+        self.authorize_blocked_command(
+            command,
+            "bash-foreign-openspec",
+            ack,
+        )
+        self.assertEqual(0, self.gate_bash(command).returncode)
+        git(self.repo, "add", "--", foreign)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user-authorized change",
+        )
+        self.posttool_bash(command)
+        write(self.repo, foreign, "# later unapproved version\n")
+        git(self.repo, "add", "--", foreign)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]later external change",
+        )
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertFalse(ok)
+        self.assertIn(foreign, why)
+
+    def test_exact_user_authorized_revert_finalizes_into_push_evidence(self):
+        foreign = "openspec/changes/reverted-foreign/change.md"
+        git(self.repo, "checkout", "-qb", "revert-source", "main")
+        write(self.repo, foreign, "# source history\n")
+        git(self.repo, "add", "--", foreign)
+        git(self.repo, "commit", "-qm", "source parent")
+        os.remove(os.path.join(self.repo, foreign))
+        git(self.repo, "add", "-u", "--", foreign)
+        git(self.repo, "commit", "-qm", "source deletion")
+        target = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "checkout", "-q", "feature")
+        state = self.state(current="build")
+        mf.save_state(state)
+        command = "git revert " + target
+        ack = "我明确授权 Agent 执行 git revert " + target
+
+        self.authorize_blocked_command(
+            command,
+            "bash-git-revert-user-authorization",
+            ack,
+        )
+        allowed = self.gate_bash(command)
+        self.assertEqual(
+            0, allowed.returncode, allowed.stdout + allowed.stderr)
+        git(self.repo, "revert", target)
+        self.posttool_bash(command)
+        self.push_to_new_remote()
+
+        ok, why = mf.ev_pushed({}, mf.load_state())
+
+        self.assertTrue(ok, why)
+
+    def test_exact_user_authorization_does_not_expand_to_an_extra_path(self):
+        first = "openspec/changes/user-selected-change/change.md"
+        extra = "openspec/changes/unapproved-change/change.md"
+        write(self.repo, first, "# approved\n")
+        write(self.repo, extra, "# extra\n")
+        state = self.state(current="build")
+        mf.save_state(state)
+        exact_command = (
+            'git add -- "%s" && '
+            'git commit -m "[REQ123][fix]user-authorized change"'
+            % first
+        )
+        ack = "我明确授权 Agent 提交 " + first
+        self.authorize_blocked_command(
+            exact_command,
+            "bash-foreign-openspec",
+            ack,
+        )
+        expanded_command = (
+            'git add -- "%s" "%s" && '
+            'git commit -m "[REQ123][fix]expanded change"'
+            % (first, extra)
+        )
+
+        expanded = self.gate_bash(expanded_command)
+
+        output = expanded.stdout + expanded.stderr
+        self.assertNotEqual(0, expanded.returncode, output)
+        self.assertIn(extra, output)
+
+    def test_non_git_source_permit_keeps_its_existing_user_exit(self):
+        source = "src/main.py"
+        write(self.repo, source, "value = 1\n")
+        state = self.state(current="config_confirm")
+        mf.save_state(state)
+        command = "sed -i 's/value/other/' " + source
+        ack = "我明确授权 Agent 本次用 sed 修改 " + source
+
+        self.authorize_blocked_command(
+            command,
+            "bash-source",
+            ack,
+        )
+        allowed = self.gate_bash(command)
+
+        self.assertEqual(
+            0,
+            allowed.returncode,
+            allowed.stdout + allowed.stderr,
+        )
+
+    def test_user_external_current_delivery_needs_no_agent_provenance(self):
+        current = "openspec/changes/current-change/change.md"
+        write(self.repo, current, "# user committed current delivery\n")
+        git(self.repo, "add", "--", current)
+        git(
+            self.repo,
+            "commit",
+            "-qm",
+            "[REQ123][fix]user external current delivery",
+        )
+        self.push_to_new_remote()
+        state = self.state(current="push")
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.agent-writes")))
+
+        ok, why = mf.ev_pushed({}, state)
+
+        self.assertTrue(ok, why)
 
     def test_archive_clean_checks_only_exact_current_outputs(self):
         stale = "openspec/changes/old/change.md"

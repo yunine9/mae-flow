@@ -39,6 +39,8 @@ class HookContractSupportMixin:
             kind, report, st, self.task_card_ports_factory())
         if not decision.accepted:
             self._contract_bail(kind, decision.reason, soft)
+        self._validated_task_bindings[kind] = dict(
+            decision.task or {})
         return decision.task
 
 

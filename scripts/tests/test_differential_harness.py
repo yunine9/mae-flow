@@ -67,6 +67,7 @@ STAGE5_HOOK_SCENARIOS = {
 
 from differential.normalize import normalize_text, normalize_value  # noqa: E402
 from differential.runner import (  # noqa: E402
+    _state_replacements,
     assert_matches_golden,
     load_goldens,
     run_scenario,
@@ -75,6 +76,25 @@ from differential.snapshot import Snapshot  # noqa: E402
 
 
 class DifferentialNormalizationTests(unittest.TestCase):
+    def test_task_issuance_ids_are_normalized_with_task_digests(self):
+        actual = _state_replacements({
+            ".mae-flow.json": {
+                "agent_tasks": {
+                    "COMPILE": {
+                        "sha256": "task-digest",
+                        "issuance_id": "random-issuance-id",
+                    },
+                },
+            },
+        })
+        self.assertEqual(
+            {
+                "task-digest": "<TASK_CARD_SHA256>",
+                "random-issuance-id": "<TASK_ISSUANCE_ID>",
+            },
+            actual,
+        )
+
     def test_normalize_text_replaces_only_explicit_dynamic_values(self):
         replacements = {
             "/tmp/mf-123": "<TMP>",

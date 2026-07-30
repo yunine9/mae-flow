@@ -11,12 +11,62 @@
 ## Global Constraints
 
 - The primary rule is provenance-based; artifact names and directories are fallback evidence only.
-- Existing CLI, Hook protocol, task-card digest, state compatibility, and legitimate delete/move behavior must remain intact.
+- Existing CLI, Hook protocol, state compatibility, and legitimate delete/move
+  behavior must remain intact; the explicit COMPILE no-commit instruction is
+  the only intentional task-card body/digest change.
 - Old `.mae-flow.json.agent-writes` documents containing only `paths` must remain readable.
 - A successful later Agent `Write`, `Edit`, or `MultiEdit` supersedes the compile-side-effect record for that path.
 - Exact snapshot/comparison/sidecar failures must log and fail open so an otherwise accepted COMPILE remains accepted.
 - A normal exact ledger blocks only the affected commit attempt, with recovery that neither deletes files nor creates a persistent lock.
 - Production code changes must follow red-green-refactor and include real behavior tests.
+
+## Final review closure (2026-07-30)
+
+Whole-branch review found four gaps in the original implementation. The final
+fix wave extends the plan with these binding requirements:
+
+- [x] Every full-flow COMPILE card says not to commit/push; any HEAD advance
+  invalidates completion.
+- [x] New task issuance invalidates the old token, completion tokens bind the
+  exact task digest, and Commit Gate uses a transient, non-strike/non-permit
+  pre-completion rule until that matching token exists.
+- [x] Baseline capture records explicit validity and dedicated provenance Git
+  helpers surface failure; invalid baselines log and skip attribution.
+- [x] Attribution and both direct-write paths use one slash/case identity rule;
+  transcript supersession removes old entries in the same locked atomic update
+  even when there is no new delta.
+- [x] Current snapshots exclude absent paths so tracked and pre-existing
+  deletions remain legitimate Git operations, and exclude exact ephemeral
+  Mae-Flow process state so task-card absolute paths do not destabilize
+  provenance. Repository-owned `.mae-flow-defaults.json` remains included and
+  protected.
+- [x] UT scope distinguishes intentional direct non-test edits from command
+  side effects. Command-created paths do not offer unlock/accept-risk or ask
+  for a user decision; recovery restores only task-baseline-clean paths or
+  moves new outputs recoverably while preserving user dirt.
+- [x] One normalized `GitAction` parser covers `git.exe`, global options,
+  pipelines, quoted separators, and line continuation. Multiple HEAD
+  mutations, mutating aliases, opaque pathspec files, and high-confidence
+  interpreter wrappers are hard rejected.
+- [x] Pure deletions are not delivery members; a staged deletion recreated by a
+  later add becomes a present A/M candidate. Force-added ignored paths remain
+  hard blocks.
+- [x] Review integrity, exact COMPILE provenance, and strong/forced artifacts
+  precede and aggregate inherited/foreign ownership findings without
+  strike/permit state. User-decision rules show the exact `allow` exit on the
+  first block.
+- [x] Consumed exact Agent Git permits become actor-bound receipts.
+  `PostToolUse` finalizes exact commit/revert result HEAD, status, blobs, and
+  last-touch evidence so push/done honors that decision once, without trusting
+  extra paths or later same-path commits. User-external current delivery needs
+  no Agent provenance.
+
+The only intentional task-card prose/digest delta is the COMPILE no-commit
+instruction. The intentional task-state delta is baseline validity and exact
+task-token binding. High-confidence wrapper detection is not a claim to
+statically understand arbitrary code/string obfuscation; final Git/delivery
+evidence is the backstop. The corrupt-sidecar diagnostic pre-read may race in
+log wording only; the authoritative mutation remains locked and atomic.
 
 ---
 
@@ -34,6 +84,15 @@
 - Modify `scripts/mae_flow_core/guard/ownership.py`: add an exact compile-side-effect blocking fact and decision.
 - Modify `scripts/mae_flow_core/cli_commands/git_ownership.py`: load the side-effect ledger and classify exact commit candidates.
 - Modify `scripts/mae_flow_core/cli_commands/gate.py`: pass the new fact into ownership policy.
+- Create `scripts/mae_flow_core/cli_commands/git_authorization.py`: build exact
+  Agent Git actions and validate durable delivery receipts.
+- Create `scripts/mae_flow_core/adapters/hook_runtime_git_authorization.py`:
+  bind a consumed exact commit/revert permit to the observed Git result.
+- Modify `scripts/mae_flow_core/foundation/git_intent.py`: normalize direct Git
+  actions and reject aliases, opaque pathspecs, multiple HEAD mutations, and
+  high-confidence interpreter wrappers.
+- Create `scripts/mae_flow_core/cli_commands/gate_permit_state.py`: keep
+  one-shot permit/strike mutation and receipt issuance behind the CLI facade.
 - Modify `scripts/tests/test_quality_task_cards.py`, `scripts/tests/test_state_core.py`, `scripts/tests/test_hook_compile_contract.py`, `scripts/tests/test_task_scope.py`, `scripts/tests/test_guard_ownership.py`, `scripts/tests/test_commit_ownership.py`, and `scripts/tests/probe_gate_smoke.py`: protect integration and compatibility behavior.
 - Modify `scripts/tests/differential/goldens/phase6.json` through `phase15.json`: record the intentional detached COMPILE snapshot metadata in the existing task-card scenario.
 - Modify `MAINTAINERS.md` and `docs/superpowers/mae-flow-refactor-findings.md`: document the corrected provenance invariant and discovered defect.
@@ -149,6 +208,7 @@ git commit -m "feat: classify compile side effects by provenance"
 **Interfaces:**
 - Consumes: Task 1 `successful_direct_write_paths` and `compile_side_effect_paths`.
 - Produces: task record field `worktree_snapshot: dict[str, str]`.
+- Produces: task record field `worktree_snapshot_valid: bool`.
 - Produces: sidecar field `compile_side_effects: dict[str, dict]`.
 - Produces: `_worktree_snapshot_since(head) -> dict[str, str]` on the CLI facade and `_worktree_snapshot(head) -> dict[str, str]` on the Hook runtime.
 
@@ -204,7 +264,8 @@ worktree_snapshot=(
 ),
 ```
 
-Do not render this field into the human task-card body or change its digest.
+Do not render snapshot metadata into the human task-card body. The separate
+COMPILE no-commit instruction is the only intentional body/digest change.
 
 - [ ] **Step 5: Record accepted COMPILE side effects**
 
@@ -426,8 +487,8 @@ python scripts/selftest.py
 ```
 
 Expected: every command exits 0. Differential changes must be limited to the
-intentional compile-side-effect Gate scenarios; unrelated golden behavior must
-remain identical.
+intentional COMPILE task-card/task-state changes and compile-side-effect Gate
+scenarios; unrelated golden behavior must remain identical.
 
 - [ ] **Step 4: Commit documentation and final proof**
 

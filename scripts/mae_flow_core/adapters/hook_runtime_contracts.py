@@ -114,7 +114,17 @@ class HookContractsMixin:
             self._contract_bail("UT", msg, soft)
 
         task = self._task_card_contract("UT", report, soft)
-        changed = self._enforce_agent_scope("UT", task, bail)
+        direct_paths = (
+            _successful_direct_write_paths(
+                self._tool_call_values(tool_calls), os.getcwd())
+            if tool_calls else ()
+        )
+        changed = (
+            self._enforce_agent_scope(
+                "UT", task, bail, direct_write_paths=direct_paths)
+            if direct_paths
+            else self._enforce_agent_scope("UT", task, bail)
+        )
         if status not in ("PASS", "NEEDS_INPUT", "FAIL"):
             bail("未知结果状态 " + status)
             return

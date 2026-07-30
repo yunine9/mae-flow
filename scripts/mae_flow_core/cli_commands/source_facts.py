@@ -1,7 +1,7 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    hashlib, json, re, time,
+    hashlib, json, os, re, source_paths, subprocess, time,
 )
 from .wiring import api
 
@@ -142,8 +142,74 @@ def _worktree_snapshot_since(head):
     """Fingerprint every Git-visible change for a COMPILE provenance baseline."""
     return {
         path: api._review_path_fingerprint(path)
-        for path in _changed_paths_since_head(head)
+        for path in _provenance_changed_paths_since_head(head)
+        if (
+            os.path.lexists(path)
+            and not source_paths.is_flow_control_path(path)
+        )
     }
+
+
+def _provenance_git_output(arguments):
+    """Run one required provenance Git read and surface every failure."""
+    try:
+        result = subprocess.run(
+            list(arguments),
+            shell=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "COMPILE provenance Git command failed: %s" % exc
+        ) from exc
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        raise RuntimeError(
+            "COMPILE provenance Git command exited %s%s"
+            % (
+                result.returncode,
+                (": " + detail) if detail else "",
+            )
+        )
+    return result.stdout or ""
+
+
+def _provenance_status_paths(output):
+    paths = []
+    for line in output.splitlines():
+        fields = line.split(None, 1)
+        if len(fields) == 2:
+            paths.append(
+                fields[1].split(" -> ")[-1].strip().strip('"'))
+    return paths
+
+
+def _provenance_changed_paths_since_head(head):
+    """Collect committed and working paths without trustworthy-empty fallbacks."""
+    if not head:
+        raise RuntimeError("COMPILE provenance baseline HEAD is missing")
+    if _provenance_git_output(
+            ["git", "cat-file", "-t", head]).strip() != "commit":
+        raise RuntimeError(
+            "COMPILE provenance baseline HEAD is not a commit")
+    paths = _provenance_git_output([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--name-only", "--no-renames", head, "HEAD",
+    ]).splitlines()
+    paths.extend(_provenance_git_output([
+        "git", "-c", "core.quotepath=false", "diff",
+        "--name-only", "--no-renames", "HEAD",
+    ]).splitlines())
+    paths.extend(_provenance_status_paths(_provenance_git_output([
+        "git", "-c", "core.quotepath=false", "status",
+        "--porcelain", "--untracked-files=all",
+    ])))
+    return list(dict.fromkeys(
+        api.norm(path) for path in paths if path))
 
 
 def _checkpoint_candidate_path(path, st, flow=None):

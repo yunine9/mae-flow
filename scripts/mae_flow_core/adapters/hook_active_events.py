@@ -348,6 +348,8 @@ class ActiveHookEventAdapter:
             self.runtime._record_agent_token("ASKUSER", "CONFIRMED")
             return HookResponse()
         if tool == "Bash":
+            self.runtime._finalize_git_authorization(
+                tool_input.get("command", "") or "")
             self.runtime._maybe_utrun(payload)
             return HookResponse()
         path = (

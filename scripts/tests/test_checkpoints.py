@@ -107,15 +107,16 @@ class CheckpointTests(unittest.TestCase):
 
     def compile_receipt(self, state, checkpoint):
         head = git(self.repo, "rev-parse", "HEAD")
+        task_sha256 = "task-" + checkpoint
         state.setdefault("agent_tasks", {})["COMPILE"] = {
-            "step": state["current"], "head": head, "sha256": "task-" + checkpoint,
+            "step": state["current"], "head": head, "sha256": task_sha256,
             "scope": checkpoint, "checkpoint": checkpoint,
         }
         self.save(state)
         with open(mf.STATE_PATH + ".tokens", "w", encoding="utf-8") as f:
             json.dump({"COMPILE": {
                 "at": "9999-12-31 23:59:59", "step": state["current"],
-                "head": head, "status": "OK",
+                "head": head, "status": "OK", "task_sha256": task_sha256,
             }}, f)
 
     def precommit_compile_receipt(self, state):
@@ -130,7 +131,7 @@ class CheckpointTests(unittest.TestCase):
             json.dump({"COMPILE": {
                 "at": "9999-12-31 23:59:59", "step": "tw_change",
                 "head": self.base, "status": "OK",
-                "source_snapshot": snapshot,
+                "source_snapshot": snapshot, "task_sha256": "task-CP1",
             }}, stream)
         return state
 
@@ -511,6 +512,7 @@ class CheckpointTests(unittest.TestCase):
         snapshot = mf._source_snapshot_since(self.base, state)
         state["agent_tasks"] = {"COMPILE": {
             "step": "tw_change", "head": self.base,
+            "sha256": "compile-task-digest",
             "precommit_review": True, "source_snapshot": snapshot,
         }}
         self.save(state)
@@ -519,6 +521,30 @@ class CheckpointTests(unittest.TestCase):
             token = json.load(stream)["COMPILE"]
         self.assertEqual(token["head"], self.base)
         self.assertEqual(token["source_snapshot"], snapshot)
+        self.assertEqual(token["task_sha256"], "compile-task-digest")
+
+    def test_compile_token_uses_the_digest_from_the_validated_report(self):
+        validated_digest = "a" * 64
+        reissued_digest = "b" * 64
+        state = self.state(current="tw_change")
+        state["agent_tasks"] = {"COMPILE": {
+            "step": "tw_change",
+            "head": self.base,
+            "sha256": reissued_digest,
+        }}
+        self.save(state)
+
+        self.hook._record_agent_token(
+            "COMPILE",
+            "OK",
+            "COMPILE_RESULT: OK\nTASK_CARD_SHA256: "
+            + validated_digest,
+        )
+
+        with open(mf.STATE_PATH + ".tokens", encoding="utf-8") as stream:
+            token = json.load(stream)["COMPILE"]
+        self.assertEqual(validated_digest, token["task_sha256"])
+        self.assertNotEqual(reissued_digest, token["task_sha256"])
 
     def test_switch_to_continuous_keeps_valid_compile_and_closes_mixed_states(self):
         state = self.state(current="tw_change", mode="staged", checkpoints=3)

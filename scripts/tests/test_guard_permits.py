@@ -53,15 +53,17 @@ class PermitPolicyTests(unittest.TestCase):
             data, "rule", "verify", "next", "sample", "later")
         self.assertEqual(1, count)
 
-    def test_third_strike_guidance_differs_for_moonlight(self):
+    def test_first_block_has_user_exit_but_moonlight_does_not(self):
+        first = strike_escalation(
+            1, 3, False, "abc", "/tool/mae-flow.py")
         normal = strike_escalation(
             3, 3, False, "abc", "/tool/mae-flow.py")
         moonlight = strike_escalation(
             3, 3, True, "abc", "/tool/mae-flow.py")
+        self.assertIn("allow abc", first)
         self.assertIn("allow abc", normal)
         self.assertIn("moonlight blocked", moonlight)
-        self.assertEqual("", strike_escalation(
-            2, 3, False, "abc", "/tool/mae-flow.py"))
+        self.assertNotIn("allow abc", moonlight)
 
 
 if __name__ == "__main__":

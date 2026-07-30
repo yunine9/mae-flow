@@ -48,7 +48,7 @@ def save_state(st):
         die("流程状态存在并发更新或不可读，已拒绝覆盖：" + str(exc)
             + "。重新执行 current 获取最新状态；若仍失败可直接 `/mae-flow:mae-flow exit` 保存现场并退出。", 2)
 
-def _drop_agent_token(kind):
+def _drop_agent_token(kind, strict=False):
     """清理单个令牌时保留其他并发 Hook 刚签发的事实。"""
     path = STATE_PATH + ".tokens"
 
@@ -60,10 +60,18 @@ def _drop_agent_token(kind):
 
     try:
         update_json(path, remove_one, default={}, recover_corrupt=True)
-    except Exception:
+        return True
+    except Exception as exc:
+        if strict:
+            die(
+                "新任务签发前无法废弃旧 %s 令牌，已拒绝生成任务卡: %s。"
+                "修复令牌 sidecar 后重试；禁止让旧收据复用到新任务。"
+                % (kind, exc),
+                2,
+            )
         # token 清理是防旧证据复用；文件损坏时删除当前内存任务卡仍会让 done
         # 拒绝推进，不能反过来让恢复命令因附属文件故障卡死。
-        pass
+        return False
 
 def _moonlight(st):
     return moonlight_enabled(st)

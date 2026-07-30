@@ -95,7 +95,7 @@ def runtime_for(root, logs=None):
     )
 
 
-def compile_task(root, head, worktree_snapshot):
+def compile_task(root, head, worktree_snapshot, baseline_valid=True):
     body = "# COMPILE fixture task\n"
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
     task_path = os.path.join(root, ".mae-flow-work", "compile-task.md")
@@ -109,6 +109,7 @@ def compile_task(root, head, worktree_snapshot):
         "sha256": digest,
         "head": head,
         "worktree_snapshot": worktree_snapshot,
+        "worktree_snapshot_valid": baseline_valid,
     }
 
 
@@ -310,6 +311,60 @@ class CompileContractTests(unittest.TestCase):
             )
             self.assertIn("generated/build.properties", superseded["paths"])
 
+    def test_tracked_repo_defaults_are_recorded_as_compile_side_effects(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            initialize_repository(td)
+            defaults = os.path.join(td, ".mae-flow-defaults.json")
+            with open(defaults, "w", encoding="utf-8") as stream:
+                stream.write('{"编译方式": "before"}\n')
+            subprocess.run(
+                ["git", "add", "-f", ".mae-flow-defaults.json"],
+                cwd=td,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-qm", "track repository defaults"],
+                cwd=td,
+                check=True,
+            )
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=td,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            runtime = runtime_for(td)
+            task = compile_task(
+                td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            with open(defaults, "w", encoding="utf-8") as stream:
+                stream.write('{"编译方式": "compile changed"}\n')
+
+            runtime._compile_contract(
+                "OK",
+                accepted_report(task),
+                [{
+                    "name": "Bash",
+                    "input": {"command": "python build.py"},
+                    "result_seen": True,
+                    "result": "build complete\nexit code: 0",
+                }],
+            )
+
+            with open(
+                    runtime.AGENT_WRITES_STATE,
+                    encoding="utf-8") as stream:
+                ledger = json.load(stream)
+            self.assertIn(
+                ".mae-flow-defaults.json",
+                ledger["compile_side_effects"],
+            )
+            self.assertNotIn(
+                ".mae-flow.json",
+                ledger["compile_side_effects"],
+            )
+
     def test_rejected_compile_contract_does_not_record_side_effects(self):
         with tempfile.TemporaryDirectory() as td, in_directory(td):
             head = initialize_repository(td)
@@ -327,6 +382,263 @@ class CompileContractTests(unittest.TestCase):
             self.assertEqual(2, rejected.exception.code)
             self.assertFalse(os.path.exists(
                 os.path.join(td, ".mae-flow.json.agent-writes")))
+
+    def test_invalid_baseline_accepts_contract_without_attributing_existing_dirt(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            dirty = os.path.join(td, "config", "runtime.json")
+            with open(dirty, "w", encoding="utf-8") as stream:
+                stream.write('{"runtime": "pre-existing dirty"}\n')
+            runtime = runtime_for(td)
+            task = compile_task(td, head, {}, baseline_valid=False)
+            save_compile_state(td, task)
+
+            runtime._compile_contract(
+                "OK",
+                accepted_report(task),
+                [{
+                    "name": "Bash",
+                    "input": {"command": "python build.py"},
+                    "result_seen": True,
+                    "result": "build complete\nexit code: 0",
+                }],
+            )
+
+            self.assertFalse(os.path.exists(runtime.AGENT_WRITES_STATE))
+
+    def test_transcript_direct_write_removes_old_effect_without_new_delta(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            runtime = runtime_for(td)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                json.dump({
+                    "paths": {},
+                    "compile_side_effects": {
+                        "config/runtime.json": {
+                            "task_sha256": "older-compile",
+                        },
+                    },
+                }, stream)
+
+            runtime._compile_contract(
+                "OK",
+                accepted_report(task),
+                [
+                    {
+                        "name": "Bash",
+                        "input": {"command": "python build.py"},
+                        "result_seen": True,
+                        "result": "build complete\nexit code: 0",
+                    },
+                    {
+                        "name": "Edit",
+                        "input": {"file_path": "config/runtime.json"},
+                        "result_seen": True,
+                        "result": "already correct",
+                    },
+                ],
+            )
+
+            with open(runtime.AGENT_WRITES_STATE, encoding="utf-8") as stream:
+                ledger = json.load(stream)
+            self.assertNotIn(
+                "config/runtime.json",
+                ledger["compile_side_effects"],
+            )
+
+    def test_windows_transcript_and_posttool_writes_supersede_ledger_identity(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            runtime = runtime_for(td)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            with open(
+                    os.path.join(td, "config", "runtime.json"),
+                    "w", encoding="utf-8") as stream:
+                stream.write('{"runtime": "after"}\n')
+            windows_os = mock.Mock(wraps=os)
+            windows_os.name = "nt"
+
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                json.dump({
+                    "paths": {},
+                    "compile_side_effects": {
+                        "CONFIG\\RUNTIME.JSON": {
+                            "task_sha256": "older-compile",
+                        },
+                    },
+                }, stream)
+            with mock.patch(
+                    "mae_flow_core.foundation.source_paths.os",
+                    windows_os,
+            ):
+                runtime._compile_contract(
+                    "OK",
+                    accepted_report(task),
+                    [
+                        {
+                            "name": "Bash",
+                            "input": {"command": "python build.py"},
+                            "result_seen": True,
+                            "result": "build complete\nexit code: 0",
+                        },
+                        {
+                            "name": "Edit",
+                            "input": {"file_path": "config/runtime.json"},
+                            "result_seen": True,
+                            "result": "updated",
+                        },
+                    ],
+                )
+            with open(runtime.AGENT_WRITES_STATE, encoding="utf-8") as stream:
+                transcript_ledger = json.load(stream)
+            self.assertEqual({}, transcript_ledger["compile_side_effects"])
+
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                json.dump({
+                    "paths": {},
+                    "compile_side_effects": {
+                        "CONFIG\\RUNTIME.JSON": {
+                            "task_sha256": "older-compile",
+                        },
+                    },
+                }, stream)
+            with mock.patch(
+                    "mae_flow_core.foundation.source_paths.os",
+                    windows_os,
+            ):
+                runtime._record_agent_write("config/runtime.json")
+            with open(runtime.AGENT_WRITES_STATE, encoding="utf-8") as stream:
+                posttool_ledger = json.load(stream)
+            self.assertEqual({}, posttool_ledger["compile_side_effects"])
+
+    def test_transcript_symlink_alias_is_the_same_repository_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            repository = os.path.join(td, "repository")
+            alias = os.path.join(td, "repository-alias")
+            os.makedirs(repository)
+            os.symlink(repository, alias)
+            with in_directory(repository):
+                head = initialize_repository(repository)
+                runtime = runtime_for(repository)
+                task = compile_task(
+                    repository, head, runtime._worktree_snapshot(head))
+                save_compile_state(repository, task)
+                with open(
+                        os.path.join(repository, "config", "runtime.json"),
+                        "w", encoding="utf-8") as stream:
+                    stream.write('{"runtime": "after"}\n')
+
+                runtime._compile_contract(
+                    "OK",
+                    accepted_report(task),
+                    [
+                        {
+                            "name": "Bash",
+                            "input": {"command": "python build.py"},
+                            "result_seen": True,
+                            "result": "build complete\nexit code: 0",
+                        },
+                        {
+                            "name": "Edit",
+                            "input": {
+                                "file_path": os.path.join(
+                                    alias, "config", "runtime.json"),
+                            },
+                            "result_seen": True,
+                            "result": "updated",
+                        },
+                    ],
+                )
+
+                with open(
+                        runtime.AGENT_WRITES_STATE,
+                        encoding="utf-8") as stream:
+                    ledger = json.load(stream)
+                self.assertEqual(
+                    {}, ledger["compile_side_effects"])
+
+    def test_snapshot_failure_still_applies_direct_write_supersession(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            logs = []
+            runtime = runtime_for(td, logs)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                json.dump({
+                    "paths": {},
+                    "compile_side_effects": {
+                        "config/runtime.json": {
+                            "task_sha256": "older-compile",
+                        },
+                    },
+                }, stream)
+            calls = [
+                {
+                    "name": "Bash",
+                    "input": {"command": "python build.py"},
+                    "result_seen": True,
+                    "result": "build complete\nexit code: 0",
+                },
+                {
+                    "name": "Edit",
+                    "input": {"file_path": "config/runtime.json"},
+                    "result_seen": True,
+                    "result": "already correct",
+                },
+            ]
+
+            with mock.patch.object(
+                    runtime,
+                    "_worktree_snapshot",
+                    side_effect=OSError("snapshot fixture unavailable"),
+            ):
+                runtime._compile_contract(
+                    "OK", accepted_report(task), calls)
+
+            with open(runtime.AGENT_WRITES_STATE, encoding="utf-8") as stream:
+                ledger = json.load(stream)
+            self.assertNotIn(
+                "config/runtime.json",
+                ledger["compile_side_effects"],
+            )
+            self.assertTrue(any(
+                "snapshot fixture unavailable" in entry
+                for entry in logs))
+
+    def test_tracked_deletion_is_excluded_from_compile_attribution(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            runtime = runtime_for(td)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            os.remove(os.path.join(td, "config", "runtime.json"))
+
+            runtime._compile_contract(
+                "OK",
+                accepted_report(task),
+                [{
+                    "name": "Bash",
+                    "input": {"command": "python build.py"},
+                    "result_seen": True,
+                    "result": "build complete\nexit code: 0",
+                }],
+            )
+
+            self.assertFalse(os.path.exists(runtime.AGENT_WRITES_STATE))
+
+    def test_preexisting_deletion_is_absent_from_compile_baseline(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            os.remove(os.path.join(td, "config", "runtime.json"))
+            runtime = runtime_for(td)
+
+            baseline = runtime._worktree_snapshot(head)
+
+            self.assertNotIn("config/runtime.json", baseline)
 
     def test_compile_provenance_failures_are_logged_without_rejecting(self):
         with tempfile.TemporaryDirectory() as td, in_directory(td):
@@ -382,7 +694,7 @@ class CompileContractTests(unittest.TestCase):
                 "COMPILE side-effect ledger EXC: update fixture unavailable"
                 in entry for entry in logs))
 
-    def test_worktree_snapshot_logs_git_failures(self):
+    def test_worktree_snapshot_surfaces_git_failures(self):
         with tempfile.TemporaryDirectory() as td, in_directory(td):
             logs = []
             runtime = runtime_for(td, logs)
@@ -392,13 +704,11 @@ class CompileContractTests(unittest.TestCase):
                 stderr="fixture git failure",
             )
             with mock.patch(
-                    "mae_flow_core.adapters.hook_runtime_contracts.subprocess.run",
+                    "mae_flow_core.adapters.hook_runtime_source.subprocess.run",
                     return_value=failed_git,
             ):
-                self.assertEqual({}, runtime._worktree_snapshot("fixture-head"))
-            self.assertTrue(any(
-                "git output unavailable (exit 1)" in entry
-                for entry in logs))
+                with self.assertRaises(RuntimeError):
+                    runtime._worktree_snapshot("fixture-head")
 
 
 if __name__ == "__main__":

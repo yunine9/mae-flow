@@ -37,6 +37,35 @@ def normalize_path(path):
     return (path or "").replace("\\", "/")
 
 
+def repository_path_identity(path, case_insensitive=None):
+    """Return one identity for repository-relative path comparisons."""
+    normalized = re.sub(
+        r"^(?:\./)+",
+        "",
+        normalize_path(path).strip().strip("\"'"),
+    )
+    if case_insensitive is None:
+        case_insensitive = os.name == "nt"
+    return normalized.casefold() if case_insensitive else normalized
+
+
+def is_flow_control_path(path):
+    """Return whether a path is Mae-Flow process state, never delivery input."""
+    normalized = repository_path_identity(
+        path, case_insensitive=False)
+    return (
+        normalized == ".mae-flow.json"
+        or normalized.startswith(".mae-flow.json.")
+        or normalized == ".mae-flow-history.jsonl"
+        or normalized == ".mae-flow-need-reload"
+        or normalized == ".mae-flow"
+        or normalized.startswith(".mae-flow/")
+        or normalized == ".mae-flow-work"
+        or normalized.startswith(".mae-flow-work/")
+        or normalized.startswith(".codecheckcli/")
+    )
+
+
 def is_absolute_path(path):
     normalized = normalize_path(path)
     return normalized.startswith("/") or bool(

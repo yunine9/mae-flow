@@ -147,6 +147,7 @@ from mae_flow_core.guard.permits import (
 )
 from mae_flow_core.guard.ownership import (
     OwnershipFacts,
+    decide_compile_task_commit,
     decide_ownership,
 )
 from mae_flow_core.guard.bash import (

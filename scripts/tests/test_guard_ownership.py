@@ -58,7 +58,7 @@ class OwnershipPolicyTests(unittest.TestCase):
         self.assertIn("漏掉 src/a.py", mismatch.block.message)
         self.assertIn("夹带 src/b.py", mismatch.block.message)
 
-    def test_block_precedence_preserves_historical_order(self):
+    def test_non_authorizable_blocks_precede_and_summarize_user_exits(self):
         result = decide_ownership(self.facts(
             inherited=("legacy.txt",),
             foreign_openspec=("openspec/changes/other/change.md",),
@@ -66,15 +66,22 @@ class OwnershipPolicyTests(unittest.TestCase):
             strong_artifacts=("build/a.o",),
         ))
         self.assertEqual(
-            "bash-cross-delivery-carryover", result.block.rule)
+            "bash-compile-side-effects", result.block.rule)
+        self.assertIn(
+            "config/generated.properties", result.block.message)
+        self.assertIn("build/a.o", result.block.message)
         self.assertIn("legacy.txt", result.block.message)
+        self.assertIn(
+            "openspec/changes/other/change.md",
+            result.block.message,
+        )
+        self.assertIn("同时检测到其他独立问题", result.block.message)
 
         result = decide_ownership(self.facts(
             foreign_openspec=("openspec/changes/other/change.md",),
-            compile_side_effects=("config/generated.properties",),
             strong_artifacts=("build/a.o",),
         ))
-        self.assertEqual("bash-foreign-openspec", result.block.rule)
+        self.assertEqual("bash-build-artifacts", result.block.rule)
 
     def test_compile_side_effects_block_before_fallback_artifacts(self):
         result = decide_ownership(self.facts(

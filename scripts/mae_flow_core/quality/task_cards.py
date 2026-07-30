@@ -82,6 +82,7 @@ def task_record(
     initial_compile_net,
     source_snapshot,
     worktree_snapshot,
+    worktree_snapshot_valid,
     allowed_files,
     task_files,
     execution_roots,
@@ -89,6 +90,7 @@ def task_record(
     ut_targets,
     unchanged_initial_dirty,
     at,
+    issuance_id="",
 ):
     return {
         "step": step,
@@ -101,6 +103,7 @@ def task_record(
         "initial_compile_net": initial_compile_net,
         "source_snapshot": dict(source_snapshot),
         "worktree_snapshot": dict(worktree_snapshot),
+        "worktree_snapshot_valid": bool(worktree_snapshot_valid),
         "allowed_files": list(allowed_files),
         "task_files": list(task_files),
         "execution_roots": list(execution_roots),
@@ -112,4 +115,5 @@ def task_record(
         "unchanged_initial_dirty": list(
             unchanged_initial_dirty),
         "at": at,
+        "issuance_id": str(issuance_id or ""),
     }

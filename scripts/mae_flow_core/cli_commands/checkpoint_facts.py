@@ -305,7 +305,7 @@ def _committed_delivery_paths(st):
     try:
         result = subprocess.run(
             ["git", "-c", "core.quotepath=false", "diff", "--name-only",
-             "--no-renames", scope, "--"],
+             "--no-renames", "--diff-filter=ACMRTUXB", scope, "--"],
             shell=False, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=30,
         )
@@ -333,5 +333,6 @@ def _committed_initial_carryover(st):
         if path in changed
         and api._unchanged_initial_dirty(path, st)
         and api._repo_path_identity(path) not in written
+        and not api._authorized_delivery_path(path, st)
     ]
     return carried, ""

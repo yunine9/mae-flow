@@ -242,8 +242,32 @@ flow.json 步骤字段语义：
   避免对移动、删除、生成源码和项目约定二进制误杀。精确采集异常只记日志并 fail-open，不反向拒绝
   COMPILE；正常命中只拒绝当前 commit 尝试，按提示移出暂存区或命令清单即可重试，不删除本地构建结果，
   也不产生持久锁。流程启动前已存在且指纹未变的候选属于跨单遗留，会硬拦；OpenSpec 另按当前
-  change/本次 archive 精确归属硬校验。候选集只表示“有可能提交”，不能替代逐文件 `git diff`。
+  change/本次 archive 精确归属硬校验。COMPILE 任务卡明确禁止子 Agent commit/push；任务期间 HEAD
+  前进会使收尾失败，新任务会废弃旧令牌，令牌绑定当前任务卡 SHA。当前步骤任务尚无匹配令牌时，
+  `bash-compile-task-pending` 只瞬时拒绝 commit，不记 strike/permit；SubagentStop 合法收尾后由主流程提交。
+  baseline 另带有效位，Git 采集失败不得把空字典当 clean；当前不存在的路径（含 tracked deletion）不入账。
+  归因、transcript/PostToolUse 直接改写消账和 Gate 共用 slash 标准化 + Windows case-fold identity，消账与
+  新增在同一次加锁原子更新中完成。sidecar 损坏诊断的预读只可能竞争日志措辞，权威更新仍加锁原子化。
+  provenance 只排除精确流程态：`.mae-flow.json` 及 sidecar、`.mae-flow-history.jsonl`、
+  `.mae-flow-need-reload`、`.mae-flow/`、`.mae-flow-work/`、`.codecheckcli/`；
+  仓库配置 `.mae-flow-defaults.json` 不在排除项内，COMPILE 改写它仍入账并硬拦。
+  候选集只表示“有可能提交”，不能替代逐文件 `git diff`。
+- Agent Git 写统一先解析为顺序 `GitAction`：兼容 `git.exe`、`-C`/`-c` 等全局选项、管道、
+  引号内分隔符与反斜杠续行；单条 Bash 多个 commit/revert、mutating alias、
+  `--pathspec-from-file` 和高置信 Python/shell/PowerShell/cmd 换壳一律硬拦，只读 alias 不受影响。
+  静态分析不承诺识别任意代码或字符串混淆，最终 HEAD/候选/推送证据仍是兜底。纯 D 不属于交付输出；
+  若旧暂存 D 在同命令被重新创建并 add，则按当前 A/M 候选重新做归属。显式 force-add 的 ignored
+  路径继续按高置信硬拦。
+- ownership 先聚合 review 快照、COMPILE 精确账和强产物等不可放行问题，再列 inherited/foreign；
+  前三类不写 strike/permit。需要用户裁决的规则第一次拦截就给 exact `allow`，不要求空转三次。
+  经用户原话验真的 Agent Git permit 会记录 actor/operation/path-or-commit/step/pre-HEAD；
+  commit/revert 仅在 PostToolUse 证明单一结果提交的 A/M/D、blob 和 HEAD 完全匹配后固化，
+  push/done 还验 last-touch，因此同路径后续提交、额外路径或陈旧收据都不会被放大授权。
+  用户在外部终端执行的合法当前 change 交付不经过 Agent Hook，也不要求伪造 Agent-write provenance。
 - verify_ut/rf_ut 的测试路径收紧（`tests_only`）：仓库配置优先，缺失时放弃旧的 fail-open，改用内置保守测试路径规则；Edit/Bash 双路都拦非测试源码。**这不是死禁**——非标准目录补 `.mae-flow-defaults.json`，真源码缺陷走 unlock 裁决通道。
+- UT 命令若生成非测试文件，属于命令副作用事故而非“源码缺陷裁决”：提示不得使用 `unlock source` /
+  `accept-risk`，也不向用户提问；只可恢复任务基线原本 clean 的路径，或把本轮新输出可恢复地移出仓库，
+  既有用户脏改必须保留。只有 Agent 有意直接改写非测试源码时，才保留既有 unlock 用户裁决出口。
 - **unlock source 裁决通道**：UT 揭出疑似源码缺陷、用户判"确为代码缺陷"后，`unlock source --reason <裁决> --ack "用户原话"`（ack 走与 done 相同的三级验真）解锁当前步骤，历史留痕 `unlock:source`。done 检测到被测源码变化后不消费旧 UT 证据，而是自动回流完整质量链：review 回 rf_compile；主流程进入 verify_recompile，再走 Ponytail/CodeCheck/UT，不重做实现计划。无 unlock 却改了被测源码则判越权，不允许通过补验证洗白。
 
 **已知局限（设计决定）**：Bash 写检测的 `WRITEISH` 正则是打地鼠，永远可绕过（如 `python -c`）——它的定位是**软提醒层**，真正的门槛在 done 的证据校验。不要试图把 bash 正则做"完备"。

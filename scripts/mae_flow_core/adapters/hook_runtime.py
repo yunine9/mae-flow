@@ -8,12 +8,14 @@ from mae_flow_core.file_io import read_text
 
 from .hook_runtime_contract_support import HookContractSupportMixin
 from .hook_runtime_contracts import HookContractsMixin
+from .hook_runtime_git_authorization import HookGitAuthorizationMixin
 from .hook_runtime_source import HookSourceMixin
 from .hook_runtime_state import HookStateMixin
 from .hook_runtime_trace import HookTraceMixin
 
 
 class HookRuntimeAdapter(
+        HookGitAuthorizationMixin,
         HookStateMixin,
         HookTraceMixin,
         HookContractSupportMixin,
@@ -38,6 +40,7 @@ class HookRuntimeAdapter(
         self.task_card_ports_factory = (
             task_card_ports_factory or self._task_card_ports)
         self.input_encoding = ""
+        self._validated_task_bindings = {}
 
     def _task_card_ports(self):
         return TaskCardPorts(

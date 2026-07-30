@@ -51,28 +51,41 @@ class AgentEvidenceRules:
         return EvidenceResult(
             False, message + " " + self._risk_option(kind, expired))
 
-    def _fresh_token_result(
-            self, spec, state, kind, token, accepted_why):
-        status = token.get("status", "")
+    def _token_binding_rejection(self, state, kind, token):
         token_step = token.get("step", "")
-        head = token.get("head", "")
-        snapshot = token.get("source_snapshot")
         if token_step and token_step != state.get("current"):
-            return self._blocked(
-                kind,
-                accepted_why,
+            return (
                 "%s 令牌属于步骤 %s，当前是 %s。每个步骤必须重新执行，"
                 "不能复用上一关同一秒签发的令牌。"
-                % (kind, token_step, state.get("current")),
+                % (kind, token_step, state.get("current"))
             )
+        task = (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
+        task_digest = str(task.get("sha256", "") or "")
+        task_issuance = str(task.get("issuance_id", "") or "")
+        if (
+                kind == "COMPILE"
+                and (
+                    task_digest
+                    and str(token.get("task_sha256", "") or "") != task_digest
+                    or task_issuance
+                    and str(
+                        token.get("task_issuance_id", "") or ""
+                    ) != task_issuance
+                )):
+            return (
+                "%s 令牌不属于当前任务卡。重新完成当前任务；"
+                "旧任务或未绑定任务卡的令牌不能复用。" % kind
+            )
+        return ""
+
+    def _token_status_rejection(self, spec, kind, token):
+        status = token.get("status", "")
         wanted = (
             spec.get("statuses")
             or ([spec["status"]] if spec.get("status") else [])
         )
         if wanted and status not in wanted:
-            return self._blocked(
-                kind,
-                accepted_why,
+            return (
                 "%s 子 agent 虽已收尾,但结果为 %s,本步只接受 %s。"
                 "FAIL/BLOCKED/NEEDS_INPUT 是有效上报,但不是质量通过证据;"
                 "处理报告中的问题后重启 agent。"
@@ -80,40 +93,51 @@ class AgentEvidenceRules:
                     kind,
                     status or "旧令牌未记录状态",
                     "/".join(wanted),
-                ),
+                )
             )
+        return ""
+
+    def _token_source_rejection(self, state, kind, token):
+        head = token.get("head", "")
+        snapshot = token.get("source_snapshot")
         if head and isinstance(snapshot, dict):
             current = self.ports.source_snapshot_since(head, state)
             if current != snapshot:
-                return self._blocked(
-                    kind,
-                    accepted_why,
+                return (
                     "%s 证据已过期:令牌签发后的未提交代码快照已变化。"
                     "重新启动对应 agent 对当前工作区收尾；"
-                    "旧证据不能背书另一份 diff。" % kind,
+                    "旧证据不能背书另一份 diff。" % kind
                 )
         elif head:
             changed, error = self.ports.source_changed_since(
                 head, state)
             if error:
-                return self._blocked(
-                    kind,
-                    accepted_why,
+                return (
                     "%s 证据新鲜度无法核实(%s)。重新启动对应 agent"
                     "(ASKUSER 则重新向用户提问)签发绑定当前代码状态的新令牌。"
-                    % (kind, error),
+                    % (kind, error)
                 )
             if changed:
                 more = "…" if len(changed) > 5 else ""
-                return self._blocked(
-                    kind,
-                    accepted_why,
+                return (
                     "%s 证据已过期:令牌签发后源码发生变更(%s%s)。"
                     "变更若属本单成果先按规范 commit,然后重新启动对应 agent"
                     "(ASKUSER 则重新向用户确认)对最新代码收尾——"
                     "旧证据对新代码无效。"
-                    % (kind, "、".join(changed[:5]), more),
+                    % (kind, "、".join(changed[:5]), more)
                 )
+        return ""
+
+    def _fresh_token_result(
+            self, spec, state, kind, token, accepted_why):
+        rejections = (
+            self._token_binding_rejection(state, kind, token),
+            self._token_status_rejection(spec, kind, token),
+            self._token_source_rejection(state, kind, token),
+        )
+        for reason in rejections:
+            if reason:
+                return self._blocked(kind, accepted_why, reason)
         return EvidenceResult(True, "")
 
     def agent_ran(self, spec, state):

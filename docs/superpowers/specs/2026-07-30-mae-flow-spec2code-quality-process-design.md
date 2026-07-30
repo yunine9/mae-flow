@@ -131,6 +131,7 @@ Fixture、Fake/Mock 和具体调用方式，不在每个 CP 维护容易失效�
 ```
 
 蓝图不包含类名、函数名、测试文件、Fixture 名称、Mock API 或 private 调用。
+场景 ID 在同一蓝图内必须唯一；重复 ID 直接退回蓝图 Loop，不能在 AutoUT 前静默合并。
 
 ### 6.4 人工检视 Loop
 
@@ -367,6 +368,10 @@ Reviewer 每轮最多提出五个高价值问题，并使用第 13 节的统一�
 .mae-flow-work/reviews/{单号}/{CP}-plan.md
 .mae-flow-work/reviews/{单号}/{CP}-code.md
 ```
+
+记录顶部必须带冻结信封：`CLEAN|FINDINGS`、PLAN/CODE 模式、CP、角色任务卡
+SHA256、被审计划或源码快照 SHA256。只有显式 `CLEAN` 才允许零条 Finding；
+`FINDINGS` 至少一条。信封与当前任务卡或审查目标不一致时必须重新派 Reviewer。
 
 ## 14. CP 编码与走读 Loop
 

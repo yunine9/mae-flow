@@ -38,6 +38,52 @@ def _failure(message):
     )
 
 
+def confirm_artifacts(process, kinds, actor, now):
+    """Bind user or Moonlight approval to exact registered revisions."""
+    if actor not in ("user", "moonlight"):
+        return _failure("Spec2Code 确认主体必须为 user 或 moonlight")
+    requested = tuple(dict.fromkeys(
+        str(kind) for kind in kinds if str(kind)))
+    if not requested:
+        return _failure("Spec2Code 确认至少需要一个过程件")
+    current = process if isinstance(process, dict) else {}
+    missing = [
+        kind for kind in requested
+        if not isinstance(current.get(kind), dict)
+        or not current[kind].get("revision")
+        or not current[kind].get("sha256")
+    ]
+    if missing:
+        return _failure(
+            "无法确认未登记的 Spec2Code 过程件: "
+            + "、".join(missing)
+        )
+    updated = deepcopy(current)
+    for kind in requested:
+        record = updated[kind]
+        record["confirmed_revision"] = record["revision"]
+        record["confirmed_sha256"] = record["sha256"]
+        record["confirmed_by"] = actor
+        record["confirmed_at"] = now
+    joined = ",".join(requested)
+    return DeliveryResult(
+        effects=(
+            DeliveryEffect("set_spec2code", updated),
+            DeliveryEffect("append_history", {
+                "result": "spec2code:confirm:" + joined,
+                "note": actor,
+                "at": now,
+            }),
+        ),
+        stdout=(
+            "[mae-flow] 已确认 Spec2Code 过程件 %s（确认主体: %s）"
+            % (joined, actor),
+        ),
+        stderr=(),
+        exit_code=0,
+    )
+
+
 def register_artifact(process, kind, path, ticket, ports):
     """Validate one existing artifact and return an immutable state update."""
     if kind not in _VALIDATORS:

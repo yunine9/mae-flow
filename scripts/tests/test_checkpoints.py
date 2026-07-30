@@ -165,6 +165,28 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(
             state["development_review"]["checkpoints"][1]["status"], "coding")
 
+    def test_new_full_process_cannot_downgrade_to_legacy_items(self):
+        state = self.state(current="build_pace")
+        state["choices"]["workflow"] = "full"
+        state["spec2code"] = {
+            "version": 1,
+            "blueprint": {"path": "blueprint.md", "sha256": "a" * 64},
+            "roadmap": {"path": "roadmap.md", "sha256": "b" * 64},
+            "plan": {"path": "plan.md", "sha256": "c" * 64},
+        }
+        with self.assertRaises(SystemExit) as caught:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_checkpoint_plan(
+                    state,
+                    types.SimpleNamespace(
+                        item=["bypass"],
+                        roadmap=None,
+                        plan=None,
+                    ),
+                )
+        self.assertEqual(2, caught.exception.code)
+        self.assertNotIn("development_review", state)
+
     def test_review_with_no_confirmed_fixes_does_not_deadlock_on_empty_checkpoint(self):
         state = self.state(current="rf_pace")
         state["choices"]["workflow"] = "review"

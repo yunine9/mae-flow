@@ -101,6 +101,13 @@ def _local_process_path(path):
     ).replace("\\", "/")
 
 
+def _role_task_sha(st, role, checkpoint):
+    record = (st.get("role_tasks") or {}).get(role) or {}
+    if record.get("checkpoint") != checkpoint:
+        return ""
+    return str(record.get("sha256", "") or "")
+
+
 def _checkpoint_quality_ports(st, ack=""):
     return CheckpointQualityPorts(
         is_file=os.path.isfile,
@@ -111,6 +118,8 @@ def _checkpoint_quality_ports(st, ack=""):
         ack_cursor=api._ack_message_cursor,
         verify_ack=lambda receipt, expected: _checkpoint_ack(
             st, ack, expected, receipt),
+        role_task_sha=lambda role, checkpoint: _role_task_sha(
+            st, role, checkpoint),
         now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
     )
 

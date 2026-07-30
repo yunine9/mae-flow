@@ -399,10 +399,17 @@ class TaskScopeTests(unittest.TestCase):
         write(blueprint_path, BLUEPRINT)
         state = self.state("verify_ut")
         state["spec2code"] = {
+            "version": 1,
             "blueprint": {
                 "path": blueprint_path,
                 "sha256": hashlib.sha256(
                     BLUEPRINT.encode("utf-8")).hexdigest(),
+                "revision": 2,
+                "confirmed_revision": 2,
+                "confirmed_sha256": hashlib.sha256(
+                    BLUEPRINT.encode("utf-8")).hexdigest(),
+                "confirmed_by": "user",
+                "confirmed_at": "2026-07-30 12:00:00",
             },
         }
 
@@ -415,6 +422,58 @@ class TaskScopeTests(unittest.TestCase):
         )
         self.assertEqual(
             ["SC-1"], task["blueprint"]["scenario_ids"])
+
+    def test_new_full_flow_ut_rejects_unconfirmed_blueprint(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() { return 2; }\n")
+        self.commit("code")
+        blueprint_path = (
+            ".mae-flow-work/test-blueprint-REQ-SCOPE.md")
+        write(blueprint_path, BLUEPRINT)
+        digest = hashlib.sha256(BLUEPRINT.encode("utf-8")).hexdigest()
+        state = self.state("verify_ut")
+        state["spec2code"] = {
+            "version": 1,
+            "blueprint": {
+                "path": blueprint_path,
+                "sha256": digest,
+                "revision": 2,
+                "confirmed_revision": 1,
+                "confirmed_sha256": digest,
+            },
+        }
+
+        with self.assertRaises(SystemExit) as caught:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.task(state, "ut")
+
+        self.assertEqual(2, caught.exception.code)
+
+    def test_new_full_flow_ut_rejects_confirmation_for_an_old_digest(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() { return 2; }\n")
+        self.commit("code")
+        blueprint_path = (
+            ".mae-flow-work/test-blueprint-REQ-SCOPE.md")
+        write(blueprint_path, BLUEPRINT)
+        digest = hashlib.sha256(BLUEPRINT.encode("utf-8")).hexdigest()
+        state = self.state("verify_ut")
+        state["spec2code"] = {
+            "version": 1,
+            "blueprint": {
+                "path": blueprint_path,
+                "sha256": digest,
+                "revision": 2,
+                "confirmed_revision": 2,
+                "confirmed_sha256": "0" * 64,
+            },
+        }
+
+        with self.assertRaises(SystemExit) as caught:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.task(state, "ut")
+
+        self.assertEqual(2, caught.exception.code)
 
     def test_new_full_flow_ut_rejects_missing_blueprint(self):
         write("services/anr/src/Logic.cpp",

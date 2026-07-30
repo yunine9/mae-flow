@@ -240,6 +240,19 @@ Review 的每条 `## Finding F<n>` 必须包含：
 - 状态：待处理|已解决|已拒绝
 ```
 
+Review 文件顶部还必须包含：
+
+```text
+- CRAFT_REVIEW_RESULT: CLEAN|FINDINGS
+- Reviewer 模式: PLAN|CODE
+- 检查点: CPn
+- TASK_CARD_SHA256: <角色任务卡摘要>
+- REVIEW_TARGET_SHA256: <计划或源码快照摘要>
+```
+
+零条 Finding 只允许配合显式 `CLEAN`；`FINDINGS` 至少一条。摘要与当前冻结对象
+不一致时拒绝推进。
+
 - [ ] **Step 5: 运行测试**
 
 Run: `python scripts/tests/test_spec2code_artifacts.py`

@@ -84,17 +84,33 @@ def _approved_blueprint(state, kind):
         return {}
     process = state.get("spec2code") or {}
     registered = process.get("blueprint") or {}
+    new_full = (
+        process.get("version") == 1
+        and (state.get("choices") or {}).get("workflow") == "full"
+    )
     if not registered:
-        if (
-            process.get("version") == 1
-            and (state.get("choices") or {}).get("workflow") == "full"
-        ):
+        if new_full:
             api.die(
                 "新 full 流程缺少已确认 UT 蓝图；"
                 "回到 test_blueprint Loop 生成并登记。",
                 2,
             )
         return {}
+    if new_full and (
+        not registered.get("revision")
+        or registered.get("confirmed_revision")
+        != registered.get("revision")
+        or registered.get("confirmed_sha256")
+        != registered.get("sha256")
+        or registered.get("confirmed_by")
+        not in ("user", "moonlight")
+        or not registered.get("confirmed_at")
+    ):
+        api.die(
+            "UT 蓝图尚未按当前版本确认，或确认绑定已失效；"
+            "回到 test_blueprint Loop 重新检视并选择 continue。",
+            2,
+        )
     path = str(registered.get("path", "") or "")
     if not path or not os.path.isfile(path):
         api.die("已登记的 UT 蓝图不存在；重新生成并登记 blueprint。", 2)

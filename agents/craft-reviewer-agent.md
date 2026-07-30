@@ -26,6 +26,11 @@ PLAN 模式检查文件与符号落点、职责拆分、状态/依赖所有权�
 
 不提交风格偏好、假想扩展、无关旧债；两种写法都正确时只描述取舍。复查只验证已接受意见和直接回归。
 
+Reviewer 记录必须写入任务卡指定路径，文件顶部逐字包含任务卡要求的冻结信封：
+`CRAFT_REVIEW_RESULT: CLEAN|FINDINGS`、PLAN/CODE 模式、CP、任务卡 SHA256 和审查目标 SHA256。
+只有明确 `CLEAN` 才允许零条 Finding；`FINDINGS` 必须至少一条。`NEEDS_INPUT` 或 `FAIL`
+只用于最终回复并停止推进，不得伪造为可登记的 Review 文件。
+
 最终回复第一行只能是：
 
 ```text

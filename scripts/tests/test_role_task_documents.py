@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.quality.role_task_documents import (  # noqa: E402
     ArtifactRef,
+    RoleTaskContext,
     build_role_task_document,
 )
 
@@ -37,9 +38,22 @@ def build(role):
         project_root="/repo",
         ticket="REQ-1",
         checkpoint="CP1",
-        artifacts=ARTIFACTS,
-        files=("src/service.py",),
-        diff="base..HEAD",
+        context=RoleTaskContext(
+            artifacts=ARTIFACTS,
+            files=("src/service.py",),
+            context_paths=(
+                "/repo/docs/requirement.md",
+                "/repo/.mae-flow-work/survey-REQ-1.md",
+            ),
+            diff="""文件清单:
+- src/service.py
+补丁:
+diff --git a/src/service.py b/src/service.py
+""",
+            review_output=(
+                "/repo/.mae-flow-work/reviews/REQ-1/CP1-code.md"),
+            review_target_sha256="d" * 64,
+        ),
     ).body()
 
 
@@ -68,9 +82,18 @@ class RoleTaskDocumentTests(unittest.TestCase):
 
     def test_code_reviewer_receives_diff_but_no_write_permission(self):
         body = build("craft-code")
-        self.assertIn("实际 diff: base..HEAD", body)
+        self.assertIn("diff --git a/src/service.py", body)
+        self.assertIn("REVIEW_TARGET_SHA256: " + "d" * 64, body)
+        self.assertIn("TASK_CARD_SHA256", body)
+        self.assertIn("CRAFT_REVIEW_RESULT: CLEAN|FINDINGS", body)
         self.assertIn("只读", body)
         self.assertNotIn("允许修改:", body)
+
+    def test_test_designer_reads_requirement_and_survey_not_future_blueprint(self):
+        body = build("test-design")
+        self.assertIn("/repo/docs/requirement.md", body)
+        self.assertIn("/repo/.mae-flow-work/survey-REQ-1.md", body)
+        self.assertNotIn("- blueprint:", body)
 
     def test_unknown_role_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知角色"):

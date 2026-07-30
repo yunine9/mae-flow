@@ -26,6 +26,7 @@ class CheckpointQualityPorts:
     digest: Callable[[str], str]
     ack_cursor: Callable[[], object]
     verify_ack: Callable[[object, str], object]
+    role_task_sha: Callable[[str, str], str]
     now: Callable[[], str]
 
 
@@ -89,7 +90,13 @@ def prepare_checkpoint_plan(
     )
     if why:
         return _failure(why)
-    errors = validate_review(review_text, "plan", checkpoint)
+    errors = validate_review(
+        review_text,
+        "plan",
+        checkpoint,
+        ports.role_task_sha("craft-plan", checkpoint),
+        ports.digest(plan_text),
+    )
     if errors:
         return _failure("PLAN Reviewer 记录校验失败: " + "；".join(errors))
     if review_requires_rework(review_text):
@@ -164,7 +171,7 @@ def decide_checkpoint_plan(review, choice, ack, ports):
 
 def _validated_craft_text(
         review_path, ticket, checkpoint,
-        ports, moonlight):
+        target_sha256, ports, moonlight):
     text, why = _read_expected(
         review_path,
         artifact_path("review", ticket, checkpoint, "code"),
@@ -172,7 +179,13 @@ def _validated_craft_text(
     )
     if why:
         return "", why
-    errors = validate_review(text, "code", checkpoint)
+    errors = validate_review(
+        text,
+        "code",
+        checkpoint,
+        ports.role_task_sha("craft-code", checkpoint),
+        target_sha256,
+    )
     if errors:
         return "", "CODE Reviewer 记录校验失败: " + "；".join(errors)
     if moonlight and review_requires_human_decision(text):
@@ -215,7 +228,13 @@ def record_craft_review(
         return _failure(
             "源码摘要与首次编译收据不一致；重新编译后派新鲜 CODE Reviewer。")
     text, why = _validated_craft_text(
-        review_path, ticket, checkpoint, ports, moonlight)
+        review_path,
+        ticket,
+        checkpoint,
+        current_source_sha256,
+        ports,
+        moonlight,
+    )
     if why:
         return _failure(why)
     item["craft_review"] = {

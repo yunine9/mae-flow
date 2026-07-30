@@ -61,6 +61,7 @@ _REVIEW_FIELDS = (
 )
 _DISPOSITIONS = ("修改", "验证后修改", "人工裁决", "拒绝/暂缓")
 _REVIEW_STATUSES = ("待处理", "已解决", "已拒绝")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _safe(value, pattern, label):
@@ -122,6 +123,14 @@ def validate_blueprint(text):
     scenarios = _sections(text, "Scenario:")
     if not scenarios:
         errors.append("UT 蓝图至少需要一个 ## Scenario: <ID>")
+    identifiers = [title.split(":", 1)[1].strip() for title, _ in scenarios]
+    duplicates = sorted({
+        value for value in identifiers
+        if value and identifiers.count(value) > 1
+    })
+    if duplicates:
+        errors.append(
+            "UT 蓝图 Scenario ID 重复: " + "、".join(duplicates))
     for title, body in scenarios:
         errors.extend(_required_fields(body, _BLUEPRINT_FIELDS, title))
     return tuple(errors)
@@ -193,15 +202,85 @@ def _review_findings(text):
     return _sections(text, "Finding ")
 
 
-def validate_review(text, mode, checkpoint):
+def _review_envelope(text):
+    fields = {}
+    for name in (
+            "CRAFT_REVIEW_RESULT",
+            "Reviewer 模式",
+            "检查点",
+            "TASK_CARD_SHA256",
+            "REVIEW_TARGET_SHA256",
+    ):
+        match = re.search(
+            r"(?:^|\n)\s*-\s*%s[：:]\s*(.+?)\s*$"
+            % re.escape(name),
+            str(text or ""),
+            re.M,
+        )
+        fields[name] = match.group(1).strip() if match else ""
+    return fields
+
+
+def _validate_review_envelope(
+        envelope,
+        mode,
+        checkpoint,
+        task_card_sha256,
+        review_target_sha256,
+):
     errors = []
-    if str(mode).lower() not in ("plan", "code"):
+    expected_mode = str(mode).upper()
+    if expected_mode not in ("PLAN", "CODE"):
         errors.append("Reviewer 模式只能是 PLAN 或 CODE")
     if not _CP_RE.fullmatch(str(checkpoint or "")):
         errors.append("Reviewer 检查点必须是 CP1-CP6")
-    findings = _review_findings(text)
+    if envelope["CRAFT_REVIEW_RESULT"] not in ("CLEAN", "FINDINGS"):
+        errors.append("CRAFT_REVIEW_RESULT 必须为 CLEAN 或 FINDINGS")
+    if envelope["Reviewer 模式"] != expected_mode:
+        errors.append("Reviewer 模式与任务卡不匹配")
+    if envelope["检查点"] != checkpoint:
+        errors.append("Reviewer 检查点与任务卡不匹配")
+    for field, expected in (
+            ("TASK_CARD_SHA256", task_card_sha256),
+            ("REVIEW_TARGET_SHA256", review_target_sha256),
+    ):
+        value = envelope[field]
+        if not _SHA256_RE.fullmatch(value):
+            errors.append("%s 必须是 64 位小写 SHA256" % field)
+        elif expected and value != expected:
+            errors.append("%s 与任务卡冻结值不匹配" % field)
+    return errors
+
+
+def _validate_review_shape(result, findings):
+    errors = []
+    if result == "CLEAN" and findings:
+        errors.append("CLEAN 记录不得同时包含 Finding")
+    if result == "FINDINGS" and not findings:
+        errors.append("FINDINGS 记录至少一条 Finding")
     if len(findings) > 5:
         errors.append("Reviewer 每轮最多五条发现")
+    return errors
+
+
+def validate_review(
+        text,
+        mode,
+        checkpoint,
+        task_card_sha256="",
+        review_target_sha256="",
+):
+    envelope = _review_envelope(text)
+    errors = _validate_review_envelope(
+        envelope,
+        mode,
+        checkpoint,
+        task_card_sha256,
+        review_target_sha256,
+    )
+    findings = _review_findings(text)
+    errors.extend(_validate_review_shape(
+        envelope["CRAFT_REVIEW_RESULT"], findings))
     for title, body in findings:
         errors.extend(_required_fields(body, _REVIEW_FIELDS, title))
         disposition = re.search(

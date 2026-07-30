@@ -224,6 +224,11 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
         state = {"moonlight": {"enabled": True}}
         self.assertEqual(
             [
+                CompletionEvent(
+                    "confirm_spec2code",
+                    "roadmap,plan",
+                    "moonlight",
+                ),
                 CompletionEvent("prepare_moonlight_checkpoint"),
                 CompletionEvent(
                     "advance",
@@ -236,6 +241,37 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
                 state,
                 "continue",
                 "",
+            )),
+        )
+
+    def test_continue_confirms_blueprint_as_user_before_advance(self):
+        self.assertEqual(
+            [
+                CompletionEvent(
+                    "confirm_spec2code",
+                    "blueprint",
+                    "user",
+                ),
+                CompletionEvent("advance", note="approved"),
+            ],
+            list(completion_events(
+                "test_blueprint",
+                {"user_ack": True},
+                {},
+                "continue",
+                "approved",
+            )),
+        )
+
+    def test_revise_does_not_confirm_spec2code_artifacts(self):
+        self.assertEqual(
+            [CompletionEvent("advance", note="needs changes")],
+            list(completion_events(
+                "build_plan",
+                {"user_ack": True},
+                {},
+                "revise",
+                "needs changes",
             )),
         )
 
@@ -295,8 +331,18 @@ class WorkflowCompletionAdapterTests(unittest.TestCase):
                 (step_id, step, current, choice, ack)
             )
             yield CompletionEvent(
+                "confirm_spec2code",
+                "blueprint",
+                "user",
+            )
+            yield CompletionEvent(
                 "advance",
                 note="policy note",
+            )
+
+        def confirm_spec2code(current, kinds, actor):
+            observed.append(
+                ("confirm_spec2code", current, kinds, actor)
             )
 
         def advance(flow_value, state_value, sid, step, result, note):
@@ -315,23 +361,37 @@ class WorkflowCompletionAdapterTests(unittest.TestCase):
             self.mf.workflow_completion.completion_events
         )
         original_advance = self.mf.advance
+        original_confirm = self.mf._confirm_spec2code_artifacts
         with tempfile.TemporaryDirectory() as project:
             previous = os.getcwd()
             try:
                 os.chdir(project)
                 self.mf.workflow_completion.completion_events = events
                 self.mf.advance = advance
+                self.mf._confirm_spec2code_artifacts = (
+                    confirm_spec2code
+                )
                 self.mf.cmd_done(flow, state, args)
             finally:
                 self.mf.workflow_completion.completion_events = (
                     original_events
                 )
                 self.mf.advance = original_advance
+                self.mf._confirm_spec2code_artifacts = original_confirm
                 os.chdir(previous)
 
         self.assertEqual(
             ("source", flow["steps"]["source"], state, "", ""),
             observed[0],
+        )
+        self.assertEqual(
+            (
+                "confirm_spec2code",
+                state,
+                ("blueprint",),
+                "user",
+            ),
+            observed[1],
         )
         self.assertEqual(
             (
@@ -342,7 +402,7 @@ class WorkflowCompletionAdapterTests(unittest.TestCase):
                 "done",
                 "policy note",
             ),
-            observed[1],
+            observed[2],
         )
 
 

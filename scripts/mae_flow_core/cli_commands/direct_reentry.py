@@ -22,6 +22,29 @@ def _reopen_spec_archive(st):
          "note": "源码返工,验证结论作废", "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     return True, ""
 
+
+def _rewind_checkpoint_after_direct_changes(review_state):
+    items = review_state.get("checkpoints") or []
+    index = int(review_state.get("current_index", 0) or 0)
+    item = items[index] if 0 <= index < len(items) else None
+    if not item:
+        return
+    if item.get("status") == "plan_review_pending":
+        item["status"] = "planned"
+        item.pop("plan_receipt", None)
+    elif item.get("status") in (
+            "craft_pending", "push_pending", "review_pending",
+            "commit_pending", "commit_recovery", "reset_pending"):
+        item["status"] = "coding"
+        for key in (
+                "receipt", "head", "compile_head",
+                "compile_task_sha256", "compile_source_sha256",
+                "craft_review",
+        ):
+            item.pop(key, None)
+    review_state.pop("final_review", None)
+
+
 def _explicit_direct_reentry(text):
     """Whether captured user text explicitly asks Mae-Flow to take control again."""
     return _direct_reentry_decision(text) == "allow"
@@ -243,18 +266,7 @@ def _resume_direct_mode(ack="", message_id=""):
     if source_changed:
         review_state = api._development_review(st)
         if review_state:
-            item = api._checkpoint_current(st)
-            if item and item.get("status") in (
-                    "plan_review_pending", "craft_pending",
-                    "push_pending", "review_pending", "commit_pending",
-                    "commit_recovery", "reset_pending"):
-                item["status"] = "coding"
-                for key in ("receipt", "head", "compile_head",
-                            "compile_task_sha256",
-                            "compile_source_sha256",
-                            "craft_review"):
-                    item.pop(key, None)
-            review_state.pop("final_review", None)
+            _rewind_checkpoint_after_direct_changes(review_state)
     old_step = st.get("current", "")
     workflow = (st.get("choices", {}) or {}).get("workflow", "")
     target = old_step

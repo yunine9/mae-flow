@@ -72,7 +72,20 @@ PLAN = """# 实现计划
 """
 
 
-def review(findings=1, status="已解决", disposition="修改"):
+TASK_CARD_SHA = "e" * 64
+REVIEW_TARGET_SHA = "f" * 64
+
+
+def review(
+        findings=1,
+        status="已解决",
+        disposition="修改",
+        mode="CODE",
+        checkpoint="CP1",
+        task_card_sha=TASK_CARD_SHA,
+        target_sha=REVIEW_TARGET_SHA,
+        result="FINDINGS",
+):
     blocks = []
     for index in range(findings):
         blocks.append(
@@ -86,7 +99,24 @@ def review(findings=1, status="已解决", disposition="修改"):
 - 状态：%s
 """ % (index + 1, disposition, status)
         )
-    return "# CP1 CODE Review\n\n" + "\n".join(blocks)
+    return """# %s %s Review
+
+- CRAFT_REVIEW_RESULT: %s
+- Reviewer 模式: %s
+- 检查点: %s
+- TASK_CARD_SHA256: %s
+- REVIEW_TARGET_SHA256: %s
+
+%s""" % (
+        checkpoint,
+        mode,
+        result,
+        mode,
+        checkpoint,
+        task_card_sha,
+        target_sha,
+        "\n".join(blocks),
+    )
 
 
 class Spec2CodeArtifactTests(unittest.TestCase):
@@ -110,6 +140,13 @@ class Spec2CodeArtifactTests(unittest.TestCase):
         errors = validate_blueprint(
             BLUEPRINT.replace("- 可观察结果：返回新对象。\n", ""))
         self.assertTrue(any("可观察结果" in error for error in errors))
+        duplicate = (
+            BLUEPRINT
+            + "\n"
+            + BLUEPRINT[BLUEPRINT.index("## Scenario: SC-1"):]
+        )
+        errors = validate_blueprint(duplicate)
+        self.assertTrue(any("重复" in error for error in errors))
 
     def test_validates_roadmap_and_exact_deferrals(self):
         self.assertEqual((), validate_roadmap(ROADMAP))
@@ -156,8 +193,23 @@ class Spec2CodeArtifactTests(unittest.TestCase):
         self.assertTrue(any("注释计划" in error for error in errors))
 
     def test_review_has_five_item_limit_and_disposition(self):
-        self.assertEqual((), validate_review(review(), "code", "CP1"))
-        errors = validate_review(review(findings=6), "code", "CP1")
+        self.assertEqual(
+            (),
+            validate_review(
+                review(),
+                "code",
+                "CP1",
+                TASK_CARD_SHA,
+                REVIEW_TARGET_SHA,
+            ),
+        )
+        errors = validate_review(
+            review(findings=6),
+            "code",
+            "CP1",
+            TASK_CARD_SHA,
+            REVIEW_TARGET_SHA,
+        )
         self.assertTrue(any("最多五条" in error for error in errors))
         self.assertTrue(review_requires_rework(review(status="待处理")))
         self.assertFalse(
@@ -165,6 +217,42 @@ class Spec2CodeArtifactTests(unittest.TestCase):
                 review(status="已拒绝", disposition="拒绝/暂缓")
             )
         )
+
+    def test_review_requires_bound_envelope_and_explicit_clean(self):
+        errors = validate_review(
+            "",
+            "code",
+            "CP1",
+            TASK_CARD_SHA,
+            REVIEW_TARGET_SHA,
+        )
+        self.assertTrue(any("CRAFT_REVIEW_RESULT" in error for error in errors))
+        self.assertEqual(
+            (),
+            validate_review(
+                review(findings=0, result="CLEAN"),
+                "code",
+                "CP1",
+                TASK_CARD_SHA,
+                REVIEW_TARGET_SHA,
+            ),
+        )
+        mismatched = validate_review(
+            review(task_card_sha="0" * 64),
+            "code",
+            "CP1",
+            TASK_CARD_SHA,
+            REVIEW_TARGET_SHA,
+        )
+        self.assertTrue(any("TASK_CARD_SHA256" in error for error in mismatched))
+        contradictory = validate_review(
+            review(findings=0, result="FINDINGS"),
+            "code",
+            "CP1",
+            TASK_CARD_SHA,
+            REVIEW_TARGET_SHA,
+        )
+        self.assertTrue(any("至少一条" in error for error in contradictory))
 
 
 if __name__ == "__main__":

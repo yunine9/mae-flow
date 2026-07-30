@@ -101,6 +101,27 @@ def _story_is_local(state):
     )
 
 
+def _spec2code_confirmation_events(step_id, state, choice):
+    if choice != "continue":
+        return
+    kinds = {
+        "test_blueprint": "blueprint",
+        "build_plan": "roadmap,plan",
+    }.get(step_id)
+    if not kinds:
+        return
+    actor = (
+        "moonlight"
+        if moonlight_enabled(state)
+        else "user"
+    )
+    yield CompletionEvent(
+        "confirm_spec2code",
+        kinds,
+        actor,
+    )
+
+
 def completion_events(
     step_id,
     step,
@@ -109,6 +130,12 @@ def completion_events(
     ack,
 ):
     """Yield ordered adapter actions after Evidence has succeeded."""
+    yield from _spec2code_confirmation_events(
+        step_id,
+        state,
+        choice,
+    )
+
     if step_id in PACE_STEPS and not moonlight_enabled(state):
         if choice == "adjust":
             yield CompletionEvent("adjust_checkpoint")

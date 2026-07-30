@@ -122,6 +122,16 @@ def cmd_checkpoint_plan(st, args):
         "plan": getattr(args, "plan", ""),
     }
     raw_items = getattr(args, "item", ()) or ()
+    new_full = (
+        (st.get("choices") or {}).get("workflow") == "full"
+        and (st.get("spec2code") or {}).get("version") == 1
+    )
+    if new_full and raw_items:
+        api.die(
+            "新 full 流程不得使用兼容参数 --item 降级；"
+            "必须使用已登记的 --roadmap 与 --plan。",
+            2,
+        )
     if not raw_items and (
             not supplied["roadmap"] or not supplied["plan"]):
         api.die(

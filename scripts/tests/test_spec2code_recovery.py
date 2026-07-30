@@ -13,6 +13,9 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core.quality.spec2code_recovery import (  # noqa: E402
     recovery_guidance,
 )
+from mae_flow_core.cli_commands.direct_reentry import (  # noqa: E402
+    _rewind_checkpoint_after_direct_changes,
+)
 
 
 class Spec2CodeRecoveryTests(unittest.TestCase):
@@ -95,6 +98,27 @@ class Spec2CodeRecoveryTests(unittest.TestCase):
         self.assertIn("blueprint.md", body)
         self.assertIn("最终 Git diff", body)
         self.assertNotIn("roadmap.md", body)
+
+    def test_direct_source_change_invalidates_pending_plan_review(self):
+        state, _files = self.state("plan_review_pending")
+        review_state = state["development_review"]
+        _rewind_checkpoint_after_direct_changes(review_state)
+        item = review_state["checkpoints"][0]
+        self.assertEqual("planned", item["status"])
+        self.assertNotIn("plan_receipt", item)
+
+    def test_direct_source_change_returns_post_code_review_to_coding(self):
+        state, _files = self.state("craft_pending")
+        review_state = state["development_review"]
+        item = review_state["checkpoints"][0]
+        item.update({
+            "receipt": {"snapshot": {"src/a.py": "digest"}},
+            "compile_source_sha256": "a" * 64,
+        })
+        _rewind_checkpoint_after_direct_changes(review_state)
+        self.assertEqual("coding", item["status"])
+        self.assertNotIn("receipt", item)
+        self.assertNotIn("compile_source_sha256", item)
 
 
 if __name__ == "__main__":

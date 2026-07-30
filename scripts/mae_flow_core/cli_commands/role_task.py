@@ -4,8 +4,10 @@ import re
 
 from mae_flow_core.application.quality.role_task_documents import (
     ArtifactRef,
+    RoleTaskContext,
     build_role_task_document,
 )
+from mae_flow_core.quality.spec2code_artifacts import artifact_path
 from mae_flow_core.application.quality.task_cards import (
     TaskCardStorePorts,
     store_task_card,
@@ -52,17 +54,127 @@ def _plan_files(state, checkpoint):
             continue
         for value in re.split(r"[、,，]", match.group(1).rstrip("。")):
             value = value.strip().strip("`")
-            if value and value not in files:
-                files.append(value)
+            if not value:
+                continue
+            root = os.path.realpath(os.getcwd())
+            absolute = os.path.realpath(value)
+            relative = os.path.relpath(absolute, root).replace("\\", "/")
+            if (
+                relative == ".."
+                or relative.startswith("../")
+                or relative in files
+            ):
+                continue
+            files.append(relative)
     return tuple(files)
 
 
-def _role_diff(state, role):
+def _existing_context_paths(state, files):
+    config = state.get("config") or {}
+    ticket = str(config.get("单号", "") or "")
+    change = str(config.get("CHANGE_NAME", "") or "")
+    spec = state.get("spec") or {}
+    candidates = (
+        config.get("需求文档", ""),
+        os.path.join("openspec", "changes", change, "change.md")
+        if change else "",
+        spec.get("design_doc", ""),
+        os.path.join("docs", "clarifications-%s.md" % ticket),
+        os.path.join(".mae-flow-work", "survey-%s.md" % ticket),
+        "runtime/standards/comment-standard-v1.md",
+        *tuple(files),
+    )
+    result = []
+    for path in candidates:
+        value = str(path or "")
+        if value and os.path.isfile(value):
+            absolute = os.path.abspath(value)
+            if absolute not in result:
+                result.append(absolute)
+    return tuple(result)
+
+
+def _untracked_bodies(paths):
+    untracked = set(api.argv_out([
+        "git", "-c", "core.quotepath=false",
+        "ls-files", "--others", "--exclude-standard", "--",
+        *paths,
+    ]).splitlines())
+    bodies = []
+    for path in paths:
+        if path not in untracked or not os.path.isfile(path):
+            continue
+        try:
+            body = read_text(path, encoding="utf-8", errors="replace")
+        except OSError:
+            body = "（无法读取）"
+        bodies.extend([
+            "### 未跟踪文件: " + path,
+            body[:100000],
+        ])
+    return bodies
+
+
+def _role_diff(state, role, plan_files):
     if role != "craft-code":
         return ""
     item = api._checkpoint_current(state) or {}
     base = str(item.get("fixed_base", "") or "")
-    return (base + "..HEAD") if base else "HEAD"
+    receipt = item.get("receipt") or {}
+    snapshot = receipt.get("snapshot") or {}
+    paths = tuple(snapshot) if isinstance(snapshot, dict) else ()
+    paths = paths or tuple(plan_files)
+    if not paths:
+        return ""
+    staged = bool(snapshot)
+    command = [
+        "git", "-c", "core.quotepath=false", "diff", "--no-ext-diff",
+    ]
+    command.extend(
+        ["HEAD", "--", *paths]
+        if staged else [base or "HEAD^", "HEAD", "--", *paths]
+    )
+    patch = api.argv_out(command)
+    if len(patch) > 100000:
+        patch = (
+            patch[:100000]
+            + "\n（补丁超过 100000 字符已截断；"
+            "按文件清单 Read 目标文件核对剩余内容）"
+        )
+    status = api.argv_out([
+        "git", "-c", "core.quotepath=false",
+        "status", "--short", "--", *paths,
+    ])
+    body = [
+        "文件清单:",
+        *("- " + path for path in paths),
+        "工作区状态:",
+        status or "（已提交范围）",
+        "补丁:",
+        patch or "（无 tracked patch；检查下方未跟踪文件内容）",
+        *_untracked_bodies(paths),
+    ]
+    return "\n".join(body)
+
+
+def _review_output(ticket, checkpoint, role):
+    if role not in ("craft-plan", "craft-code"):
+        return ""
+    mode = "plan" if role == "craft-plan" else "code"
+    return os.path.abspath(
+        artifact_path("review", ticket, checkpoint, mode))
+
+
+def _review_target_sha(state, role):
+    if role == "craft-plan":
+        return str(
+            ((state.get("spec2code") or {}).get("plan") or {}).get(
+                "sha256", "")
+            or "")
+    if role == "craft-code":
+        item = api._checkpoint_current(state) or {}
+        return str(item.get("compile_source_sha256", "") or "")
+    return ""
 
 
 def cmd_role_task(_flow, state, args):
@@ -99,14 +211,21 @@ def cmd_role_task(_flow, state, args):
             ),
             2,
         )
+    ticket = str((state.get("config") or {}).get("单号", "") or "")
+    plan_files = _plan_files(state, checkpoint)
     document = build_role_task_document(
         role=role,
         project_root=os.path.abspath(os.getcwd()),
-        ticket=str((state.get("config") or {}).get("单号", "") or ""),
+        ticket=ticket,
         checkpoint=checkpoint,
-        artifacts=_artifact_refs(state),
-        files=_plan_files(state, checkpoint),
-        diff=_role_diff(state, role),
+        context=RoleTaskContext(
+            artifacts=_artifact_refs(state),
+            files=plan_files,
+            context_paths=_existing_context_paths(state, plan_files),
+            diff=_role_diff(state, role, plan_files),
+            review_output=_review_output(ticket, checkpoint, role),
+            review_target_sha256=_review_target_sha(state, role),
+        ),
     )
     suffix = ("-" + checkpoint.lower()) if checkpoint else ""
     artifact = store_task_card(

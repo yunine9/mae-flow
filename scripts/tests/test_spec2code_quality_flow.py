@@ -23,6 +23,7 @@ from mae_flow_core.application.delivery.checkpoints import (  # noqa: E402
 )
 from mae_flow_core.application.quality.role_task_documents import (  # noqa: E402
     ArtifactRef,
+    RoleTaskContext,
     build_role_task_document,
 )
 from mae_flow_core.delivery.models import thaw  # noqa: E402
@@ -33,6 +34,7 @@ from test_spec2code_artifacts import (  # noqa: E402
     BLUEPRINT,
     PLAN,
     ROADMAP,
+    TASK_CARD_SHA,
     review,
 )
 
@@ -50,6 +52,7 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
             digest=digest,
             ack_cursor=lambda: ("before-user-review",),
             verify_ack=lambda _receipt, _expected: (True, ""),
+            role_task_sha=lambda _role, _checkpoint: TASK_CARD_SHA,
             now=lambda: "2026-07-30 16:00:00",
         )
 
@@ -95,8 +98,13 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
         })
         files = {
             ".mae-flow-work/plan-REQ-1.md": PLAN,
-            ".mae-flow-work/reviews/REQ-1/CP1-plan.md": review(),
-            ".mae-flow-work/reviews/REQ-1/CP1-code.md": review(),
+            ".mae-flow-work/reviews/REQ-1/CP1-plan.md": review(
+                mode="PLAN",
+                target_sha=digest(PLAN),
+            ),
+            ".mae-flow-work/reviews/REQ-1/CP1-code.md": review(
+                target_sha="d" * 64,
+            ),
         }
         prepared = prepare_checkpoint_plan(
             checkpoint_state,
@@ -126,23 +134,25 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
             project_root="/repo",
             ticket="REQ-1",
             checkpoint="CP1",
-            artifacts=refs,
-            files=("src/service.py",),
-            diff="",
+            context=RoleTaskContext(
+                artifacts=refs,
+                files=("src/service.py",),
+                context_paths=("survey.md", "src/service.py"),
+            ),
         ).body()
         self.assertIn("Comment Standard v1", implement_card)
         self.assertIn("src/service.py", implement_card)
 
         coding_state["checkpoints"][0].update({
             "status": "craft_pending",
-            "compile_source_sha256": "compiled-source",
+            "compile_source_sha256": "d" * 64,
         })
         crafted = record_craft_review(
             coding_state,
             "CP1",
             ".mae-flow-work/reviews/REQ-1/CP1-code.md",
             "REQ-1",
-            "compiled-source",
+            "d" * 64,
             self.ports(files),
         )
         self.assertEqual(

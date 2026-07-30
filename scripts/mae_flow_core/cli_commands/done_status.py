@@ -219,6 +219,15 @@ def _done_finalize(flow, st, args, sid, step):
             return
         if event.kind == "activate_checkpoint":
             api._activate_checkpoint_plan(st, event.value)
+        elif event.kind == "confirm_spec2code":
+            api._confirm_spec2code_artifacts(
+                st,
+                tuple(
+                    kind for kind in event.value.split(",")
+                    if kind
+                ),
+                event.note,
+            )
         elif event.kind == "prepare_moonlight_checkpoint":
             api._prepare_moonlight_checkpoint_plan(st)
         elif event.kind == "resolve_moonlight":

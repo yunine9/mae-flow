@@ -19,11 +19,17 @@ from mae_flow_core.application.delivery.checkpoint_quality import (  # noqa: E40
     record_craft_review,
 )
 from mae_flow_core.delivery.models import thaw  # noqa: E402
-from test_spec2code_artifacts import PLAN, review  # noqa: E402
+from test_spec2code_artifacts import (  # noqa: E402
+    PLAN,
+    TASK_CARD_SHA,
+    review,
+)
 from mae_flow_core.cli_parser import parse_args  # noqa: E402
 
 
 class CheckpointQualityTests(unittest.TestCase):
+    SOURCE_SHA = "d" * 64
+
     def test_parser_exposes_plan_and_craft_commands(self):
         global_plan = parse_args([
             "checkpoint",
@@ -91,13 +97,18 @@ class CheckpointQualityTests(unittest.TestCase):
                 verify,
                 "" if verify else "missing ack",
             ),
+            role_task_sha=lambda _role, _checkpoint: TASK_CARD_SHA,
             now=lambda: "2026-07-30 13:00:00",
         )
 
     def test_prepare_and_user_decide_plan_loop(self):
         paths = {
             ".mae-flow-work/plan-REQ-1.md": PLAN,
-            ".mae-flow-work/reviews/REQ-1/CP1-plan.md": review(),
+            ".mae-flow-work/reviews/REQ-1/CP1-plan.md": review(
+                mode="PLAN",
+                target_sha=hashlib.sha256(
+                    PLAN.encode("utf-8")).hexdigest(),
+            ),
         }
         prepared = prepare_checkpoint_plan(
             self.state(),
@@ -134,18 +145,23 @@ class CheckpointQualityTests(unittest.TestCase):
 
     def test_craft_review_rework_or_advances(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
-        pending_files = {code_path: review(status="待处理")}
+        pending_files = {
+            code_path: review(
+                status="待处理",
+                target_sha=self.SOURCE_SHA,
+            ),
+        }
         current = self.state()
         current["checkpoints"][0].update({
             "status": "craft_pending",
-            "compile_source_sha256": "source-sha",
+            "compile_source_sha256": self.SOURCE_SHA,
         })
         pending = record_craft_review(
             current,
             "CP1",
             code_path,
             "REQ-1",
-            "source-sha",
+            self.SOURCE_SHA,
             self.ports(pending_files),
         )
         self.assertEqual(
@@ -154,13 +170,18 @@ class CheckpointQualityTests(unittest.TestCase):
         )
         self.assertEqual("invalidate_quality", pending.effects[1].kind)
 
-        clean_files = {code_path: review(status="已解决")}
+        clean_files = {
+            code_path: review(
+                status="已解决",
+                target_sha=self.SOURCE_SHA,
+            ),
+        }
         accepted = record_craft_review(
             current,
             "CP1",
             code_path,
             "REQ-1",
-            "source-sha",
+            self.SOURCE_SHA,
             self.ports(clean_files),
         )
         self.assertEqual(
@@ -173,7 +194,7 @@ class CheckpointQualityTests(unittest.TestCase):
         current = self.state(mode="continuous", count=2)
         current["checkpoints"][0].update({
             "status": "craft_pending",
-            "compile_source_sha256": "source-sha",
+            "compile_source_sha256": self.SOURCE_SHA,
             "head": "next-head",
         })
         result = record_craft_review(
@@ -181,8 +202,13 @@ class CheckpointQualityTests(unittest.TestCase):
             "CP1",
             code_path,
             "REQ-1",
-            "source-sha",
-            self.ports({code_path: review(status="已解决")}),
+            self.SOURCE_SHA,
+            self.ports({
+                code_path: review(
+                    status="已解决",
+                    target_sha=self.SOURCE_SHA,
+                ),
+            }),
         )
         updated = thaw(result.effects[0].payload)
         self.assertEqual("completed", updated["checkpoints"][0]["status"])
@@ -198,18 +224,19 @@ class CheckpointQualityTests(unittest.TestCase):
         current = self.state(mode="continuous")
         current["checkpoints"][0].update({
             "status": "craft_pending",
-            "compile_source_sha256": "source-sha",
+            "compile_source_sha256": self.SOURCE_SHA,
         })
         result = record_craft_review(
             current,
             "CP1",
             code_path,
             "REQ-1",
-            "source-sha",
+            self.SOURCE_SHA,
             self.ports({
                 code_path: review(
                     status="待处理",
                     disposition="人工裁决",
+                    target_sha=self.SOURCE_SHA,
                 ),
             }),
             moonlight=True,

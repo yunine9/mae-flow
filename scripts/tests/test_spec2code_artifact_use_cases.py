@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.quality.spec2code_artifacts import (  # noqa: E402
     ArtifactPorts,
+    confirm_artifacts,
     register_artifact,
 )
 from mae_flow_core.delivery.models import thaw  # noqa: E402
@@ -79,6 +80,68 @@ class Spec2CodeArtifactUseCaseTests(unittest.TestCase):
             2,
             thaw(again.effects[0].payload)["blueprint"]["revision"],
         )
+
+    def test_confirmation_binds_current_revision_digest_actor_and_time(self):
+        registered = thaw(self.call().effects[0].payload)
+
+        result = confirm_artifacts(
+            registered,
+            ("blueprint",),
+            "user",
+            "2026-07-30 12:02:00",
+        )
+
+        self.assertEqual(0, result.exit_code)
+        confirmed = thaw(result.effects[0].payload)["blueprint"]
+        self.assertEqual(confirmed["revision"], confirmed["confirmed_revision"])
+        self.assertEqual(confirmed["sha256"], confirmed["confirmed_sha256"])
+        self.assertEqual("user", confirmed["confirmed_by"])
+        self.assertEqual(
+            "2026-07-30 12:02:00",
+            confirmed["confirmed_at"],
+        )
+
+    def test_reregistering_an_artifact_invalidates_its_confirmation(self):
+        registered = thaw(self.call().effects[0].payload)
+        confirmed = thaw(confirm_artifacts(
+            registered,
+            ("blueprint",),
+            "user",
+            "2026-07-30 12:02:00",
+        ).effects[0].payload)
+
+        result = register_artifact(
+            confirmed,
+            "blueprint",
+            ".mae-flow-work/test-blueprint-REQ-1.md",
+            "REQ-1",
+            ArtifactPorts(
+                is_file=lambda _path: True,
+                read_text=lambda _path: BLUEPRINT + "\n",
+                normalize_path=lambda value: value,
+                now=lambda: "2026-07-30 12:03:00",
+            ),
+        )
+
+        record = thaw(result.effects[0].payload)["blueprint"]
+        self.assertEqual(2, record["revision"])
+        self.assertEqual(0, record["confirmed_revision"])
+        self.assertNotIn("confirmed_sha256", record)
+        self.assertNotIn("confirmed_by", record)
+        self.assertNotIn("confirmed_at", record)
+
+    def test_confirmation_rejects_missing_artifacts_atomically(self):
+        registered = thaw(self.call().effects[0].payload)
+        result = confirm_artifacts(
+            registered,
+            ("blueprint", "plan"),
+            "moonlight",
+            "2026-07-30 12:04:00",
+        )
+
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("plan", result.stderr[0])
+        self.assertEqual((), result.effects)
 
 
 if __name__ == "__main__":

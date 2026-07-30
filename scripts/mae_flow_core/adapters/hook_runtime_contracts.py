@@ -175,9 +175,14 @@ class HookContractsMixin:
         try:
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=8)
-            return r.stdout if r.returncode == 0 else ""
-        except Exception:
+            if r.returncode == 0:
+                return r.stdout
+            self.log("git output unavailable (exit %s): %s" % (
+                r.returncode, cmd))
+        except Exception as exc:
+            self.log("git output EXC: %s (%s)" % (exc, cmd))
             return ""
+        return ""
 
 
     def _compile_net_lines(self, head):

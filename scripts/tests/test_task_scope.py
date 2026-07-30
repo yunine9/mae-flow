@@ -8,6 +8,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -341,6 +342,30 @@ class TaskScopeTests(unittest.TestCase):
             card = stream.read()
         self.assertIn(checkpoint_one + "..HEAD", card)
         self.assertNotIn("- services/anr/src/Logic.cpp", card)
+
+    def test_compile_snapshot_failure_issues_card_with_empty_baseline(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() { return 2; }\n"
+              "int untouchedFunction() { return 9; }\n")
+        self.commit("compile snapshot fixture")
+        state = self.state("build")
+        mf.save_state(state)
+        stderr = io.StringIO()
+        with mock.patch.object(
+                mf,
+                "_worktree_snapshot_since",
+                side_effect=OSError("snapshot fixture unavailable"),
+        ), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            mf.cmd_agent_task(
+                FLOW,
+                state,
+                types.SimpleNamespace(
+                    kind="compile", scope=None, checkpoint=None),
+            )
+
+        task = mf.load_state()["agent_tasks"]["COMPILE"]
+        self.assertEqual({}, task["worktree_snapshot"])
+        self.assertIn("COMPILE provenance baseline unavailable", stderr.getvalue())
 
     def test_precommit_checkpoint_card_uses_tracked_and_untracked_worktree(self):
         write("services/anr/src/Logic.cpp",

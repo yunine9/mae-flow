@@ -126,6 +126,11 @@ class HookStateMixin:
             relative = os.path.relpath(absolute, root).replace("\\", "/")
             if relative in ("", ".") or relative.startswith("../"):
                 return
+            _existing, sidecar_error = safe_read_json(self.AGENT_WRITES_STATE)
+            if sidecar_error:
+                self.log(
+                    "agent write ledger recovering unreadable sidecar: "
+                    + sidecar_error)
 
             def update_writes(data):
                 paths = data.setdefault("paths", {})
@@ -167,6 +172,11 @@ class HookStateMixin:
                 baseline, current, direct_paths)
             if not side_effect_paths:
                 return
+            _existing, sidecar_error = safe_read_json(self.AGENT_WRITES_STATE)
+            if sidecar_error:
+                self.log(
+                    "COMPILE side-effect ledger recovering unreadable sidecar: "
+                    + sidecar_error)
             recorded_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
             def update_side_effects(data):

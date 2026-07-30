@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -79,7 +80,7 @@ def initialize_repository(root):
     ).stdout.strip()
 
 
-def runtime_for(root):
+def runtime_for(root, logs=None):
     return HookRuntimeAdapter(
         state=os.path.join(root, ".mae-flow.json"),
         exit_state=os.path.join(root, ".mae-flow.json.exited"),
@@ -90,7 +91,7 @@ def runtime_for(root):
         moonlight_intent=os.path.join(root, ".mae-flow.json.moonlight-intent"),
         exit_intent=os.path.join(root, ".mae-flow.json.exit-intent"),
         maeflow=os.path.join(ROOT, "scripts", "mae-flow.py"),
-        log=lambda _message: None,
+        log=logs.append if logs is not None else lambda _message: None,
     )
 
 
@@ -326,6 +327,78 @@ class CompileContractTests(unittest.TestCase):
             self.assertEqual(2, rejected.exception.code)
             self.assertFalse(os.path.exists(
                 os.path.join(td, ".mae-flow.json.agent-writes")))
+
+    def test_compile_provenance_failures_are_logged_without_rejecting(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            logs = []
+            runtime = runtime_for(td, logs)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            generated = os.path.join(td, "generated", "build.properties")
+            os.makedirs(os.path.dirname(generated), exist_ok=True)
+            with open(generated, "w", encoding="utf-8") as stream:
+                stream.write("compiled=true\n")
+            calls = [{
+                "name": "Bash",
+                "input": {"command": "python build.py"},
+                "result_seen": True,
+                "result": "build complete\nexit code: 0",
+            }]
+
+            with mock.patch.object(
+                    runtime,
+                    "_worktree_snapshot",
+                    side_effect=OSError("snapshot fixture unavailable"),
+            ):
+                runtime._compile_contract("OK", accepted_report(task), calls)
+            self.assertTrue(any(
+                "COMPILE side-effect ledger EXC: snapshot fixture unavailable"
+                in entry for entry in logs))
+
+            logs.clear()
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                stream.write("{unreadable ledger")
+            runtime._compile_contract("OK", accepted_report(task), calls)
+            self.assertTrue(any(
+                "COMPILE side-effect ledger recovering unreadable sidecar"
+                in entry for entry in logs))
+
+            logs.clear()
+            with open(runtime.AGENT_WRITES_STATE, "w", encoding="utf-8") as stream:
+                stream.write("{unreadable direct ledger")
+            runtime._record_agent_write("config/runtime.json")
+            self.assertTrue(any(
+                "agent write ledger recovering unreadable sidecar" in entry
+                for entry in logs))
+
+            logs.clear()
+            with mock.patch(
+                    "mae_flow_core.adapters.hook_runtime_state.update_json",
+                    side_effect=OSError("update fixture unavailable"),
+            ):
+                runtime._compile_contract("OK", accepted_report(task), calls)
+            self.assertTrue(any(
+                "COMPILE side-effect ledger EXC: update fixture unavailable"
+                in entry for entry in logs))
+
+    def test_worktree_snapshot_logs_git_failures(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            logs = []
+            runtime = runtime_for(td, logs)
+            failed_git = mock.Mock(
+                returncode=1,
+                stdout="",
+                stderr="fixture git failure",
+            )
+            with mock.patch(
+                    "mae_flow_core.adapters.hook_runtime_contracts.subprocess.run",
+                    return_value=failed_git,
+            ):
+                self.assertEqual({}, runtime._worktree_snapshot("fixture-head"))
+            self.assertTrue(any(
+                "git output unavailable (exit 1)" in entry
+                for entry in logs))
 
 
 if __name__ == "__main__":

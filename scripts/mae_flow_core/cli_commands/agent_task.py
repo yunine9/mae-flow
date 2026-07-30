@@ -4,6 +4,7 @@ from .shared import (
     BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
     codecheck_log_path, globmod, os, quality_task_card_documents,
     quality_task_card_use_cases, quality_task_cards, read_text, time, write_text,
+    sys,
 )
 from .wiring import api
 
@@ -59,7 +60,17 @@ def _resolve_requirement_sources_from_runtime(st):
 
 
 def _compile_worktree_snapshot(kind, head):
-    return api._worktree_snapshot_since(head) if kind == "COMPILE" else {}
+    if kind != "COMPILE":
+        return {}
+    try:
+        return api._worktree_snapshot_since(head)
+    except Exception as exc:
+        print(
+            "[mae-flow] COMPILE provenance baseline unavailable; "
+            "issuing task with empty snapshot: %s" % exc,
+            file=sys.stderr,
+        )
+        return {}
 
 
 def _store_agent_task(flow, st, args, context):

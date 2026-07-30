@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -17,6 +18,7 @@ from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core import cli_runtime as mf
 from mae_flow_core.cli_commands import source_facts
+from test_spec2code_artifacts import BLUEPRINT
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:
@@ -386,6 +388,44 @@ class TaskScopeTests(unittest.TestCase):
         targets = task["ut_targets"]["services/anr/src/Logic.cpp"]
         self.assertTrue(targets)
         self.assertTrue(any("changedFunction" in item["context"] for item in targets))
+
+    def test_full_ut_card_binds_registered_fresh_blueprint(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() {\n  return 2;\n}\n\n"
+              "int untouchedFunction() {\n  return 9;\n}\n")
+        self.commit("code")
+        blueprint_path = (
+            ".mae-flow-work/test-blueprint-REQ-SCOPE.md")
+        write(blueprint_path, BLUEPRINT)
+        state = self.state("verify_ut")
+        state["spec2code"] = {
+            "blueprint": {
+                "path": blueprint_path,
+                "sha256": hashlib.sha256(
+                    BLUEPRINT.encode("utf-8")).hexdigest(),
+            },
+        }
+
+        card, task = self.task(state, "ut")
+
+        self.assertIn("已确认 UT 行为蓝图", card)
+        self.assertEqual(
+            hashlib.sha256(BLUEPRINT.encode("utf-8")).hexdigest(),
+            task["blueprint"]["sha256"],
+        )
+        self.assertEqual(
+            ["SC-1"], task["blueprint"]["scenario_ids"])
+
+    def test_new_full_flow_ut_rejects_missing_blueprint(self):
+        write("services/anr/src/Logic.cpp",
+              "int changedFunction() { return 2; }\n")
+        self.commit("code")
+        state = self.state("verify_ut")
+        state["spec2code"] = {"version": 1}
+        with self.assertRaises(SystemExit) as caught:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.task(state, "ut")
+        self.assertEqual(2, caught.exception.code)
 
     def test_document_only_is_machine_skipped_at_all_quality_entries(self):
         write("README.md", "# docs only\n")

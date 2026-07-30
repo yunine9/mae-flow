@@ -127,6 +127,16 @@ def validate_blueprint(text):
     return tuple(errors)
 
 
+def blueprint_scenario_ids(text):
+    """Return ordered, unique Scenario IDs from a behavior blueprint."""
+    result = []
+    for title, _body in _sections(text, "Scenario:"):
+        value = title.split(":", 1)[1].strip()
+        if value and value not in result:
+            result.append(value)
+    return tuple(result)
+
+
 def validate_roadmap(text):
     errors = []
     checkpoints = [
@@ -146,6 +156,19 @@ def validate_roadmap(text):
                 r"CP[1-6].*Task\s+[A-Za-z0-9._-]+", value):
             errors.append("%s 延后事项必须指向具体 CP/Task" % title)
     return tuple(errors)
+
+
+def roadmap_checkpoints(text):
+    """Return ordered ``(CPn, title)`` pairs from a valid roadmap."""
+    result = []
+    for title, _body in _sections(text, "CP"):
+        match = re.match(r"(CP[1-6])\s*(?:[:：]\s*(.+))?$", title)
+        if match:
+            result.append((
+                match.group(1),
+                (match.group(2) or match.group(1)).strip(),
+            ))
+    return tuple(result)
 
 
 def validate_plan(text, checkpoint=""):
@@ -208,3 +231,59 @@ def review_requires_rework(text):
         ):
             return True
     return False
+
+
+def review_requires_human_decision(text):
+    """Return whether a reviewer explicitly deferred a finding to a human."""
+    return any(
+        re.search(
+            r"(?:^|\n)\s*-\s*处置[：:]\s*人工裁决(?:[。\s]|$)",
+            body,
+        )
+        for _title, body in _review_findings(text)
+    )
+
+
+def _field(body, name):
+    match = re.search(
+        r"(?:^|\n)\s*-\s*%s[：:]\s*(.+?)\s*$"
+        % re.escape(name),
+        body,
+        re.M,
+    )
+    return match.group(1).strip() if match else "（缺失）"
+
+
+def checkpoint_review_context(roadmap_text, plan_text, checkpoint, diff):
+    """Render the global/local context shown beside one CP code diff."""
+    checkpoints = roadmap_checkpoints(roadmap_text)
+    roadmap_body = next((
+        body
+        for title, body in _sections(roadmap_text, checkpoint)
+        if title.startswith(checkpoint)
+    ), "")
+    task_rows = []
+    for title, body in _sections(plan_text, "Task "):
+        if re.search(
+            r"(?:^|\n)\s*-\s*所属 CP[：:]\s*%s(?:[。\s]|$)"
+            % re.escape(checkpoint),
+            body,
+        ):
+            task_rows.append(
+                "%s=%s" % (
+                    title,
+                    _field(body, "对应 UT 蓝图场景"),
+                )
+            )
+    return (
+        "整体交付地图: " + " → ".join(
+            "%s(%s)" % item for item in checkpoints),
+        "当前 CP 完成合同: " + _field(roadmap_body, "完成合同"),
+        "当前 CP 非目标: " + _field(roadmap_body, "明确非目标"),
+        "延后事项 → 后续 CP/Task: "
+        + _field(roadmap_body, "延后事项及具体落点"),
+        "Scenario → CP → Task → 状态: "
+        + ("；".join(task_rows) if task_rows else "（无）"),
+        "对后续暴露的接口: " + _field(roadmap_body, "后续接口"),
+        "实际代码 diff: " + (diff or "（无）"),
+    )

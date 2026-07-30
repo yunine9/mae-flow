@@ -91,8 +91,9 @@ def task_record(
     unchanged_initial_dirty,
     at,
     issuance_id="",
+    blueprint=None,
 ):
-    return {
+    record = {
         "step": step,
         "path": path,
         "sha256": digest,
@@ -117,3 +118,11 @@ def task_record(
         "at": at,
         "issuance_id": str(issuance_id or ""),
     }
+    if blueprint:
+        record["blueprint"] = {
+            "path": str(blueprint.get("path", "")),
+            "sha256": str(blueprint.get("sha256", "")),
+            "scenario_ids": list(
+                blueprint.get("scenario_ids") or ()),
+        }
+    return record

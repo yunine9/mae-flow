@@ -11,6 +11,9 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.quality.spec2code_artifacts import (  # noqa: E402
     artifact_path,
+    blueprint_scenario_ids,
+    checkpoint_review_context,
+    roadmap_checkpoints,
     review_requires_rework,
     validate_blueprint,
     validate_plan,
@@ -103,12 +106,17 @@ class Spec2CodeArtifactTests(unittest.TestCase):
 
     def test_validates_blueprint_required_behavior_fields(self):
         self.assertEqual((), validate_blueprint(BLUEPRINT))
+        self.assertEqual(("SC-1",), blueprint_scenario_ids(BLUEPRINT))
         errors = validate_blueprint(
             BLUEPRINT.replace("- 可观察结果：返回新对象。\n", ""))
         self.assertTrue(any("可观察结果" in error for error in errors))
 
     def test_validates_roadmap_and_exact_deferrals(self):
         self.assertEqual((), validate_roadmap(ROADMAP))
+        self.assertEqual(
+            (("CP1", "创建核心对象"),),
+            roadmap_checkpoints(ROADMAP),
+        )
         errors = validate_roadmap(
             ROADMAP.replace(
                 "查询 → CP2 / Task CP2-T1。",
@@ -116,6 +124,25 @@ class Spec2CodeArtifactTests(unittest.TestCase):
             )
         )
         self.assertTrue(any("具体 CP/Task" in error for error in errors))
+
+    def test_checkpoint_context_renders_global_and_local_views(self):
+        lines = checkpoint_review_context(
+            ROADMAP,
+            PLAN,
+            "CP1",
+            "base..HEAD",
+        )
+        body = "\n".join(lines)
+        for heading in (
+            "整体交付地图",
+            "当前 CP 完成合同",
+            "当前 CP 非目标",
+            "延后事项 → 后续 CP/Task",
+            "Scenario → CP → Task → 状态",
+            "对后续暴露的接口",
+            "实际代码 diff",
+        ):
+            self.assertIn(heading, body)
 
     def test_validates_plan_and_comment_plan(self):
         self.assertEqual((), validate_plan(PLAN, "CP1"))

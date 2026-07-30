@@ -77,6 +77,49 @@ class UnitTestContractTests(unittest.TestCase):
         ))
         self.assertTrue(decision.accepted)
 
+    def test_approved_blueprint_requires_exact_scenario_mapping(self):
+        report = self.report(extra=(
+            "BLUEPRINT_SHA256: %s\n"
+            "BLUEPRINT_MAPPING:\n"
+            "SC-1 | tests/test_a.py::test_a | PASS\n"
+            "SC-2 | tests/test_a.py::test_b | PASS\n"
+        ) % ("a" * 64))
+        base = self.context(
+            report,
+            [tool(
+                "Bash",
+                {"command": "python -m unittest"},
+                "7 passed",
+            )],
+        )
+
+        def with_report(value):
+            return AgentContractContext(
+                kind=base.kind,
+                status=base.status,
+                report=value,
+                task={
+                    **base.task,
+                    "blueprint": {
+                        "sha256": "a" * 64,
+                        "scenario_ids": ["SC-1", "SC-2"],
+                    },
+                },
+                config=base.config,
+                calls=base.calls,
+                changed_paths=base.changed_paths,
+                reusable_receipts=base.reusable_receipts,
+                facts=base.facts,
+            )
+
+        self.assertTrue(
+            evaluate_unit_test_contract(with_report(report)).accepted)
+        missing = evaluate_unit_test_contract(with_report(
+            report.replace(
+                "SC-2 | tests/test_a.py::test_b | PASS\n", "")
+        ))
+        self.assertIn("SC-2", missing.reason)
+
     def test_zero_tests_and_failed_counts_cannot_pass(self):
         zero = evaluate_unit_test_contract(self.context(
             self.report(total=0, passed=0, failed=0),

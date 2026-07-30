@@ -163,6 +163,50 @@ def _report_decision(report):
     return "", counts
 
 
+def _blueprint_mapping_rows(report):
+    mapping = report_field(report, "BLUEPRINT_MAPPING") or ""
+    rows = {}
+    for raw in mapping.splitlines():
+        cells = [cell.strip() for cell in raw.strip().strip("|").split("|")]
+        if len(cells) < 3 or not cells[0]:
+            continue
+        rows.setdefault(cells[0], []).append(cells)
+    return rows
+
+
+def _blueprint_mapping_error(rows, expected_ids):
+    for scenario_id in expected_ids:
+        matches = rows.get(scenario_id) or []
+        if len(matches) != 1:
+            return (
+                "UT 蓝图场景 %s 必须且只能映射一个测试用例，当前 %d 个。"
+                % (scenario_id, len(matches))
+            )
+        if matches[0][2].upper() != "PASS":
+            return (
+                "UT 蓝图场景 %s 的执行结果不是 PASS。" % scenario_id)
+    extras = sorted(set(rows) - set(expected_ids))
+    if extras:
+        return "BLUEPRINT_MAPPING 含任务卡外场景: " + "、".join(extras)
+    return ""
+
+
+def _blueprint_decision(context):
+    blueprint = context.task.get("blueprint") or {}
+    if not blueprint:
+        return ""
+    expected_sha = str(blueprint.get("sha256", "") or "")
+    actual_sha = report_field(
+        context.report, "BLUEPRINT_SHA256") or ""
+    if actual_sha.lower() != expected_sha.lower():
+        return "BLUEPRINT_SHA256 与任务卡冻结的 UT 蓝图不一致。"
+    expected_ids = tuple(blueprint.get("scenario_ids") or ())
+    return _blueprint_mapping_error(
+        _blueprint_mapping_rows(context.report),
+        expected_ids,
+    )
+
+
 def evaluate_unit_test_contract(context):
     """Evaluate UT using only frozen report, transcript and receipt facts."""
     if context.status not in ("PASS", "NEEDS_INPUT", "FAIL"):
@@ -176,6 +220,9 @@ def evaluate_unit_test_contract(context):
         return reject(reason, details=details)
     reason, run = _run_decision(context)
     details.update(run)
+    if reason:
+        return reject(reason, details=details)
+    reason = _blueprint_decision(context)
     if reason:
         return reject(reason, details=details)
     reason, counts = _report_decision(context.report)

@@ -277,6 +277,53 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
             "- src/a.cpp | 行 7-9 | changedFunction", body)
         self.assertIn("测试对象=本次修改的函数/行为", body)
 
+    def test_full_ut_document_binds_approved_blueprint(self):
+        document = build_full_task_document({
+            "kind": "UT",
+            "sid": "verify_ut",
+            "project_root": "/repo",
+            "head": "deadbeef",
+            "config": {
+                "单号": "REQ-1",
+                "单号类型": "feat",
+                "基线分支": "main",
+                "编译方式": "build",
+                "UT生成方式": "manual",
+                "UT运行命令": "python -m unittest",
+            },
+            "diff": "main..HEAD",
+            "scope": "",
+            "checkpoint_id": "",
+            "precommit_review": False,
+            "inherited_dirty": (),
+            "sources": (),
+            "groups": task_file_groups(
+                ("src/a.cpp",), lambda _path: False,
+                lambda _path: False),
+            "change_count": 1,
+            "task_file_count": 1,
+            "execution_plan": type("Plan", (), {
+                "roots": (("src", "源码目录"),),
+                "unresolved": (),
+            })(),
+            "lightcheck": None,
+            "notes": (),
+            "scan": {},
+            "ut_targets": {},
+            "blueprint": {
+                "path": "/repo/.mae-flow-work/test-blueprint-REQ-1.md",
+                "sha256": "a" * 64,
+                "scenario_ids": ("SC-1", "SC-2"),
+            },
+        })
+        body = document.body()
+        self.assertIn("已确认 UT 行为蓝图", body)
+        self.assertIn("SC-1、SC-2", body)
+        self.assertIn(
+            "runtime/standards/comment-standard-v1.md",
+            body,
+        )
+
     def test_standalone_codecheck_document_preserves_no_commit_boundary(self):
         document = build_standalone_task_document({
             "label": "CODECHECK",

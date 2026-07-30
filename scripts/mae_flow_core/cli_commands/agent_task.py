@@ -2,6 +2,10 @@
 
 import hashlib
 
+from mae_flow_core.quality.spec2code_artifacts import (
+    blueprint_scenario_ids,
+)
+
 from .shared import (
     BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
     codecheck_log_path, globmod, os, quality_task_card_documents,
@@ -75,6 +79,39 @@ def _compile_worktree_snapshot(kind, head):
         return {}, False
 
 
+def _approved_blueprint(state, kind):
+    if kind != "UT":
+        return {}
+    process = state.get("spec2code") or {}
+    registered = process.get("blueprint") or {}
+    if not registered:
+        if (
+            process.get("version") == 1
+            and (state.get("choices") or {}).get("workflow") == "full"
+        ):
+            api.die(
+                "新 full 流程缺少已确认 UT 蓝图；"
+                "回到 test_blueprint Loop 生成并登记。",
+                2,
+            )
+        return {}
+    path = str(registered.get("path", "") or "")
+    if not path or not os.path.isfile(path):
+        api.die("已登记的 UT 蓝图不存在；重新生成并登记 blueprint。", 2)
+    try:
+        body = read_text(path, encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        api.die("已登记的 UT 蓝图无法读取: %s" % exc, 2)
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    if digest != registered.get("sha256"):
+        api.die("UT 蓝图登记后已变化；必须重新执行 quality-artifact register。", 2)
+    return {
+        "path": os.path.abspath(path),
+        "sha256": digest,
+        "scenario_ids": blueprint_scenario_ids(body),
+    }
+
+
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
@@ -135,7 +172,8 @@ def _store_agent_task(flow, st, args, context):
         ut_targets=context["ut_targets"] if kind == "UT" else {},
         unchanged_initial_dirty=context["inherited_dirty"],
         at=time.strftime("%Y-%m-%d %H:%M:%S"),
-        issuance_id=issuance_id)
+        issuance_id=issuance_id,
+        blueprint=context["blueprint"])
     if kind == "CODECHECK":
         append_codecheck_event(
             os.getcwd(), st, "agent.task_created", {
@@ -302,6 +340,7 @@ def cmd_agent_task(flow, st, args):
             st, groups["business"])
         if target_err:
             api.die("无法计算 UT 函数级范围：" + target_err, 2)
+    blueprint = _approved_blueprint(st, kind)
     lines = quality_task_card_documents.build_full_task_document({
         "kind": kind,
         "sid": sid,
@@ -326,6 +365,7 @@ def cmd_agent_task(flow, st, args):
         "notes": tuple(notes),
         "scan": scan,
         "ut_targets": ut_targets,
+        "blueprint": blueprint,
     })
     _store_agent_task(flow, st, args, {
         "kind": kind, "sid": sid, "document": lines,
@@ -334,4 +374,5 @@ def cmd_agent_task(flow, st, args):
         "task_files": task_files, "execution_files": execution_files,
         "lightcheck_result": lightcheck_result, "ut_targets": ut_targets,
         "inherited_dirty": inherited_dirty,
+        "blueprint": blueprint,
     })

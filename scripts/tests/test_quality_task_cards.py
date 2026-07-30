@@ -75,6 +75,37 @@ class QualityTaskCardTests(unittest.TestCase):
         self.assertEqual("abc", record["sha256"])
         self.assertEqual("issuance-123", record["issuance_id"])
 
+    def test_task_record_detaches_blueprint_binding(self):
+        blueprint = {
+            "path": ".mae-flow-work/test-blueprint-REQ-1.md",
+            "sha256": "a" * 64,
+            "scenario_ids": ["SC-1"],
+        }
+        record = task_record(
+            step="verify_ut",
+            path="/tmp/card.md",
+            digest="abc",
+            head="deadbeef",
+            scope="",
+            checkpoint="",
+            precommit_review=False,
+            initial_compile_net=0,
+            source_snapshot={},
+            worktree_snapshot={},
+            worktree_snapshot_valid=False,
+            allowed_files=[],
+            task_files=["src/main.cpp"],
+            execution_roots=["src"],
+            lightcheck={},
+            ut_targets={},
+            unchanged_initial_dirty=[],
+            at="2026-07-30 10:00:00",
+            blueprint=blueprint,
+        )
+        blueprint["scenario_ids"].append("SC-2")
+        self.assertEqual(["SC-1"], record["blueprint"]["scenario_ids"])
+        self.assertEqual("a" * 64, record["blueprint"]["sha256"])
+
 
 if __name__ == "__main__":
     unittest.main()

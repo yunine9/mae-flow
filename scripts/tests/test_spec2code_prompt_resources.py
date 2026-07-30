@@ -47,6 +47,22 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("只允许修改任务卡", text)
         self.assertIn("NEEDS_INPUT", text)
 
+    def test_ut_generator_executes_blueprint_instead_of_redesigning_it(self):
+        text = read("agents/ut-generator-agent.md")
+        self.assertIn("BLUEPRINT_SHA256:", text)
+        self.assertIn("BLUEPRINT_MAPPING:", text)
+        self.assertIn("禁止重新发明测试场景", text)
+
+    def test_build_prompts_use_registered_plan_and_role_loops(self):
+        pace = read("flow/steps/build_pace.md")
+        self.assertIn("--roadmap", pace)
+        self.assertIn("--plan", pace)
+        build = read("flow/steps/build.md")
+        self.assertIn("role-task cp-implement", build)
+        self.assertIn("role-task craft-code", build)
+        self.assertIn("checkpoint craft-reviewed", build)
+        self.assertIn("Comment Standard v1", build)
+
 
 if __name__ == "__main__":
     unittest.main()

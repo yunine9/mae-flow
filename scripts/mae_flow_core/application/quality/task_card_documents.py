@@ -135,7 +135,18 @@ def _append_full_codecheck(document, scan):
         "主会话不得代修；修复后按任务卡编译方式验证并复验。")
 
 
-def _append_full_ut(document, groups, targets):
+def _append_full_ut(document, groups, targets, blueprint=None):
+    blueprint = blueprint or {}
+    if blueprint:
+        document.extend([
+            "已确认 UT 行为蓝图: " + blueprint.get("path", ""),
+            "UT 蓝图 SHA256: " + blueprint.get("sha256", ""),
+            "必须完整映射的蓝图场景: "
+            + "、".join(blueprint.get("scenario_ids") or ()),
+            "注释规范: runtime/standards/comment-standard-v1.md",
+            "最终报告必须输出 BLUEPRINT_SHA256 和逐行 BLUEPRINT_MAPPING；"
+            "每行格式为 场景 ID | 测试文件::用例名 | PASS|FAIL|BLOCKED。",
+        ])
     document.append("UT覆盖目标（硬边界，不等于整个文件）:")
     if groups.business:
         for business_file in groups.business:
@@ -241,6 +252,7 @@ def build_full_task_document(facts):
             document,
             facts["groups"],
             facts["ut_targets"],
+            facts.get("blueprint"),
         )
     else:
         document.append(

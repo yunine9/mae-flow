@@ -14,6 +14,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
+sys.path.insert(0, os.path.dirname(__file__))
 from mae_flow_core.foundation import fingerprints
 from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 from mae_flow_core import cli_runtime as mf

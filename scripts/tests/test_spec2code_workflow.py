@@ -54,6 +54,10 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
             {"type": "spec2code_artifact", "kind": "plan"},
             plan_evidence,
         )
+        self.assertIn(
+            {"type": "spec2code_plan_review", "checkpoint": "CP1"},
+            plan_evidence,
+        )
 
     def test_other_workflow_entries_remain_unchanged(self):
         steps = self.flow["steps"]

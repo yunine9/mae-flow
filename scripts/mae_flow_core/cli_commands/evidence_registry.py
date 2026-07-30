@@ -4,8 +4,10 @@ from .shared import (
     AgentEvidencePorts, AgentEvidenceRules, DeliveryEvidencePorts,
     DeliveryEvidenceRules, QualityEvidencePorts, QualityEvidenceRules,
     RISK_AGENT_LABELS, WorkflowEvidencePorts, WorkflowEvidenceRules,
-    append_codecheck_event, build_evidence_registry, globmod, os, read_bytes,
-    read_text, specengine, sys, time,
+    append_codecheck_event, build_evidence_registry, globmod, hashlib, os,
+    read_bytes,
+    read_text, spec2code_artifact_path, spec2code_review_requires_rework,
+    specengine, sys, time, validate_spec2code_review, EvidenceResult,
 )
 from .wiring import api
 
@@ -101,6 +103,70 @@ ev_codecheck_clean = _QUALITY_EVIDENCE.codecheck_clean
 ev_review_codecheck = _QUALITY_EVIDENCE.review_codecheck
 
 
+def _spec2code_plan_review(spec, state):
+    checkpoint = str(spec.get("checkpoint", "CP1") or "CP1")
+    ticket = str((state.get("config") or {}).get("单号", "") or "")
+    plan = (state.get("spec2code") or {}).get("plan") or {}
+    task = (state.get("role_tasks") or {}).get("craft-plan") or {}
+    expected_plan = str(plan.get("sha256", "") or "")
+    if (
+        not expected_plan
+        or task.get("checkpoint") != checkpoint
+        or task.get("review_target_sha256") != expected_plan
+        or not task.get("sha256")
+    ):
+        return EvidenceResult(
+            False,
+            "PLAN Reviewer 任务卡未签发或已随 plan 修订失效；"
+            "重新生成 role-task craft-plan。",
+        )
+    plan_path = str(plan.get("path", "") or "")
+    if not plan_path or not os.path.isfile(plan_path):
+        return EvidenceResult(False, "已登记 plan 文件不存在。")
+    try:
+        plan_text = read_text(plan_path, encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return EvidenceResult(False, "已登记 plan 无法读取: %s" % exc)
+    if hashlib.sha256(
+            plan_text.encode("utf-8")).hexdigest() != expected_plan:
+        return EvidenceResult(
+            False,
+            "plan 登记后内容已变化；重新登记并重新签发 PLAN Reviewer。",
+        )
+    try:
+        review_path = spec2code_artifact_path(
+            "review", ticket, checkpoint, "plan")
+    except ValueError as exc:
+        return EvidenceResult(False, "PLAN Review 路径无效: %s" % exc)
+    if not os.path.isfile(review_path):
+        return EvidenceResult(
+            False,
+            "缺少 PLAN Review 记录: " + review_path,
+        )
+    try:
+        review_text = read_text(review_path, encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return EvidenceResult(False, "PLAN Review 无法读取: %s" % exc)
+    errors = validate_spec2code_review(
+        review_text,
+        "plan",
+        checkpoint,
+        str(task.get("sha256")),
+        expected_plan,
+    )
+    if errors:
+        return EvidenceResult(
+            False,
+            "PLAN Review 记录无效: " + "；".join(errors),
+        )
+    if spec2code_review_requires_rework(review_text):
+        return EvidenceResult(
+            False,
+            "PLAN Reviewer 仍有已接受待处理项。",
+        )
+    return EvidenceResult(True, "")
+
+
 _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     cwd=os.getcwd,
     glob_paths=globmod.glob,
@@ -118,6 +184,8 @@ _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     spec_data=lambda state: api._spec_data(state),
     risk_acceptance=lambda kind, state: api._risk_acceptance(kind, state),
     business_changed_files=lambda state: api._biz_changed_files(state),
+    spec2code_plan_review=lambda spec, state:
+        _spec2code_plan_review(spec, state),
 ))
 
 # Compatibility names used by in-flight command handlers and legacy tests.
@@ -126,6 +194,7 @@ ev_branch_ok = _WORKFLOW_EVIDENCE.branch_ok
 ev_tasks_checked = _WORKFLOW_EVIDENCE.tasks_checked
 ev_spec_field = _WORKFLOW_EVIDENCE.spec_field
 ev_spec2code_artifact = _WORKFLOW_EVIDENCE.spec2code_artifact
+ev_spec2code_plan_review = _WORKFLOW_EVIDENCE.spec2code_plan_review
 ev_tier_scope = _WORKFLOW_EVIDENCE.tier_scope
 ev_spec_validate = _WORKFLOW_EVIDENCE.spec_validate
 ev_content_free = _WORKFLOW_EVIDENCE.content_free

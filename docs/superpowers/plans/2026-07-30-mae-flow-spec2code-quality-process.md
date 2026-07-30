@@ -256,6 +256,7 @@ Review 文件顶部还必须包含：
 初始顺序固定为：Coordinator 生成并登记 roadmap → Task Analyst 写 plan → 登记 plan
 → 签发 PLAN Reviewer 卡。plan 每次修订后都重新登记并重新签发 Reviewer；用户确认
 当前 CP 前再读 plan/Review 文件并核对展示收据摘要，变化即退回 Loop。
+build_plan 的 `done` 证据必须同时校验 CP1 PLAN Review 信封与任务卡/plan 摘要。
 
 - [ ] **Step 5: 运行测试**
 

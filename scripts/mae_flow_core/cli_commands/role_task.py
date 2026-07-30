@@ -103,8 +103,17 @@ def _survey_neighbors(path):
     for pair in tokens:
         value = next((item for item in pair if item), "")
         value = value.rstrip(".,，。:：;；)")
-        if value and os.path.isfile(value) and value not in result:
-            result.append(value)
+        root = os.path.realpath(os.getcwd())
+        absolute = os.path.realpath(value)
+        relative = os.path.relpath(absolute, root).replace("\\", "/")
+        if (
+            value
+            and os.path.isfile(absolute)
+            and relative != ".."
+            and not relative.startswith("../")
+            and relative not in result
+        ):
+            result.append(relative)
     return tuple(result)
 
 

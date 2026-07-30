@@ -470,6 +470,10 @@
         {
           "type": "spec_field",
           "field": "plan"
+        },
+        {
+          "type": "spec2code_plan_review",
+          "checkpoint": "CP1"
         }
       ],
       "next": {

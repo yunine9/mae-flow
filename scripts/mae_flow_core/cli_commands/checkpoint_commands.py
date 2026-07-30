@@ -133,6 +133,10 @@ def _checkpoint_quality_ports(st, ack=""):
             st, ack, expected, receipt),
         role_task_sha=lambda role, checkpoint: _role_task_sha(
             st, role, checkpoint),
+        registered_artifact_sha=lambda kind: str(
+            ((st.get("spec2code") or {}).get(kind) or {}).get(
+                "sha256", "")
+            or ""),
         now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
     )
 

@@ -68,6 +68,8 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
             ack_cursor=lambda: ("before-user-review",),
             verify_ack=lambda _receipt, _expected: (True, ""),
             role_task_sha=lambda _role, _checkpoint: TASK_CARD_SHA,
+            registered_artifact_sha=lambda kind: (
+                digest(PLAN) if kind == "plan" else ""),
             now=lambda: "2026-07-30 16:00:00",
         )
 
@@ -296,6 +298,7 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
         plan_path = ".mae-flow-work/plan-REQ-1.md"
         self.write(plan_path, PLAN)
         self.register("plan", plan_path)
+        self.state["spec"]["plan"] = plan_path
         review_card, review_task = self.role("craft-plan")
         plan_sha = self.state["spec2code"]["plan"]["sha256"]
         self.assertIn("REVIEW_TARGET_SHA256: " + plan_sha, review_card)
@@ -306,6 +309,23 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
         self.assertEqual(
             plan_sha,
             review_task["review_target_sha256"],
+        )
+        failures = mf.check_evidence(
+            FLOW["steps"]["build_plan"], self.state)
+        self.assertTrue(any(
+            "PLAN Review" in failure for failure in failures))
+        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
+        self.write(review_path, review(
+            findings=0,
+            result="CLEAN",
+            mode="PLAN",
+            task_card_sha=review_task["sha256"],
+            target_sha=plan_sha,
+        ))
+        self.assertEqual(
+            [],
+            mf.check_evidence(
+                FLOW["steps"]["build_plan"], self.state),
         )
         self.write(plan_path, PLAN + "\n")
         self.register("plan", plan_path)

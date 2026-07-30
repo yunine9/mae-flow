@@ -27,6 +27,7 @@ class CheckpointQualityPorts:
     ack_cursor: Callable[[], object]
     verify_ack: Callable[[object, str], object]
     role_task_sha: Callable[[str, str], str]
+    registered_artifact_sha: Callable[[str], str]
     now: Callable[[], str]
 
 
@@ -83,6 +84,11 @@ def prepare_checkpoint_plan(
     errors = validate_plan(plan_text, checkpoint)
     if errors:
         return _failure("当前 CP 计划结构校验失败: " + "；".join(errors))
+    plan_sha256 = ports.digest(plan_text)
+    if ports.registered_artifact_sha("plan") != plan_sha256:
+        return _failure(
+            "当前 CP 计划与已登记 plan 摘要不一致；"
+            "重新登记 plan 并重新签发 PLAN Reviewer 任务卡。")
     review_text, why = _read_expected(
         review_path,
         artifact_path("review", ticket, checkpoint, "plan"),
@@ -95,7 +101,7 @@ def prepare_checkpoint_plan(
         "plan",
         checkpoint,
         ports.role_task_sha("craft-plan", checkpoint),
-        ports.digest(plan_text),
+        plan_sha256,
     )
     if errors:
         return _failure("PLAN Reviewer 记录校验失败: " + "；".join(errors))

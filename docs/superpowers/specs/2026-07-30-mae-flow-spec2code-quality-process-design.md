@@ -375,6 +375,7 @@ Reviewer 每轮最多提出五个高价值问题，并使用第 13 节的统一�
 记录顶部必须带冻结信封：`CLEAN|FINDINGS`、PLAN/CODE 模式、CP、角色任务卡
 SHA256、被审计划或源码快照 SHA256。只有显式 `CLEAN` 才允许零条 Finding；
 `FINDINGS` 至少一条。信封与当前任务卡或审查目标不一致时必须重新派 Reviewer。
+首次 build_plan 的完成证据也必须包含 CP1 PLAN Review，不能只凭 roadmap/plan 文件存在推进。
 用户确认当前 CP 计划前再次核对 plan 与 Review 文件摘要；展示后任一文件变化都会
 清除旧收据并返回计划 Loop。
 

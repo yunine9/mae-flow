@@ -98,6 +98,10 @@ class CheckpointQualityTests(unittest.TestCase):
                 "" if verify else "missing ack",
             ),
             role_task_sha=lambda _role, _checkpoint: TASK_CARD_SHA,
+            registered_artifact_sha=lambda kind: (
+                hashlib.sha256(PLAN.encode("utf-8")).hexdigest()
+                if kind == "plan" else ""
+            ),
             now=lambda: "2026-07-30 13:00:00",
         )
 
@@ -173,6 +177,29 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertEqual("planned", item["status"])
         self.assertNotIn("plan_receipt", item)
         self.assertIn("发生变化", result.stdout[0])
+
+    def test_prepare_rejects_plan_changed_after_registration(self):
+        plan_path = ".mae-flow-work/plan-REQ-1.md"
+        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
+        changed = PLAN + "\n<!-- unregistered change -->\n"
+        changed_sha = hashlib.sha256(
+            changed.encode("utf-8")).hexdigest()
+        result = prepare_checkpoint_plan(
+            self.state(),
+            "CP1",
+            plan_path,
+            review_path,
+            "REQ-1",
+            self.ports({
+                plan_path: changed,
+                review_path: review(
+                    mode="PLAN",
+                    target_sha=changed_sha,
+                ),
+            }),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("已登记 plan 摘要不一致", result.stderr[0])
 
     def test_craft_review_rework_or_advances(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"

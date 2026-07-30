@@ -28,4 +28,6 @@ PLAN Reviewer 任务卡并复查，后续展示差异和受影响部分。
 任何“后续处理”都必须指向具体 `CPn / Task`，无法定位就是计划缺口。修改轮次不设上限。
 
 用户明确继续后执行 `python "{MAEFLOW_PATH}" done --choice continue`；要求修改时执行
-`python "{MAEFLOW_PATH}" done --choice revise`。月光宝盒真实执行 Task 分析和 PLAN 走读后保守继续。
+`python "{MAEFLOW_PATH}" done --choice revise`。`done` 会校验 CP1 PLAN Reviewer 任务卡、
+Review 信封和当前已登记 plan 摘要，缺失或漂移时拒绝推进。月光宝盒真实执行 Task 分析和
+PLAN 走读后保守继续。

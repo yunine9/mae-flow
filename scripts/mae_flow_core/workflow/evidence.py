@@ -58,6 +58,7 @@ def build_evidence_registry(*, workflow, agent, delivery, quality):
         ("final_review_clear", delivery.final_review_clear),
         ("spec_field", workflow.spec_field),
         ("spec2code_artifact", workflow.spec2code_artifact),
+        ("spec2code_plan_review", workflow.spec2code_plan_review),
         ("yaml_field", workflow.spec_field),
         ("spec_validate", workflow.spec_validate),
         ("tier_scope", workflow.tier_scope),

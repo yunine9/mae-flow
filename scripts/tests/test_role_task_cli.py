@@ -108,6 +108,13 @@ class RoleTaskCliTests(unittest.TestCase):
 
     def test_survey_neighbor_files_are_frozen_as_context_refs(self):
         with tempfile.TemporaryDirectory() as repository:
+            outside = tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+            )
+            outside.write("OUTSIDE = True\n")
+            outside.close()
             os.makedirs(os.path.join(repository, ".mae-flow-work"))
             os.makedirs(os.path.join(repository, "src"))
             with open(
@@ -125,7 +132,10 @@ class RoleTaskCliTests(unittest.TestCase):
                     "w",
                     encoding="utf-8",
             ) as stream:
-                stream.write("关键邻近代码：`src/service.py`\n")
+                stream.write(
+                    "关键邻近代码：`src/service.py`\n"
+                    "禁止扩展：`%s`\n" % outside.name
+                )
             previous = os.getcwd()
             try:
                 os.chdir(repository)
@@ -135,9 +145,11 @@ class RoleTaskCliTests(unittest.TestCase):
                 )
             finally:
                 os.chdir(previous)
+                os.unlink(outside.name)
         body = "\n".join(refs)
         self.assertIn("/src/service.py | SHA256 ", body)
         self.assertIn("/survey-REQ-1.md | SHA256 ", body)
+        self.assertNotIn(outside.name, body)
 
 
 if __name__ == "__main__":

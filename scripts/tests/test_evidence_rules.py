@@ -40,6 +40,8 @@ def make_ports(**overrides):
         "spec_data": lambda state: state.setdefault("spec", {}),
         "risk_acceptance": lambda _kind, _state: (False, ""),
         "business_changed_files": lambda _state: ([], ""),
+        "spec2code_plan_review": lambda _spec, _state: (
+            False, "missing review"),
     }
     values.update(overrides)
     return WorkflowEvidencePorts(**values)

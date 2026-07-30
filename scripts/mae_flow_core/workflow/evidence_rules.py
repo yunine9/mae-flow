@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
+from .evidence import legacy_result
 
 
 SPEC_REGISTER_FIELDS = ("design_doc", "plan", "verification_report")
@@ -36,6 +37,7 @@ class WorkflowEvidencePorts:
     spec_data: object
     risk_acceptance: object
     business_changed_files: object
+    spec2code_plan_review: object
 
 
 class WorkflowEvidenceRules:
@@ -230,6 +232,10 @@ class WorkflowEvidenceRules:
                 "旧检视结论不能复用。" % kind,
             )
         return EvidenceResult(True, "")
+
+    def spec2code_plan_review(self, spec, state):
+        return legacy_result(
+            self.ports.spec2code_plan_review(spec, state))
 
     def tier_scope(self, _spec, state):
         workflow = (

@@ -6,3 +6,4 @@
 - 不生成(no)。
 拿到按钮选择后直接 done --choice commit|local|no。harness 会把入库选择带进 story 步,
 定稿后不再追加一次询问，也不再要求用户输入确认句。
+本选择结束后，无论是否生成 STORY，都先进入编码计划检视。

@@ -333,7 +333,36 @@
           ]
         }
       ],
-      "next": "story_ask"
+      "next": "test_blueprint"
+    },
+    "test_blueprint": {
+      "title": "UT 行为蓝图检视",
+      "user_ack": true,
+      "choice_key": "test_blueprint_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "UT 行为蓝图已确认，继续"
+        ],
+        "revise": [
+          "需要调整 UT 行为蓝图"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "spec2code_artifact",
+          "kind": "blueprint"
+        }
+      ],
+      "next": {
+        "continue": "story_ask",
+        "revise": "test_blueprint"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
     },
     "story_ask": {
       "title": "STORY 生成询问",
@@ -374,7 +403,7 @@
       "next": {
         "commit": "story",
         "local": "story",
-        "no": "build_pace"
+        "no": "build_plan"
       }
     },
     "story": {
@@ -411,7 +440,44 @@
           "note": "待确认闭环未完成:文档残留『待确认』,或存在未经用户确认的裸『不涉及』。合法终态只有『不涉及(已确认)』——由你用 AskUserQuestion 拿到用户逐项拍板后亲自改写,agent 无权消除标注"
         }
       ],
-      "next": "build_pace"
+      "next": "build_plan"
+    },
+    "build_plan": {
+      "title": "编码计划检视",
+      "user_ack": true,
+      "choice_key": "build_plan_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "编码计划已确认，继续"
+        ],
+        "revise": [
+          "需要调整编码计划"
+        ]
+      },
+      "evidence": [
+        {
+          "type": "spec2code_artifact",
+          "kind": "roadmap"
+        },
+        {
+          "type": "spec2code_artifact",
+          "kind": "plan"
+        },
+        {
+          "type": "spec_field",
+          "field": "plan"
+        }
+      ],
+      "next": {
+        "continue": "build_pace",
+        "revise": "build_plan"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
     },
     "hf_open": {
       "title": "已定位问题修复 — 确认修改范围",

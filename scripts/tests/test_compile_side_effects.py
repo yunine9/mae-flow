@@ -39,6 +39,8 @@ class CompileSideEffectTests(unittest.TestCase):
                      result_seen=True, result="ok"),
             ToolCall("2", "Write", {"file_path": "/repo/failed.json"},
                      result_seen=True, is_error=True, result="failed"),
+            ToolCall("3", "Write", {"file_path": "/repo/unobserved.json"},
+                     result_seen=False),
         )
         direct = successful_direct_write_paths(calls, "/repo")
         self.assertEqual(("tracked/settings.json",), direct)

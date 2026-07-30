@@ -14,6 +14,8 @@
 - Existing CLI, Hook protocol, task-card digest, state compatibility, and legitimate delete/move behavior must remain intact.
 - Old `.mae-flow.json.agent-writes` documents containing only `paths` must remain readable.
 - A successful later Agent `Write`, `Edit`, or `MultiEdit` supersedes the compile-side-effect record for that path.
+- Exact snapshot/comparison/sidecar failures must log and fail open so an otherwise accepted COMPILE remains accepted.
+- A normal exact ledger blocks only the affected commit attempt, with recovery that neither deletes files nor creates a persistent lock.
 - Production code changes must follow red-green-refactor and include real behavior tests.
 
 ---
@@ -32,7 +34,8 @@
 - Modify `scripts/mae_flow_core/guard/ownership.py`: add an exact compile-side-effect blocking fact and decision.
 - Modify `scripts/mae_flow_core/cli_commands/git_ownership.py`: load the side-effect ledger and classify exact commit candidates.
 - Modify `scripts/mae_flow_core/cli_commands/gate.py`: pass the new fact into ownership policy.
-- Modify `scripts/tests/test_quality_task_cards.py`, `scripts/tests/test_state_core.py`, `scripts/tests/test_hook_compile_contract.py`, `scripts/tests/test_guard_ownership.py`, `scripts/tests/test_commit_ownership.py`, and `scripts/tests/probe_gate_smoke.py`: protect integration and compatibility behavior.
+- Modify `scripts/tests/test_quality_task_cards.py`, `scripts/tests/test_state_core.py`, `scripts/tests/test_hook_compile_contract.py`, `scripts/tests/test_task_scope.py`, `scripts/tests/test_guard_ownership.py`, `scripts/tests/test_commit_ownership.py`, and `scripts/tests/probe_gate_smoke.py`: protect integration and compatibility behavior.
+- Modify `scripts/tests/differential/goldens/phase6.json` through `phase15.json`: record the intentional detached COMPILE snapshot metadata in the existing task-card scenario.
 - Modify `MAINTAINERS.md` and `docs/superpowers/mae-flow-refactor-findings.md`: document the corrected provenance invariant and discovered defect.
 
 ### Task 1: Pure compile-side-effect attribution
@@ -140,6 +143,8 @@ git commit -m "feat: classify compile side effects by provenance"
 - Modify: `scripts/tests/test_quality_task_cards.py`
 - Modify: `scripts/tests/test_state_core.py`
 - Modify: `scripts/tests/test_hook_compile_contract.py`
+- Modify: `scripts/tests/test_task_scope.py`
+- Modify: `scripts/tests/differential/goldens/phase6.json` through `phase15.json`
 
 **Interfaces:**
 - Consumes: Task 1 `successful_direct_write_paths` and `compile_side_effect_paths`.
@@ -158,6 +163,8 @@ Extend `test_task_record_detaches_mutable_inputs` to pass `worktree_snapshot` an
 - load an old sidecar containing only `paths` without error.
 
 Add a COMPILE contract integration test proving the ledger is not written when the compile contract rejects.
+Add failure-path coverage proving snapshot and sidecar failures are logged
+without rejecting a COMPILE that already passed its contract.
 
 - [ ] **Step 2: Run the tests and verify RED**
 
@@ -217,6 +224,8 @@ Add a runtime method that computes current snapshot, extracts successful direct-
 ```
 
 Call it only after `_evaluate_compile_contract(...)` returns accepted. Update `_record_agent_write` so the same atomic sidecar update both records the direct write and removes that path from `compile_side_effects`.
+Treat provenance capture as best-effort: log snapshot/comparison/sidecar
+failures and return without changing the accepted COMPILE result.
 
 - [ ] **Step 6: Run the focused tests and verify GREEN**
 
@@ -306,19 +315,17 @@ Read `compile_side_effects` defensively from the existing sidecar. Normalize its
 
 - [ ] **Step 4: Add the pure hard-block decision**
 
-Insert `compile_side_effects` after foreign OpenSpec and before fallback strong artifacts in the existing precedence:
+Insert `compile_side_effects` after foreign OpenSpec and before fallback strong
+artifacts in the existing precedence. The `bash-compile-side-effects` message
+must list every affected path and distinguish recovery by candidate state:
 
-```python
-if facts.compile_side_effects:
-    return GateDecision(
-        "block",
-        "bash-compile-side-effects",
-        "提交前检测到由 COMPILE 命令产生或改写、且 Agent 未直接修改的文件: "
-        + "、".join(facts.compile_side_effects[:8])
-        + "。这些文件只能保留在本地构建现场，禁止进入本次提交。"
-        "执行 git restore --staged -- <上述路径> 只移出暂存区。",
-    )
-```
+- staged-only paths: `git restore --staged -- <paths>`;
+- same-command-only paths: remove them from `git add`, `git commit -a`, or the
+  commit pathspec;
+- paths in both groups: do both.
+
+Every recovery preserves the local file. The rule rejects only the current
+illegal commit attempt and creates no persistent lock.
 
 Wire the sixth return value through both `OwnershipFacts` construction sites in `gate.py`.
 
@@ -353,6 +360,12 @@ git commit -m "fix: block compile side effects from commits"
 **Files:**
 - Modify: `MAINTAINERS.md`
 - Modify: `docs/superpowers/mae-flow-refactor-findings.md`
+- Modify: `docs/superpowers/specs/2026-07-30-compile-side-effect-ownership-design.md`
+- Modify: `docs/superpowers/plans/2026-07-30-compile-side-effect-ownership.md`
+- Modify: `scripts/tests/test_compile_side_effects.py`
+- Modify: `scripts/tests/test_commit_ownership.py`
+- Modify: `scripts/mae_flow_core/cli_commands/gate.py`
+- Modify: `scripts/mae_flow_core/guard/ownership.py`
 
 **Interfaces:**
 - Consumes: the final rule and test evidence from Tasks 1–3.
@@ -368,6 +381,11 @@ description with the two-layer contract:
 
 Record the prior behavior as a reproducible guard coverage defect, including the
 normal configuration-file and tracked-file cases.
+
+Correct the earlier rejection premise: exact provenance capture failures are
+logged and fail open. Document that a normal ledger blocks only the illegal
+commit attempt with state-specific recovery, no persistent lock, and no file
+deletion.
 
 - [ ] **Step 2: Run formatting and placeholder checks**
 
@@ -403,7 +421,15 @@ remain identical.
 - [ ] **Step 4: Commit documentation and final proof**
 
 ```bash
-git add MAINTAINERS.md docs/superpowers/mae-flow-refactor-findings.md
+git add \
+  MAINTAINERS.md \
+  docs/superpowers/mae-flow-refactor-findings.md \
+  docs/superpowers/specs/2026-07-30-compile-side-effect-ownership-design.md \
+  docs/superpowers/plans/2026-07-30-compile-side-effect-ownership.md \
+  scripts/tests/test_compile_side_effects.py \
+  scripts/tests/test_commit_ownership.py \
+  scripts/mae_flow_core/cli_commands/gate.py \
+  scripts/mae_flow_core/guard/ownership.py
 git commit -m "docs: document compile output ownership invariant"
 ```
 
@@ -417,4 +443,6 @@ git log --oneline --decorate -6
 git diff HEAD~4..HEAD --stat
 ```
 
-Expected: clean worktree, four implementation commits after the design/plan commits, and only files listed in this plan changed.
+Expected: clean worktree, six implementation/closure commits after the
+design/plan commits (including the Task 2 and Task 3 review-fix commits), and
+only files listed in this plan changed.

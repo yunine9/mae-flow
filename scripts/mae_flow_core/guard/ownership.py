@@ -57,6 +57,48 @@ def _review_block(facts):
     )
 
 
+def _compile_side_effect_block(facts):
+    all_paths = tuple(dict.fromkeys(facts.compile_side_effects))
+    staged = tuple(dict.fromkeys(facts.staged_compile_side_effects))
+    command = tuple(dict.fromkeys(facts.command_compile_side_effects))
+    if not staged and not command:
+        staged = all_paths
+    staged_set = set(staged)
+    command_set = set(command)
+    staged_only = tuple(path for path in all_paths
+                        if path in staged_set and path not in command_set)
+    command_only = tuple(path for path in all_paths
+                         if path in command_set and path not in staged_set)
+    both = tuple(path for path in all_paths
+                 if path in staged_set and path in command_set)
+    message = (
+        "提交前检测到由 COMPILE 命令产生或改写、且 Agent 未直接修改的文件: "
+        + "、".join(all_paths)
+        + "。这些文件只能保留在本地构建现场，禁止进入本次提交。")
+    if staged_only:
+        message += (
+            "已在暂存区的路径: " + "、".join(staged_only)
+            + "。执行 git restore --staged -- <上述路径> 只移出暂存区，"
+            "不删除本地文件。")
+    if command_only:
+        message += (
+            "当前命令尚未执行但会纳入提交的路径: "
+            + "、".join(command_only)
+            + "。从当前 git add 清单、git commit -a 或 commit pathspec 中"
+            "移除这些路径后重试。")
+    if both:
+        message += (
+            "以下路径已暂存且当前命令会再次纳入提交: " + "、".join(both)
+            + "。先执行 git restore --staged -- <上述路径> 只移出暂存区，"
+            "不删除本地文件；再从当前 git add 清单、git commit -a 或 "
+            "commit pathspec 中移除这些路径后重试。")
+    return GateDecision(
+        "block",
+        "bash-compile-side-effects",
+        message,
+    )
+
+
 def _candidate_block(facts):
     if facts.inherited:
         return GateDecision(
@@ -82,45 +124,7 @@ def _candidate_block(facts):
             "选择不入库后由流程移入 .mae-flow-work/story。",
         )
     if facts.compile_side_effects:
-        all_paths = tuple(dict.fromkeys(facts.compile_side_effects))
-        staged = tuple(dict.fromkeys(facts.staged_compile_side_effects))
-        command = tuple(dict.fromkeys(facts.command_compile_side_effects))
-        if not staged and not command:
-            staged = all_paths
-        staged_set = set(staged)
-        command_set = set(command)
-        staged_only = tuple(path for path in all_paths
-                            if path in staged_set and path not in command_set)
-        command_only = tuple(path for path in all_paths
-                             if path in command_set and path not in staged_set)
-        both = tuple(path for path in all_paths
-                     if path in staged_set and path in command_set)
-        message = (
-            "提交前检测到由 COMPILE 命令产生或改写、且 Agent 未直接修改的文件: "
-            + "、".join(all_paths)
-            + "。这些文件只能保留在本地构建现场，禁止进入本次提交。")
-        if staged_only:
-            message += (
-                "已在暂存区的路径: " + "、".join(staged_only)
-                + "。执行 git restore --staged -- <上述路径> 只移出暂存区，"
-                "不删除本地文件。")
-        if command_only:
-            message += (
-                "当前命令尚未执行但会纳入提交的路径: "
-                + "、".join(command_only)
-                + "。从当前 git add 清单、git commit -a 或 commit pathspec 中"
-                "移除这些路径后重试。")
-        if both:
-            message += (
-                "以下路径已暂存且当前命令会再次纳入提交: " + "、".join(both)
-                + "。先执行 git restore --staged -- <上述路径> 只移出暂存区，"
-                "不删除本地文件；再从当前 git add 清单、git commit -a 或 "
-                "commit pathspec 中移除这些路径后重试。")
-        return GateDecision(
-            "block",
-            "bash-compile-side-effects",
-            message,
-        )
+        return _compile_side_effect_block(facts)
     if facts.strong_artifacts:
         return GateDecision(
             "block",

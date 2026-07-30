@@ -277,3 +277,48 @@
   evidence override propagation and bidirectional live Flow visibility;
   Phase-15 remains zero-diff
 - Product behavior: restored to the historical in-process API
+
+## MF-RF-017: Compile-owned normal and tracked files escaped the commit block
+
+- Status: resolved by `b61116d`, `d8b2aca`, `fd2b674`, `0a0ab29`, and
+  `573dc4b`
+- Classification: reproducible guard coverage defect
+- Baseline: `7910bfc` (491 tests passed)
+- Trigger: a validated COMPILE task creates a normal-looking configuration
+  file or modifies an already tracked configuration file, then that path is
+  included in a commit
+- Evidence: the prior pending-file policy blocked an unproven path only when it
+  was both newly added and matched a high-confidence temporary-artifact
+  pattern. `config/generated.properties` therefore produced only an advisory,
+  while tracked `config/runtime.properties` could not enter the new-file
+  branch at all
+- Root cause: the Agent-write sidecar proved direct file-tool edits but did not
+  record the complementary COMPILE-owned delta. The Gate inferred ownership
+  from file naming, new-file status, and absence of a direct edit rather than
+  from the validated COMPILE boundary
+- Resolution: COMPILE task cards now retain a detached all-path fingerprint
+  baseline; accepted completion computes the post-COMPILE delta, excludes
+  successful observed `Write`/`Edit`/`MultiEdit` calls, and stores exact paths
+  in a backward-compatible sidecar ledger. Commit ownership hard-blocks an
+  exact ledger match before the naming fallback, and a later successful direct
+  edit supersedes the recorded COMPILE ownership. Final release verification
+  also split candidate grouping/enforcement and recovery-message assembly into
+  focused helpers, restoring the established adapter and guard complexity
+  limits without changing policy
+- Regression: `test_compile_side_effects.py` covers normal/tracked deltas,
+  failed and unobserved direct-write results, path normalization, and
+  out-of-repository rejection; `test_hook_compile_contract.py` covers accepted
+  persistence, direct-edit supersession, rejected-contract ordering, and
+  fail-open diagnostics; `test_commit_ownership.py` covers normal new files,
+  tracked files, legacy/corrupt sidecars, same-command candidates, ambiguous
+  artifacts, and case-insensitive ledger identity; pure ownership tests and
+  real Gate probes cover blocking precedence and recovery guidance
+- Availability boundary: snapshot, comparison, or sidecar-update failures are
+  logged and fail open; they do not reject an otherwise accepted COMPILE.
+  With a normal exact ledger, only the illegal commit attempt is rejected.
+  Recovery removes affected paths from the index or current command without
+  deleting local files or creating a persistent lock
+- Behavior boundary: high-confidence naming remains the fallback when exact
+  provenance is absent. Legitimate move/delete behavior and unrelated golden
+  scenarios are unchanged; exact provenance adds blocks only for recorded
+  COMPILE paths

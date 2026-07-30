@@ -94,15 +94,19 @@ again if compilation changes it again.
 ### 5. Commit Gate
 
 Commit-candidate ownership receives a separate `compile_side_effects` fact.
-Any staged candidate in that fact is blocked regardless of:
+Any staged candidate or same-command candidate in that fact is blocked
+regardless of:
 
 - extension or file name;
 - directory;
 - whether it is new or already tracked;
 - whether it resembles a deliverable.
 
-The error identifies the file as a COMPILE-generated side effect and instructs
-the Agent to remove it from the index without deleting the local build result.
+The error identifies the file as a COMPILE-generated side effect and gives
+recovery for its actual state: remove staged paths from the index, or remove
+not-yet-staged paths from the current `git add`, `git commit -a`, or commit
+pathspec. These actions preserve the local build result. The block applies only
+to that illegal commit attempt; it creates no persistent lock.
 
 The current strong artifact classification remains as defense in depth for
 artifacts created outside a validated COMPILE task or for migrated in-flight
@@ -110,13 +114,16 @@ flows without the new ledger.
 
 ### 6. Failure behavior
 
-Snapshot or ledger read failures must not silently label arbitrary files as
-compile outputs. The COMPILE completion is rejected with an actionable
-contract error when its baseline cannot be compared safely.
+Availability and a smooth recovery path take precedence over exact capture.
+Capture-side snapshot, comparison, ledger-read, or ledger-write failures are
+logged and fail open. They must not silently label arbitrary files as compile
+outputs, and they must not reject an otherwise accepted COMPILE completion.
 
-Commit Gate keeps the existing fail-safe behavior for a corrupt provenance
-sidecar: strong artifact rules still apply, and diagnostics identify that exact
-provenance could not be loaded.
+When exact provenance cannot be captured or loaded, Commit Gate retains the
+existing high-confidence artifact fallback. When a normal exact ledger is
+available, it blocks only the affected commit attempt with actionable
+unstage/remove-from-command guidance. It never deletes the file or creates a
+persistent lock.
 
 ## Testing
 
@@ -142,5 +149,8 @@ architecture, and full strict suites.
   name looks legitimate.
 - A tracked file modified only by compilation is blocked.
 - Direct Agent edits remain distinguishable from command side effects.
+- Exact-capture failures remain observable without interrupting COMPILE.
+- A normal ledger block is recoverable without deleting local build outputs or
+  clearing a persistent lock.
 - Existing legitimate delete/move behavior is unchanged.
 - Existing high-confidence artifact protection remains active.

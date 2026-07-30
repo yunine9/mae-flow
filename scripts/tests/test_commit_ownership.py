@@ -7,11 +7,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core import cli_runtime as mf
+from mae_flow_core.cli_commands import git_ownership
 from mae_flow_core.guard.ownership import OwnershipFacts, decide_ownership
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
@@ -134,6 +136,26 @@ class CommitOwnershipTests(unittest.TestCase):
         git(self.repo, "add", generated)
 
         compile_side_effects, decision = self.decide_pending_files(self.state())
+
+        self.assertEqual([generated], compile_side_effects)
+        self.assertEqual("bash-compile-side-effects", decision.block.rule)
+
+    def test_case_insensitive_identity_matches_compile_ledger_spelling(self):
+        generated = "config/runtime.properties"
+        write(self.repo, generated, "compiled=false\n")
+        git(self.repo, "add", generated)
+        git(self.repo, "commit", "-qm", "track runtime config")
+        write(self.repo, generated, "compiled=true\n")
+        self.write_sidecar({
+            "CONFIG\\RUNTIME.PROPERTIES": {"task_sha256": "compile"},
+        })
+        git(self.repo, "add", generated)
+        windows_os = mock.Mock(wraps=os)
+        windows_os.name = "nt"
+
+        with mock.patch.object(git_ownership, "os", windows_os):
+            compile_side_effects, decision = self.decide_pending_files(
+                self.state())
 
         self.assertEqual([generated], compile_side_effects)
         self.assertEqual("bash-compile-side-effects", decision.block.rule)

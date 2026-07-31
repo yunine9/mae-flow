@@ -16,6 +16,8 @@ from mae_flow_core.lightcheck import (
     analyze_changed_with_timeout,
     render_markdown,
 )
+from mae_flow_core.lightcheck_nesting import annotate_control_nesting
+from mae_flow_core.lightcheck_source import _load_lizard
 
 
 def _write(root, path, text):
@@ -25,12 +27,47 @@ def _write(root, path, text):
         stream.write(text)
 
 
-def _long_body(indent, declaration, condition):
+def _nesting_depth(path, source):
+    lizard = _load_lizard()
+    info = lizard.analyze_file.analyze_source_code(path, source)
+    annotate_control_nesting(lizard, path, source, info.function_list)
+    return info.function_list[0].max_control_nesting
+
+
+def _nested_braced(
+        declaration, depth=6, indent="  ", base_indent="", body_count=45,
+        long_return=True):
     lines = [declaration]
-    lines.extend(indent + condition.format(index=index) for index in range(6))
-    lines.extend(indent + "value_%d = %d;" % (index, index) for index in range(45))
-    lines.append(indent + "return " + " + ".join(["value_0"] * 18) + ";")
-    lines.append("}")
+    for index in range(depth):
+        lines.append(
+            base_indent + indent * (index + 1)
+            + "if (value_%d) {" % index)
+    body_indent = base_indent + indent * (depth + 1)
+    lines.extend(
+        body_indent + "value_%d = %d;" % (index, index)
+        for index in range(body_count))
+    return_value = (
+        " + ".join(["value_0"] * 18)
+        if long_return else "value_0")
+    lines.append(body_indent + "return " + return_value + ";")
+    for index in reversed(range(depth)):
+        lines.append(base_indent + indent * (index + 1) + "}")
+    lines.append(base_indent + "}")
+    return "\n".join(lines) + "\n"
+
+
+def _nested_python(depth=6, body_count=45):
+    lines = ["def heavy(self, a, b, c, d, e, f):"]
+    for index in range(depth):
+        lines.append(
+            "    " * (index + 1) + "if value_%d:" % index)
+    body_indent = "    " * (depth + 1)
+    lines.extend(
+        body_indent + "value_%d = %d" % (index, index)
+        for index in range(body_count))
+    lines.append(
+        body_indent + "return "
+        + " + ".join(["value_0"] * 24))
     return "\n".join(lines) + "\n"
 
 
@@ -53,41 +90,26 @@ class LightCheckTests(unittest.TestCase):
         self.assertEqual(result["status"], "FINDINGS", result)
         self.assertEqual(
             {item["rule"] for item in result["findings"]},
-            {"MF-PARAM-5", "MF-FUNC-50", "MF-CC-5", "MF-LINE-120"},
+            {"MF-PARAM-5", "MF-FUNC-50", "MF-NEST-5", "MF-LINE-120"},
             result,
         )
 
     def test_cpp_java_javascript_python_cover_all_four_rules(self):
-        cpp = _long_body(
-            "  ",
-            "int heavy(int a, int b, int c, int d, int e, int f) {",
-            "if (value_{index}) value_{index}++;",
-        )
-        java_body = _long_body(
-            "    ",
-            "  int heavy(int a, int b, int c, int d, int e, int f) {",
-            "if (value_{index} > 0) value_{index}++;",
-        )
-        java = "class Demo {\n" + java_body.replace(
-            "\n}", "\n  }\n}", 1)
-        javascript = _long_body(
-            "  ",
-            "function heavy(a, b, c, d, e, f) {",
-            "if (value_{index}) value_{index}++;",
-        )
-        python_lines = [
-            "def heavy(self, a, b, c, d, e, f):",
-            *["    if value_%d:" % index for index in range(6)],
-            *["        value_%d += 1" % index for index in range(6)],
-            *["    value_%d = %d" % (index, index) for index in range(45)],
-            "    return " + " + ".join(["value_0"] * 24),
-            "",
-        ]
+        cpp = _nested_braced(
+            "int heavy(int a, int b, int c, int d, int e, int f) {")
+        java = (
+            "class Demo {\n"
+            + _nested_braced(
+                "  int heavy(int a, int b, int c, int d, int e, int f) {",
+                base_indent="  ")
+            + "}\n")
+        javascript = _nested_braced(
+            "function heavy(a, b, c, d, e, f) {")
         for path, source in (
                 ("src/heavy.cpp", cpp),
                 ("src/Demo.java", java),
                 ("src/heavy.js", javascript),
-                ("src/heavy.py", "\n".join(python_lines))):
+                ("src/heavy.py", _nested_python())):
             with self.subTest(path=path):
                 self.assert_all_rules(path, source)
 
@@ -103,18 +125,107 @@ class LightCheckTests(unittest.TestCase):
                 result,
             )
 
-    def test_exact_parameter_line_and_complexity_limits_are_allowed(self):
-        lines = [
+    def test_exact_parameter_line_and_nesting_limits_are_allowed(self):
+        source = _nested_braced(
             "int boundary(int a, int b, int c, int d, int e) {",
-            *["  if (v%d) v%d++;" % (index, index) for index in range(4)],
-            *["  int value%d = %d;" % (index, index) for index in range(44)],
-            "  return 0;",
-            "}",
-            "",
-        ]
-        result = self.analyze("boundary.cpp", "\n".join(lines))
+            depth=5, body_count=43, long_return=False)
+        result = self.analyze("boundary.cpp", source)
         self.assertEqual(result["status"], "CLEAN", result)
         self.assertEqual(result["findings"], [], result)
+
+    def test_parallel_branches_and_compound_conditions_do_not_accumulate(self):
+        fixtures = {
+            "parallel.cpp": "\n".join([
+                "int parallel() {",
+                *["  if (a%d && b%d || c%d) value++;" % (
+                    index, index, index) for index in range(12)],
+                "  return value;",
+                "}",
+                "",
+            ]),
+            "parallel.ts": "\n".join([
+                "function parallel() {",
+                *["  if (a%d && b%d || c%d) value++;" % (
+                    index, index, index) for index in range(12)],
+                "  return value;",
+                "}",
+                "",
+            ]),
+            "parallel.py": "\n".join([
+                "def parallel():",
+                *["    if a%d and b%d or c%d:" % (
+                    index, index, index) + "\n        value += 1"
+                  for index in range(12)],
+                "    return value",
+                "",
+            ]),
+        }
+        for path, source in fixtures.items():
+            with self.subTest(path=path):
+                self.assertEqual(_nesting_depth(path, source), 1)
+                result = self.analyze(path, source)
+                self.assertNotIn(
+                    "MF-NEST-5",
+                    {item["rule"] for item in result["findings"]},
+                    result,
+                )
+                self.assertNotIn(
+                    "MF-CC-5",
+                    {item["rule"] for item in result["findings"]},
+                    result,
+                )
+
+    def test_else_if_chains_stay_flat_and_braceless_nesting_increases(self):
+        flat_cpp = "\n".join([
+            "int flat() {",
+            "  if (a) value++;",
+            "  else if (b) value--;",
+            "  else if (c) value = 0;",
+            "  return value;",
+            "}",
+            "",
+        ])
+        flat_python = "\n".join([
+            "def flat():",
+            "    if a:",
+            "        value += 1",
+            "    elif b:",
+            "        value -= 1",
+            "    elif c:",
+            "        value = 0",
+            "    return value",
+            "",
+        ])
+        nested = "\n".join([
+            "int nested() {",
+            "  if (a)",
+            "    if (b)",
+            "      if (c)",
+            "        if (d)",
+            "          if (e)",
+            "            if (f)",
+            "              value++;",
+            "  return value;",
+            "}",
+            "",
+        ])
+        for path, source in (
+                ("flat.cpp", flat_cpp), ("flat.py", flat_python)):
+            with self.subTest(path=path):
+                self.assertEqual(_nesting_depth(path, source), 1)
+                self.assertNotIn(
+                    "MF-NEST-5",
+                    {item["rule"] for item in self.analyze(
+                        path, source)["findings"]},
+                )
+        result = self.analyze("nested.cpp", nested)
+        self.assertEqual(_nesting_depth("nested.cpp", nested), 6)
+        nesting = [
+            item for item in result["findings"]
+            if item["rule"] == "MF-NEST-5"
+        ]
+        self.assertEqual(len(nesting), 1, result)
+        self.assertEqual(nesting[0]["actual"], 6, result)
 
     def test_comment_blank_and_delimiter_only_lines_do_not_count(self):
         lines = ["int safe() {"]
@@ -130,45 +241,32 @@ class LightCheckTests(unittest.TestCase):
         )
 
     def test_existing_violation_without_regression_is_only_logged(self):
-        baseline_lines = [
-            "int oldDebt(int a, int b, int c, int d, int e, int f) {",
-            *["  if (v%d) v%d++;" % (index, index) for index in range(6)],
-            *["  int value%d = %d;" % (index, index) for index in range(45)],
-            "  return 0;",
-            "}",
-            "",
-        ]
-        baseline = "\n".join(baseline_lines)
-        current_lines = list(baseline_lines)
+        baseline = _nested_braced(
+            "int oldDebt(int a, int b, int c, int d, int e, int f) {")
+        current_lines = baseline.splitlines()
         current_lines.insert(2, "  // changed explanation only")
-        current = "\n".join(current_lines)
+        current = "\n".join(current_lines) + "\n"
         result = self.analyze(
             "legacy.cpp", current, changed={3}, baseline=baseline)
         self.assertEqual(result["findings"], [], result)
         self.assertEqual(
             {item["rule"] for item in result["existing_debt"]},
-            {"MF-PARAM-5", "MF-FUNC-50", "MF-CC-5"},
+            {"MF-PARAM-5", "MF-FUNC-50", "MF-NEST-5"},
             result,
         )
 
-    def test_new_complexity_threshold_crossing_is_reported(self):
-        baseline = "\n".join([
-            "int changed(int a) {",
-            "  if (a > 0) a++;",
-            "  if (a > 1) a++;",
-            "  if (a > 2) a++;",
-            "  if (a > 3) a++;",
-            "  return a;",
-            "}",
-            "",
-        ])
-        current = baseline.replace(
-            "  return a;", "  if (a > 4) a++;\n  return a;")
+    def test_new_nesting_threshold_crossing_is_reported(self):
+        baseline = _nested_braced(
+            "int changed(int a) {", depth=5, body_count=0,
+            long_return=False)
+        current = _nested_braced(
+            "int changed(int a) {", depth=6, body_count=0,
+            long_return=False)
         result = self.analyze(
-            "changed.cpp", current, changed={7}, baseline=baseline)
+            "changed.cpp", current, baseline=baseline)
         self.assertEqual(
             [item["rule"] for item in result["findings"]],
-            ["MF-CC-5"],
+            ["MF-NEST-5"],
             result,
         )
         self.assertEqual(result["findings"][0]["baseline"], 5)

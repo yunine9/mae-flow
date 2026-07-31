@@ -1,13 +1,13 @@
 """Stable facade for changed-code Lightcheck analysis."""
 
 from .lightcheck_source import (
-    COMPLEXITY_LIMIT,
     FUNCTION_LINE_LIMIT,
     LINE_LENGTH_LIMIT,
     MAX_FILES,
     MAX_FILE_BYTES,
     MAX_REPORTED_ITEMS,
     MAX_TOTAL_BYTES,
+    NESTING_LIMIT,
     PARAMETER_LIMIT,
     SUPPORTED_EXTENSIONS,
     TAB_WIDTH,

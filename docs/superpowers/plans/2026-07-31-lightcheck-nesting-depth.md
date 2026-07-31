@@ -4,7 +4,7 @@
 
 **Goal:** Replace Lightcheck's McCabe branch-count warning with a maximum structural nesting-depth warning.
 
-**Architecture:** A focused Lizard token processor computes `max_nesting_depth` while the existing Lightcheck pipeline continues to own changed scope, baseline comparison, reporting, and fail-open behavior. The metric is consumed through the existing function-rule table.
+**Architecture:** A focused analyzer computes `max_control_nesting` from Lizard's language-aware tokens for brace-based languages and Python's AST for Python. The existing Lightcheck pipeline continues to own changed scope, baseline comparison, reporting, and fail-open behavior. The metric is consumed through the existing function-rule table.
 
 **Tech Stack:** Python 3, vendored Lizard 1.23.0, `unittest`.
 
@@ -29,15 +29,15 @@
 
 **Interfaces:**
 - Consumes: Lizard `FileAnalyzer`, language readers, and function nesting state.
-- Produces: `analyzer_with_nesting(lizard)` and per-function integer `max_nesting_depth`.
+- Produces: `annotate_control_nesting(...)` and per-function integer `max_control_nesting`.
 
-- [ ] **Step 1: Write failing behavioral tests**
+- [x] **Step 1: Write failing behavioral tests**
 
 Add fixtures that assert parallel branches and compound conditions do not
 produce a nesting finding, while six truly nested controls produce
 `MF-NEST-5` for C++, JavaScript, and Python.
 
-- [ ] **Step 2: Verify the tests fail for the old McCabe behavior**
+- [x] **Step 2: Verify the tests fail for the old McCabe behavior**
 
 Run:
 
@@ -48,25 +48,24 @@ python -m unittest scripts.tests.test_lightcheck
 Expected: parallel-branch tests fail because `MF-CC-5` is still reported, and
 nested-depth expectations fail because `MF-NEST-5` does not exist.
 
-- [ ] **Step 3: Add the token processor and wire the metric**
+- [x] **Step 3: Add the structural analyzer and wire the metric**
 
 Implement:
 
 ```python
-def analyzer_with_nesting(lizard):
-    return lizard.FileAnalyzer(
-        lizard.get_extensions([StructuralNestingExtension(lizard)]))
+def annotate_control_nesting(lizard, path, source, functions):
+    ...
 ```
 
-Store `max_nesting_depth` in `_function_metrics` and replace the function rule
+Store `max_control_nesting` in `_function_metrics` and replace the function rule
 with:
 
 ```python
-("MF-NEST-5", "max_nesting_depth", NESTING_LIMIT,
+("MF-NEST-5", "control_nesting", NESTING_LIMIT,
  "函数控制结构嵌套深度超过 5")
 ```
 
-- [ ] **Step 4: Verify Lightcheck tests pass**
+- [x] **Step 4: Verify Lightcheck tests pass**
 
 Run:
 
@@ -87,13 +86,13 @@ Expected: all Lightcheck tests pass.
 - Consumes: `MF-NEST-5` result from Task 1.
 - Produces: accurate user-facing and maintainer-facing metric semantics.
 
-- [ ] **Step 1: Update public wording**
+- [x] **Step 1: Update public wording**
 
 Replace references to `McCabe 圈复杂度超过 5` with
 `控制结构嵌套深度超过 5`, explicitly noting that parallel branches do not
 accumulate.
 
-- [ ] **Step 2: Run targeted and complete verification**
+- [x] **Step 2: Run targeted and complete verification**
 
 Run:
 
@@ -108,4 +107,3 @@ Expected: targeted tests and the complete self-test suite exit 0.
 
 Commit all implementation, regression tests, and documentation together, then
 push `main` after verifying the worktree is clean and synchronized.
-

@@ -9,6 +9,7 @@ from .lightcheck_functions import (
     _FUNCTION_RULES, _baseline_matches, _empty_result, _finding,
     _function_metrics, _function_start, _valid_line_number,
 )
+from .lightcheck_nesting import annotate_control_nesting
 
 class _ChangedAnalyzer:
     def __init__(
@@ -78,7 +79,10 @@ class _ChangedAnalyzer:
 
     def _parse(self, path, source):
         try:
-            return self.lizard.analyze_file.analyze_source_code(path, source)
+            info = self.lizard.analyze_file.analyze_source_code(path, source)
+            annotate_control_nesting(
+                self.lizard, path, source, info.function_list)
+            return info
         except Exception as exc:
             self._skip(path + ": 语法分析失败(" + str(exc) + ")")
             return None

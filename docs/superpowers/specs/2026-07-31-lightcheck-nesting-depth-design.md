@@ -24,17 +24,18 @@ the total number of independent branches.
 
 ## Implementation
 
-Add a small first-party Lizard token processor dedicated to structural nesting.
-For brace-based languages it tracks control bodies, including braceless bodies,
-without counting boolean operators. For Python it consumes the indentation
-nesting already maintained by Lizard's Python reader. The processor writes
-`max_nesting_depth` onto each parsed function.
+Add a small first-party structural nesting analyzer alongside Lizard. For
+brace-based languages it reads Lizard's language-aware tokens and parses
+control bodies, including braceless bodies, without counting boolean
+operators. For Python it walks the standard-library AST so indentation,
+`elif`, and exception bodies retain their native structure. The analyzer
+writes `max_control_nesting` onto each parsed function.
 
-Lightcheck reads `max_nesting_depth` instead of
+Lightcheck reads `max_control_nesting` instead of
 `cyclomatic_complexity`. The public finding becomes:
 
 - rule: `MF-NEST-5`
-- metric: `max_nesting_depth`
+- metric: `control_nesting`
 - message: `函数控制结构嵌套深度超过 5`
 
 The old `MF-CC-5` rule is removed rather than kept as a second warning.
@@ -49,4 +50,3 @@ Regression tests cover C++, Java, JavaScript/TypeScript, and Python:
 - compound boolean conditions remain at depth 1;
 - exact depth 5 remains clean;
 - baseline debt behavior continues to compare the new metric.
-

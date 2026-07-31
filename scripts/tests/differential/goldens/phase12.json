@@ -149,8 +149,8 @@
   "combined_git_add_flags": {
     "files": {
       ".mae-flow-work/lightcheck/latest.md": {
-        "sha256": "e3ff9fdcb2e594c13122f2c3d89f0502ec07df5fcc20d55dc201e6cf5eca5881",
-        "size": 637
+        "sha256": "8282a42fe74ad72d3593cda70457856c6b9e8e472cefbbad986118e584a308e1",
+        "size": 636
       },
       ".mae-flow.json": {
         "sha256": "baebdcccdf7a0b701e07da6872fcf25292e9c0b133e6b1d66beed1ed812cf58d",
@@ -195,8 +195,8 @@
         "size": 1926
       },
       ".mae-flow-work/lightcheck/latest.md": {
-        "sha256": "c7a9bd4f0355d848436c78fce23b020466d502b1f6ec33ad90bb8a75741dfdd3",
-        "size": 624
+        "sha256": "4b8745248cafcaf6d8a3d10acb0014936c6fef3cb186752fbb5f62d227532a26",
+        "size": 623
       },
       ".mae-flow.json": {
         "sha256": "133d666a656b2ba95714a88bbbc9cbf5f5ab1c1df586c555d5f4862e301db3e7",

@@ -2,9 +2,8 @@
 
 This module intentionally has no gate semantics.  It reports only high
 confidence findings, skips uncertain/generated input, and lets every caller
-fail open.  Function discovery and cyclomatic complexity come from the pinned
-Lizard runtime; Mae-Flow owns the changed-scope, effective-line and reporting
-semantics.
+fail open. Function discovery comes from the pinned Lizard runtime; Mae-Flow
+owns structural nesting, changed-scope, effective-line and reporting semantics.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from io import StringIO
 
 PARAMETER_LIMIT = 5
 FUNCTION_LINE_LIMIT = 50
-COMPLEXITY_LIMIT = 5
+NESTING_LIMIT = 5
 LINE_LENGTH_LIMIT = 120
 TAB_WIDTH = 4
 MAX_FILE_BYTES = 2 * 1024 * 1024

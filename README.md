@@ -403,7 +403,7 @@ npm install -g @baize/codecheckcli --registry=https://cmc.centralrepo.rnd.huawei
 
 为减少问题积攒到正式 CodeCheck，编码阶段还带一个内置轻量预检：提交 Hook 只看本次真实提交快照，
 手动执行只看本轮当前代码差异，并排除未变化的启动前脏文件。它会提前提示“参数超过 5、函数有效代码行
-超过 50、McCabe 圈复杂度超过 5、修改行超过 120 字符”。
+超过 50、控制结构最大嵌套深度超过 5、修改行超过 120 字符”。
 提交前由 Hook 静默运行，编译任务生成时再兜底一次；C/C++（含模板实现文件）、Java、
 JavaScript/TypeScript（含现代模块扩展名）和 Python
 使用插件内固定版本的语法分析器，不要求项目安装依赖。它不会新增流程节点或门禁：解析不确定、超时、

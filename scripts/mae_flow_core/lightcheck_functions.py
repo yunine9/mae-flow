@@ -1,7 +1,7 @@
 """Function discovery, matching, and finding construction for Lightcheck."""
 
 from .lightcheck_source import (
-    COMPLEXITY_LIMIT, FUNCTION_LINE_LIMIT, PARAMETER_LIMIT, _normalized, re,
+    FUNCTION_LINE_LIMIT, NESTING_LIMIT, PARAMETER_LIMIT, _normalized, re,
 )
 
 def _quoted_step(char, quote_state):
@@ -170,7 +170,7 @@ def _function_metrics(path, source, function, code_lines):
     return {
         "parameter_count": parameter_count,
         "effective_lines": len(code_lines.intersection(range(start, end + 1))),
-        "cyclomatic_complexity": int(function.cyclomatic_complexity),
+        "control_nesting": int(function.max_control_nesting),
     }
 
 
@@ -279,8 +279,8 @@ _FUNCTION_RULES = (
     ("MF-PARAM-5", "parameter_count", PARAMETER_LIMIT, "函数入参超过 5 个"),
     ("MF-FUNC-50", "effective_lines", FUNCTION_LINE_LIMIT,
      "函数有效代码行超过 50 行"),
-    ("MF-CC-5", "cyclomatic_complexity", COMPLEXITY_LIMIT,
-     "函数 McCabe 圈复杂度超过 5"),
+    ("MF-NEST-5", "control_nesting", NESTING_LIMIT,
+     "函数控制结构嵌套深度超过 5"),
 )
 
 

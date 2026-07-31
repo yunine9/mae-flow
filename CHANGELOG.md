@@ -4,6 +4,8 @@
 
 - compile-agent 与 build-fix 改为一轮一次同步调用，以编译提供方返回作为完成信号；删除后台任务、
   固定 sleep 和日志轮询，快速构建不再白等，宿主超时也不再触发无意义重试；
+- build-fix 的文件定位改用任务卡或当前 Git 工作区，不再扫描 `/home/claude`、依赖 `/tmp` 快照；
+  Bash 数组完整保留 Windows 路径中的空格，多模块仍按最近 CMakeLists 分别编译；
 - CodeCheck/UT 仅同步继承修复后编译的单次调用方式，原有检查、测试、任务卡和收据门禁不变；
 - 将内部 `build-fix` 视为不透明编译权威：Hook 验证真实 Skill 调用和宿主错误状态，
   不再用 `EXECUTED_BUILD`/`BUILD_ERRORS` 文案二次猜测 Maven/g++ 结果；

@@ -144,6 +144,9 @@ cd "$BUILD_DIR" && mcde build -i
 ````
 
 Change `build-fix/SKILL.md`'s Step 2 summary to “单次同步执行，命令返回即完成”.
+Replace Step 1's `/home/claude`/timestamp scan with task-card paths or
+NUL-delimited repository-local Git paths stored in a quoted Bash array; missing
+paths fail explicitly instead of falling back to a project-root build.
 Rebuild `build-fix.skill` without adding unrelated files, then run the Skill
 Creator validator against the extracted folder:
 

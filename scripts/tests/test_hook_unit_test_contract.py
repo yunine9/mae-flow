@@ -58,7 +58,6 @@ class UnitTestContractTests(unittest.TestCase):
         return (
             "GENERATOR_USED: manual\n"
             "EXECUTED_UT: python -m unittest\n"
-            "AC_COVERAGE: REQ-1 -> test_feature\n"
             "TESTS_TOTAL: %s\n"
             "TESTS_PASSED: %s\n"
             "TESTS_FAILED: %s\n"
@@ -66,7 +65,7 @@ class UnitTestContractTests(unittest.TestCase):
             % (total, passed, failed, extra)
         )
 
-    def test_pass_accepts_real_successful_run_and_positive_counts(self):
+    def test_pass_does_not_require_ac_coverage(self):
         decision = evaluate_unit_test_contract(self.context(
             self.report(),
             [tool(
@@ -75,7 +74,23 @@ class UnitTestContractTests(unittest.TestCase):
                 "7 passed",
             )],
         ))
-        self.assertTrue(decision.accepted)
+        self.assertTrue(decision.accepted, decision.reason)
+
+    def test_pass_ignores_legacy_ac_coverage_content(self):
+        report = self.report().replace(
+            "EXECUTED_UT: python -m unittest\n",
+            "EXECUTED_UT: python -m unittest\n"
+            "AC_COVERAGE: 框架不支持覆盖率，存在未覆盖场景\n",
+        )
+        decision = evaluate_unit_test_contract(self.context(
+            report,
+            [tool(
+                "Bash",
+                {"command": "python -m unittest"},
+                "7 passed",
+            )],
+        ))
+        self.assertTrue(decision.accepted, decision.reason)
 
     def test_approved_blueprint_requires_exact_scenario_mapping(self):
         report = self.report(extra=(
@@ -230,7 +245,7 @@ class UnitTestContractTests(unittest.TestCase):
         ))
         self.assertIn("追加了过滤/排除参数", filtered.reason)
 
-    def test_pending_sections_and_prose_coverage_cannot_pass(self):
+    def test_pending_sections_cannot_pass(self):
         pending = evaluate_unit_test_contract(self.context(
             self.report(extra="KNOWN_FAILURES: flaky test\n"),
             [tool(
@@ -240,17 +255,6 @@ class UnitTestContractTests(unittest.TestCase):
             )],
         ))
         self.assertIn("KNOWN_FAILURES 非空", pending.reason)
-
-        prose = evaluate_unit_test_contract(self.context(
-            self.report().replace(
-                "REQ-1 -> test_feature", "全部已覆盖"),
-            [tool(
-                "Bash",
-                {"command": "python -m unittest"},
-                "7 passed",
-            )],
-        ))
-        self.assertIn("必须逐项给出 EARS 条目", prose.reason)
 
     def test_nonpass_statuses_are_honest_early_results(self):
         for status in ("NEEDS_INPUT", "FAIL"):

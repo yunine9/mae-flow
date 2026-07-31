@@ -46,7 +46,6 @@ from mae_flow_core.quality.agent_contracts import (
     AgentContractContext as _AgentContractContext,
 )
 from mae_flow_core.quality.agent_reports import (
-    ac_coverage_has_mapping as _core_ac_coverage_has_mapping,
     empty_section as _core_empty_section,
     report_field as _core_report_field,
     report_number as _core_report_number,

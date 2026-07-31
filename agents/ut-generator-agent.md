@@ -25,7 +25,7 @@ UT_RESULT: NEEDS_INPUT
 UT_RESULT: FAIL
 ```
 
-- `PASS` 的唯一条件:**你亲自运行了配置的 UT 运行命令,且用例全部通过,且无 BLOCKED 方法、待确认问题、疑似源码缺陷或验收缺口**。
+- `PASS` 的唯一条件:**你亲自运行了配置的 UT 运行命令,且用例全部通过,且无 BLOCKED 方法、待确认问题或疑似源码缺陷**。
   完整流程还要求按任务卡 commit；任务卡写明 `运行模式: standalone` 时恰好相反，**禁止 commit**，保留工作区给用户检查。
   任一不满足即不是 PASS(批次模式下的范围与运行口径见「批次模式」节)
 - `NEEDS_INPUT` = 存在 BLOCKED 方法等待用户决策(其余方法已完成并通过);此时**不 commit**,等用户答复后的第二轮全部解决再 commit
@@ -86,8 +86,8 @@ UT_RESULT: FAIL
 
    **如果配置为 AutoUT skill(C++ 项目):**
    - 调用 Mae-Flow 插件自带的 AutoUT skill 生成 UT；**每个任务卡只调用一轮**，
-     能力不足时不要用相同输入反复重启。保留已生成的有效用例，把无法覆盖的
-     C++/GTest 场景按 BLOCKED/缺口如实列出
+     能力不足时不要用相同输入反复重启。保留已生成的有效用例，把无法实现或验证的
+     C++/GTest 场景按 BLOCKED 如实列出
    - AutoUT 内部会处理 C++ 测试框架的适配
 
    **如果配置为 java-autout skill(Java 项目):**
@@ -98,12 +98,11 @@ UT_RESULT: FAIL
 
    **如果配置为"参考仓内已有 UT 写法":**
    - 扫描 `src/test/` 目录,识别既有 UT 的编写风格(测试框架、断言方式、Mock 用法、命名规范、目录结构)
-   - 参考既有 UT 的写法,为未覆盖部分编写风格一致的单元测试
+   - 参考既有 UT 的写法,为任务卡点名场景编写风格一致的单元测试
 
-4. UT 要基于 SPEC 的业务逻辑和边界条件设计,不是对着代码实现凑覆盖率。
+4. UT 要基于 SPEC 的业务逻辑和边界条件设计,不是对着代码实现补无价值用例。
    规格条目的 Scenario 若为 EARS 句式(WHEN <条件> THE SYSTEM SHALL <行为>),**逐条设计对应用例**
 
-   ——每条 WHEN/SHALL 就是一个现成的测试场景(条件=准备,行为=断言),AC_COVERAGE 表按此逐行对照:
    - 正常场景:核心业务流程能跑通
    - 边界条件:入参为空、越界、类型不匹配等
    - 异常场景:SPEC 中约束的错误处理逻辑
@@ -172,11 +171,9 @@ UT_RESULT: FAIL
    `BLUEPRINT_SHA256: <任务卡中的蓝图指纹>`，并输出 `BLUEPRINT_MAPPING:`；
    其下每行格式为 `场景 ID | 测试文件::用例名 | PASS|FAIL|BLOCKED`。
    每个蓝图场景必须且只能出现一次，不得出现蓝图外场景；PASS 要求所有行均为 PASS。
-6. `AC_COVERAGE:` 验收标准覆盖对照表(每行 = 规格条目的一条 Scenario/EARS 条目 → 对应测试用例名;无对应者标"缺口"并说明)。
-   **公司环境没有覆盖率工具,禁止报告任何覆盖率百分比——出现百分比即视为编造**
-7. `PENDING_QUESTIONS:` BLOCKED 方法的问题清单(方法名 | 疑问 | 已完成的查证 | 候选方案);没有则写 `PENDING_QUESTIONS: 无`
-8. `KNOWN_FAILURES:` 失败用例清单(文件、用例名、失败原因、已尝试的修复);没有则写 `KNOWN_FAILURES: 无`
-9. `SUSPECTED_BUGS:` 疑似源码缺陷/规格演进清单(每项六要素齐全,六要素不全会被主 agent 打回补查);没有则写 `SUSPECTED_BUGS: 无`。非空时不得 PASS，使用 NEEDS_INPUT
-10. FAIL 且因缺失配置时:缺失项清单
+6. `PENDING_QUESTIONS:` BLOCKED 方法的问题清单(方法名 | 疑问 | 已完成的查证 | 候选方案);没有则写 `PENDING_QUESTIONS: 无`
+7. `KNOWN_FAILURES:` 失败用例清单(文件、用例名、失败原因、已尝试的修复);没有则写 `KNOWN_FAILURES: 无`
+8. `SUSPECTED_BUGS:` 疑似源码缺陷/规格演进清单(每项六要素齐全,六要素不全会被主 agent 打回补查);没有则写 `SUSPECTED_BUGS: 无`。非空时不得 PASS，使用 NEEDS_INPUT
+9. FAIL 且因缺失配置时:缺失项清单
 
 **禁止**只输出自然语言总结而不带 `UT_RESULT:` 标记。

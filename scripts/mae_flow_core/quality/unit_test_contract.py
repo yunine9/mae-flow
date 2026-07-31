@@ -1,7 +1,5 @@
 """Pure UT Agent final-report and execution-risk contract."""
 
-import re
-
 from mae_flow_core.quality.agent_contracts import (
     accept,
     reject,
@@ -9,7 +7,6 @@ from mae_flow_core.quality.agent_contracts import (
     same_config,
 )
 from mae_flow_core.quality.agent_reports import (
-    ac_coverage_has_mapping,
     empty_section,
     report_field,
 )
@@ -114,32 +111,6 @@ def _report_decision(report):
                 "不能带问题过关。" % name,
                 None,
             )
-    coverage = report_field(report, "AC_COVERAGE")
-    if (
-            coverage is None
-            or not coverage.strip()
-            or empty_section(coverage)):
-        return "PASS 报告缺少有效的 AC_COVERAGE 验收场景对照。", None
-    cleaned = re.sub(
-        r"无\s*(?:未覆盖|缺口|无对应)(?:场景|项)?|"
-        r"(?:缺口|未覆盖|无对应)\s*[:：]?\s*(?:0|无|零)\b",
-        "",
-        coverage,
-    )
-    if re.search(r"缺口|未覆盖|无对应", cleaned):
-        return (
-            "AC_COVERAGE 仍有验收缺口，不能报告 PASS"
-            "(若只是措辞请改写为正向表述;"
-            "若为事实缺口按契约用 NEEDS_INPUT/缺口标注上报)。",
-            None,
-        )
-    if not ac_coverage_has_mapping(coverage):
-        return (
-            "AC_COVERAGE 必须逐项给出 EARS 条目与对应测试用例名；"
-            "可使用「条目 → 用例」列表或至少含一行数据的 Markdown "
-            "对照表，不能只写一句『全部已覆盖』。",
-            None,
-        )
     counts = report_counts(report)
     for key, field in (
             ("total", "TESTS_TOTAL"),

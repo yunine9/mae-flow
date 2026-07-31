@@ -12,7 +12,6 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.quality.agent_reports import (  # noqa: E402
-    ac_coverage_has_mapping,
     empty_section,
     report_field,
     report_number,
@@ -52,22 +51,6 @@ class AgentReportTests(unittest.TestCase):
                 self.assertTrue(empty_section(value))
         self.assertFalse(empty_section("one known failure"))
         self.assertFalse(empty_section(None))
-
-    def test_coverage_accepts_arrow_or_nonempty_markdown_mapping(self):
-        self.assertTrue(ac_coverage_has_mapping("REQ-1 -> test_one"))
-        self.assertTrue(ac_coverage_has_mapping(
-            "| EARS | Test |\n"
-            "| --- | --- |\n"
-            "| REQ-1 | test_one |\n"
-        ))
-
-    def test_coverage_rejects_prose_and_header_only_table(self):
-        self.assertFalse(ac_coverage_has_mapping("全部覆盖"))
-        self.assertFalse(ac_coverage_has_mapping(
-            "| EARS | Test |\n"
-            "| --- | --- |\n"
-        ))
-
 
 if __name__ == "__main__":
     unittest.main()

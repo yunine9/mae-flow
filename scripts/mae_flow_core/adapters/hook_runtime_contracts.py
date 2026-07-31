@@ -98,17 +98,6 @@ class HookContractsMixin:
             "result": "accepted",
         })
 
-    def _ac_coverage_has_mapping(self, coverage):
-        """Accept either arrow mappings or a real Markdown EARS/test table.
-
-        The agent contract asks for a comparison table, so requiring a literal
-        arrow rejects the most natural compliant representation.  A Markdown table
-        only counts when it has a separator row and at least one non-empty data row;
-        a header-only table or a prose assertion still does not prove coverage.
-        """
-        return _core_ac_coverage_has_mapping(coverage)
-
-
     def _ut_contract(self, status, report, tool_calls=None, soft=False):
         def bail(msg):
             self._contract_bail("UT", msg, soft)

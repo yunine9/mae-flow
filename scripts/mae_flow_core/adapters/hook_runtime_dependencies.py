@@ -24,10 +24,12 @@ from mae_flow_core import (
 from mae_flow_core.application.hooks.receipts import (
     ReceiptContext as _ReceiptContext,
     askuser_receipt as _askuser_receipt,
+    plan_compile_run_receipt as _plan_compile_run_receipt,
     plan_codecheck_build_receipt as _plan_codecheck_build_receipt,
     plan_codecheck_fullcheck_receipt as _plan_codecheck_fullcheck_receipt,
     plan_ut_generator_receipt as _plan_ut_generator_receipt,
     plan_ut_run_receipt as _plan_ut_run_receipt,
+    reusable_compile_run_receipt as _core_reusable_compile_run,
     reusable_codecheck_build_receipt as _core_reusable_codecheck_build,
     reusable_codecheck_fullcheck_receipt as _core_reusable_codecheck_fullcheck,
     reusable_ut_receipt as _core_reusable_ut_receipt,

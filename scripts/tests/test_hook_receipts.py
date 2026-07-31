@@ -14,10 +14,12 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core.application.hooks.receipts import (  # noqa: E402
     ReceiptContext,
+    plan_compile_run_receipt,
     plan_codecheck_build_receipt,
     plan_codecheck_fullcheck_receipt,
     plan_ut_generator_receipt,
     plan_ut_run_receipt,
+    reusable_compile_run_receipt,
     reusable_codecheck_build_receipt,
     reusable_codecheck_fullcheck_receipt,
     reusable_ut_receipt,
@@ -29,6 +31,97 @@ TASK = {"step": "tw_ut", "sha256": "task-digest", "head": HEAD}
 
 
 class HookReceiptTests(unittest.TestCase):
+    def test_compile_receipt_binds_opaque_run_without_storing_raw_result(self):
+        task = {
+            "step": "build",
+            "sha256": "compile-task",
+            "issuance_id": "issue-1",
+            "checkpoint": "CP1",
+            "precommit_review": True,
+        }
+        receipt = plan_compile_run_receipt(
+            task,
+            ReceiptContext(
+                "2026-07-31 20:00:00",
+                HEAD,
+                {"src/a.cpp": "fingerprint"},
+            ),
+            "build-fix",
+            "OK",
+            "internal maven and g++ output",
+        )
+
+        self.assertEqual("issue-1", receipt["task_issuance_id"])
+        self.assertEqual("CP1", receipt["checkpoint"])
+        self.assertEqual("build-fix", receipt["build"])
+        self.assertEqual("OK", receipt["status"])
+        self.assertEqual(
+            {"src/a.cpp": "fingerprint"},
+            receipt["source_snapshot"],
+        )
+        self.assertEqual(
+            hashlib.sha256(
+                b"internal maven and g++ output").hexdigest(),
+            receipt["result_sha256"],
+        )
+        self.assertNotIn("internal maven and g++ output", repr(receipt))
+
+    def test_compile_reuse_requires_same_issuance_route_status_and_snapshot(self):
+        task = {
+            "step": "build",
+            "sha256": "compile-task",
+            "issuance_id": "issue-1",
+            "checkpoint": "CP1",
+            "precommit_review": True,
+        }
+        snapshot = {"src/a.cpp": "one"}
+        receipt = plan_compile_run_receipt(
+            task,
+            ReceiptContext("now", HEAD, snapshot),
+            "build-fix",
+            "OK",
+            "opaque",
+        )
+
+        self.assertEqual(
+            receipt,
+            reusable_compile_run_receipt(
+                receipt,
+                task,
+                "build-fix",
+                "OK",
+                source_snapshot=snapshot,
+            ),
+        )
+        self.assertIsNone(reusable_compile_run_receipt(
+            receipt,
+            dict(task, issuance_id="issue-2"),
+            "build-fix",
+            "OK",
+            source_snapshot=snapshot,
+        ))
+        self.assertIsNone(reusable_compile_run_receipt(
+            receipt,
+            task,
+            "another-build",
+            "OK",
+            source_snapshot=snapshot,
+        ))
+        self.assertIsNone(reusable_compile_run_receipt(
+            receipt,
+            task,
+            "build-fix",
+            "BLOCKED",
+            source_snapshot=snapshot,
+        ))
+        self.assertIsNone(reusable_compile_run_receipt(
+            receipt,
+            task,
+            "build-fix",
+            "OK",
+            source_snapshot={"src/a.cpp": "two"},
+        ))
+
     def test_build_receipt_binds_task_head_and_configuration(self):
         receipt = plan_codecheck_build_receipt(
             TASK,

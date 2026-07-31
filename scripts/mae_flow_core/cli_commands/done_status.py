@@ -346,17 +346,39 @@ def cmd_accept_risk(flow, st, args):
         api._authorization_message(st, args.message_id))
     if not ok:
         api.die("accept-risk 授权验真失败:" + why, 2)
+    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
+    precommit_compile = bool(
+        kind == "COMPILE" and task.get("precommit_review"))
     dirty = api._blocking_dirty_source_paths(st, flow)
-    if dirty:
+    if dirty and not precommit_compile:
         api.die("风险确认必须绑定稳定代码版本，但仍有未提交源码/测试/构建文件: " + "、".join(dirty[:8])
             + "。先按本单规范提交，再向用户展示风险并重新确认。", 2)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     inherited_dirty = api._unchanged_initial_dirty_source_paths(st, flow)
-    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     rec = {"step": sid, "head": api.sh("git rev-parse --verify HEAD"), "at": now,
            "task_sha256": task.get("sha256", ""), "reason": args.reason,
            "authorization": authorization_receipt,
            "unchanged_initial_dirty": inherited_dirty}
+    if precommit_compile:
+        task_head = task.get("head", "")
+        if (
+                not task_head
+                or api.argv_out([
+                    "git", "cat-file", "-t", task_head]) != "commit"):
+            api.die("分段编译风险确认无法绑定任务卡源码基线，请重新签发 COMPILE 任务卡。", 2)
+        issued_snapshot = task.get("source_snapshot")
+        current_snapshot = api._source_snapshot_since(
+            task_head, st, flow)
+        if (
+                not isinstance(issued_snapshot, dict)
+                or current_snapshot != issued_snapshot):
+            api.die("分段编译风险确认使用的 COMPILE 任务卡已过期；"
+                    "源码快照变化后必须重新签发任务卡，再让用户确认风险。", 2)
+        rec.update({
+            "task_issuance_id": task.get("issuance_id", ""),
+            "checkpoint": task.get("checkpoint", ""),
+            "source_snapshot": current_snapshot,
+        })
     st.setdefault("risk_acceptances", {})[kind] = rec
     st.setdefault("history", []).append(
         {"step": sid, "result": "accept-risk:" + kind, "note": args.reason, "at": now})
@@ -366,7 +388,13 @@ def cmd_accept_risk(flow, st, args):
     if inherited_dirty:
         print("审计:以下流程启动前已脏文件指纹未变，不算本单变化: "
               + "、".join(inherited_dirty[:8]))
-    print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，本次放行自动失效。现在重新执行 done。")
+    if precommit_compile:
+        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
+              "本次放行自动失效。现在执行 checkpoint ready %s。"
+              % (task.get("checkpoint", "") or "<当前检查点>"))
+    else:
+        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
+              "本次放行自动失效。现在重新执行 done。")
 
 def _workflow_chain(flow, wf):
     """按交付方式线性展开步骤链(可选询问步取"做"分支展示完整形态)。"""

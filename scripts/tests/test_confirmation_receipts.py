@@ -396,6 +396,112 @@ class ConfirmationReceiptTests(unittest.TestCase):
                 self.assertEqual("m1", parsed.message_id)
                 self.assertFalse(hasattr(parsed, "ack"))
 
+    def test_precommit_compile_risk_binds_dirty_checkpoint_snapshot(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        with open(
+                os.path.join(root, ".gitignore"),
+                "w", encoding="utf-8") as stream:
+            stream.write("pycache/\n.mae-flow*\n")
+        subprocess.run(
+            ["git", "add", ".gitignore"], cwd=root, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "ignore test runtime files"],
+            cwd=root, check=True)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+            text=True, capture_output=True).stdout.strip()
+        with open(os.path.join(root, "biz.cpp"), "w", encoding="utf-8") as stream:
+            stream.write("int answer() { return 43; }\n")
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            task_snapshot = mf._source_snapshot_since(head, {
+                "config": {"源码路径": [r"\.cpp$"]},
+            })
+        finally:
+            os.chdir(old_cwd)
+        state = {
+            "current": "build",
+            "started": "2026-07-31 11:00:00",
+            "history": [{
+                "step": "build", "at": "2026-07-31 11:30:00",
+            }],
+            "config": {"源码路径": [r"\.cpp$"]},
+            "choices": {"workflow": "full"},
+            "agent_tasks": {"COMPILE": {
+                "step": "build",
+                "sha256": "compile-task",
+                "issuance_id": "compile-issue-1",
+                "checkpoint": "CP1",
+                "head": head,
+                "precommit_review": True,
+                "source_snapshot": task_snapshot,
+            }},
+        }
+        save_versioned_json(
+            os.path.join(root, ".mae-flow.json"),
+            state,
+            "flow",
+            project_root=root,
+        )
+        with open(
+                os.path.join(root, ".mae-flow.json.usermsg"),
+                "w", encoding="utf-8") as stream:
+            json.dump([{
+                "id": "compile-risk-answer",
+                "at": "2026-07-31 12:00:00",
+                "step": "build",
+                "text": "确认承担本检查点的编译风险",
+            }], stream, ensure_ascii=False)
+
+        accepted = run(root, [
+            sys.executable,
+            MAE,
+            "accept-risk",
+            "compile",
+            "--reason",
+            "内部构建环境暂不可用",
+            "--message-id",
+            "compile-risk-answer",
+        ])
+
+        self.assertEqual(
+            0, accepted.returncode, accepted.stdout + accepted.stderr)
+        updated = read_json(os.path.join(root, ".mae-flow.json"))
+        receipt = updated["risk_acceptances"]["COMPILE"]
+        self.assertEqual("compile-issue-1", receipt["task_issuance_id"])
+        self.assertEqual("CP1", receipt["checkpoint"])
+        self.assertIn("biz.cpp", receipt["source_snapshot"])
+
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            valid, why = mf._risk_acceptance("COMPILE", updated)
+            self.assertTrue(valid, why)
+            with open(
+                    os.path.join(root, "biz.cpp"),
+                    "w", encoding="utf-8") as stream:
+                stream.write("int answer() { return 44; }\n")
+            valid, why = mf._risk_acceptance("COMPILE", updated)
+            self.assertFalse(valid)
+            self.assertIn("快照", why)
+        finally:
+            os.chdir(old_cwd)
+
+        rebound = run(root, [
+            sys.executable,
+            MAE,
+            "accept-risk",
+            "compile",
+            "--reason",
+            "内部构建环境仍不可用",
+            "--message-id",
+            "compile-risk-answer",
+        ])
+        self.assertEqual(2, rebound.returncode)
+        self.assertIn("任务卡", rebound.stdout + rebound.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

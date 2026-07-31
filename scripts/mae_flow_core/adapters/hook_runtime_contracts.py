@@ -230,6 +230,15 @@ class HookContractsMixin:
 
         task = self._task_card_contract("COMPILE", report, soft)
         changed = self._enforce_agent_scope("COMPILE", task, bail)
+        current_build = self._build_call(
+            tool_calls, self._state_config().get("编译方式", ""))
+        self._record_compile_run_receipt(
+            task, status, tool_calls)
+        reusable = {}
+        if not current_build:
+            receipt = self._reusable_compile_run_receipt(task, status)
+            if receipt:
+                reusable["COMPILE_RUN"] = receipt
         decision = _evaluate_compile_contract(self._contract_context(
             "COMPILE",
             status,
@@ -238,7 +247,18 @@ class HookContractsMixin:
             tool_calls,
             changed,
             compile_net=self._compile_agent_net(task),
+            reusable_receipts=reusable,
         ))
+        if decision.details.get("reused_execution"):
+            receipt = reusable.get("COMPILE_RUN", {})
+            self.log("COMPILE 重答复用编译凭证 @"
+                 + receipt.get("head", "")[:9])
+        if decision.details.get("build_summary_inaccurate"):
+            self.log("COMPILE EXECUTED_BUILD 摘要不准确,"
+                 "以真实调用或绑定凭证为准")
+        if decision.details.get("reported_error_conflict"):
+            self.log("COMPILE BUILD_ERRORS 与最终状态冲突,"
+                 "按 build-fix/编译命令的真实完成状态处理")
         if not decision.accepted:
             bail(decision.reason)
         self._record_compile_side_effects(task, tool_calls)

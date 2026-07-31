@@ -102,6 +102,25 @@ def plan_ut_run_receipt(
     )
 
 
+def plan_compile_run_receipt(
+        task, context, build, status, result):
+    """Bind an opaque compile run without persisting provider output."""
+    digest = hashlib.sha256(
+        str(result or "").encode(
+            "utf-8", errors="replace")).hexdigest()
+    receipt = dict(
+        _common(task, context),
+        task_issuance_id=task.get("issuance_id", ""),
+        checkpoint=task.get("checkpoint", ""),
+        build=build,
+        status=status,
+        result_sha256=digest,
+    )
+    if context.source_snapshot is not None:
+        receipt["source_snapshot"] = dict(context.source_snapshot)
+    return receipt
+
+
 def _same_task(receipt, task):
     return bool(
         receipt
@@ -133,6 +152,40 @@ def reusable_ut_receipt(
             receipt,
             task,
             standalone_snapshot,
+            changed_paths,
+            source_error,
+        )
+        else None
+    )
+
+
+def reusable_compile_run_receipt(
+        receipt, task, expected_build, status, source_snapshot=None,
+        changed_paths: Tuple[str, ...] = (), source_error=""):
+    if not _same_task(receipt, task):
+        return None
+    if (
+            receipt.get("task_issuance_id", "")
+            != task.get("issuance_id", "")
+            or receipt.get("checkpoint", "")
+            != task.get("checkpoint", "")
+            or not same_config(receipt.get("build", ""), expected_build)
+            or receipt.get("status") != status):
+        return None
+    if task.get("standalone") or task.get("precommit_review"):
+        if "source_snapshot" not in receipt:
+            return None
+        return (
+            receipt
+            if receipt.get("source_snapshot") == (source_snapshot or {})
+            else None
+        )
+    return (
+        receipt
+        if _fresh(
+            receipt,
+            task,
+            source_snapshot,
             changed_paths,
             source_error,
         )

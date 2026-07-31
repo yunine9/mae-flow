@@ -168,7 +168,7 @@ class CompileContractTests(unittest.TestCase):
         self.assertFalse(missing.accepted)
         self.assertIn("没有真实执行配置的编译命令", missing.reason)
 
-    def test_ok_rejects_failed_tool_and_nonzero_error_count(self):
+    def test_ok_rejects_explicit_host_tool_failure(self):
         report = "EXECUTED_BUILD: python build.py\nBUILD_ERRORS: 0"
         failed = evaluate_compile_contract(self.context(
             report,
@@ -180,14 +180,105 @@ class CompileContractTests(unittest.TestCase):
         ))
         self.assertIn("工具结果明确失败", failed.reason)
 
-        contradictory = evaluate_compile_contract(self.context(
-            "EXECUTED_BUILD: python build.py\nBUILD_ERRORS: 3",
-            [call("Bash", {"command": "python build.py"}, "done")],
+    def test_opaque_build_fix_does_not_require_provider_output_fields(self):
+        decision = evaluate_compile_contract(self.context(
+            "provider diagnostics are intentionally opaque",
+            [call(
+                "Skill",
+                {"skill": "build-fix"},
+                "internal result format is not public",
+            )],
+            build="build-fix",
         ))
-        self.assertEqual(
-            "标记 OK 但 BUILD_ERRORS=3,自相矛盾。",
-            contradictory.reason,
-        )
+
+        self.assertTrue(decision.accepted, decision.reason)
+
+    def test_reported_provider_counts_are_diagnostic_not_a_second_compiler(self):
+        decision = evaluate_compile_contract(self.context(
+            "EXECUTED_BUILD: internal wrapper\nBUILD_ERRORS: 3",
+            [call(
+                "Skill",
+                {"skill": "build-fix"},
+                "opaque",
+            )],
+            build="build-fix",
+        ))
+
+        self.assertTrue(decision.accepted, decision.reason)
+        self.assertTrue(decision.details["build_summary_inaccurate"])
+        self.assertTrue(decision.details["reported_error_conflict"])
+
+    def test_matching_compile_receipt_replaces_only_missing_tool_call(self):
+        decision = evaluate_compile_contract(AgentContractContext(
+            kind="COMPILE",
+            status="OK",
+            report="corrected report without another build",
+            task={"step": "build", "sha256": "task"},
+            config={"编译方式": "build-fix"},
+            calls=(),
+            changed_paths=(),
+            compile_net=0,
+            reusable_receipts={
+                "COMPILE_RUN": {
+                    "step": "build",
+                    "task_sha256": "task",
+                    "build": "build-fix",
+                    "status": "OK",
+                },
+            },
+        ))
+
+        self.assertTrue(decision.accepted, decision.reason)
+        self.assertTrue(decision.details["reused_execution"])
+
+    def test_compile_receipt_cannot_override_host_failure_or_status(self):
+        receipt = {
+            "step": "build",
+            "task_sha256": "task",
+            "build": "build-fix",
+            "status": "OK",
+        }
+        failed = evaluate_compile_contract(AgentContractContext(
+            kind="COMPILE",
+            status="OK",
+            report="",
+            task={"step": "build", "sha256": "task"},
+            config={"编译方式": "build-fix"},
+            calls=(call(
+                "Skill", {"skill": "build-fix"},
+                "host error", error=True),),
+            reusable_receipts={"COMPILE_RUN": receipt},
+        ))
+        wrong_status = evaluate_compile_contract(AgentContractContext(
+            kind="COMPILE",
+            status="BLOCKED",
+            report="",
+            task={"step": "build", "sha256": "task"},
+            config={"编译方式": "build-fix"},
+            calls=(),
+            reusable_receipts={"COMPILE_RUN": receipt},
+        ))
+        wrong_issuance = evaluate_compile_contract(AgentContractContext(
+            kind="COMPILE",
+            status="OK",
+            report="",
+            task={
+                "step": "build",
+                "sha256": "task",
+                "issuance_id": "issue-2",
+            },
+            config={"编译方式": "build-fix"},
+            calls=(),
+            reusable_receipts={
+                "COMPILE_RUN": dict(
+                    receipt, task_issuance_id="issue-1"),
+            },
+        ))
+
+        self.assertFalse(failed.accepted)
+        self.assertIn("工具结果明确失败", failed.reason)
+        self.assertFalse(wrong_status.accepted)
+        self.assertFalse(wrong_issuance.accepted)
 
     def test_blocked_accepts_a_real_failed_attempt_with_errors(self):
         decision = evaluate_compile_contract(self.context(
@@ -244,6 +335,45 @@ class CompileContractTests(unittest.TestCase):
             status="FAIL",
         ))
         self.assertTrue(decision.accepted)
+
+    def test_runtime_reuses_successful_compile_when_only_report_is_corrected(self):
+        with tempfile.TemporaryDirectory() as td, in_directory(td):
+            head = initialize_repository(td)
+            logs = []
+            runtime = runtime_for(td, logs)
+            task = compile_task(td, head, runtime._worktree_snapshot(head))
+            save_compile_state(td, task)
+            calls = [{
+                "name": "Bash",
+                "input": {"command": "python build.py"},
+                "result_seen": True,
+                "result": "private compiler output that must not be stored",
+            }]
+
+            with mock.patch.object(
+                    runtime, "_compile_agent_net", return_value=-1):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as rejected:
+                        runtime._compile_contract(
+                            "OK", accepted_report(task), calls)
+                self.assertEqual(2, rejected.exception.code)
+
+                with open(runtime.EVIDENCE_STATE, encoding="utf-8") as stream:
+                    evidence = json.load(stream)
+                receipt = evidence["COMPILE_RUN"]
+                self.assertEqual("OK", receipt["status"])
+                self.assertNotIn("private compiler output", repr(receipt))
+
+                runtime._compile_contract(
+                    "OK",
+                    accepted_report(task)
+                    + "\nSHRINK_EXEMPT:\nremoved duplicate wrapper\n",
+                    [],
+                )
+
+            self.assertTrue(any(
+                "COMPILE 重答复用编译凭证" in entry
+                for entry in logs))
 
     def test_accepted_compile_records_only_non_direct_worktree_effects(self):
         with tempfile.TemporaryDirectory() as td, in_directory(td):

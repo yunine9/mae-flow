@@ -17,6 +17,26 @@ def _risk_acceptance(kind, st):
     task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     if rec.get("task_sha256") and rec.get("task_sha256") != task.get("sha256", ""):
         return False, "风险确认绑定的任务卡已经变化"
+    if (
+            rec.get("task_issuance_id")
+            and rec.get("task_issuance_id") != task.get("issuance_id", "")):
+        return False, "风险确认绑定的任务卡签发批次已经变化"
+    if (
+            rec.get("checkpoint")
+            and rec.get("checkpoint") != task.get("checkpoint", "")):
+        return False, "风险确认绑定的开发检查点已经变化"
+    snapshot = rec.get("source_snapshot")
+    if isinstance(snapshot, dict):
+        task_head = task.get("head", "")
+        if (
+                not task_head
+                or api.argv_out([
+                    "git", "cat-file", "-t", task_head]) != "commit"):
+            return False, "风险确认绑定的任务卡源码基线不可解析"
+        current = api._source_snapshot_since(task_head, st)
+        if current != snapshot:
+            return False, "风险确认后未提交代码快照发生变化"
+        return True, ""
     head = rec.get("head", "")
     changed, err = api._source_changed_since(head, st) if head else ([], "风险确认缺少 HEAD")
     if err:

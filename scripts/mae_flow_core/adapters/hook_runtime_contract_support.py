@@ -107,16 +107,51 @@ class HookContractSupportMixin:
         return call if call and not self._call_failed(call) else None
 
 
-    def _receipt_context(self, task):
+    def _receipt_context(self, task, bind_precommit=False):
         snapshot = (
             self._source_snapshot(task.get("head", ""))
-            if task.get("standalone") else None
+            if (
+                task.get("standalone")
+                or (bind_precommit and task.get("precommit_review"))
+            )
+            else None
         )
         return _ReceiptContext(
             at=time.strftime("%Y-%m-%d %H:%M:%S"),
             head=self._git_head(),
             source_snapshot=snapshot,
         )
+
+
+    def _record_compile_run_receipt(self, task, status, tool_calls):
+        """Persist only a digest of a completed opaque compile invocation."""
+        if status not in ("OK", "BLOCKED"):
+            return None
+        build_cfg = self._state_config().get("编译方式", "")
+        call = self._build_call(tool_calls, build_cfg)
+        if (
+                not build_cfg
+                or not call
+                or not call.get("result_seen")
+                or (status == "OK" and self._call_failed(call))):
+            return None
+        try:
+            rec = _plan_compile_run_receipt(
+                task,
+                self._receipt_context(task, bind_precommit=True),
+                build_cfg,
+                status,
+                call.get("result", ""),
+            )
+            data = self._evidence_data()
+            data["COMPILE_RUN"] = rec
+            self._save_evidence(data)
+            self.log("COMPILE 编译凭证: %s @%s" % (
+                status, rec.get("head", "")[:9] or "no-git"))
+            return rec
+        except Exception as exc:
+            self.log("compile receipt EXC: " + str(exc))
+            return None
 
 
     def _record_codecheck_build_receipt(self, task, tool_calls):
@@ -210,8 +245,11 @@ class HookContractSupportMixin:
             self.log("ut receipt EXC: " + str(e))
 
 
-    def _reuse_source_facts(self, receipt, task):
-        if task.get("standalone"):
+    def _reuse_source_facts(
+            self, receipt, task, bind_precommit=False):
+        if (
+                task.get("standalone")
+                or (bind_precommit and task.get("precommit_review"))):
             return self._source_snapshot(task.get("head", "")), (), ""
         changed, err = self._source_changed_since_receipt(
             receipt.get("head", ""), self._contract_state())
@@ -228,6 +266,23 @@ class HookContractSupportMixin:
             task,
             expected=expected,
             standalone_snapshot=snapshot,
+            changed_paths=changed,
+            source_error=err,
+        )
+
+
+    def _reusable_compile_run_receipt(self, task, status):
+        rec = self._evidence_data().get("COMPILE_RUN", {})
+        if not rec:
+            return None
+        snapshot, changed, err = self._reuse_source_facts(
+            rec, task, bind_precommit=True)
+        return _core_reusable_compile_run(
+            rec,
+            task,
+            self._state_config().get("编译方式", ""),
+            status,
+            source_snapshot=snapshot,
             changed_paths=changed,
             source_error=err,
         )

@@ -153,7 +153,7 @@ class CommitOwnershipTests(unittest.TestCase):
                 state,
                 types.SimpleNamespace(
                     block_id=permit_id,
-                    ack=ack,
+                    message_id="user-git-authorization",
                 ),
             )
         return output, permit_id

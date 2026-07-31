@@ -68,11 +68,12 @@ def evidence_error(
     if failure_count < 2 or moonlight:
         return message
     goto_hint = (
-        '执行 python "%s" goto %s --force --ack "用户原话"'
+        '先执行 messages 取得该回答 ID，再执行 python "%s" goto %s '
+        "--force --message-id <ID>"
         % (script_path, target)
         if target else
         "先按 current 完成本步选择；目标确定后再执行 goto <目标步骤> "
-        '--force --ack "用户原话"'
+        "--force --message-id <messages输出的ID>"
     )
     return message + (
         "\n⚠ 本步证据已连续 %d 次不满足。机器事实不能由口头确认替代;"

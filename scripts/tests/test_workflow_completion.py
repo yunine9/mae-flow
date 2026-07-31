@@ -143,8 +143,8 @@ class WorkflowCompletionPolicyTests(unittest.TestCase):
             "/tmp/mae-flow.py",
         )
         self.assertIn(
-            '执行 python "/tmp/mae-flow.py" goto next '
-            '--force --ack "用户原话"',
+            '先执行 messages 取得该回答 ID，再执行 python '
+            '"/tmp/mae-flow.py" goto next --force --message-id <ID>',
             message,
         )
         self.assertIn("本步证据已连续 2 次不满足", message)

@@ -43,7 +43,7 @@ class AgentEvidenceRules:
             + kind.lower()
             + " --reason \""
             + risk
-            + "\" --ack \"<用户确认原话>\"；"
+            + "\" --message-id <messages输出的ID>；"
             "它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。"
         )
 

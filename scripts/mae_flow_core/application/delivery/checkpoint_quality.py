@@ -159,7 +159,7 @@ def _plan_receipt_fresh(receipt, ports):
     return True
 
 
-def decide_checkpoint_plan(review, choice, ack, ports):
+def decide_checkpoint_plan(review, choice, ports):
     updated = deepcopy(review)
     items = updated.get("checkpoints") or []
     index = int(updated.get("current_index", 0) or 0)
@@ -172,8 +172,6 @@ def decide_checkpoint_plan(review, choice, ack, ports):
     }.get(choice)
     if expected is None:
         return _failure("计划裁决只能是 continue 或 revise。")
-    if ack != expected:
-        return _failure("选择原文必须精确为「%s」。" % expected)
     receipt = item.get("plan_receipt") or {}
     if not _plan_receipt_fresh(receipt, ports):
         item["status"] = "planned"
@@ -201,7 +199,7 @@ def decide_checkpoint_plan(review, choice, ack, ports):
         (message,),
         extra=(DeliveryEffect("append_history", {
             "result": "checkpoint:plan-%s:%s" % (choice, item["id"]),
-            "note": ack,
+            "note": expected,
             "at": ports.now(),
         }),),
     )

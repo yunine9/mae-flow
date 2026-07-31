@@ -148,8 +148,9 @@ def _source_edit_decision(context):
             "edit-tests-only",
             "当前步骤 %s 仅允许写测试路径(当前生效规则: %s)。"
             "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,"
-            "用户判定确为代码缺陷时执行 mae-flow unlock source "
-            "--reason <裁决结论> --ack \"用户原话\" 解锁本步修复;"
+            "用户判定确为代码缺陷时先执行 messages 取得回答 ID，再执行 "
+            "mae-flow unlock source --reason <裁决结论> "
+            "--message-id <ID> 解锁本步修复;"
             "禁止未经用户裁决自行改源码。"
             % (context.step, "|".join(context.tests_only_patterns)),
         )

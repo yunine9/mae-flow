@@ -18,7 +18,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.delivery.checkpoint_quality import (  # noqa: E402
-    PLAN_CONTINUE_ACK,
     CheckpointQualityPorts,
     decide_checkpoint_plan,
     prepare_checkpoint_plan,
@@ -134,7 +133,6 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
         coding = decide_checkpoint_plan(
             thaw(prepared.effects[0].payload),
             "continue",
-            PLAN_CONTINUE_ACK,
             self.ports(files),
         )
         coding_state = thaw(coding.effects[0].payload)

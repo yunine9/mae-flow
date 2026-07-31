@@ -523,19 +523,23 @@ if flow:
             mf.save_state(scope_state)
             scope_ack = "W1 涉及本次修改"
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
-                json.dump([{"text": scope_ack, "step": "verify_codecheck", "at": now}],
+                json.dump([{"id": "codecheck-scope-answer",
+                            "text": scope_ack,
+                            "step": "verify_codecheck", "at": now}],
                           f, ensure_ascii=False)
             mf.cmd_codecheck_scope(flow, scope_state, types.SimpleNamespace(
-                include="W1", none=False, ack=scope_ack))
+                include="W1", none=False,
+                message_id="codecheck-scope-answer"))
             reviewed = mf.load_state()["quality"]["codecheck_scan"]
             check("疑似范围外告警未经用户确认不能推进或派修复",
                   not pending_ok and "尚未经用户确认" in pending_why
                   and pending_task_blocked)
-            check("用户确认涉及后候选会进入修复范围并绑定原话",
+            check("用户确认涉及后候选会进入修复范围并绑定消息收据",
                   reviewed["count"] == 2 and reviewed["stock_excluded"] == 0
                   and not reviewed["scope_pending"]
                   and reviewed["scope_review"]["included"] == ["W1"]
-                  and reviewed["scope_review"]["ack"] == scope_ack
+                  and reviewed["scope_review"]["authorization"][
+                      "message_id"] == "codecheck-scope-answer"
                   and "用户确认涉及" in reviewed["scope_reasons"][-1]["reason"])
 
             moon_scope_state = {
@@ -1085,6 +1089,7 @@ if flow:
             mf.save_state(branch_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{
+                    "id": "branch-skip",
                     "text": "跳过创建分支，继续下一步",
                     "step": "branch_create", "at": now,
                 }], f, ensure_ascii=False)
@@ -1093,7 +1098,7 @@ if flow:
                 with contextlib.redirect_stderr(io.StringIO()):
                     mf.cmd_goto(flow, branch_state, types.SimpleNamespace(
                         step="grill_ask", force=True,
-                        ack="跳过创建分支，继续下一步"))
+                        message_id="branch-skip"))
             except SystemExit as exc:
                 branch_skip_blocked = exc.code == 2
             check("goto 不能只跳过分支关而留下后续必失败状态",
@@ -1103,12 +1108,14 @@ if flow:
             adoption_ack = "在现有分支上继续 (推荐)"
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{
+                    "id": "branch-adopt",
                     "text": adoption_ack,
                     "step": "branch_create", "at": now,
                 }], f, ensure_ascii=False)
             with contextlib.redirect_stdout(io.StringIO()):
                 mf.cmd_goto(flow, branch_state, types.SimpleNamespace(
-                    step="branch_create", force=True, ack=adoption_ack))
+                    step="branch_create", force=True,
+                    message_id="branch-adopt"))
             adopted = mf.load_state()
             adopted_ok, _ = mf.ev_branch_ok({}, adopted)
             stale_receipt = json.loads(json.dumps(adopted))
@@ -1144,13 +1151,14 @@ if flow:
             mf.save_state(upgrade_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{
+                    "id": "upgrade-flow",
                     "text": "确认升级为完整开发并进入方案设计",
                     "step": "tw_open", "at": now,
                 }], f, ensure_ascii=False)
             with contextlib.redirect_stdout(io.StringIO()):
                 mf.cmd_goto(flow, upgrade_state, types.SimpleNamespace(
                     step="design", force=True,
-                    ack="确认升级为完整开发并进入方案设计"))
+                    message_id="upgrade-flow"))
             upgraded = mf.load_state()
             check("轻量流程 goto design 会同步 workflow 和规格阶段",
                   upgraded.get("current") == "design"
@@ -1179,12 +1187,14 @@ if flow:
             mf.save_state(rewind_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
                 json.dump([{
+                    "id": "rewind-spec",
                     "text": "规格有误，回到 open 修订",
                     "step": "verify_ponytail", "at": now,
                 }], f, ensure_ascii=False)
             with contextlib.redirect_stdout(io.StringIO()):
                 mf.cmd_goto(flow, rewind_state, types.SimpleNamespace(
-                    step="open", force=True, ack="规格有误，回到 open 修订"))
+                    step="open", force=True,
+                    message_id="rewind-spec"))
             rewound = mf.load_state()
             check("goto open 会同步回退规格阶段并作废下游证据",
                   rewound.get("current") == "open"
@@ -1296,32 +1306,38 @@ if flow:
                 "请问是不是点“确认以上范围”就开始？",
             )
             check("独立任务范围确认不接受否定句和询问句",
-                  all(not mf._action_scope_ack_verified(
-                      {"scope_proposed_epoch": 1, "user_messages": [
-                          {"epoch": 2, "text": text}]},
-                      mf.ACTION_SCOPE_ACK)[0]
+                  all(not mf._action_scope_receipt({
+                      "scope_proposed_epoch": 1,
+                      "scope_sha256": "scope-negative",
+                      "user_messages": [{
+                          "epoch": 2,
+                          "scope_sha256": "scope-negative",
+                          "text": text,
+                      }],
+                  })[0]
                       for text in negative_scope_messages))
-            forged_scope_ack_blocked = False
+            forged_scope_receipt_blocked = False
             try:
                 mf.cmd_action_confirm_scope(
-                    flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
+                    flow, types.SimpleNamespace())
             except SystemExit as exc:
-                forged_scope_ack_blocked = exc.code == 2
-            check("独立任务范围确认不能由 Agent 只带命令参数伪造",
-                  forged_scope_ack_blocked)
+                forged_scope_receipt_blocked = exc.code == 2
+            check("独立任务范围确认不能由 Agent 无用户收据推进",
+                  forged_scope_receipt_blocked)
             scope_prompt = json.dumps(
-                {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                {"cwd": td, "prompt": "范围没问题，优先覆盖大量行缺失的文件"},
                 ensure_ascii=False) + "\n"
             captured = subprocess.run(
                 [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
                 cwd=td, input=scope_prompt, text=True, capture_output=True, timeout=10)
             mf.cmd_action_confirm_scope(
-                flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
+                flow, types.SimpleNamespace())
             action = mf._load_action()
             ut_task = action.get("agent_tasks", {}).get("UT", {})
             check("用户二次确认后独立 UT 才生成任务卡",
                   captured.returncode == 0 and action.get("kind") == "ut"
-                  and action.get("scope_confirmed_ack") == mf.ACTION_SCOPE_ACK
+                  and action.get("scope_confirmation_receipt", {}).get(
+                      "scope_sha256") == action.get("scope_sha256")
                   and ut_task.get("standalone")
                   and os.path.isfile(ut_task.get("path", ""))
                   and not os.path.exists(mf.STATE_PATH)
@@ -1364,13 +1380,13 @@ if flow:
                       pending_codecheck.get("status") == "awaiting_scope_confirmation"
                       and not calls)
                 scope_prompt = json.dumps(
-                    {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                    {"cwd": td, "prompt": "确认以上范围"},
                     ensure_ascii=False) + "\n"
                 captured_cc = subprocess.run(
                     [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
                     cwd=td, input=scope_prompt, text=True, capture_output=True, timeout=10)
                 mf.cmd_action_confirm_scope(
-                    flow, types.SimpleNamespace(ack=mf.ACTION_SCOPE_ACK))
+                    flow, types.SimpleNamespace())
             finally:
                 mf._run_codecheck = old_run
             check("独立 CodeCheck 经用户确认后首检为零不派 Agent",
@@ -1443,14 +1459,14 @@ if flow:
                   and cli_action.get("status") == "awaiting_scope_confirmation"
                   and not os.path.exists(mf.STATE_PATH), cli.stdout)
             cli_prompt = json.dumps(
-                {"cwd": td, "prompt": mf.ACTION_SCOPE_ACK},
+                {"cwd": td, "prompt": "确认以上范围"},
                 ensure_ascii=False) + "\n"
             cli_capture = subprocess.run(
                 [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"), "userprompt"],
                 cwd=td, input=cli_prompt, text=True, capture_output=True, timeout=10)
             cli_confirm = subprocess.run([
                 sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
-                "action", "confirm-scope", "--ack", mf.ACTION_SCOPE_ACK,
+                "action", "confirm-scope",
             ], env=cli_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 encoding="cp936", errors="replace")
             cli_confirmed_action = mf._load_action()
@@ -1917,16 +1933,19 @@ if flow:
                           "history": [], "started": now}
             mf.save_state(risk_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
-                json.dump([{"text": risk_ack, "step": "rf_ut", "at": now}], f, ensure_ascii=False)
+                json.dump([{"id": "risk-ut", "text": risk_ack,
+                            "step": "rf_ut", "at": now}], f, ensure_ascii=False)
             fake_blocked = False
             try:
                 mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
-                    agent="ut", reason="UT 未核实", ack="模型代答确认"))
+                    agent="ut", reason="UT 未核实",
+                    message_id="agent-forged-id"))
             except SystemExit as exc:
                 fake_blocked = exc.code == 2
             check("Agent 令牌风险放行必须匹配用户真实原话", fake_blocked)
             mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
-                agent="ut", reason="UT 结果未被 harness 核实", ack=risk_ack))
+                agent="ut", reason="UT 结果未被 harness 核实",
+                message_id="risk-ut"))
             risk_state = mf.load_state()
             risk_ok, _ = mf.ev_agent_ran({"agent": "UT", "statuses": ["PASS"]}, risk_state)
             check("用户确认可只放行当前步骤的 UT 令牌", risk_ok
@@ -1935,7 +1954,8 @@ if flow:
             wrong_kind = False
             try:
                 mf.cmd_accept_risk(flow, risk_state, types.SimpleNamespace(
-                    agent="compile", reason="编译未核实", ack=risk_ack))
+                    agent="compile", reason="编译未核实",
+                    message_id="risk-ut"))
             except SystemExit as exc:
                 wrong_kind = exc.code == 2
             check("风险放行不能预授权本步骤不需要的令牌", wrong_kind)
@@ -1956,10 +1976,12 @@ if flow:
                         "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}}}
             mf.save_state(cc_state)
             with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
-                json.dump([{"text": cc_ack, "step": "rf_codecheck", "at": now}],
+                json.dump([{"id": "risk-codecheck", "text": cc_ack,
+                            "step": "rf_codecheck", "at": now}],
                           f, ensure_ascii=False)
             mf.cmd_accept_risk(flow, cc_state, types.SimpleNamespace(
-                agent="codecheck", reason="CodeCheck 修复 Agent 令牌未签发", ack=cc_ack))
+                agent="codecheck", reason="CodeCheck 修复 Agent 令牌未签发",
+                message_id="risk-codecheck"))
             cc_state = mf.load_state()
             old_clean = mf.ev_codecheck_clean
             try:

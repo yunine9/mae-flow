@@ -46,7 +46,8 @@
      脚本会从项目预设或上次现场继承 UT 生成/运行/编译方式；缺项时只问缺失配置，不启动环境流程、不猜命令。
      `start` 只会冻结并展示文件清单，不会立即派 Agent。必须用 AskUserQuestion 让用户选择
      「确认以上范围 / 需要调整范围」；确认后执行
-     `mae-flow.py action confirm-scope --ack "确认以上范围"`，调整则 `action cancel` 后按新清单重开。
+     `mae-flow.py action confirm-scope`；命令会读取绑定当前范围指纹的新回答。调整则
+     `action cancel` 后按新清单重开。
      只有确认成功后，才按输出的唯一话术启动 `ut-generator-agent`，不得添加自编参数。
      Agent 收尾后执行 `action finish`。
      PASS 必须真实生成并运行测试；疑似源码缺陷先展示自查报告让用户裁决。独立模式默认不 commit、不 push。
@@ -55,7 +56,7 @@
      `mae-flow.py action start codecheck --request "<用户描述>" [--files "<路径>"]`
      只想看报告时增加 `--check-only`。修复模式缺编译方式时只问这一项。
      `start` 同样只展示过滤后的业务文件清单，用户二次确认后执行
-     `action confirm-scope --ack "确认以上范围"`；确认前禁止扫描，调整时取消后按新范围重开。
+     `action confirm-scope`；确认前禁止扫描，调整时取消后按新范围重开。
      确认后脚本才真实 fullcheck：0 告警直接结束，不派 Agent；有告警才按输出任务卡启动
      `codecheck-fix-agent`。Agent 收尾后执行 `action finish`。测试文件自动排除，剩余告警只报告，
      禁止自动豁免；默认不 commit、不 push。

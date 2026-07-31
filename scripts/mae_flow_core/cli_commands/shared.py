@@ -233,8 +233,6 @@ FAILURE_PATH = STATE_PATH + ".failures"
 
 ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
 
-ACTION_SCOPE_ACK = "确认以上范围"
-
 CONFIG_CONFIRM_ACK = "确认以上全部配置"
 
 CHECKPOINT_CONTINUE_ACK = "我已认真检视并完成自验证，继续"

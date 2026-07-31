@@ -195,7 +195,7 @@ class QualityEvidenceRules:
                 + "、".join(unauthorized[:5])
                 + "。逐项 AskUserQuestion 后执行 mae-flow "
                 "approve-exemption --rule <规则ID> --file <文件> "
-                "--reason <理由> --ack \"用户原话\"；"
+                "--reason <理由> --message-id <messages输出的ID>；"
                 "手写豁免文件不再算授权",
             )
         return EvidenceResult(True, "")

@@ -197,8 +197,9 @@ def _diagnostic_error(
         "codecheck 已返回但告警数无法解析。已尝试控制台、Markdown 汇总/明细和 JSON 结果；"
         "完整现场已保存到 %s。这是工具兼容问题，不要派修复 Agent、不要猜 0 条。"
         "可重试一次；仍失败时把诊断文件展示给用户人工核对，用户确认实际告警数后执行 "
+        "messages 取得该回答 ID，再执行 "
         'python "%s" codecheck-record --count <数字> --diagnostic "%s" '
-        '--reason "输出格式暂不兼容，已人工核对" --ack "用户确认原话"。'
+        '--reason "输出格式暂不兼容，已人工核对" --message-id <ID>。'
         "该记录绑定当前步骤、HEAD、文件清单和诊断内容，代码一变自动失效。"
         % (snapshot, ports.program_path, snapshot)
     )

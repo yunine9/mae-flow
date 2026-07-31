@@ -169,8 +169,9 @@ class ActiveHookEventAdapter:
         if action.get("status") == "awaiting_scope_confirmation":
             output += (
                 "[mae-flow] 当前任务尚未执行，正在等待用户确认已展示的文件范围。"
-                "用户选择「确认以上范围」后执行 action confirm-scope "
-                "--ack \"确认以上范围\"；用户要求调整则 action cancel 后按新范围重开。\n"
+                "用户确认范围后直接执行 action confirm-scope；"
+                "命令会读取绑定当前范围指纹的回答。"
+                "用户要求调整则 action cancel 后按新范围重开。\n"
             )
         return HookResponse(stdout=output)
 

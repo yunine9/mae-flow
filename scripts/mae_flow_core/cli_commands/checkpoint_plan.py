@@ -186,7 +186,8 @@ def _print_checkpoint_decisions(final=False):
     if not final:
         print("  - " + CHECKPOINT_CONTINUOUS_ACK)
     print("点选后执行 checkpoint decide continue|revise"
-          + ("" if final else "|continuous") + ' --ack "用户选择原文"。')
+          + ("" if final else "|continuous")
+          + "；命令会自动读取本次检视后的新回答。")
 
 def cmd_checkpoint_ready(flow, st, args):
     result = ready_checkpoint(

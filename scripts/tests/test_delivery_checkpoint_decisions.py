@@ -58,7 +58,6 @@ class CheckpointDecisionUseCaseTests(unittest.TestCase):
             "current": "tw_change",
             "moonlight": False,
             "choice": "continue",
-            "ack": "我已认真检视并完成自验证，继续",
             "ports": CheckpointDecisionPorts(
                 verify_ack=supplied("verify_ack", (True, "")),
                 head=supplied("head", overrides.pop("head", "base")),
@@ -103,7 +102,6 @@ class CheckpointDecisionUseCaseTests(unittest.TestCase):
     def test_revise_returns_to_coding_and_invalidates_quality(self):
         result, calls = self.call(
             choice="revise",
-            ack="需要调整代码",
         )
         updated = thaw(result.effects[0].payload)
         item = updated["checkpoints"][0]
@@ -124,7 +122,6 @@ class CheckpointDecisionUseCaseTests(unittest.TestCase):
             review=review,
             current="delivery_review",
             choice="revise",
-            ack="需要调整代码",
         )
         self.assertEqual(0, result.exit_code)
         self.assertEqual("activate_final_rework", result.effects[0].kind)
@@ -141,7 +138,6 @@ class CheckpointDecisionUseCaseTests(unittest.TestCase):
         result, calls = self.call(
             review=review,
             choice="revise",
-            ack="需要调整代码",
         )
         updated = thaw(result.effects[0].payload)
         self.assertEqual(

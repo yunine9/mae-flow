@@ -180,7 +180,7 @@ def _refresh_commit_pending(review, item, current, ports):
                 + error,
                 "把失败原因和真实 git diff 展示给用户，"
                 "让用户选择「需要调整代码」；随后执行 checkpoint "
-                'decide revise --ack "需要调整代码"。',
+                "decide revise。",
             ),
         )
     now = ports.now()

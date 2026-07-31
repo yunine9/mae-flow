@@ -127,10 +127,10 @@ def cmd_codecheck_scan(flow, st, args):
                 item["id"], item["rule"], item["file"], item["line"],
                 item["reason"]))
         print("用 AskUserQuestion 分批展示上述候选，让用户选择“涉及本次修改”的编号。")
-        print("确认后执行以下二选一命令（--ack 必须复制用户确认原话）：")
-        print('  python "%s" codecheck-scope --include W1,W3 --ack "<用户原话>"'
+        print("确认后先执行 messages 取得该回答 ID，再执行以下二选一命令：")
+        print('  python "%s" codecheck-scope --include W1,W3 --message-id <ID>'
               % os.path.abspath(sys.argv[0]))
-        print('  python "%s" codecheck-scope --none --ack "<用户原话>"'
+        print('  python "%s" codecheck-scope --none --message-id <ID>'
               % os.path.abspath(sys.argv[0]))
         print("在 codecheck-scope 完成前，禁止生成修复任务卡，也不能 done。")
     elif excluded_pairs is None and result["total"]:
@@ -156,16 +156,21 @@ def cmd_codecheck_scope(flow, st, args):
         api.die("codecheck-scope 只能在规范检查步骤使用。", 2)
     scan = (st.get("quality", {}) or {}).get(
         "codecheck_scan", {})
+    ok, authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
+    if not ok:
+        api.die("CodeCheck 涉及范围确认验真失败:" + why, 2)
     decision = quality_codecheck_state.decide_scope_with_ports(
         scan=scan,
         current_step=st["current"],
         include_text=args.include or "",
         none=bool(args.none),
-        ack=args.ack or "",
+        ack=authorization,
+        authorization=authorization_receipt,
         source_changed_since=lambda head: (
             api._source_changed_since(head, st)
         ),
-        verify_ack=lambda ack: api._ack_verified(st, ack),
+        verify_ack=lambda _ack: (True, ""),
         now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
     )
     if decision.error:
@@ -198,9 +203,10 @@ def cmd_codecheck_record(flow, st, args):
     """CodeCheck 输出格式未知时的人工恢复口，不把工具兼容问题变成无解死锁。"""
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
         api.die("codecheck-record 只能在规范检查步骤使用。", 2)
-    if args.count < 0 or not args.reason or not args.ack:
-        api.die("codecheck-record 需要非负 --count、--reason 和用户确认原话 --ack。", 2)
-    ok, why = api._ack_verified(st, args.ack)
+    if args.count < 0 or not args.reason:
+        api.die("codecheck-record 需要非负 --count、--reason 和 --message-id。", 2)
+    ok, _authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
     if not ok:
         api.die("人工确认验真失败:" + why, 2)
     diag = os.path.abspath(args.diagnostic)
@@ -226,7 +232,7 @@ def cmd_codecheck_record(flow, st, args):
         diagnostic=diag,
         diagnostic_sha256=digest,
         reason=args.reason,
-        ack=args.ack,
+        authorization=authorization_receipt,
         at=time.strftime("%Y-%m-%d %H:%M:%S"),
         log_path=codecheck_log_path(os.getcwd(), st),
     )
@@ -248,19 +254,21 @@ def cmd_codecheck_record(flow, st, args):
 def cmd_approve_exemption(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
         api.die("规范告警豁免只能在 CodeCheck 步骤审批。", 2)
-    if not args.ack or not args.reason:
-        api.die("approve-exemption 必须带 --reason 和 --ack 用户原话。", 2)
+    if not args.reason:
+        api.die("approve-exemption 必须带 --reason 和 --message-id。", 2)
     asked, why = api.ev_agent_ran({"agent": "ASKUSER"}, st)
     if not asked:
         api.die("豁免前必须真实使用 AskUserQuestion 逐项呈用户裁决:" + why, 2)
-    ok, why = api._ack_verified(st, args.ack)
+    ok, _authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
     if not ok:
         api.die("豁免授权验真失败:" + why, 2)
     rule, file_name = args.rule.strip(), api.norm(args.file.strip()).lstrip("./")
     if not rule or not file_name:
         api.die("--rule/--file 不能为空。", 2)
     rec = {"rule": rule, "file": file_name, "reason": args.reason,
-           "ack": args.ack, "step": st["current"], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
+           "authorization": authorization_receipt,
+           "step": st["current"], "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     rows = st.setdefault("codecheck_exemptions", [])
     key = api._approval_key(rule, file_name)
     rows[:] = [x for x in rows if api._approval_key(x.get("rule", ""), x.get("file", "")) != key]
@@ -269,15 +277,18 @@ def cmd_approve_exemption(flow, st, args):
     os.makedirs(os.path.dirname(ex), exist_ok=True)
     if not os.path.exists(ex):
         write_text(ex, "# CodeCheck 正式豁免记录\n\n")
-    safe_ack = re.sub(r"[\r\n|]+", " ", args.ack).strip()
     safe_reason = re.sub(r"[\r\n|]+", " ", args.reason).strip()
     with open(ex, "a", encoding="utf-8") as f:
-        f.write(f"- {rule} | {file_name} | {safe_reason} | 用户原话:{safe_ack}\n")
+        f.write(
+            f"- {rule} | {file_name} | {safe_reason} | "
+            f"用户消息:{authorization_receipt['message_id']} | "
+            f"SHA256:{authorization_receipt['answer_sha256']}\n")
     append_codecheck_event(
         os.getcwd(), st, "exemption.approved", {
             "head": api.sh("git rev-parse --verify HEAD"),
             "rule": rule, "file": file_name,
-            "reason": args.reason, "ack": args.ack,
+            "reason": args.reason,
+            "authorization": authorization_receipt,
             "record_file": os.path.abspath(ex),
         })
     api.save_state(st)

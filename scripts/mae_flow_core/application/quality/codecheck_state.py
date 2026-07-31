@@ -278,7 +278,7 @@ def _selection_error(candidates, include, none):
 def _ack_scope_error(
         include, ack, ack_verified, ack_error):
     if not ack:
-        return "codecheck-scope 必须携带用户确认原话 --ack。"
+        return "codecheck-scope 的消息 ID 没有解析出用户回答。"
     if not ack_verified:
         return "CodeCheck 涉及范围确认验真失败:" + ack_error
     ack_upper = str(ack).upper()
@@ -334,7 +334,7 @@ def _scope_error(
 def decide_scope(
         *, scan, current_step, include_text, none,
         ack, ack_verified, source_changed,
-        source_error, at, ack_error=""):
+        source_error, at, ack_error="", authorization=None):
     """Validate a user scope decision and return a detached scan record."""
     include = _scope_include(include_text)
     error = _scope_error(
@@ -375,7 +375,7 @@ def decide_scope(
     updated["scope_review"] = {
         "head": updated.get("head", ""),
         "included": sorted(include),
-        "ack": ack,
+        "authorization": copy.deepcopy(authorization or {}),
         "at": at,
     }
     excluded = [
@@ -388,7 +388,7 @@ def decide_scope(
         "candidates": candidates,
         "included": sorted(include),
         "excluded": excluded,
-        "ack": ack,
+        "authorization": copy.deepcopy(authorization or {}),
         "final_count": updated["count"],
         "stock_excluded": updated["stock_excluded"],
     }
@@ -402,7 +402,7 @@ def decide_scope(
 
 def decide_scope_with_ports(
         *, scan, current_step, include_text, none,
-        ack, source_changed_since, verify_ack, now):
+        ack, authorization, source_changed_since, verify_ack, now):
     """Collect freshness and acknowledgement facts only when required."""
     error = _scan_scope_error(
         scan, current_step, (), "")
@@ -424,7 +424,7 @@ def decide_scope_with_ports(
         return ScopeDecision(error=error)
     if not ack:
         return ScopeDecision(
-            error="codecheck-scope 必须携带用户确认原话 --ack。")
+            error="codecheck-scope 的消息 ID 没有解析出用户回答。")
     ack_verified, ack_error = verify_ack(ack)
     return decide_scope(
         scan=scan,
@@ -437,12 +437,13 @@ def decide_scope_with_ports(
         source_changed=changed,
         source_error=source_error,
         at=now(),
+        authorization=authorization,
     )
 
 
 def build_manual_records(
         *, step, head, files, count, diagnostic,
-        diagnostic_sha256, reason, ack, at, log_path):
+        diagnostic_sha256, reason, authorization, at, log_path):
     """Build matching manual and scan cache records."""
     manual = {
         "step": step,
@@ -452,7 +453,7 @@ def build_manual_records(
         "diagnostic": diagnostic,
         "diagnostic_sha256": diagnostic_sha256,
         "reason": reason,
-        "ack": ack,
+        "authorization": copy.deepcopy(authorization or {}),
         "at": at,
     }
     scan = {
@@ -474,7 +475,7 @@ def build_manual_records(
         "diagnostic": diagnostic,
         "diagnostic_sha256": diagnostic_sha256,
         "reason": reason,
-        "ack": ack,
+        "authorization": copy.deepcopy(authorization or {}),
     }
     return ManualRecords(
         manual=manual,

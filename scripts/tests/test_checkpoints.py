@@ -1130,8 +1130,7 @@ class CheckpointTests(unittest.TestCase):
         self.message(state, mf.CHECKPOINT_CONTINUE_ACK)
         receipt = {"ack_cursor": mf._ack_message_cursor()}
         ok, why = mf._checkpoint_ack(
-            state, mf.CHECKPOINT_CONTINUE_ACK,
-            mf.CHECKPOINT_CONTINUE_ACK, receipt)
+            state, mf.CHECKPOINT_CONTINUE_ACK, receipt)
         self.assertFalse(ok)
         self.assertIn("上一批", why)
         with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
@@ -1146,8 +1145,7 @@ class CheckpointTests(unittest.TestCase):
                 },
             ], f, ensure_ascii=False)
         ok, _ = mf._checkpoint_ack(
-            state, mf.CHECKPOINT_CONTINUE_ACK,
-            mf.CHECKPOINT_CONTINUE_ACK, receipt)
+            state, mf.CHECKPOINT_CONTINUE_ACK, receipt)
         self.assertTrue(ok)
 
 

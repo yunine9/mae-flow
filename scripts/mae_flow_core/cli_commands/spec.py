@@ -257,7 +257,8 @@ def cmd_spec(flow, st, args):
             print("[mae-flow] 交付阶段(轻量单快进):open → design → build → verify")
             return
         if order.index(target) < order.index(cur):
-            api.die("阶段不能回退(%s → %s)。需要回流请走 goto --force --ack 由用户裁决。"
+            api.die("阶段不能回退(%s → %s)。需要回流请让用户裁决，"
+                "再用 messages + goto --force --message-id <ID>。"
                 % (cur, target), 2)
         if order.index(target) - order.index(cur) > 1:
             # dogfood 实测:hotfix/tweak 单不经 design/build 步骤,阶段停在 open,
@@ -357,7 +358,8 @@ def cmd_allow(flow, st, args):
     if rec.get("step") != st.get("current"):
         api.die("拦截编号 %s 属于步骤 %s,当前步骤是 %s;放行令只能在拦截发生的步骤签发。"
             % (bid, rec.get("step", "?"), st.get("current", "?")), 2)
-    ok, why = api._ack_verified(st, args.ack or "", exact=True)
+    ok, authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
     if not ok:
         api.die("放行令签发验真失败:" + why
             + "。必须先把动作原文和拦截原因展示给用户,取得用户明确同意的原话。", 2)
@@ -375,7 +377,7 @@ def cmd_allow(flow, st, args):
         if (
                 action
                 and not api._authorization_ack_covers(
-                    action, args.ack or "")):
+                    action, authorization)):
             api.die(
                 "该 Git 放行必须绑定用户原话中明确写出的 exact path/commit；"
                 "当前原话未覆盖本动作的全部路径，已拒绝扩大授权。"
@@ -388,7 +390,8 @@ def cmd_allow(flow, st, args):
         data[bid] = {"rule": rec.get("rule", ""), "step": st.get("current", ""),
                      "head": head, "sample": rec.get("sample", ""),
                      "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                     "ack": (args.ack or "")[:200], "used": False}
+                     "authorization": authorization_receipt,
+                     "used": False}
         if action:
             data[bid]["git_action"] = action
         return data

@@ -85,24 +85,25 @@ def _prepare_spec_for_goto(st, target):
 def cmd_goto(flow, st, args):
     if not args.force:
         api.die("goto 是人工修复通道,必须 --force。")
-    if not args.ack:
-        api.die("goto 是**人工**修复通道,必须携带用户明确授权:--ack \"用户原话\"。"
-            "证据不足该修证据/重跑 agent,禁止用 goto 绕过关卡——绕过 = 最严重违规。", 2)
+    ok, authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
+    if not ok:
+        api.die("goto 授权验真失败:" + why
+            + "。证据不足应修证据或重跑 Agent，禁止用 goto 绕过关卡。", 2)
     if args.step not in flow["steps"]:
         api.die("未知步骤: " + args.step)
     source = st.get("current", "")
     branch_context = source == "branch_create" or args.step == "branch_create"
-    branch_adoption = branch_context and api._branch_adoption_requested(args.ack)
+    branch_adoption = (
+        branch_context and api._branch_adoption_requested(authorization))
     if args.step == source and not branch_adoption:
         api.die("当前已经在步骤 %s；同一步 goto 不会修复任何证据，反而会让本步旧授权失效。"
             "请按 current 的补救指引处理。若是在 branch_create 明确沿用现有分支，"
             "用户原话必须包含“沿用/在当前（现有）分支继续”。" % source, 2)
-    ok, why = api._ack_verified(st, args.ack)
-    if not ok:
-        api.die("goto 授权验真失败:" + why, 2)
     notes = []
     if branch_adoption:
-        adopted, detail = api._adopt_current_branch(st, args.ack)
+        adopted, detail = api._adopt_current_branch(
+            st, authorization)
         if not adopted:
             api.die("沿用现有分支失败:" + detail, 2)
         notes.append(detail)
@@ -141,7 +142,10 @@ def cmd_goto(flow, st, args):
     st.pop("risk_acceptances", None)
     st.pop("config_review", None)
     st["history"].append({"step": st["current"], "result": "goto:" + args.step,
-                          "note": "；".join(notes) if notes else "manual",
+                          "note": (
+                              "；".join(notes) if notes else "manual")
+                          + "；message-id:"
+                          + authorization_receipt["message_id"],
                           "at": time.strftime("%Y-%m-%d %H:%M:%S")})
     st["current"] = args.step
     st.setdefault("step_heads", {})[args.step] = api.sh("git rev-parse --verify HEAD")
@@ -153,19 +157,24 @@ def cmd_goto(flow, st, args):
 def cmd_unlock(flow, st, args):
     """用户裁决通道:UT 揭出疑似代码缺陷、用户判定"确为代码缺陷,本单修"后,
     解锁当前步的测试路径收紧(仅本步有效,done/goto 自动失效,历史留痕)。
-    不是绕过 gate 的后门:--ack 走与 done 相同的三级验真,伪造授权会被拒;
+    不是绕过 gate 的后门:message-id 必须指向本步骤捕获的真实用户裁决;
     未启用收紧的仓也可执行(裁决留痕,无实际解锁动作)。"""
     if not args.reason:
         api.die("unlock 必须 --reason 说明裁决结论(如\"SUSPECTED_BUG#1 确认为代码缺陷\"),留痕供审计。", 2)
-    if not args.ack:
-        api.die("unlock 必须携带用户裁决原话:--ack \"用户原话\"。未经用户裁决解锁源码 = 最严重违规。", 2)
-    ok, why = api._ack_verified(st, args.ack)
+    ok, _authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
     if not ok:
         api.die("unlock 授权验真失败:" + why, 2)
     sid = st["current"]
     step = flow["steps"][sid]
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    st["unlock"] = {"scope": args.what, "step": sid, "at": now, "reason": args.reason}
+    st["unlock"] = {
+        "scope": args.what,
+        "step": sid,
+        "at": now,
+        "reason": args.reason,
+        "authorization": authorization_receipt,
+    }
     st["history"].append({"step": sid, "result": "unlock:" + args.what, "note": args.reason, "at": now})
     api.save_state(st)
     if step.get("tests_only"):

@@ -195,6 +195,10 @@ class CodeCheckStateTests(unittest.TestCase):
             source_changed=(),
             source_error="",
             at="2026-07-30 02:10:00",
+            authorization={
+                "message_id": "scope-answer",
+                "answer_sha256": "a" * 64,
+            },
         )
 
         self.assertEqual("", decision.error)
@@ -202,6 +206,11 @@ class CodeCheckStateTests(unittest.TestCase):
         self.assertEqual(2, updated["count"])
         self.assertEqual(1, updated["stock_excluded"])
         self.assertEqual(["W1"], updated["scope_review"]["included"])
+        self.assertEqual(
+            "scope-answer",
+            updated["scope_review"]["authorization"]["message_id"],
+        )
+        self.assertNotIn("ack", updated["scope_review"])
         self.assertFalse(updated["scope_pending"])
         self.assertEqual(
             [("R.NEAR", "src/a.cpp", 2)],
@@ -232,6 +241,10 @@ class CodeCheckStateTests(unittest.TestCase):
             include_text="W1",
             none=False,
             ack="W1 涉及本次修改",
+            authorization={
+                "message_id": "scope-answer",
+                "answer_sha256": "a" * 64,
+            },
             source_changed_since=lambda head: (
                 calls.append(("source", head))
                 or (["src/a.cpp"], "")
@@ -255,13 +268,21 @@ class CodeCheckStateTests(unittest.TestCase):
             diagnostic="/repo/diag.txt",
             diagnostic_sha256="def456",
             reason="format changed",
-            ack="用户确认 2 条",
+            authorization={
+                "message_id": "manual-answer",
+                "answer_sha256": "b" * 64,
+            },
             at="2026-07-30 03:00:00",
             log_path="/logs/run.md",
         )
 
         self.assertEqual(2, records.manual["count"])
         self.assertEqual("def456", records.manual["diagnostic_sha256"])
+        self.assertEqual(
+            "manual-answer",
+            records.manual["authorization"]["message_id"],
+        )
+        self.assertNotIn("ack", records.manual)
         self.assertTrue(records.scan["manual"])
         self.assertEqual(
             ("人工核对诊断文件:/repo/diag.txt",),

@@ -262,7 +262,8 @@ class WorkflowEvidenceRules:
             "这是步骤文档里的升级条件,现在由机器亲数。两条出路呈用户裁决:"
             "①升级工作流(展示原因,确认后按步骤指引正规升级/goto design "
             "--force);②确属轻量修改(如批量重命名)则 accept-risk "
-            "tier_scope --reason --ack \"用户原话\" 继续,代码再变化即失效"
+            "tier_scope --reason <风险> --message-id <messages输出的ID> "
+            "继续,代码再变化即失效"
             % (
                 len(files),
                 workflow,

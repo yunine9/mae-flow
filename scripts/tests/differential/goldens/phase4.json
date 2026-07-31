@@ -69,7 +69,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {

@@ -92,13 +92,21 @@ class StandaloneLifecycleUseCaseTests(unittest.TestCase):
         }
         result = confirm_standalone_scope(
             action=action,
-            ack="确认以上范围",
+            confirmation_receipt={
+                "message_id": "scope-answer",
+                "scope_sha256": "scope-v1",
+            },
             ack_verified=(True, ""),
             validated_files=("biz.py",),
             now="2026-07-30 14:10:00",
         )
         updated = thaw(result.effects[0].payload)
         self.assertEqual("active", updated["status"])
+        self.assertEqual(
+            "scope-answer",
+            updated["scope_confirmation_receipt"]["message_id"],
+        )
+        self.assertNotIn("scope_confirmed_ack", updated)
         self.assertEqual("create_task_card", result.effects[1].kind)
 
     def test_finish_non_grill_requires_agent_token(self):

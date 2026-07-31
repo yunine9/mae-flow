@@ -210,8 +210,8 @@ def _review_decision_lines():
         "  - 我已认真检视并完成自验证，继续",
         "  - 需要调整代码",
         "  - 当前批次先不确认，剩余代码一次完成后统一检视",
-        "点选后执行 checkpoint decide continue|revise|continuous "
-        '--ack "用户选择原文"。',
+        "点选后直接执行 checkpoint decide continue|revise|continuous；"
+        "命令会读取本次检视收据之后的新回答。",
     )
 
 

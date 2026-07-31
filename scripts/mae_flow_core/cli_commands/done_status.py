@@ -315,9 +315,8 @@ def cmd_accept_risk(flow, st, args):
             + ("本步可放行: " + "、".join(sorted(required)) if required else "本步没有可风险放行的 Agent 令牌。"), 2)
     if not args.reason:
         api.die("accept-risk 必须 --reason 写清具体风险，不能只写『继续』。", 2)
-    if not args.ack:
-        api.die("accept-risk 必须携带用户明确承担风险的原话:--ack \"用户原话\"。", 2)
-    ok, why = api._ack_verified(st, args.ack, exact=True)
+    ok, _authorization, authorization_receipt, why = (
+        api._authorization_message(st, args.message_id))
     if not ok:
         api.die("accept-risk 授权验真失败:" + why, 2)
     dirty = api._blocking_dirty_source_paths(st, flow)
@@ -328,7 +327,8 @@ def cmd_accept_risk(flow, st, args):
     inherited_dirty = api._unchanged_initial_dirty_source_paths(st, flow)
     task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     rec = {"step": sid, "head": api.sh("git rev-parse --verify HEAD"), "at": now,
-           "task_sha256": task.get("sha256", ""), "reason": args.reason, "ack": args.ack,
+           "task_sha256": task.get("sha256", ""), "reason": args.reason,
+           "authorization": authorization_receipt,
            "unchanged_initial_dirty": inherited_dirty}
     st.setdefault("risk_acceptances", {})[kind] = rec
     st.setdefault("history", []).append(

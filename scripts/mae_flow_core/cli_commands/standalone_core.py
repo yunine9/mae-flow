@@ -1,7 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
+import hashlib
+
 from .shared import (
-    ACTION_SCOPE_ACK, AGENT_WRITES_PATH, CODE_EXTS, DEFAULTS_PATH, EXIT_INTENT_PATH,
+    AGENT_WRITES_PATH, CODE_EXTS, DEFAULTS_PATH, EXIT_INTENT_PATH,
     EXIT_PATH, FAILURE_PATH, GATE_PERMITS_PATH, GATE_STRIKES_PATH,
     MOONLIGHT_INTENT_PATH, STATE_PATH, StateStoreError, append_codecheck_event,
     atomic_write_json, atomic_write_text, codecheck_log_path, core_action_work_dir,
@@ -183,20 +185,48 @@ def _action_target_files(values, kind, config, flow):
         return source_files
     return values
 
-def _action_scope_ack_verified(action, ack):
-    """Scope approval must come from a user event after the proposal was saved."""
-    if re.sub(r"\s+", "", ack or "") != re.sub(r"\s+", "", ACTION_SCOPE_ACK):
-        return False, "确认命令必须原样使用用户选项「%s」" % ACTION_SCOPE_ACK
+def _scope_confirmation_answer(value):
+    """Accept an affirmative scope decision, never questions or rework intent."""
+    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
+    if not compact or re.search(
+            r"不确认|还没确认|不同意|不是|不要|不能|拒绝|暂不|取消|"
+            r"需要修改|需要调整|先别|等等|不对|有误|有问题|"
+            r"什么意思|怎么|是否|能否|为什么|[?？]",
+            compact, re.I):
+        return False
+    if api._is_positive_confirmation(value):
+        return True
+    return bool(re.match(
+        r"^(?:以上)?范围(?:没问题|无问题|无异议|正确|可以|确认)",
+        compact, re.I))
+
+
+def _action_scope_receipt(action):
+    """Resolve a fresh user answer bound to the displayed standalone scope."""
     proposed = float(action.get("scope_proposed_epoch", 0) or 0)
+    scope_sha = str(action.get("scope_sha256", "") or "")
+    if not scope_sha:
+        return False, {}, "独立任务缺少范围指纹；取消后重新展示范围。"
     for message in reversed(action.get("user_messages", []) or []):
         if float(message.get("epoch", 0) or 0) + 0.001 < proposed:
             continue
-        candidates = api._ack_candidates(str(message.get("text", "")))
-        if re.sub(r"\s+", "", ACTION_SCOPE_ACK) in candidates:
-            return True, ""
-    return False, (
+        if str(message.get("scope_sha256", "") or "") != scope_sha:
+            continue
+        candidates = api._trusted_answer_values(
+            str(message.get("text", "")))
+        for candidate in reversed(candidates):
+            if _scope_confirmation_answer(candidate):
+                return True, {
+                    "message_id": str(message.get("id", "") or ""),
+                    "answer_sha256": hashlib.sha256(
+                        candidate.encode("utf-8")).hexdigest(),
+                    "scope_sha256": scope_sha,
+                    "captured_at": str(message.get("at", "") or ""),
+                }, ""
+    return False, {}, (
         "没有捕获到范围展示后的用户确认。请使用 AskUserQuestion 让用户选择「确认以上范围」；"
-        "工具应答未被宿主回传时，让用户再发送一条纯文本“确认以上范围”，不要由 Agent 代答。")
+        "工具应答未被宿主回传时，让用户直接说明当前范围是否可执行；"
+        "不要由 Agent 拼接固定确认口令。")
 
 def _print_action_scope(action, inferred):
     print("[mae-flow] 独立 %s 待确认执行范围（尚未运行工具、尚未派子 Agent）：" %
@@ -210,8 +240,8 @@ def _print_action_scope(action, inferred):
     print("  - 确认以上范围")
     print("  - 需要调整范围")
     print("用户确认后执行：")
-    print('python "%s" action confirm-scope --ack "%s"' %
-          (os.path.abspath(__file__), ACTION_SCOPE_ACK))
+    print('python "%s" action confirm-scope' %
+          os.path.abspath(sys.argv[0]))
     print("若用户要求调整，执行 action cancel 后按新范围重新 action start；禁止自行扩大文件清单。")
 
 def _action_request(action, request="", source=""):

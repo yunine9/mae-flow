@@ -73,9 +73,7 @@ def cmd_checkpoint_final(st):
     for line in result.stdout:
         print(line)
 
-def _checkpoint_ack(st, ack, expected, receipt):
-    if ack != expected:
-        return False, "选择原文必须精确为「%s」，不能用近义词代答" % expected
+def _checkpoint_ack(st, expected, receipt):
     cursor = set((receipt or {}).get("ack_cursor") or [])
     fresh = [
         item for item in api._current_ack_messages(st)
@@ -121,7 +119,7 @@ def _role_task_sha(st, role, checkpoint):
     return str(record.get("sha256", "") or "")
 
 
-def _checkpoint_quality_ports(st, ack=""):
+def _checkpoint_quality_ports(st):
     return CheckpointQualityPorts(
         is_file=os.path.isfile,
         read_text=lambda path: read_text(path, encoding="utf-8"),
@@ -130,7 +128,7 @@ def _checkpoint_quality_ports(st, ack=""):
             text.encode("utf-8")).hexdigest(),
         ack_cursor=api._ack_message_cursor,
         verify_ack=lambda receipt, expected: _checkpoint_ack(
-            st, ack, expected, receipt),
+            st, expected, receipt),
         role_task_sha=lambda role, checkpoint: _role_task_sha(
             st, role, checkpoint),
         registered_artifact_sha=lambda kind: str(
@@ -189,8 +187,7 @@ def cmd_checkpoint_plan_decide(st, args):
     result = decide_checkpoint_plan(
         api._development_review(st),
         args.choice,
-        args.ack,
-        _checkpoint_quality_ports(st, args.ack),
+        _checkpoint_quality_ports(st),
     )
     _apply_checkpoint_quality_result(st, result)
 
@@ -235,11 +232,10 @@ def cmd_checkpoint_decide(flow, st, args):
         current=st.get("current"),
         moonlight=api._moonlight(st),
         choice=args.choice,
-        ack=args.ack,
         config=st.get("config", {}) or {},
         ports=CheckpointDecisionPorts(
             verify_ack=lambda receipt, expected: _checkpoint_ack(
-                st, args.ack, expected, receipt),
+                st, expected, receipt),
             head=lambda: api.sh("git rev-parse --verify HEAD"),
             upstream=api._upstream_snapshot,
             worktree_fresh=lambda item: api._reviewed_worktree_fresh(

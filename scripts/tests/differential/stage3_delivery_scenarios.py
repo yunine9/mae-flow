@@ -143,8 +143,6 @@ def checkpoint_revise_decision(
         "checkpoint",
         "decide",
         "revise",
-        "--ack",
-        "需要调整代码",
     )
 
 
@@ -221,6 +219,7 @@ def standalone_scope_confirmation(
         "status": "awaiting_scope_confirmation",
         "expires_epoch": 4102444800,
         "scope_proposed_epoch": 1,
+        "scope_sha256": "scope-diff",
         "work_dir": os.path.join(
             project, ".mae-flow-work", "standalone",
             "delivery-scope"),
@@ -234,8 +233,10 @@ def standalone_scope_confirmation(
         "rejections": {},
         "quality": {},
         "user_messages": [{
+            "id": "scope-answer",
             "text": "确认以上范围",
             "epoch": 2,
+            "scope_sha256": "scope-diff",
         }],
     }
     write_json(os.path.join(
@@ -246,8 +247,6 @@ def standalone_scope_confirmation(
         env,
         "action",
         "confirm-scope",
-        "--ack",
-        "确认以上范围",
     )
 
 

@@ -1,5 +1,6 @@
 """Standalone task lifecycle use cases."""
 
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -18,6 +19,21 @@ def _result(effects=(), stdout=(), stderr=(), exit_code=0):
 
 def _failure(message):
     return _result(stderr=(message,), exit_code=2)
+
+
+def standalone_scope_fingerprint(action):
+    """Identify the exact standalone scope presented for confirmation."""
+    payload = {
+        "kind": str((action or {}).get("kind", "") or ""),
+        "files": list((action or {}).get("files", []) or []),
+        "base_head": str((action or {}).get("base_head", "") or ""),
+        "scope_proposed_epoch": float(
+            (action or {}).get("scope_proposed_epoch", 0) or 0),
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def validate_standalone_start(
@@ -106,6 +122,7 @@ def start_standalone(
             "dirty-worktree" if inferred_scope else "explicit")
         action["scope_proposed_at"] = scope_proposed_at or created_at
         action["scope_proposed_epoch"] = scope_epoch
+        action["scope_sha256"] = standalone_scope_fingerprint(action)
         effects[-1] = DeliveryEffect("save_action", action)
         effects.append(DeliveryEffect("show_scope", {
             "inferred": inferred_scope,
@@ -116,7 +133,7 @@ def start_standalone(
 
 
 def confirm_standalone_scope(
-        action, ack, ack_verified, validated_files, now):
+        action, confirmation_receipt, ack_verified, validated_files, now):
     """Confirm exactly the scope that was previously displayed."""
     validation = validate_scope_confirmation(action, ack_verified)
     if validation.exit_code:
@@ -128,7 +145,8 @@ def confirm_standalone_scope(
     updated = deepcopy(action)
     updated["status"] = "active"
     updated["scope_confirmed_at"] = now
-    updated["scope_confirmed_ack"] = ack
+    updated["scope_confirmation_receipt"] = deepcopy(
+        confirmation_receipt)
     next_effect = (
         DeliveryEffect("run_standalone_codecheck", {})
         if updated["kind"] == "codecheck"

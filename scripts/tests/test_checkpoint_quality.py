@@ -11,8 +11,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.delivery.checkpoint_quality import (  # noqa: E402
-    PLAN_CONTINUE_ACK,
-    PLAN_REVISE_ACK,
     CheckpointQualityPorts,
     decide_checkpoint_plan,
     prepare_checkpoint_plan,
@@ -55,10 +53,9 @@ class CheckpointQualityTests(unittest.TestCase):
             "checkpoint",
             "plan-decide",
             "continue",
-            "--ack",
-            PLAN_CONTINUE_ACK,
         ])
         self.assertEqual("continue", decided.choice)
+        self.assertFalse(hasattr(decided, "ack"))
         crafted = parse_args([
             "checkpoint",
             "craft-reviewed",
@@ -129,7 +126,6 @@ class CheckpointQualityTests(unittest.TestCase):
         continued = decide_checkpoint_plan(
             thaw(prepared.effects[0].payload),
             "continue",
-            PLAN_CONTINUE_ACK,
             self.ports(paths),
         )
         self.assertEqual(
@@ -140,7 +136,6 @@ class CheckpointQualityTests(unittest.TestCase):
         revised = decide_checkpoint_plan(
             thaw(prepared.effects[0].payload),
             "revise",
-            PLAN_REVISE_ACK,
             self.ports(paths),
         )
         revised_item = thaw(revised.effects[0].payload)["checkpoints"][0]
@@ -170,7 +165,6 @@ class CheckpointQualityTests(unittest.TestCase):
         result = decide_checkpoint_plan(
             thaw(prepared.effects[0].payload),
             "continue",
-            PLAN_CONTINUE_ACK,
             self.ports(paths),
         )
         item = thaw(result.effects[0].payload)["checkpoints"][0]

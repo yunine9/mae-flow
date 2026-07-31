@@ -233,7 +233,7 @@
       }
     },
     "stderr": "",
-    "stdout": "🔎 最终未检视代码增量\n  范围: 9c6b2db726..e11a843d4d\n  提交:\n    e11a843 [REQ-DIFF][feat]final delta\n  文件:\n    A\tsrc/main.py\n  统计: 1 file changed, 2 insertions(+)\n  完整差异命令: git diff 9c6b2db726f49b708a5876d0b5a1c51c773e083b e11a843d4d3373dd7edd0d08ba7295593decd6c2\n  模式说明:中途策略是不 push；确认最终整体代码后才进入正式 push。\n\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：\n  - 我已认真检视并完成自验证，继续\n  - 需要调整代码\n点选后执行 checkpoint decide continue|revise --ack \"用户选择原文\"。\n"
+    "stdout": "🔎 最终未检视代码增量\n  范围: 9c6b2db726..e11a843d4d\n  提交:\n    e11a843 [REQ-DIFF][feat]final delta\n  文件:\n    A\tsrc/main.py\n  统计: 1 file changed, 2 insertions(+)\n  完整差异命令: git diff 9c6b2db726f49b708a5876d0b5a1c51c773e083b e11a843d4d3373dd7edd0d08ba7295593decd6c2\n  模式说明:中途策略是不 push；确认最终整体代码后才进入正式 push。\n\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：\n  - 我已认真检视并完成自验证，继续\n  - 需要调整代码\n点选后执行 checkpoint decide continue|revise；命令会自动读取本次检视后的新回答。\n"
   },
   "checkpoint_plan_creation": {
     "files": {
@@ -805,7 +805,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本步内未检测到 COMPILE 子 agent 的合法收尾(最近令牌: 无;本步始于 2026-07-29 10:00:00)。请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。主会话代写或口头汇报不算执行证据。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：没有可验证的编译成功证据，代码可能无法构建。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk compile --reason \"没有可验证的编译成功证据，代码可能无法构建\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本步内未检测到 COMPILE 子 agent 的合法收尾(最近令牌: 无;本步始于 2026-07-29 10:00:00)。请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。主会话代写或口头汇报不算执行证据。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：没有可验证的编译成功证据，代码可能无法构建。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk compile --reason \"没有可验证的编译成功证据，代码可能无法构建\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "evidence_archive_rejection": {
@@ -1130,7 +1130,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --ack \"<用户确认原话>\"；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "evidence_review_rejection": {
@@ -1336,7 +1336,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 已有放行令 c5c7463462 因代码版本变化作废(签发于 00000000)。需重新征得用户同意后 allow 重签。配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 requirement-record --message-id；已有文本用 requirement-record --source。\n⚠ 本规则本次拦截编号 c5c7463462。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow c5c7463462 --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
+    "stderr": "[mae-flow] 已有放行令 c5c7463462 因代码版本变化作废(签发于 00000000)。需重新征得用户同意后 allow 重签。配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 requirement-record --message-id；已有文本用 requirement-record --source。\n⚠ 本规则本次拦截编号 c5c7463462。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，先执行 messages 取得该回答 ID，再执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow c5c7463462 --message-id <ID>。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "guard_internal_state_edit": {
@@ -1437,7 +1437,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。\n⚠ 本规则本次拦截编号 e3115d5a7d。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow e3115d5a7d --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
+    "stderr": "[mae-flow] 配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。\n⚠ 本规则本次拦截编号 e3115d5a7d。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，先执行 messages 取得该回答 ID，再执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow e3115d5a7d --message-id <ID>。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {
@@ -1965,7 +1965,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec 文件: openspec/changes/other-change/change.md。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，选择不入库后由流程移入 .mae-flow-work/story。\n⚠ 本规则本次拦截编号 f68c690a5f。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，直接执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow f68c690a5f --ack \"用户同意原话\"。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
+    "stderr": "[mae-flow] 提交前检测到不属于当前 CHANGE_NAME 或本次定稿产物的 OpenSpec 文件: openspec/changes/other-change/change.md。请从暂存区移除；STORY 只能写到 docs/story/STORY-<单号>.md，选择不入库后由流程移入 .mae-flow-work/story。\n⚠ 本规则本次拦截编号 f68c690a5f。不要重试写法变体；若当前步骤已捕获到用户明确授权这一个 exact 动作/path/commit 的原话，先执行 messages 取得该回答 ID，再执行 python \"<IMPLEMENTATION>/scripts/mae-flow.py\" allow f68c690a5f --message-id <ID>。否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。\n",
     "stdout": ""
   },
   "quality_agent_task_missing_scan": {
@@ -2022,6 +2022,10 @@
         "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
         "size": 3
       },
+      ".mae-flow.json.usermsg": {
+        "sha256": "75769480f220fe7e844239b5eba86921982627740eaf3a2c9c5d43085b73bdec",
+        "size": 141
+      },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
         "size": 23
@@ -2030,7 +2034,7 @@
     "git": {
       "branch": "main",
       "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
-      "status": "?? .mae-flow.json\n?? .mae-flow.json.tokens"
+      "status": "?? .mae-flow.json\n?? .mae-flow.json.tokens\n?? .mae-flow.json.usermsg"
     },
     "returncode": 0,
     "state": {
@@ -2069,7 +2073,15 @@
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
       },
-      ".mae-flow.json.tokens": {}
+      ".mae-flow.json.tokens": {},
+      ".mae-flow.json.usermsg": [
+        {
+          "at": "9999-12-31 23:59:59",
+          "id": "scope-answer",
+          "step": "tw_codecheck",
+          "text": "全部不涉及本次修改"
+        }
+      ]
     },
     "stderr": "",
     "stdout": "[mae-flow] CodeCheck 首检完成:业务文件 0 个,告警 0 条。\n[mae-flow] CodeCheck 详细日志: <PROJECT>/.mae-flow-work/codecheck-logs/REQ-DIFF-tw_codecheck.md\n零告警，不派修复 agent；直接 done（期间源码若变化，证据会过期并要求重扫）。\n"
@@ -2111,7 +2123,7 @@
         "updated_at": "2026-07-29 10:00:00"
       }
     },
-    "stderr": "[mae-flow] 尚无本步骤的 codecheck-scan 结果；先执行首检。\n",
+    "stderr": "[mae-flow] CodeCheck 涉及范围确认验真失败:当前步骤不存在消息 ID scope-answer。先执行 messages 查看可用 ID；不要自行构造或复用旧 ID。\n",
     "stdout": ""
   },
   "quality_standalone_finish_missing_token": {
@@ -2180,8 +2192,8 @@
   "standalone_scope_confirmation": {
     "files": {
       ".mae-flow-work/standalone-action.json": {
-        "sha256": "cda24cb9bbeb7fc413f35896acdd9b131be895276e7e9fdb061a02a75b99bbf4",
-        "size": 1445
+        "sha256": "d92f60cc41a4b02088259e6f35ebd7a2d97df005d797d74dcf593e43d39c51ea",
+        "size": 1712
       },
       ".mae-flow-work/standalone/delivery-scope/ut-task.md": {
         "sha256": "438960a6d84f973ba5841fec95d41da60766d025e198e959e42cb01436bcf36d",

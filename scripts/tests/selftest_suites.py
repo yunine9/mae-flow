@@ -27,6 +27,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_spec2code_quality_flow.py",), 180, 5000),
     ("共享状态内核回归",
      ("scripts/tests/test_state_core.py",), 90, 3000),
+    ("确认收据与消息授权回归",
+     ("scripts/tests/test_confirmation_receipts.py",), 180, 5000),
     ("内嵌能力完整生命周期回归",
      ("scripts/tests/test_capabilities.py",), 240, 5000),
     ("内置规格引擎回归与差分对拍",

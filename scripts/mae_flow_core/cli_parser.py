@@ -26,7 +26,8 @@ class MFParser(argparse.ArgumentParser):
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
             "done 的 --set 可重复,值含空格要加引号；"
-            "--ack 仅用于报错明确要求的高风险裁决。" % (me, me, me),
+            "高风险裁决先用 messages 取得回答 ID，再传 --message-id；"
+            "不要把用户原话复制进 shell。" % (me, me, me),
             file=sys.stderr)
         sys.exit(2)
 
@@ -57,16 +58,16 @@ def parse_args(argv=None):
     goto = sub.add_parser("goto")
     goto.add_argument("step")
     goto.add_argument("--force", action="store_true")
-    goto.add_argument("--ack")
+    goto.add_argument("--message-id", required=True)
     unlock = sub.add_parser("unlock")
     unlock.add_argument("what", choices=["source"])
     unlock.add_argument("--reason")
-    unlock.add_argument("--ack")
+    unlock.add_argument("--message-id", required=True)
     risk = sub.add_parser("accept-risk")
     risk.add_argument(
         "agent", help="当前步骤报错中显示的 Agent 名称，如 compile/codecheck/ut")
     risk.add_argument("--reason", required=True)
-    risk.add_argument("--ack", required=True)
+    risk.add_argument("--message-id", required=True)
     spec = sub.add_parser("spec")
     spec_actions = spec.add_subparsers(dest="spec_action", required=True)
     spec_actions.add_parser("init")
@@ -91,7 +92,7 @@ def parse_args(argv=None):
     allow = sub.add_parser("allow")
     allow.add_argument(
         "block_id", help="gate 三振升级报错中给出的拦截编号(不要自行构造)")
-    allow.add_argument("--ack", required=True)
+    allow.add_argument("--message-id", required=True)
     moonlight = sub.add_parser("moonlight")
     moonlight.add_argument("action", choices=[
         "on", "continue", "off", "report", "push-failed",
@@ -118,7 +119,6 @@ def parse_args(argv=None):
     action_start.add_argument("--ut-command")
     action_start.add_argument("--check-only", action="store_true")
     confirm_scope = actions.add_parser("confirm-scope")
-    confirm_scope.add_argument("--ack", required=True)
     actions.add_parser("status")
     critic = actions.add_parser("critic")
     critic.add_argument("--stage", choices=["prep", "final"], required=True)
@@ -221,7 +221,6 @@ def parse_args(argv=None):
     checkpoint_plan_decide = checkpoint_actions.add_parser("plan-decide")
     checkpoint_plan_decide.add_argument(
         "choice", choices=["continue", "revise"])
-    checkpoint_plan_decide.add_argument("--ack", required=True)
     checkpoint_craft = checkpoint_actions.add_parser("craft-reviewed")
     checkpoint_craft.add_argument("checkpoint_id", help="当前检查点，如 CP1")
     checkpoint_craft.add_argument("--review", required=True)
@@ -229,7 +228,6 @@ def parse_args(argv=None):
     checkpoint_decide = checkpoint_actions.add_parser("decide")
     checkpoint_decide.add_argument(
         "choice", choices=["continue", "revise", "continuous"])
-    checkpoint_decide.add_argument("--ack", required=True)
     sub.add_parser("codecheck-scan")
     codecheck_scope = sub.add_parser("codecheck-scope")
     codecheck_scope.add_argument(
@@ -238,15 +236,15 @@ def parse_args(argv=None):
     codecheck_scope.add_argument(
         "--none", action="store_true",
         help="用户确认所有疑似范围外候选均不涉及本次修改")
-    codecheck_scope.add_argument("--ack", required=True)
+    codecheck_scope.add_argument("--message-id", required=True)
     record = sub.add_parser("codecheck-record")
     record.add_argument("--count", required=True, type=int)
     record.add_argument("--diagnostic", required=True)
     record.add_argument("--reason", required=True)
-    record.add_argument("--ack", required=True)
+    record.add_argument("--message-id", required=True)
     exemption = sub.add_parser("approve-exemption")
     exemption.add_argument("--rule", required=True)
     exemption.add_argument("--file", required=True)
     exemption.add_argument("--reason", required=True)
-    exemption.add_argument("--ack", required=True)
+    exemption.add_argument("--message-id", required=True)
     return parser.parse_args(argv)

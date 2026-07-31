@@ -292,6 +292,8 @@ class HookStateMixin:
                 "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
                 "input_encoding": self.input_encoding or "unknown",
             }
+            if action and action.get("scope_sha256"):
+                row["scope_sha256"] = str(action["scope_sha256"])
             if config_review_sha:
                 row["config_review_sha256"] = config_review_sha
                 row["config_review_id"] = config_review_id
@@ -451,7 +453,6 @@ class HookStateMixin:
                 self._record_agent_token("UTRUN", "EXECUTED")
         except Exception as e:
             self.log("utrun EXC: %s" % e)
-
 
     def _load_action(self):
         action, err, expired = core_load_action()

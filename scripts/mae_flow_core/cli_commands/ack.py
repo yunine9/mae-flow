@@ -86,15 +86,44 @@ def _ack_candidates(text):
 
 def _trusted_answer_candidates(text):
     """Return actual answer values, excluding question/option metadata."""
-    candidates = _ack_candidates(text)
+    return [
+        re.sub(r"\s+", "", value)
+        for value in _trusted_answer_values(text)
+        if re.sub(r"\s+", "", value)
+    ]
+
+
+def _trusted_answer_values(text):
+    """Return answer values with their original wording and whitespace."""
     try:
         parsed = json.loads(text)
     except Exception:
-        return candidates
+        return [(text or "").strip()] if (text or "").strip() else []
     if isinstance(parsed, str):
-        return [re.sub(r"\s+", "", parsed)] if parsed.strip() else []
-    raw = re.sub(r"\s+", "", text or "")
-    return [value for value in candidates if value != raw]
+        return [parsed.strip()] if parsed.strip() else []
+    out = []
+    answer_keys = {
+        "answer", "answers", "response", "responses", "selected",
+        "selection", "selectedoption", "selectedoptions", "result",
+    }
+
+    def walk(value, trusted=False):
+        if isinstance(value, str) and trusted and value.strip():
+            out.append(value.strip())
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                normalized = re.sub(
+                    r"[^a-z]", "", str(key).lower())
+                walk(item, trusted or normalized in answer_keys)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item, trusted)
+
+    if isinstance(parsed, list):
+        walk(parsed, trusted=True)
+    else:
+        walk(parsed)
+    return out
 
 def _all_ack_messages():
     try:
@@ -131,6 +160,50 @@ def _current_ack_messages(st, extra_steps=()):
             # 供随后的选择步直接消费,免逐步重复提问;仍是本单内真实捕获的用户答案。
             out.append(item)
     return out
+
+
+def _authorization_message(st, message_id):
+    """Resolve one current-step user message without shell text transport."""
+    wanted = str(message_id or "").strip()
+    if not wanted:
+        return False, "", {}, (
+            "缺少 --message-id。先执行 messages，使用当前步骤用户授权消息左侧的 ID；"
+            "不要把用户原话复制进 shell。")
+    current = [
+        item for item in _current_ack_messages(st)
+        if str(item.get("id", "") or "") == wanted
+    ]
+    if not current:
+        old = [
+            item for item in _all_ack_messages()
+            if str(item.get("id", "") or "") == wanted
+        ]
+        if old:
+            return False, "", {}, (
+                "消息 ID %s 属于步骤 %s，当前是 %s；"
+                "高风险授权不能跨步骤复用。"
+                % (wanted, old[-1].get("step", "(未标步骤)"),
+                   st.get("current", "")))
+        return False, "", {}, (
+            "当前步骤不存在消息 ID %s。先执行 messages 查看可用 ID；"
+            "不要自行构造或复用旧 ID。" % wanted)
+    row = current[-1]
+    values = _trusted_answer_values(str(row.get("text", "") or ""))
+    if not values:
+        return False, "", {}, (
+            "消息 ID %s 的结构中没有可信回答字段。执行 messages --id %s --full "
+            "核对宿主回传；不得用问题或候选项文本冒充用户回答。"
+            % (wanted, wanted))
+    answer = "\n".join(dict.fromkeys(values))
+    receipt = {
+        "message_id": wanted,
+        "answer_sha256": hashlib.sha256(
+            answer.encode("utf-8")).hexdigest(),
+        "captured_at": str(row.get("at", "") or ""),
+        "step": str(row.get("step", "") or st.get("current", "")),
+    }
+    _ack_failure(st, success=True)
+    return True, answer, receipt, ""
 
 def _out_of_scope_ack_reason(st):
     """Explain captured-but-stale answers without blaming the Hook."""

@@ -21,6 +21,15 @@ def quality_codecheck_empty_scan(
         os.path.join(project, ".mae-flow.json"),
         _quality_state("tw_codecheck"),
     )
+    write_json(
+        os.path.join(project, ".mae-flow.json.usermsg"),
+        [{
+            "id": "scope-answer",
+            "text": "全部不涉及本次修改",
+            "step": "tw_codecheck",
+            "at": "9999-12-31 23:59:59",
+        }],
+    )
     return fixed_cli(
         implementation_root, env, "codecheck-scan")
 
@@ -37,8 +46,8 @@ def quality_codecheck_scope_missing_scan(
         env,
         "codecheck-scope",
         "--none",
-        "--ack",
-        "全部不涉及本次修改",
+        "--message-id",
+        "scope-answer",
     )
 
 

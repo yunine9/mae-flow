@@ -123,10 +123,11 @@ def cmd_action_start(flow, st, args):
 
 def cmd_action_confirm_scope(flow, args):
     action = api._load_action()
-    ack_verified = (
-        api._action_scope_ack_verified(action, args.ack)
-        if action else (False, "")
+    scope_receipt = (
+        api._action_scope_receipt(action)
+        if action else (False, {}, "")
     )
+    ack_verified = (scope_receipt[0], scope_receipt[2])
     validation = validate_scope_confirmation(action, ack_verified)
     if validation.exit_code:
         api.die(validation.stderr[0], validation.exit_code)
@@ -136,7 +137,7 @@ def cmd_action_confirm_scope(flow, args):
         files, action["kind"], action.get("config", {}), flow)
     result = confirm_standalone_scope(
         action=action,
-        ack=args.ack,
+        confirmation_receipt=scope_receipt[1],
         ack_verified=ack_verified,
         validated_files=tuple(files),
         now=time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -155,7 +156,9 @@ def cmd_action_confirm_scope(flow, args):
             os.getcwd(), action, "standalone.scope_confirmed", {
                 "head": action.get("base_head", ""),
                 "files": files,
-                "ack": args.ack,
+                "message_id": scope_receipt[1].get("message_id", ""),
+                "scope_sha256": scope_receipt[1].get(
+                    "scope_sha256", ""),
             })
         result, err = api._run_codecheck(files, action, "standalone-scan")
         if err:

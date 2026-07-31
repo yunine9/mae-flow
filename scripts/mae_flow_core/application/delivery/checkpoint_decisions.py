@@ -75,11 +75,12 @@ def commit_commands(item, config):
 
 
 def decide_checkpoint(
-        review, current, moonlight, choice, ack, ports, config=None):
+        review, current, moonlight, choice, ports, config=None):
     """Resolve one checkpoint decision without mutating caller state."""
     if not review or moonlight:
         return _failure("当前没有等待用户裁决的普通模式检查点。")
     expected = ACKS[choice]
+    ack = expected
     now = ports.now()
     updated = deepcopy(review)
     final = updated.get("final_review") or {}

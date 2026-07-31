@@ -9,6 +9,11 @@ from .wiring import api
 def _branch_adoption_requested(text):
     """Whether the user explicitly chose to keep working on the current branch."""
     value = re.sub(r"[（(]推荐[）)]", "", str(text or "")).strip()
+    value = re.sub(
+        r"“[^”]*”|「[^」]*」|『[^』]*』|`[^`]*`|\"[^\"]*\"|'[^']*'",
+        "",
+        value,
+    )
     if re.search(
             r"(不要|不在|不想|拒绝|取消|改用其他|另开|新建|切到|切换到|"
             r"是否|能否|可以吗|怎么|如何|为什么|[?？])",
@@ -16,10 +21,20 @@ def _branch_adoption_requested(text):
         return False
     branch = r"(?:当前|现有|现在|这个)分支"
     keep = r"(?:继续|沿用|保留|使用|开发|往下做)"
-    return bool(
-        re.search(branch + r"[^，。！？,;；]{0,12}" + keep, value, re.I)
-        or re.search(keep + r"[^，。！？,;；]{0,12}" + branch, value, re.I)
+    patterns = (
+        branch + r"[^，。！？,;；]{0,12}" + keep,
+        keep + r"[^，。！？,;；]{0,12}" + branch,
     )
+    meta = re.compile(
+        r"(文案|字样|文本|示例|例子|说明|需求文档|注释|测试|按钮)"
+        r"[^，。！？,;；]{0,16}$",
+        re.I,
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, value, re.I):
+            if not meta.search(value[max(0, match.start() - 32):match.start()]):
+                return True
+    return False
 
 def _adopt_current_branch(st, ack):
     """Bind the explicitly chosen existing branch to this delivery round."""
@@ -62,11 +77,27 @@ def _adopt_current_branch(st, ack):
 
 
 def _recorded_delivery_head(state):
-    moonlight = (state.get("moonlight") or {}) if isinstance(state, dict) else {}
-    current = str(state.get("current", "")) if isinstance(state, dict) else ""
-    step_head = (((state.get("step_heads") or {}).get(current, ""))
-                 if isinstance(state, dict) else "")
+    if not isinstance(state, dict):
+        return ""
+    moonlight = state.get("moonlight")
+    moonlight = moonlight if isinstance(moonlight, dict) else {}
+    step_heads = state.get("step_heads")
+    step_heads = step_heads if isinstance(step_heads, dict) else {}
+    current = str(state.get("current", ""))
+    step_head = step_heads.get(current, "")
     return str(step_head or moonlight.get("pushed_head", ""))
+
+
+def _archived_delivery_facts(state):
+    if not isinstance(state, dict):
+        return "", "", ""
+    config = state.get("config")
+    config = config if isinstance(config, dict) else {}
+    return (
+        str(config.get("单号", "") or ""),
+        str(config.get("分支名", "") or ""),
+        _recorded_delivery_head(state),
+    )
 
 
 def _last_delivery_snapshot():
@@ -101,8 +132,8 @@ def _resolve_moonlight_branch(flow, st):
         if base else ""
     )
     previous, previous_sha = _last_delivery_snapshot()
-    previous_config = previous.get("config") or {}
-    previous_head = _recorded_delivery_head(previous)
+    previous_ticket, previous_branch, previous_head = (
+        _archived_delivery_facts(previous))
     request = str((st.get("moonlight") or {}).get("request", "") or "")
     facts = MoonlightBranchFacts(
         current_branch=current,
@@ -114,8 +145,8 @@ def _resolve_moonlight_branch(flow, st):
         request_sha256=hashlib.sha256(
             request.encode("utf-8")).hexdigest(),
         last_state_sha256=previous_sha,
-        previous_ticket=str(previous_config.get("单号", "") or ""),
-        previous_branch=str(previous_config.get("分支名", "") or ""),
+        previous_ticket=previous_ticket,
+        previous_branch=previous_branch,
         previous_head=previous_head,
         previous_head_is_ancestor=_is_ancestor(previous_head, head),
         dirty_paths=tuple(api._dirty_paths()[:100]),

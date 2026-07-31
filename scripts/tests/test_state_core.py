@@ -28,9 +28,32 @@ from mae_flow_core import (  # noqa: E402
     save_versioned_json,
     update_json,
 )
+from mae_flow_core.cli_commands.source_facts import (  # noqa: E402
+    _archived_delivery_facts,
+    _branch_adoption_requested,
+)
 
 
 class RuntimeAndStateTests(unittest.TestCase):
+    def test_branch_adoption_request_rejects_quoted_or_documentation_text(self):
+        self.assertTrue(_branch_adoption_requested(
+            "开启月光宝盒，继续当前分支完成开发"))
+        self.assertFalse(_branch_adoption_requested(
+            "开启月光宝盒，把按钮文案改成“继续当前分支”"))
+        self.assertFalse(_branch_adoption_requested(
+            "需求文档里补充「使用当前分支」这个例子"))
+
+    def test_archived_delivery_facts_fail_closed_on_bad_nested_json(self):
+        self.assertEqual(
+            ("", "", ""),
+            _archived_delivery_facts({
+                "current": "end",
+                "config": [],
+                "step_heads": [],
+                "moonlight": "bad",
+            }),
+        )
+
     def test_moonlight_branch_create_continues_terminal_rollover_same_delivery(self):
         with tempfile.TemporaryDirectory() as root:
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)

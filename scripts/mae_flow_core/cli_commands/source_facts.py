@@ -9,11 +9,7 @@ from .wiring import api
 def _branch_adoption_requested(text):
     """Whether the user explicitly chose to keep working on the current branch."""
     value = re.sub(r"[（(]推荐[）)]", "", str(text or "")).strip()
-    value = re.sub(
-        r"“[^”]*”|「[^」]*」|『[^』]*』|`[^`]*`|\"[^\"]*\"|'[^']*'",
-        "",
-        value,
-    )
+    value = re.sub(r"[“”「」『』`\"']", "", value)
     if re.search(
             r"(不要|不在|不想|拒绝|取消|改用其他|另开|新建|切到|切换到|"
             r"是否|能否|可以吗|怎么|如何|为什么|[?？])",
@@ -25,14 +21,23 @@ def _branch_adoption_requested(text):
         branch + r"[^，。！？,;；]{0,12}" + keep,
         keep + r"[^，。！？,;；]{0,12}" + branch,
     )
-    meta = re.compile(
-        r"(文案|字样|文本|示例|例子|说明|需求文档|注释|测试|按钮)"
-        r"[^，。！？,;；]{0,16}$",
+    meta_before = re.compile(
+        r"(文案|字样|文本|示例|例子|注释|测试|按钮)"
+        r"[^，。！？,;；]{0,16}"
+        r"(改成|写进|写入|补充|展示|显示|设为|作为)\s*$",
+        re.I,
+    )
+    meta_after = re.compile(
+        r"^\s*(这个|该)?"
+        r"(写进|写入|改成|设为|作为|展示|显示|用作|用于|"
+        r"字样|文案|示例|例子|文本|测试)",
         re.I,
     )
     for pattern in patterns:
         for match in re.finditer(pattern, value, re.I):
-            if not meta.search(value[max(0, match.start() - 32):match.start()]):
+            before = value[max(0, match.start() - 40):match.start()]
+            after = value[match.end():match.end() + 32]
+            if not meta_before.search(before) and not meta_after.search(after):
                 return True
     return False
 

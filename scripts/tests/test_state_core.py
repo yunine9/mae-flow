@@ -38,10 +38,18 @@ class RuntimeAndStateTests(unittest.TestCase):
     def test_branch_adoption_request_rejects_quoted_or_documentation_text(self):
         self.assertTrue(_branch_adoption_requested(
             "开启月光宝盒，继续当前分支完成开发"))
+        self.assertTrue(_branch_adoption_requested(
+            "开启月光宝盒，请“继续当前分支”完成开发"))
+        self.assertTrue(_branch_adoption_requested(
+            "需求文档确认无误后继续当前分支"))
         self.assertFalse(_branch_adoption_requested(
             "开启月光宝盒，把按钮文案改成“继续当前分支”"))
         self.assertFalse(_branch_adoption_requested(
             "需求文档里补充「使用当前分支」这个例子"))
+        self.assertFalse(_branch_adoption_requested(
+            "开启月光宝盒，把继续当前分支写进按钮文案"))
+        self.assertFalse(_branch_adoption_requested(
+            "将使用当前分支设为测试示例"))
 
     def test_archived_delivery_facts_fail_closed_on_bad_nested_json(self):
         self.assertEqual(

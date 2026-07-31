@@ -36,6 +36,8 @@ class CompileWaitInstructionTests(unittest.TestCase):
         self.assertIn("单次同步", skill)
         self.assertIn('cd "$BUILD_DIR" && mcde build -i', loop)
         self.assertIn("源码和构建输入未变化", loop)
+        self.assertIn("属于 FAIL，不是 BLOCKED", loop)
+        self.assertIn("Windows Git Bash", loop)
         self.assertNotIn("后台执行+轮询", skill)
         self.assertNotIn("/tmp/build_output.txt", loop)
         self.assertNotRegex(loop, r"mcde build -i[^\n]*&")

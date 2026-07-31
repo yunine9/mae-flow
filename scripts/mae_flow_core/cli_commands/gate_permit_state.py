@@ -21,6 +21,12 @@ def _gate_block_id(rule, subject):
     return permit_block_id(rule, subject)
 
 
+def _hook_rule_message(rule, message):
+    if os.environ.get("MAE_FLOW_HOOK_TRACE") == "1":
+        return "[mae-flow-rule=%s]\n%s" % (rule, message)
+    return message
+
+
 def _gate_die(st, sid, rule, subject, msg):
     """Consume an exact permit or record a strike and show recovery guidance."""
     bid = _gate_block_id(rule, subject)
@@ -145,4 +151,4 @@ def _gate_die(st, sid, rule, subject, msg):
         bid,
         os.path.abspath(sys.argv[0]),
     )
-    api.die(msg, 2)
+    api.die(_hook_rule_message(rule, msg), 2)

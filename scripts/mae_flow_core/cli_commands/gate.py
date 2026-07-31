@@ -9,6 +9,22 @@ from .shared import (
 )
 from .wiring import api
 
+
+def _hook_rule_message(rule, message):
+    if os.environ.get("MAE_FLOW_HOOK_TRACE") == "1":
+        return "[mae-flow-rule=%s]\n%s" % (
+            rule or "absolute-policy", message)
+    return message
+
+
+def _die_rule(rule, message):
+    api.die(_hook_rule_message(rule, message), 2)
+
+
+def _die_decision(decision):
+    _die_rule(getattr(decision, "rule", ""), decision.message)
+
+
 def _advisory_lightcheck_before_commit(st, snapshot):
     """Check exact commit candidates; any timeout/crash remains non-blocking."""
     try:
@@ -64,7 +80,7 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
             and unlock.get("step") == sid),
     ))
     if decision.kind == "absolute":
-        api.die(decision.message, 2)
+        _die_decision(decision)
     if decision.kind == "block":
         jdie(decision.rule, decision.message)
     sys.exit(0)
@@ -100,7 +116,7 @@ def _enforce_commit_ownership(decision, jdie):
                 "bash-checkpoint-reviewed-files"}:
             # Integrity/provenance hard blocks are not user-decision permits.
             # Keep their recovery local and write no strike/permit state.
-            api.die(decision.block.message, 2)
+            _die_decision(decision.block)
         jdie(decision.block.rule, decision.block.message)
     for message in decision.advisories:
         print(message, file=sys.stderr)
@@ -114,7 +130,7 @@ def _gate_compile_task_window(st):
         (tokens if isinstance(tokens, dict) else {}).get("COMPILE"),
     )
     if decision:
-        api.die(decision.message, 2)
+        _die_decision(decision)
 
 
 def _gate_commit_candidates(c, st, jdie):
@@ -199,7 +215,7 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
         bad_test_sources=tuple(bad),
     ))
     if decision.kind == "absolute":
-        api.die(decision.message, 2)
+        _die_decision(decision)
     if decision.kind == "block":
         jdie(decision.rule, decision.message)
     if decision.kind == "advisory":
@@ -210,14 +226,14 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
 def _git_actions_preflight(command):
     wrapped_git = git_intent.wrapped_git_mutations(command)
     if wrapped_git:
-        api.die(
+        _die_rule(
+            "bash-wrapped-git",
             "Agent Bash 禁止用 Python/PowerShell/cmd/sh 等解释器或子进程"
             "换壳执行 git add/commit/push 来绕过 Hook。检测到: "
             + "、".join(wrapped_git)
             + "。保留现场并直接使用可见的 git 命令，让 Gate 正常裁决；"
             "若是用户本人决定在外部终端操作，应把命令和风险交给用户，"
             "不得由 Agent 代执行。",
-            2,
         )
     alias_mutations = list(
         git_intent.inline_git_alias_mutations(command))
@@ -229,25 +245,25 @@ def _git_actions_preflight(command):
         if mutation:
             alias_mutations.append(mutation)
     if alias_mutations:
-        api.die(
+        _die_rule(
+            "bash-mutating-git-alias",
             "Agent Bash 禁止用 mutating Git alias 隐藏真实写动作。"
             "检测到 alias 最终指向: "
             + "、".join(dict.fromkeys(alias_mutations))
             + "。请改用可见的 canonical git add/commit/push/"
             "restore/rm/revert 命令，让 Gate 预检 exact action；"
             "只读 alias 不受影响，用户外部终端不受 Hook 约束。",
-            2,
         )
     opaque_pathspecs = git_intent.opaque_pathspec_mutations(
         command)
     if opaque_pathspecs:
-        api.die(
+        _die_rule(
+            "bash-opaque-pathspec",
             "Agent Git 写动作禁止使用 --pathspec-from-file/"
             "--pathspec-file-nul：Gate 无法在执行前核对其 exact candidates。"
             "检测到: " + "、".join(opaque_pathspecs)
             + "。请改为显式 `-- <paths>`，逐项展示并接受 ownership"
             " 检查；用户外部终端不受 Hook 约束。",
-            2,
         )
     actions = git_intent.git_actions(
         command, actor="agent-hook")
@@ -256,14 +272,14 @@ def _git_actions_preflight(command):
         if action.operation in ("commit", "revert")
     ]
     if len(head_mutations) > 1:
-        api.die(
+        _die_rule(
+            "bash-multiple-head-mutations",
             "Agent 单条 Bash 中只能执行每次一个可审计的 "
             "git commit/revert；检测到 %d 个 HEAD 改写动作。"
             "请拆成独立命令，让 Gate 对每个 GitAction 的 message、"
             "paths 与 ownership 分别预检。用户在外部终端的操作"
             "不受此 Hook 约束。"
             % len(head_mutations),
-            2,
         )
     return actions
 
@@ -359,7 +375,7 @@ def cmd_gate(flow, st, args):
         )
         pre = decide_pre_commit(context)
         if pre.kind == "absolute":
-            api.die(pre.message, 2)
+            _die_decision(pre)
         if pre.kind == "block":
             jdie(pre.rule, pre.message)
         if (message_present and wanted
@@ -376,7 +392,7 @@ def cmd_gate(flow, st, args):
             _gate_commit_candidates(git_command, st, jdie)
         post = decide_post_commit(context)
         if post.kind == "absolute":
-            api.die(post.message, 2)
+            _die_decision(post)
         if post.kind == "block":
             jdie(post.rule, post.message)
         return _gate_bash_writes(flow, st, sid, step, intent, jdie)

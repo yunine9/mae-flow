@@ -2,20 +2,15 @@
 # -*- coding: utf-8 -*-
 """dispatch.py — 跨平台 hook 分发器(Windows 优先,零 POSIX 依赖)。
 
-用法(hooks.json 中,shell form——公司 codeagent 实测**不支持** exec form 的 args 数组:
-只执行 command 本体,payload 落进 python 的 stdin 被当脚本解析,JSON 的 false 炸 NameError,2026-07-20 实战):
+用法(hooks.json 中,shell form；公司 codeagent 不支持 exec form 的 args 数组):
   python "${CODEAGENT3_PLUGIN_ROOT}/hooks/dispatch.py" <事件>
-事件:pretooluse | userprompt | sessionstart | subagentstop | posttooluse | stop
-(Windows 上 hook 经 Git Bash 执行,${VAR} 可展开;路径带引号防空格)
-输入:stdin 的 hook JSON。exit 2 = 拦截/打回(stderr 回传模型);其余一律 0(fail-open)。
+输入 stdin Hook JSON；exit 2 = 拦截/打回，其余一律 0(fail-open)。
 
 防卡死设计(hook 在每条消息上同步执行,任何阻塞都会冻住整个会话):
   - 看门狗:进程存活超过 WATCHDOG_SECS 秒无条件 os._exit(0) 放行;
-  - stdin 读取放在守护线程里,STDIN_SECS 秒拿不到 EOF 按空输入处理
-    (防 harness 不关闭 stdin 导致 read() 永久阻塞);
+  - stdin 守护线程在 STDIN_SECS 秒拿不到 EOF 时按空输入处理;
   - 调 mae-flow 的子进程带超时;
-  - 每次调用在 %TEMP%/mae-flow-hook.log 记 start/end 与耗时,
-    只有 start 没有 end = 该次挂起被看门狗击杀,可据此定位。
+  - %TEMP%/mae-flow-hook.log 记录 start/end 与耗时供挂起定位。
 """
 import hashlib, json, locale, os, subprocess, sys, tempfile, threading, time
 
@@ -40,6 +35,7 @@ from mae_flow_core.application.hooks.events import (
 )
 from mae_flow_core.adapters.hook_active_events import ActiveHookEventAdapter
 from mae_flow_core.adapters.hook_events import HookEventAdapter
+from mae_flow_core.adapters.hook_diagnostics import HookBlockDiagnostics
 from mae_flow_core.adapters.hook_runtime import HookRuntimeAdapter
 
 for _s in (sys.stdout, sys.stderr):
@@ -64,6 +60,7 @@ SUBPROC_SECS = 8
 _T0 = time.time()
 _INPUT_ENCODING = ""
 _STDIN_THREAD = None   # stdin 读线程句柄:超时未归还时,收尾必须绕过解释器 finalization
+_DIAGNOSTICS = HookBlockDiagnostics()
 
 
 def _log(msg):
@@ -102,14 +99,16 @@ def maeflow(*args):
         r = subprocess.run([sys.executable, MAEFLOW, *args],
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
+                           env=_DIAGNOSTICS.subprocess_environment(),
                            timeout=SUBPROC_SECS)
     except subprocess.TimeoutExpired:
         _log("maeflow %s TIMEOUT" % (args,))
         return 0
     if r.stdout:
         print(r.stdout, end="")
-    if r.stderr:
-        print(r.stderr, end="", file=sys.stderr)
+    stderr = _DIAGNOSTICS.sanitize_stderr(r.stderr)
+    if stderr:
+        print(stderr, end="", file=sys.stderr)
     if r.returncode not in (0, 2):
         _log("maeflow %s rc=%s — 非门禁语义退出码,按 fail-open 放行" % (args[:2], r.returncode))
         return 0
@@ -297,6 +296,7 @@ def main():
         runtime = resolve_runtime(os.getcwd())
         response = _handle_hook_event(
             ev, d, runtime, _hook_event_ports())
+        _DIAGNOSTICS.log_pretool_decision(ev, d, response, _log)
         if response.stdout:
             print(response.stdout, end="")
         if response.stderr:

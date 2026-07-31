@@ -27,8 +27,8 @@ class BashGateContext:
     state_active: bool
 
 
-def _absolute(message):
-    return GateDecision("absolute", message=message)
+def _absolute(rule, message):
+    return GateDecision("absolute", rule=rule, message=message)
 
 
 def _block(rule, message):
@@ -38,6 +38,7 @@ def _block(rule, message):
 def _pre_repository(context):
     if context.has_internal_state_path:
         return _absolute(
+            "bash-internal-state-read",
             "流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash "
             "直接访问；查看请用 mae-flow status/current/doctor/moonlight report，"
             "修改只能走对应子命令。")
@@ -94,6 +95,7 @@ def _pre_checkpoint(context):
         )
     if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", command):
         return _absolute(
+            "bash-wide-add",
             "禁止宽提交(git add -A / --all / .):会把无关文件与不入库产物卷进"
             "交付分支(实战:STORY 选了不入库仍被卷进 MR)。git add 必须精确到"
             "文件/明确的产物目录。")
@@ -158,15 +160,19 @@ def _post_early(context):
         re.search(r"git\s+push\b.*(--force|-f\b)", command)
         or re.search(r"git\s+push\b.*\s\+\S+", command)
     ):
-        return _absolute("禁止 force push(含 +refspec 形式)。")
+        return _absolute(
+            "bash-force-push",
+            "禁止 force push(含 +refspec 形式)。")
     if re.search(r"dispatch\.py", command):
         return _absolute(
+            "bash-manual-dispatch",
             "hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——"
             "这是伪造 agent 收尾令牌的通道。")
     if re.search(
             r"mae-flow\.py[^;&|]*\bexit\b[^;&|]*--interactive\b",
             command, re.I):
         return _absolute(
+            "bash-agent-interactive-exit",
             "exit --interactive 是 Hook/ack 全坏时给用户的真实终端逃生口，"
             "Agent 的 Bash 禁止调用或代答；把完整命令展示给用户手动执行。")
     return None
@@ -210,6 +216,7 @@ def _post_dangerous(context):
     command = context.command
     if re.search(r"\bcomet\s+init\b", command):
         return _absolute(
+            "bash-comet-init",
             "禁止执行全局 comet init：它会初始化无关平台并污染项目。"
             "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，"
             "无需人工初始化。")
@@ -220,9 +227,11 @@ def _post_dangerous(context):
         re.I,
     ):
         return _absolute(
+            "bash-remote-script-pipe",
             "危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。")
     if re.search(r"git\s+clean\s+-\S*[xX]", command):
         return _absolute(
+            "bash-git-clean-ignored",
             "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。")
     if context.state_active and (
         re.search(
@@ -241,6 +250,7 @@ def _post_dangerous(context):
         )
     if context.recursive_delete_targets:
         return _absolute(
+            "bash-recursive-delete",
             "危险命令拦截:对「%s」的递归删除。确需执行请用户手动运行。"
             % context.recursive_delete_targets[0])
     if (

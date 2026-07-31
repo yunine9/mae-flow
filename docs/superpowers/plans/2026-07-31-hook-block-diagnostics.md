@@ -25,7 +25,9 @@
 - Modify: `scripts/mae_flow_core/guard/bash.py`
 - Modify: `scripts/mae_flow_core/cli_commands/gate.py`
 - Modify: `scripts/mae_flow_core/cli_commands/gate_permit_state.py`
+- Create: `scripts/mae_flow_core/adapters/hook_diagnostics.py`
 - Modify: `hooks/dispatch.py`
+- Modify: `README.md`
 
 **Interfaces:**
 - Consumes: `GateDecision.kind`, `GateDecision.rule`, `HookResponse.exit_code`, and the Hook payload fields `tool_name` and `tool_input.command`.
@@ -135,10 +137,12 @@ Then commit only the plan, tests, and implementation:
 
 ```bash
 git add docs/superpowers/plans/2026-07-31-hook-block-diagnostics.md \
+  README.md \
   scripts/tests/test_hook_block_diagnostics.py \
   scripts/mae_flow_core/guard/bash.py \
   scripts/mae_flow_core/cli_commands/gate.py \
   scripts/mae_flow_core/cli_commands/gate_permit_state.py \
+  scripts/mae_flow_core/adapters/hook_diagnostics.py \
   hooks/dispatch.py
 git commit -m "feat: diagnose hook policy blocks"
 ```

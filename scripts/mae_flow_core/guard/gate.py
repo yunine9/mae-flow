@@ -53,8 +53,8 @@ class BashWriteContext:
     bad_test_sources: tuple
 
 
-def _absolute(message):
-    return GateDecision("absolute", message=message)
+def _absolute(message, rule="absolute-policy"):
+    return GateDecision("absolute", rule=rule, message=message)
 
 
 def _block(rule, message):
@@ -179,11 +179,13 @@ def _bash_absolute_decision(context):
     ):
         return _absolute(
             "comet/openspec 状态文件禁止经 Bash 改写:它们由 comet-state 维护"
-            "(黑名单#4),直写等同伪造阶段/验证证据。")
+            "(黑名单#4),直写等同伪造阶段/验证证据。",
+            rule="bash-comet-state-write")
     if re.search(r"COMET_FORCE_PHASE", command, re.I):
         return _absolute(
             "COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
-            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。")
+            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。",
+            rule="bash-retired-force-phase")
     if re.search(
         r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*"
         r"\.(sh|mjs|js)\b|runtime/bin/openspec\b",
@@ -193,17 +195,20 @@ def _bash_absolute_decision(context):
         return _absolute(
             "禁止直接执行插件内嵌脚本:绕过 capability 包装会丢失内嵌 OpenSpec "
             "路由等环境,退落到机器全局版本(版本锁失效)。请使用 current 给出的 "
-            "capability 命令。")
+            "capability 命令。",
+            rule="bash-vendored-runtime")
     if re.search(r"(?:^|[;&|(])\s*openspec\b", command):
         return _absolute(
             "禁止调用机器全局 openspec CLI:schema 与归档语义锁定在内嵌 1.6.0,"
             "全局版本随上游发布漂移(版本锁失效);init 还会交互式生成工具目录污染"
-            "仓库。请使用 current 给出的 capability openspec 命令。")
+            "仓库。请使用 current 给出的 capability openspec 命令。",
+            rule="bash-global-openspec")
     if context.writeish and context.hits_internal_state:
         return _absolute(
             "流程状态/历史账本/待重启标记/仓库预设/月光宝盒报告由 mae-flow "
             "维护,禁止经 Bash 改写/删除(待重启标记只能靠重启会话清;"
-            "仓库预设决定门禁口径,流程外走正常评审提交)。")
+            "仓库预设决定门禁口径,流程外走正常评审提交)。",
+            rule="bash-internal-state-write")
     return None
 
 

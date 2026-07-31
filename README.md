@@ -466,6 +466,11 @@ UTF-8；已有 GBK/UTF-16 文本也可以规范化后再进入完整配置确认
 Hook 通用日志位于 `%TEMP%\mae-flow-hook.log`。CodeCheck 问题优先提供扫描输出中打印的专项详细日志；
 其他无法解释的拦截，把 `doctor` 输出和 Hook 日志最后几十行一起交给维护者。
 
+宿主可能把正常的门禁拒绝也显示为 `PreToolUse:<工具> hook error`。此时查看同一时刻的
+`decision event=pretooluse ... result=blocked source=mae-flow rule=<规则>`：存在该行表示
+Mae-Flow 按规则主动拦截，不是 Hook 崩溃；`command_sha256` 只用于判断多次拦截是否来自同一条
+Bash 命令，日志不会保存命令原文。`EXC`、`WATCHDOG` 或“非门禁语义退出码”才表示 Hook/运行环境异常。
+
 ## 哪些内容会留下
 
 根据任务类型，项目中可能产生：

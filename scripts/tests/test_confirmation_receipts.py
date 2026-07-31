@@ -244,6 +244,138 @@ class ConfirmationReceiptTests(unittest.TestCase):
         self.assertIn("build", why)
         self.assertIn("verify_ut", why)
 
+    def test_binary_review_accepts_natural_positive_answer_after_receipt(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        self.addCleanup(os.chdir, old_cwd)
+        state = {
+            "current": "build_plan",
+            "started": "2026-07-31 11:00:00",
+            "history": [{
+                "step": "build_plan",
+                "at": "2026-07-31 11:30:00",
+            }],
+        }
+        with open(
+                os.path.join(root, ".mae-flow.json.usermsg"),
+                "w", encoding="utf-8") as stream:
+            json.dump([{
+                "id": "plan-answer",
+                "at": "2026-07-31 12:00:00",
+                "step": "build_plan",
+                "text": json.dumps({
+                    "answers": {
+                        "是否确认此计划进入编码阶段？": "确认，进入编码",
+                    },
+                }, ensure_ascii=False),
+            }], stream, ensure_ascii=False)
+        with open(
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
+            step = json.load(stream)["steps"]["build_plan"]
+
+        ok, why = mf._choice_verified(step, state, "continue", [])
+
+        self.assertTrue(ok, why)
+
+    def test_binary_review_maps_revision_and_rejects_ambiguous_answers(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        self.addCleanup(os.chdir, old_cwd)
+        state = {
+            "current": "build_plan",
+            "started": "2026-07-31 11:00:00",
+            "history": [{
+                "step": "build_plan",
+                "at": "2026-07-31 11:30:00",
+            }],
+        }
+        with open(
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
+            step = json.load(stream)["steps"]["build_plan"]
+        cases = (
+            ("计划还有遗漏，需要调整", "revise", True),
+            ("计划还有遗漏，需要调整", "continue", False),
+            ("确认，但是 Task 3 需要修改", "continue", False),
+            ("我看到了", "continue", False),
+        )
+        for answer, choice, expected in cases:
+            with self.subTest(answer=answer, choice=choice):
+                with open(
+                        os.path.join(root, ".mae-flow.json.usermsg"),
+                        "w", encoding="utf-8") as stream:
+                    json.dump([{
+                        "id": "plan-answer",
+                        "at": "2026-07-31 12:00:00",
+                        "step": "build_plan",
+                        "text": json.dumps({
+                            "answers": {"编码计划裁决": answer},
+                        }, ensure_ascii=False),
+                    }], stream, ensure_ascii=False)
+
+                ok, _why = mf._choice_verified(
+                    step, state, choice, [])
+
+                self.assertEqual(expected, ok)
+
+    def test_structured_choice_receipt_maps_custom_labels_for_any_choice_step(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        self.addCleanup(os.chdir, old_cwd)
+        state = {
+            "current": "workflow_select",
+            "started": "2026-07-31 11:00:00",
+            "history": [{
+                "step": "workflow_select",
+                "at": "2026-07-31 11:30:00",
+            }],
+            "config": {},
+            "choices": {},
+        }
+        mf.save_state(state)
+        labels = [
+            "走完整研发流程",
+            "只修已经定位的问题",
+            "只改这一小处",
+            "处理已有评审意见",
+        ]
+        payload = json.dumps({
+            "cwd": root,
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [{
+                    "question": "请选择本次交付方式",
+                    "options": [{"label": label} for label in labels],
+                }],
+            },
+            "tool_response": {
+                "answers": {"请选择本次交付方式": labels[2]},
+            },
+        }, ensure_ascii=False) + "\n"
+
+        captured = run(
+            root, [sys.executable, HOOK, "posttooluse"], payload)
+        self.assertEqual(0, captured.returncode, captured.stderr)
+        with open(
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
+            step = json.load(stream)["steps"]["workflow_select"]
+
+        selected, selected_why = mf._choice_verified(
+            step, state, "tweak", [])
+        substituted, _substituted_why = mf._choice_verified(
+            step, state, "full", [])
+
+        self.assertTrue(selected, selected_why)
+        self.assertFalse(substituted)
+
     def test_authorization_commands_transport_message_ids_not_user_text(self):
         commands = (
             ["goto", "verify_ut", "--force", "--message-id", "m1"],

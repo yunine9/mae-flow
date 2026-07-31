@@ -22,6 +22,29 @@ def same_config(actual, expected):
     return bool(got) and bool(wanted) and wanted in got
 
 
+def askuser_receipt(tool_input):
+    """Keep only the displayed question and option labels needed for choice proof."""
+    questions = []
+    for question in (tool_input or {}).get("questions") or []:
+        if not isinstance(question, dict):
+            continue
+        labels = []
+        for option in question.get("options") or []:
+            label = (
+                option.get("label", "")
+                if isinstance(option, dict) else option)
+            label = str(label or "").strip()
+            if label:
+                labels.append(label)
+        if labels:
+            questions.append({
+                "question": str(
+                    question.get("question", "") or "").strip(),
+                "options": labels,
+            })
+    return {"questions": questions} if questions else {}
+
+
 def _common(task, context):
     receipt = {
         "at": context.at,

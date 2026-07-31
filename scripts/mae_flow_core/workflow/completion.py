@@ -1,6 +1,7 @@
 """Pure policy for completing the current Mae-Flow step."""
 
 from dataclasses import dataclass
+import re
 
 from ..moonlight import enabled as moonlight_enabled
 from ..moonlight import step_kind as moonlight_step_kind
@@ -45,6 +46,45 @@ def choice_config(step, choice):
         key: str(value)
         for key, value in selected.items()
     }
+
+
+def natural_binary_choice(step, value, is_positive):
+    """Resolve free-text fallback only for the safe continue/revise shape."""
+    if set(step.get("choices") or []) != {"continue", "revise"}:
+        return ""
+    if is_positive(value):
+        return "continue"
+    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
+    if not compact or re.search(r"[?？]", compact):
+        return ""
+    if re.search(
+            r"需要(?:重新)?(?:调整|修改|补充|完善|修正)|"
+            r"(?:有|存在)(?:遗漏|缺口|问题|错误)|"
+            r"遗漏|漏了|缺少|不完整|不正确|不对|暂不|先别|拒绝",
+            compact, re.I):
+        return "revise"
+    return ""
+
+
+def receipt_choice(step, item, value):
+    """Resolve a structured AskUserQuestion selection by displayed position."""
+    choices = list(step.get("choices") or [])
+    if not choices:
+        return ""
+    normalized_value = re.sub(
+        r"[\s，。；;：:、!！]+", "", value or "").lower()
+    selected = set()
+    for question in (
+            ((item.get("askuser") or {}).get("questions") or [])):
+        options = question.get("options") or []
+        if len(options) != len(choices):
+            continue
+        for index, label in enumerate(options):
+            normalized_label = re.sub(
+                r"[\s，。；;：:、!！]+", "", str(label or "")).lower()
+            if normalized_label and normalized_value == normalized_label:
+                selected.add(choices[index])
+    return next(iter(selected)) if len(selected) == 1 else ""
 
 
 def evidence_failures(step, state, evaluators):

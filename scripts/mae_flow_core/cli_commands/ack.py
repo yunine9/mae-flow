@@ -308,8 +308,11 @@ def _choice_verified(step, st, choice, ack_cursor=None):
                 if _ack_message_signature(item) not in cursor]
     readable = []
     for item in rows:
-        readable.extend(_trusted_answer_candidates(item.get("text", "")))
-    for candidate in reversed(readable):
+        readable.extend(
+            (item, candidate)
+            for candidate in _trusted_answer_candidates(
+                item.get("text", "")))
+    for item, candidate in reversed(readable):
         normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
         normalized = re.sub(r"[（(]推荐[）)]", "", normalized).lower()
         # 全等,或"标签开头+补充说明"(按钮文案常带括号注释)。禁止全文子串搜索:
@@ -323,11 +326,17 @@ def _choice_verified(step, st, choice, ack_cursor=None):
                 and normalized.startswith(alias))
         ]
         if not matches:
-            continue
-        longest = max(len(alias) for _, alias in matches)
-        keys = {key for key, alias in matches if len(alias) == longest}
-        if len(keys) == 1:
-            selected = next(iter(keys))
+            selected = (
+                workflow_completion.receipt_choice(
+                    step, item, candidate)
+                or workflow_completion.natural_binary_choice(
+                    step, candidate, _is_positive_confirmation)
+            )
+        else:
+            longest = max(len(alias) for _, alias in matches)
+            keys = {key for key, alias in matches if len(alias) == longest}
+            selected = next(iter(keys)) if len(keys) == 1 else ""
+        if selected:
             if selected == choice:
                 _ack_failure(st, success=True)
                 return True, ""

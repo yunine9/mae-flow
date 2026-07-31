@@ -59,8 +59,19 @@ answer hash, and scope fingerprint rather than an Agent-supplied phrase.
 `checkpoint plan-decide` and `checkpoint decide` keep their machine choices
 (`continue`, `revise`, `continuous`) but remove `--ack`. Their existing review
 receipts already contain artifact hashes and an answer cursor. The adapter finds
-a fresh answer after that cursor and verifies it against the exact display label
-for the selected machine choice.
+a fresh answer after that cursor and resolves it to the selected machine choice.
+The AskUserQuestion Hook records the option labels shown in that exact
+interaction. The selected label's position is mapped to the step's declared
+machine-choice order, so custom wording does not become a protocol dependency.
+This works for binary and multi-choice steps and still detects an Agent command
+that submits a different choice.
+
+For old hosts or cached plugin versions that return the selected answer but omit
+the presented options, exact display labels remain authoritative. The common
+binary `continue/revise` review shape additionally accepts a natural positive
+confirmation as `continue` and an explicit omission, problem, or adjustment
+request as `revise`. Ambiguous, questioning, or mixed answers never advance the
+flow.
 
 No old answer can confirm a newly rendered plan, code diff, or final review.
 
@@ -110,6 +121,9 @@ Tests must demonstrate:
 - negative/question/adjustment scope answers fail;
 - changing the frozen scope invalidates the answer;
 - checkpoint choices consume only answers after the receipt cursor;
+- structured binary and multi-choice answers resolve from the exact presented
+  option receipt even when the display wording differs from flow aliases;
+- an Agent cannot submit a different machine choice than the selected option;
 - message IDs cannot cross steps;
 - structured answers exclude question/option metadata;
 - exact Git authorization still requires all paths/commits in the captured

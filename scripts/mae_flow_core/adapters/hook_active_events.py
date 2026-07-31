@@ -345,7 +345,8 @@ class ActiveHookEventAdapter:
                 self.runtime._record_agent_write(path)
         if tool == "AskUserQuestion":
             answer = self.runtime._text_of(payload.get("tool_response"))
-            self.runtime._capture_usermsg(answer)
+            self.runtime._capture_usermsg(
+                answer, askuser_input=tool_input)
             self.runtime._record_agent_token("ASKUSER", "CONFIRMED")
             return HookResponse()
         if tool == "Bash":

@@ -249,8 +249,7 @@ class HookStateMixin:
         except Exception as exc:
             self.log("COMPILE side-effect ledger EXC: %s" % exc)
 
-
-    def _capture_usermsg(self, text):
+    def _capture_usermsg(self, text, askuser_input=None):
         """harness 捕获的用户真实输入(UserPromptSubmit 的 prompt / AskUserQuestion 的应答),
         供完整流程 ack 与独立任务范围确认验真。没有流程/独立任务时不落盘；
         保留最近 10 条、单条截断 2000 字，写失败留日志不阻塞。"""
@@ -292,6 +291,9 @@ class HookStateMixin:
                 "sha256": hashlib.sha256(captured.encode("utf-8")).hexdigest(),
                 "input_encoding": self.input_encoding or "unknown",
             }
+            askuser = _askuser_receipt(askuser_input)
+            if askuser:
+                row["askuser"] = askuser
             if action and action.get("scope_sha256"):
                 row["scope_sha256"] = str(action["scope_sha256"])
             if config_review_sha:
@@ -317,7 +319,6 @@ class HookStateMixin:
         except Exception as e:
             self.log("usermsg EXC: %s" % e)
 
-
     def _explicit_exit_prompt(self, text):
         """只识别没有歧义的退出指令；询问“能不能退出”不应误触发。"""
         value = re.sub(r"\s+", " ", (text or "").strip())
@@ -336,7 +337,6 @@ class HookStateMixin:
             "直接开发", "直接改代码", "直接让", "直接写", "直接补", "补UT", "补 UT", "保留现场", "不走流程"))
         question = any(x in value for x in ("能不能", "可以吗", "会怎样", "怎么退出", "如何退出", "？", "?"))
         return names_flow and explicit_verb and direct_after and not question
-
 
     def _explicit_flow_start_prompt(self, text):
         """识别宿主真实 Slash 入口中会开启完整流程的动作。

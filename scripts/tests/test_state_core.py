@@ -56,6 +56,10 @@ class RuntimeAndStateTests(unittest.TestCase):
             "按钮文案是继续当前分支"))
         self.assertFalse(_branch_adoption_requested(
             "测试继续当前分支这句话的解析"))
+        self.assertFalse(_branch_adoption_requested(
+            "把按钮文案改成“修改后继续当前分支”"))
+        self.assertFalse(_branch_adoption_requested(
+            "测试“修改后继续当前分支”"))
 
     def test_archived_delivery_facts_fail_closed_on_bad_nested_json(self):
         self.assertEqual(

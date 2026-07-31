@@ -29,7 +29,8 @@ def _branch_adoption_requested(text):
     allowed = (
         re.compile(r"^" + lead + action + suffix + r"$", re.I),
         re.compile(
-            r"^[^，。！？,;；]{1,32}后(?:请|直接)?" + action
+            r"^(?:需求文档|需求)(?:已)?(?:确认|核对|检查)"
+            r"(?:无误|完成|通过)?后(?:请|直接)?" + action
             + suffix + r"$",
             re.I,
         ),

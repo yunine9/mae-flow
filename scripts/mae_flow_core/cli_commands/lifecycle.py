@@ -131,7 +131,8 @@ def cmd_goto(flow, st, args):
     if args.step == "config_confirm":
         st.pop("branch_resolution", None)
     if args.step in {
-            "config_confirm", "workflow_select", "branch_create", "grill_ask",
+            "config_confirm", "workflow_select", "code_reviewer_ask",
+            "branch_create", "grill_ask",
             "grill", "open", "design", "story_ask", "story",
             "hf_open", "tw_open", "rf_triage",
             "build_pace", "tw_pace", "rf_pace"}:

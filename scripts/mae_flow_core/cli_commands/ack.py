@@ -291,7 +291,8 @@ def _choice_verified(step, st, choice, ack_cursor=None):
     """Bind --choice to the answer when readable; trust a fresh UI token as fallback."""
     # 一卡合一:开场三个选择步同时接受配置确认卡期间捕获的真实答案。
     extra = (("config_confirm",)
-             if st.get("current") in ("workflow_select", "grill_ask", "story_ask")
+             if st.get("current") in (
+                 "workflow_select", "grill_ask", "story_ask")
              else ())
     alias_rows = []
     for key, values in (step.get("choice_answers") or {}).items():

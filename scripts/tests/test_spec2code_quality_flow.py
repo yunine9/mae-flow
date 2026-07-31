@@ -119,6 +119,8 @@ class Spec2CodeQualityFlowTests(unittest.TestCase):
                 target_sha=digest(PLAN),
             ),
             ".mae-flow-work/reviews/REQ-1/CP1-code.md": review(
+                findings=0,
+                result="CLEAN",
                 target_sha="d" * 64,
             ),
         }

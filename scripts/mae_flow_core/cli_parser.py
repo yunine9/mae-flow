@@ -224,6 +224,10 @@ def parse_args(argv=None):
     checkpoint_craft = checkpoint_actions.add_parser("craft-reviewed")
     checkpoint_craft.add_argument("checkpoint_id", help="当前检查点，如 CP1")
     checkpoint_craft.add_argument("--review", required=True)
+    checkpoint_craft_decide = checkpoint_actions.add_parser("craft-decide")
+    checkpoint_craft_decide.add_argument(
+        "checkpoint_id", help="当前检查点，如 CP1")
+    checkpoint_craft_decide.add_argument("--review", required=True)
     checkpoint_actions.add_parser("final")
     checkpoint_decide = checkpoint_actions.add_parser("decide")
     checkpoint_decide.add_argument(

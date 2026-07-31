@@ -48,7 +48,27 @@
           "处理评审意见"
         ]
       },
-      "next": "branch_create"
+      "next": "code_reviewer_ask"
+    },
+    "code_reviewer_ask": {
+      "title": "独立 CODE Reviewer 选择",
+      "user_ack": true,
+      "choice_key": "code_reviewer",
+      "choices": [
+        "disabled",
+        "enabled"
+      ],
+      "choice_answers": {
+        "disabled": [
+          "不启用独立 CODE Reviewer"
+        ],
+        "enabled": [
+          "启用独立 CODE Reviewer"
+        ]
+      },
+      "next": "branch_create",
+      "skip_in_moonlight": true,
+      "moonlight_choice": "enabled"
     },
     "branch_create": {
       "title": "创建工作分支",

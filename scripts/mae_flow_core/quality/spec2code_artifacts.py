@@ -1,5 +1,6 @@
 """Pure contracts for local Spec2Code process artifacts."""
 
+import hashlib
 import re
 
 
@@ -59,8 +60,9 @@ _REVIEW_FIELDS = (
     "处置",
     "状态",
 )
-_DISPOSITIONS = ("修改", "验证后修改", "人工裁决", "拒绝/暂缓")
-_REVIEW_STATUSES = ("待处理", "已解决", "已拒绝")
+_DISPOSITIONS = (
+    "待用户裁决", "修改", "验证后修改", "人工裁决", "拒绝/暂缓")
+_REVIEW_STATUSES = ("待裁决", "待处理", "已解决", "已拒绝")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -314,15 +316,39 @@ def review_requires_rework(text):
     return False
 
 
+def review_has_findings(text):
+    """Return whether the review contains any objective finding."""
+    return bool(_review_findings(text))
+
+
+def review_requires_user_decision(text):
+    """Return whether any finding still awaits an explicit user decision."""
+    for _title, body in _review_findings(text):
+        disposition = _field(body, "处置").rstrip("。")
+        status = _field(body, "状态").rstrip("。")
+        if (
+                disposition in ("待用户裁决", "人工裁决")
+                or status == "待裁决"):
+            return True
+    return False
+
+
+def review_facts_sha256(text):
+    """Digest immutable Finding facts while excluding user decision fields."""
+    rows = []
+    for title, body in _review_findings(text):
+        rows.append(title)
+        rows.extend(
+            name + ":" + _field(body, name)
+            for name in _REVIEW_FIELDS[:5]
+        )
+    return hashlib.sha256(
+        "\n".join(rows).encode("utf-8")).hexdigest()
+
+
 def review_requires_human_decision(text):
     """Return whether a reviewer explicitly deferred a finding to a human."""
-    return any(
-        re.search(
-            r"(?:^|\n)\s*-\s*处置[：:]\s*人工裁决(?:[。\s]|$)",
-            body,
-        )
-        for _title, body in _review_findings(text)
-    )
+    return review_requires_user_decision(text)
 
 
 def _field(body, name):

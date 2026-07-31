@@ -11,6 +11,7 @@ CODE_STEPS = {
 LOCKED_STATUSES = {
     "plan_review_pending",
     "craft_pending",
+    "craft_decision_pending",
     "review_pending",
     "commit_pending",
     "commit_recovery",

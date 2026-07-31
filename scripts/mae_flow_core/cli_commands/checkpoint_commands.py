@@ -3,6 +3,7 @@
 from .shared import (
     CheckpointDecisionPorts, CheckpointQualityPorts, FinalReviewPorts,
     activate_final_rework, decide_checkpoint, decide_checkpoint_plan,
+    decide_craft_review,
     hashlib, inspect_checkpoint_status, os, prepare_checkpoint_plan,
     prepare_final_review, read_text, record_craft_review, re,
     refresh_checkpoint, refresh_final_review, thaw_delivery_payload, time,
@@ -218,6 +219,19 @@ def cmd_checkpoint_craft_reviewed(st, args):
     )
     _apply_checkpoint_quality_result(st, result)
 
+
+def cmd_checkpoint_craft_decide(st, args):
+    ticket = str((st.get("config") or {}).get("单号", "") or "")
+    result = decide_craft_review(
+        api._development_review(st),
+        args.checkpoint_id,
+        args.review,
+        ticket,
+        _current_craft_source_sha(st),
+        _checkpoint_quality_ports(st),
+    )
+    _apply_checkpoint_quality_result(st, result)
+
 def _invalidate_quality_for_rework(st):
     st.pop("unlock", None)
     st.pop("risk_acceptances", None)
@@ -297,6 +311,8 @@ def cmd_checkpoint(flow, st, args):
         return cmd_checkpoint_plan_decide(st, args)
     if action == "craft-reviewed":
         return cmd_checkpoint_craft_reviewed(st, args)
+    if action == "craft-decide":
+        return cmd_checkpoint_craft_decide(st, args)
     if action == "final":
         return cmd_checkpoint_final(st)
     if action == "decide":

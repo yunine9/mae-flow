@@ -183,6 +183,27 @@ class AgentCompletionTests(unittest.TestCase):
         self.assertEqual(HookResponse(), response)
         self.assertNotIn("contract", [event[0] for event in events])
 
+    def test_role_result_marker_bypasses_hard_contract_router(self):
+        for marker in (
+                "CRAFT_REVIEW_RESULT: FINDINGS",
+                "TASK_ANALYSIS_RESULT: OK",
+                "TEST_DESIGN_RESULT: OK",
+                "CP_IMPLEMENT_RESULT: OK"):
+            with self.subTest(marker=marker):
+                ports, events = self.ports(
+                    [assistant(marker + "\nTASK_CARD_SHA256: " + "a" * 64)],
+                    transcript_head=marker,
+                )
+                response = handle_agent_completion(
+                    {"agent_transcript_path": "/tmp/agent.jsonl"},
+                    ports,
+                )
+                self.assertEqual(HookResponse(), response)
+                self.assertNotIn(
+                    "contract", [event[0] for event in events])
+                self.assertNotIn(
+                    "token", [event[0] for event in events])
+
 
 if __name__ == "__main__":
     unittest.main()

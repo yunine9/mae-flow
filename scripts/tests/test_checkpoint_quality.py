@@ -11,7 +11,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core.application.delivery.checkpoint_quality import (  # noqa: E402
+    CRAFT_DECISION_ACK,
     CheckpointQualityPorts,
+    decide_craft_review,
     decide_checkpoint_plan,
     prepare_checkpoint_plan,
     record_craft_review,
@@ -64,6 +66,14 @@ class CheckpointQualityTests(unittest.TestCase):
             ".mae-flow-work/reviews/REQ-1/CP2-code.md",
         ])
         self.assertEqual("craft-reviewed", crafted.checkpoint_action)
+        craft_decision = parse_args([
+            "checkpoint",
+            "craft-decide",
+            "CP2",
+            "--review",
+            ".mae-flow-work/reviews/REQ-1/CP2-code.md",
+        ])
+        self.assertEqual("craft-decide", craft_decision.checkpoint_action)
 
     def state(self, mode="staged", count=1):
         return {
@@ -220,11 +230,12 @@ class CheckpointQualityTests(unittest.TestCase):
         self.assertEqual(2, result.exit_code)
         self.assertIn("月光宝盒不得代替用户拍板", result.stderr[0])
 
-    def test_craft_review_rework_or_advances(self):
+    def test_craft_findings_wait_for_user_then_rework(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
         pending_files = {
             code_path: review(
-                status="待处理",
+                status="待裁决",
+                disposition="待用户裁决",
                 target_sha=self.SOURCE_SHA,
             ),
         }
@@ -242,14 +253,44 @@ class CheckpointQualityTests(unittest.TestCase):
             self.ports(pending_files),
         )
         self.assertEqual(
-            "coding",
+            "craft_decision_pending",
             thaw(pending.effects[0].payload)["checkpoints"][0]["status"],
         )
-        self.assertEqual("invalidate_quality", pending.effects[1].kind)
+        self.assertNotIn(
+            "invalidate_quality",
+            [effect.kind for effect in pending.effects],
+        )
 
+        pending_files[code_path] = pending_files[code_path].replace(
+            "待用户裁决", "修改").replace("待裁决", "待处理")
+        decided = decide_craft_review(
+            thaw(pending.effects[0].payload),
+            "CP1",
+            code_path,
+            "REQ-1",
+            self.SOURCE_SHA,
+            self.ports(pending_files),
+        )
+        self.assertEqual(
+            "coding",
+            thaw(decided.effects[0].payload)["checkpoints"][0]["status"],
+        )
+        self.assertEqual("invalidate_quality", decided.effects[1].kind)
+        self.assertTrue(any(
+            "checkpoint ready CP1" in line for line in decided.stdout
+        ))
+
+    def test_clean_craft_review_advances_without_decision(self):
+        code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
+        current = self.state()
+        current["checkpoints"][0].update({
+            "status": "craft_pending",
+            "compile_source_sha256": self.SOURCE_SHA,
+        })
         clean_files = {
             code_path: review(
-                status="已解决",
+                findings=0,
+                result="CLEAN",
                 target_sha=self.SOURCE_SHA,
             ),
         }
@@ -265,6 +306,22 @@ class CheckpointQualityTests(unittest.TestCase):
             "review_pending",
             thaw(accepted.effects[0].payload)["checkpoints"][0]["status"],
         )
+
+    def test_craft_review_wrong_state_explains_fresh_sequence(self):
+        code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
+        current = self.state()
+        current["checkpoints"][0]["status"] = "coding"
+        result = record_craft_review(
+            current,
+            "CP1",
+            code_path,
+            "REQ-1",
+            self.SOURCE_SHA,
+            self.ports({}),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("checkpoint ready CP1", result.stderr[0])
+        self.assertIn("role-task craft-code", result.stderr[0])
 
     def test_continuous_craft_review_moves_to_next_planned_cp(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
@@ -282,7 +339,8 @@ class CheckpointQualityTests(unittest.TestCase):
             self.SOURCE_SHA,
             self.ports({
                 code_path: review(
-                    status="已解决",
+                    findings=0,
+                    result="CLEAN",
                     target_sha=self.SOURCE_SHA,
                 ),
             }),

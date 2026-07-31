@@ -119,6 +119,11 @@ def _checkpoint_review_state(request, artifacts, task, ports):
     review = {
         "version": 2 if artifacts else 1,
         "review_before_commit": True,
+        "code_reviewer": (
+            request.get("code_reviewer")
+            if request.get("code_reviewer") in ("enabled", "disabled")
+            else "enabled"
+        ),
         "status": "plan_pending",
         "plan_step": current,
         "plan_head": head,
@@ -142,7 +147,8 @@ def _checkpoint_review_state(request, artifacts, task, ports):
 
 
 def plan_checkpoint(
-        current, workflow, moonlight, raw_items, ports):
+        current, workflow, moonlight, raw_items, ports,
+        code_reviewer=None):
     """Validate and create a checkpoint plan without mutating state."""
     if current not in PACE_STEPS:
         return _failure(
@@ -171,6 +177,7 @@ def plan_checkpoint(
             "current": current,
             "workflow": workflow,
             "items": items,
+            "code_reviewer": code_reviewer,
         },
         artifacts,
         (task_sha, task_lines, head),
@@ -217,6 +224,25 @@ def _review_decision_lines():
 
 def _review_effect(review):
     return DeliveryEffect("set_development_review", review)
+
+
+def _code_reviewer_enabled(review):
+    """Legacy/in-flight reviews conservatively retain CODE Reviewer."""
+    return review.get("code_reviewer", "enabled") != "disabled"
+
+
+def _requires_craft_review(review):
+    return (
+        review.get("version") == 2
+        and _code_reviewer_enabled(review)
+    )
+
+
+def _record_committed_source_sha(review, item, base, head):
+    if review.get("version") == 2:
+        item["compile_source_sha256"] = hashlib.sha256(
+            (base + "\0" + head).encode("utf-8")
+        ).hexdigest()
 
 
 def ready_checkpoint(
@@ -286,6 +312,7 @@ def _ready_history_failure(base, head, ports):
 
 
 def _ready_precommit(review, item, base, head, agent_tasks, ports):
+    requires_craft = _requires_craft_review(review)
     if head != base:
         return _failure(
             "%s 使用“先检视、后提交”，但固定基点之后已经产生提交。"
@@ -328,28 +355,30 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
         "receipt": receipt,
         "status": (
             "craft_pending"
-            if review.get("version") == 2
+            if requires_craft
             else "review_pending"
         ),
         "compile_source_sha256": ports.snapshot_sha256(snapshot),
         "task_structure_drift": ports.task_structure_drift(),
-        "closed_at": ports.now(),
+        "compiled_at": ports.now(),
     })
     stdout = []
     if item.get("task_structure_drift"):
         stdout.append(
             "⚠ 实现清单结构在开发中发生变化，"
             "请重点核对新增/删除任务是否仍符合确认范围。")
-    if review.get("version") == 2:
+    if requires_craft:
         stdout.append(
             "[mae-flow] 首次编译已冻结；执行 role-task craft-code "
             "--checkpoint %s，完成独立 CODE 走读后登记结果。"
             % item["id"])
+        effects = [_review_effect(review)]
     else:
         stdout.extend(_review_decision_lines())
-    effects = [_review_effect(review)]
-    if review.get("version") != 2:
-        effects.append(DeliveryEffect("render_worktree_review", item))
+        effects = [
+            _review_effect(review),
+            DeliveryEffect("render_worktree_review", item),
+        ]
     return DeliveryResult(
         effects=tuple(effects),
         stdout=tuple(stdout),
@@ -360,6 +389,7 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
 
 def _ready_committed(
         review, item, base, head, mode, agent_tasks, ports):
+    requires_craft = _requires_craft_review(review)
     dirty = tuple(ports.dirty_paths())
     if dirty:
         return _failure(
@@ -392,12 +422,10 @@ def _ready_committed(
         "compile_skipped_no_source": not source_files,
         "head": head,
         "task_structure_drift": ports.task_structure_drift(),
-        "closed_at": ports.now(),
+        "compiled_at": ports.now(),
     })
-    if review.get("version") == 2:
-        item["compile_source_sha256"] = hashlib.sha256(
-            (base + "\0" + head).encode("utf-8")
-        ).hexdigest()
+    _record_committed_source_sha(review, item, base, head)
+    if requires_craft:
         item["status"] = "craft_pending"
         return DeliveryResult(
             effects=(_review_effect(review),),
@@ -413,6 +441,7 @@ def _ready_committed(
     if mode == "continuous":
         item["status"] = "completed"
         item["completed_head"] = head
+        item["closed_at"] = ports.now()
         review["current_index"] = int(
             review.get("current_index", 0)) + 1
         next_index = review["current_index"]

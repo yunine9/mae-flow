@@ -117,6 +117,7 @@ def _accept_checkpoint(
     item["status"] = "accepted"
     item["accepted_head"] = head
     item["accepted_at"] = now
+    item["closed_at"] = now
     review["last_reviewed_head"] = head
     review["current_index"] = int(
         review.get("current_index", 0)) + 1

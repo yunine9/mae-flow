@@ -91,6 +91,10 @@ def _checkpoint_plan_result(
             api._moonlight(st)
             if moonlight is None else moonlight),
         raw_items=raw_items,
+        code_reviewer=(
+            (st.get("choices") or {}).get("code_reviewer")
+            or "enabled"
+        ),
         ports=CheckpointPlanPorts(
             dirty_paths=lambda: api._blocking_dirty_source_paths(st, api.FLOW),
             task_structure=lambda: api._task_structure_fingerprint(st),
@@ -321,6 +325,11 @@ def _show_checkpoint_review(st, data, item):
         print(
             "%s 首次编译已完成，等待新鲜 Craft Reviewer CODE 走读；"
             "登记后才能展示用户 CP 检视卡。"
+            % item.get("id", "当前 CP"))
+    elif item.get("status") == "craft_decision_pending":
+        print(
+            "%s CODE Findings 已登记，等待用户裁决；"
+            "主 Agent 不得自行修改或宣称关闭。"
             % item.get("id", "当前 CP"))
 
 def _final_drifted_checkpoints(data):

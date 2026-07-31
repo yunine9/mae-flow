@@ -86,6 +86,7 @@ from mae_flow_core.application.delivery.checkpoint_quality import (
     PLAN_CONTINUE_ACK,
     PLAN_REVISE_ACK,
     CheckpointQualityPorts,
+    decide_craft_review,
     decide_checkpoint_plan,
     prepare_checkpoint_plan,
     record_craft_review,

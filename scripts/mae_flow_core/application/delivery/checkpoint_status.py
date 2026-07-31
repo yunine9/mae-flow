@@ -4,6 +4,7 @@ from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
 
 
 LOCKED_STATUSES = {
+    "craft_decision_pending",
     "review_pending",
     "commit_pending",
     "commit_recovery",

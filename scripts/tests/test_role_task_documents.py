@@ -87,6 +87,9 @@ class RoleTaskDocumentTests(unittest.TestCase):
         self.assertIn("REVIEW_TARGET_SHA256: " + "d" * 64, body)
         self.assertIn("TASK_CARD_SHA256", body)
         self.assertIn("CRAFT_REVIEW_RESULT: CLEAN|FINDINGS", body)
+        self.assertIn("- 处置：待用户裁决", body)
+        self.assertIn("- 状态：待裁决", body)
+        self.assertIn("## Finding F1", body)
         self.assertIn("只读", body)
         self.assertNotIn("允许修改:", body)
 

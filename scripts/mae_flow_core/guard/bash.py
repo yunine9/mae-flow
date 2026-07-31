@@ -125,7 +125,8 @@ def decide_commit_branch(context):
         not context.commit_message_present
         or not context.wanted_branch
         or context.step in (
-            "config_confirm", "workflow_select", "branch_create")
+            "config_confirm", "workflow_select",
+            "code_reviewer_ask", "branch_create")
         or not context.current_branch
         or context.current_branch == context.wanted_branch
     ):

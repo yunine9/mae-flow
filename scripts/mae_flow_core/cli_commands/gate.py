@@ -380,7 +380,8 @@ def cmd_gate(flow, st, args):
             jdie(pre.rule, pre.message)
         if (message_present and wanted
                 and sid not in (
-                    "config_confirm", "workflow_select", "branch_create")):
+                    "config_confirm", "workflow_select",
+                    "code_reviewer_ask", "branch_create")):
             context = replace(
                 context,
                 current_branch=api.sh("git branch --show-current"),

@@ -23,13 +23,21 @@
 2. 状态为 `coding`：执行 `role-task cp-implement --checkpoint CPn`，让同一新鲜 CP Implementer
    连续完成当前 CP 全部 Task。任务卡注入 Comment Standard v1、固定 Coding Charter 和动态注释计划。
 3. 完成实现后执行 `agent-task compile --checkpoint CPn --scope "<本批模块/任务>"`；
-   Compile Agent OK 后执行 `checkpoint ready CPn`。
-4. 状态为 `craft_pending`：执行 `role-task craft-code --checkpoint CPn`，派新鲜 Craft Reviewer CODE。
+   Compile Agent OK 后执行 `checkpoint ready CPn`。若开场选择“不启用独立 CODE Reviewer”，
+   此命令直接进入用户 CP 检视（分阶段）或下一 CP（一次完成），禁止再生成 craft-code 任务卡。
+4. 仅当开场选择“启用独立 CODE Reviewer”且状态为 `craft_pending` 时：
+   执行 `role-task craft-code --checkpoint CPn`，派新鲜 Craft Reviewer CODE。
    Reviewer 每轮最多五条，只写 `.mae-flow-work/reviews/{单号}/CPn-code.md`，不改源码。
-5. 主 Agent按“修改/验证后修改/人工裁决/拒绝暂缓”核实并补全处置。执行
-   `checkpoint craft-reviewed CPn --review "<CPn-code.md>"`；存在已接受待处理项时交回同一 CP Implementer，
-   修改后重新编译并仅复查接受项和直接回归。
-6. CODE 走读闭环后才展示用户 CP 检视卡。用户意见仍交同一 CP Implementer 修改、重编译、定向复查；
+5. 执行 `checkpoint craft-reviewed CPn --review "<CPn-code.md>"`。CLEAN 直接闭环；
+   FINDINGS 只登记客观事实并进入 `craft_decision_pending`，不得自行处理、标记关闭或交回修改。
+   主 Agent 逐条提出“修改/验证后修改/拒绝暂缓”建议并展示给用户；用户明确选择
+   “确认上述 Finding 处置”后，才执行
+   `checkpoint craft-decide CPn --review "<CPn-code.md>"`。
+6. 存在用户接受的待处理项时交回同一 CP Implementer。修复后的铁序是：
+   新鲜编译 → `checkpoint ready CPn` → `role-task craft-code --checkpoint CPn`
+   → 新鲜 Reviewer 定向复查 → `checkpoint craft-reviewed CPn --review "<CPn-code.md>"`。
+   旧任务卡、旧 Review 和首次 `craft-reviewed` 命令均不得复用。
+7. CODE 走读闭环后才展示用户 CP 检视卡。用户意见仍交同一 CP Implementer 修改、重编译、定向复查；
    用户明确继续后才进入下一 CP。
 
 写第一行码前确认当前 Task 能指到方案、规格和蓝图；矛盾或遗漏进入对应上游 Loop，不带病开工。

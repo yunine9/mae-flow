@@ -33,7 +33,8 @@ def _rewind_checkpoint_after_direct_changes(review_state):
         item["status"] = "planned"
         item.pop("plan_receipt", None)
     elif item.get("status") in (
-            "craft_pending", "push_pending", "review_pending",
+            "craft_pending", "craft_decision_pending",
+            "push_pending", "review_pending",
             "commit_pending", "commit_recovery", "reset_pending"):
         item["status"] = "coding"
         for key in (

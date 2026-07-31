@@ -66,7 +66,7 @@ def _append_context_paths(document, paths):
         document.append("- （缺失；返回 NEEDS_INPUT，不得靠猜测补全）")
 
 
-def _append_review_contract(document, context):
+def _append_review_contract(document, context, user_decision=False):
     document.extend([
         "Review 记录必须写入: "
         + (context.review_output or "（缺失；返回 NEEDS_INPUT）"),
@@ -78,7 +78,26 @@ def _append_review_contract(document, context):
         "- REVIEW_TARGET_SHA256: "
         + (context.review_target_sha256 or "（缺失；返回 NEEDS_INPUT）"),
         "只有明确 CLEAN 才允许零条 Finding；FINDINGS 必须至少一条。",
+        "FINDINGS 使用以下完整模板:",
+        "## Finding F1",
+        "- 位置：<文件:行或符号>",
+        "- 依据：<计划/规格/工程原则>",
+        "- 证据：<当前 diff 中可复核事实>",
+        "- 实际影响：<正确性、维护性或集成影响>",
+        "- 最小改法：<最小修正方向>",
     ])
+    if user_decision:
+        document.extend([
+            "- 处置：待用户裁决",
+            "- 状态：待裁决",
+            "CODE Reviewer 只写客观事实，"
+            "不得替用户决定处置或宣称关闭。",
+        ])
+    else:
+        document.extend([
+            "- 处置：修改|验证后修改|人工裁决|拒绝/暂缓",
+            "- 状态：待处理|已解决|已拒绝",
+        ])
 
 
 def _append_role_contract(document, role, context):
@@ -122,7 +141,7 @@ def _append_role_contract(document, role, context):
             context.diff or "（缺失；返回 NEEDS_INPUT）",
             "只检查当前 CP diff 与直接集成边界，每轮最多五条。",
         ])
-        _append_review_contract(document, context)
+        _append_review_contract(document, context, user_decision=True)
 
 
 def build_role_task_document(

@@ -249,7 +249,8 @@ def print_current(flow, st):
                       "然后 checkpoint status。" % base)
             elif current_checkpoint.get("status") in {
                     "planned", "plan_review_pending",
-                    "craft_pending", "review_pending"}:
+                    "craft_pending", "craft_decision_pending",
+                    "review_pending"}:
                 api._show_checkpoint_review(
                     st, checkpoint_state, current_checkpoint)
         elif (sid == api._checkpoint_expected_code_step(st)

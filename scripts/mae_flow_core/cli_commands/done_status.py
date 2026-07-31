@@ -109,7 +109,9 @@ def _done_guard_branch(st, sid):
         api._canonicalize_story_output(
             st.get("config", {}).get("单号", ""), st)
     want = st.get("config", {}).get("分支名", "")
-    if sid not in ("config_confirm", "workflow_select", "branch_create") and want:
+    if sid not in (
+            "config_confirm", "workflow_select",
+            "code_reviewer_ask", "branch_create") and want:
         cur = api.sh("git branch --show-current")
         if cur != want:
             _done_save_die(
@@ -351,15 +353,18 @@ def cmd_steps(flow, st, args):
     透明化诉求:用户选档/裁剪前先看得见全貌;质量门禁步骤不在可裁白名单。"""
     current = st.get("current") if st else None
     active_wf = (st.get("choices", {}) or {}).get("workflow") if st else None
-    ask_labels = {"grill_ask": "需求质询", "grill": "需求质询",
-                  "story_ask": "STORY", "story": "STORY"}
+    ask_labels = {
+        "code_reviewer_ask": "独立 CODE Reviewer",
+        "grill_ask": "需求质询", "grill": "需求质询",
+        "story_ask": "STORY", "story": "STORY",
+    }
     for wf in ("full", "hotfix", "tweak", "review"):
         marker = "(本单)" if wf == active_wf else ""
         print("\n═══ %s(%s)%s ═══" % (WORKFLOW_LABELS[wf], wf, marker))
         for sid in _workflow_chain(flow, wf):
             step = flow["steps"][sid]
             tags = []
-            if sid in ("grill_ask", "story_ask"):
+            if sid in ("code_reviewer_ask", "grill_ask", "story_ask"):
                 tags.append("可选环节:%s(流程内询问决定)" % ask_labels[sid])
             elif sid in ("grill", "story"):
                 tags.append("随「%s」询问可选" % ask_labels[sid])
@@ -372,7 +377,7 @@ def cmd_steps(flow, st, args):
                 here, sid + " " + step.get("title", ""),
                 ("[" + "、".join(tags) + "] ") if tags else "",
                 ("证据:" + ",".join(evidence)) if evidence else "(无硬证据)"))
-    print("\n可选环节(需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性"
+    print("\n可选环节(独立 CODE Reviewer/需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性"
           "的一部分,不提供配置级裁剪。")
 
 def cmd_status(flow, st, args):

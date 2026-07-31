@@ -15,6 +15,8 @@ from mae_flow_core.quality.spec2code_artifacts import (  # noqa: E402
     checkpoint_review_context,
     roadmap_checkpoints,
     review_requires_rework,
+    review_requires_user_decision,
+    review_facts_sha256,
     validate_blueprint,
     validate_plan,
     validate_review,
@@ -216,6 +218,29 @@ class Spec2CodeArtifactTests(unittest.TestCase):
             review_requires_rework(
                 review(status="已拒绝", disposition="拒绝/暂缓")
             )
+        )
+
+    def test_reviewer_can_emit_pending_user_decision(self):
+        pending = review(
+            status="待裁决",
+            disposition="待用户裁决",
+        )
+        self.assertEqual(
+            (),
+            validate_review(
+                pending,
+                "code",
+                "CP1",
+                TASK_CARD_SHA,
+                REVIEW_TARGET_SHA,
+            ),
+        )
+        self.assertTrue(review_requires_user_decision(pending))
+        decided = pending.replace("待用户裁决", "修改").replace(
+            "待裁决", "待处理")
+        self.assertEqual(
+            review_facts_sha256(pending),
+            review_facts_sha256(decided),
         )
 
     def test_review_requires_bound_envelope_and_explicit_clean(self):

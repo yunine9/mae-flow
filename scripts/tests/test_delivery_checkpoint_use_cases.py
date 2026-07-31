@@ -37,6 +37,7 @@ class CheckpointPlanUseCaseTests(unittest.TestCase):
             "workflow": "tweak",
             "moonlight": False,
             "raw_items": (" core behavior ", "regression   coverage"),
+            "code_reviewer": overrides.pop("code_reviewer", None),
             "ports": CheckpointPlanPorts(
                 dirty_paths=supplied(
                     "dirty_paths", overrides.pop("dirty_paths", ())),
@@ -139,6 +140,18 @@ class CheckpointPlanUseCaseTests(unittest.TestCase):
         self.assertEqual(
             ".mae-flow-work/roadmap-REQ-1.md",
             review["roadmap_path"],
+        )
+
+    def test_persists_reviewer_choice_and_defaults_legacy_to_enabled(self):
+        disabled, _ = self.call(code_reviewer="disabled")
+        self.assertEqual(
+            "disabled",
+            thaw(disabled.effects[0].payload)["code_reviewer"],
+        )
+        legacy, _ = self.call()
+        self.assertEqual(
+            "enabled",
+            thaw(legacy.effects[0].payload)["code_reviewer"],
         )
 
 
@@ -244,6 +257,23 @@ class CheckpointReadyUseCaseTests(unittest.TestCase):
             [effect.kind for effect in result.effects],
         )
         self.assertTrue(any(
+            "craft-code" in line for line in result.stdout
+        ))
+        self.assertNotIn("closed_at", item)
+        self.assertIn("compiled_at", item)
+
+    def test_v2_precommit_skips_craft_when_reviewer_disabled(self):
+        review = self.review()
+        review.update({"version": 2, "code_reviewer": "disabled"})
+        result, _calls = self.call(review=review)
+        updated = thaw(result.effects[0].payload)
+        item = updated["checkpoints"][0]
+        self.assertEqual("review_pending", item["status"])
+        self.assertIn(
+            "render_worktree_review",
+            [effect.kind for effect in result.effects],
+        )
+        self.assertFalse(any(
             "craft-code" in line for line in result.stdout
         ))
 

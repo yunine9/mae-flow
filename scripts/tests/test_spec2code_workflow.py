@@ -61,6 +61,19 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
 
     def test_other_workflow_entries_remain_unchanged(self):
         steps = self.flow["steps"]
+        self.assertEqual(
+            "code_reviewer_ask",
+            steps["workflow_select"]["next"],
+        )
+        reviewer = steps["code_reviewer_ask"]
+        self.assertEqual("code_reviewer", reviewer["choice_key"])
+        self.assertEqual(
+            {"disabled", "enabled"},
+            set(reviewer["choices"]),
+        )
+        self.assertEqual("branch_create", reviewer["next"])
+        self.assertTrue(reviewer["skip_in_moonlight"])
+        self.assertEqual("enabled", reviewer["moonlight_choice"])
         self.assertEqual("hf_open", steps["branch_create"]["next"]["hotfix"])
         self.assertEqual("tw_open", steps["branch_create"]["next"]["tweak"])
         self.assertEqual("rf_triage", steps["branch_create"]["next"]["review"])

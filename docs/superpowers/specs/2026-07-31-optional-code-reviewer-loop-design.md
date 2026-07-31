@@ -38,7 +38,7 @@ CODE review and user inspection, producing misleading “closed” language.
 
 ## Startup Choice
 
-Add one question to the existing combined opening card:
+Immediately after delivery-type selection, show one short startup card:
 
 > 是否启用独立 CODE Reviewer？
 
@@ -50,6 +50,10 @@ Options:
 The answer is persisted as `choices.code_reviewer` with values `disabled` or
 `enabled`. It is a workflow choice rather than a repository default: two tasks
 in the same repository can make different trade-offs.
+
+The existing combined configuration card already uses the host's four-question
+limit, so this choice is the next single-question card rather than an invalid
+fifth question. It still occurs before branch creation or development.
 
 New interactive workflows must have an explicit answer. Existing in-flight
 workflows without the field behave as `enabled`, preserving the quality path

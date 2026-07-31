@@ -50,7 +50,9 @@ def _checkpoint_artifacts(state, process):
             "path": receipt.get("review_path"),
             "sha256": receipt.get("review_sha256"),
         }))
-    if status in {"craft_pending", "review_pending", "coding"}:
+    if status in {
+            "craft_pending", "craft_decision_pending",
+            "review_pending", "coding"}:
         result.append(_artifact(
             "code_review", item.get("craft_review")))
     return tuple(value for value in result if value)

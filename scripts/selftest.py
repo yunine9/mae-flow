@@ -280,7 +280,8 @@ if flow:
         sid for sid, step in steps.items() if step.get("user_ack")}
     check("人工确认只保留真实选择、代码检视和不可逆决策",
           actual_ack_steps == {
-              "config_confirm", "workflow_select", "grill_ask",
+              "config_confirm", "workflow_select", "code_reviewer_ask",
+              "grill_ask",
               "story_ask", "hf_open", "tw_open", "archive_confirm",
               "build_review", "tw_review", "rf_review",
               "build_pace", "tw_pace", "rf_pace",
@@ -882,9 +883,30 @@ if flow:
                 flow, mf.load_state(),
                 types.SimpleNamespace(
                     ack=None, choice="full", set=None))
+            reviewer_choice_state = mf.load_state()
+            with open(
+                    mf.STATE_PATH + ".usermsg",
+                    "w",
+                    encoding="utf-8") as f:
+                json.dump([{
+                    "text": json.dumps({
+                        "answers": {
+                            "是否启用独立 CODE Reviewer":
+                                "不启用独立 CODE Reviewer",
+                        },
+                    }, ensure_ascii=False),
+                    "step": "code_reviewer_ask",
+                    "at": decision_at,
+                }], f, ensure_ascii=False)
+            mf.cmd_done(
+                flow, reviewer_choice_state,
+                types.SimpleNamespace(
+                    ack=None, choice="disabled", set=None))
             check("普通流程选择点一次按钮即可推进",
                   mf.load_state().get("current") == "branch_create"
-                  and mf.load_state().get("choices", {}).get("workflow") == "full")
+                  and mf.load_state().get("choices", {}).get("workflow") == "full"
+                  and mf.load_state().get("choices", {}).get(
+                      "code_reviewer") == "disabled")
 
             scope_state = {
                 "current": "hf_open", "config": {}, "choices": {},

@@ -57,6 +57,16 @@ def _contract_agent_signature(head):
     ))
 
 
+def _role_result_marker(last):
+    """Informational role markers are validated by their artifact command."""
+    return bool(re.search(
+        r"^\s*(CRAFT_REVIEW|TASK_ANALYSIS|TEST_DESIGN|CP_IMPLEMENT)"
+        r"_RESULT:\s*\S+",
+        last,
+        re.M,
+    ))
+
+
 def _standalone_signature(expected, head):
     agent = {
         "UT": "ut-generator-agent",
@@ -194,6 +204,11 @@ def handle_agent_completion(payload, ports):
     assistants = transcript.assistant_texts
     prompt = users[0] if users else ""
     last = (assistants[-1] if assistants else "").strip()
+    if _role_result_marker(last):
+        ports.log(
+            "subagentstop: role result marker accepted; "
+            "artifact/checkpoint command owns validation")
+        return HookResponse()
     marker = select_contract_marker(last)
     _log_marker_tolerance(last, marker, ports)
     rejection = marker.error

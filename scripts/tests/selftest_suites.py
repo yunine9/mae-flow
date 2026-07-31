@@ -37,6 +37,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_checkpoints.py",), 180, 5000),
     ("Full 分阶段编译凭证恢复回归",
      ("scripts/tests/test_full_checkpoint_compile_recovery.py",), 180, 5000),
+    ("编译等待单次动作指令回归",
+     ("scripts/tests/test_compile_wait_instructions.py",), 180, 5000),
     ("跨单提交归属与 STORY 本地化回归",
      ("scripts/tests/test_commit_ownership.py",), 180, 5000),
     ("CodeCheck 全链路诊断日志回归",

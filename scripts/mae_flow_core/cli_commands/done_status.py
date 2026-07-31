@@ -207,6 +207,14 @@ def _done_require_evidence(step, st, args, sid):
         fails, count, api._moonlight(st), target,
         os.path.abspath(sys.argv[0])), 2)
 
+
+def _done_resolve_moonlight_branch(flow, st, sid):
+    if sid == "branch_create" and api._resolve_moonlight_branch(flow, st):
+        # A recorded hard blocker is a successful safe stop, not failed
+        # evidence and not a workflow advance.
+        raise SystemExit(0)
+
+
 def _done_adjust_checkpoint(flow, st, sid):
     st.pop("development_review", None)
     st.get("choices", {}).pop("development_pace", None)
@@ -264,6 +272,7 @@ def cmd_done(flow, st, args):
     if (_done_source_change(flow, st, sid, step)
             or _done_source_recheck(flow, st, sid, step)):
         return
+    _done_resolve_moonlight_branch(flow, st, sid)
     _done_require_evidence(step, st, args, sid)
     _done_finalize(flow, st, args, sid, step)
 

@@ -114,6 +114,10 @@ from mae_flow_core.application.delivery.moonlight import (
     validate_push_failure,
     validate_unlock_source,
 )
+from mae_flow_core.application.delivery.moonlight_branch import (
+    MoonlightBranchFacts,
+    resolve_moonlight_branch,
+)
 from mae_flow_core.application.delivery.moonlight_defer import (
     MoonlightDeferPorts,
     defer_moonlight_quality,

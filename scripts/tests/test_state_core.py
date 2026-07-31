@@ -31,6 +31,94 @@ from mae_flow_core import (  # noqa: E402
 
 
 class RuntimeAndStateTests(unittest.TestCase):
+    def test_moonlight_branch_create_continues_terminal_rollover_same_delivery(self):
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "mae-flow@test.invalid"],
+                cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.name", "MAE Flow Test"],
+                cwd=root, check=True)
+            subprocess.run(
+                ["git", "branch", "-M", "main"], cwd=root, check=True)
+            source = os.path.join(root, "biz.cpp")
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "checkout", "-qb", "feature/existing"],
+                cwd=root, check=True)
+            with open(source, "a", encoding="utf-8") as stream:
+                stream.write("int first = 2;\n")
+            subprocess.run(["git", "commit", "-qam", "first"], cwd=root, check=True)
+            previous_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                text=True, capture_output=True).stdout.strip()
+            with open(source, "a", encoding="utf-8") as stream:
+                stream.write("int second = 3;\n")
+            subprocess.run(["git", "commit", "-qam", "second"], cwd=root, check=True)
+
+            previous = {
+                "current": "end",
+                "config": {
+                    "单号": "REQ-7",
+                    "基线分支": "main",
+                    "分支名": "feature/existing",
+                },
+                "choices": {"workflow": "tweak"},
+                "history": [],
+                "step_heads": {"end": previous_head},
+                "started": "2026-07-31 01:00:00",
+            }
+            save_versioned_json(
+                os.path.join(root, ".mae-flow.json.last"),
+                previous, "flow", project_root=root)
+            current = {
+                "current": "branch_create",
+                "config": {
+                    "单号": "REQ-7",
+                    "基线分支": "main",
+                    "分支名": "main_u1_REQ-7",
+                },
+                "choices": {"workflow": "tweak"},
+                "history": [],
+                "moonlight": {
+                    "enabled": True,
+                    "request": "开启月光宝盒处理这个需求",
+                    "issues": [],
+                },
+                "started": "2026-07-31 02:00:00",
+            }
+            save_versioned_json(
+                os.path.join(root, ".mae-flow.json"),
+                current, "flow", project_root=root)
+            child_env = dict(os.environ)
+            child_env["PYTHONPYCACHEPREFIX"] = os.path.join(root, "pycache")
+
+            result = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "mae-flow.py"), "done"],
+                cwd=root, text=True, capture_output=True,
+                env=child_env, timeout=20)
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            with open(
+                    os.path.join(root, ".mae-flow.json"),
+                    encoding="utf-8") as stream:
+                updated = json.load(stream)
+            self.assertEqual("tw_open", updated["current"])
+            self.assertEqual(
+                "feature/existing", updated["config"]["分支名"])
+            self.assertEqual(
+                "moonlight-continuation",
+                updated["branch_resolution"]["source"])
+            self.assertEqual(
+                previous_head,
+                updated["branch_resolution"]["previous_head"])
+
     def test_runtime_matrix_schema_and_corrupt_preservation(self):
         with tempfile.TemporaryDirectory() as td:
             flow_path = os.path.join(td, ".mae-flow.json")

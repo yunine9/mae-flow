@@ -21,6 +21,10 @@ from mae_flow_core.application.delivery.moonlight import (  # noqa: E402
     repair_moonlight,
     unlock_moonlight_source,
 )
+from mae_flow_core.application.delivery.moonlight_branch import (  # noqa: E402
+    MoonlightBranchFacts,
+    resolve_moonlight_branch,
+)
 from mae_flow_core.application.delivery.moonlight_defer import (  # noqa: E402
     MoonlightDeferPorts,
     defer_moonlight_quality,
@@ -44,6 +48,109 @@ class MoonlightUseCaseTests(unittest.TestCase):
 
     def updated(self, result):
         return thaw(result.effects[0].payload)
+
+    def branch_state(self):
+        state = self.state("branch_create")
+        state["config"].update({
+            "单号": "REQ-7",
+            "基线分支": "main",
+            "分支名": "main_u1_REQ-7",
+        })
+        state["moonlight"]["request"] = "开启月光宝盒，继续当前分支"
+        return state
+
+    def branch_facts(self, **overrides):
+        values = {
+            "current_branch": "feature/existing",
+            "head": "b" * 40,
+            "base_branch": "main",
+            "base_head": "a" * 40,
+            "base_is_ancestor": True,
+            "explicit_continue": True,
+            "request_sha256": "request-sha",
+            "last_state_sha256": "",
+            "previous_ticket": "",
+            "previous_branch": "",
+            "previous_head": "",
+            "previous_head_is_ancestor": False,
+        }
+        values.update(overrides)
+        return MoonlightBranchFacts(**values)
+
+    def test_branch_resolution_adopts_explicit_current_branch(self):
+        result = resolve_moonlight_branch(
+            self.branch_state(), self.branch_facts(), "now")
+
+        updated = self.updated(result)
+        receipt = updated["branch_resolution"]
+        self.assertEqual("feature/existing", updated["config"]["分支名"])
+        self.assertEqual("moonlight-request", receipt["source"])
+        self.assertEqual("request-sha", receipt["request_sha256"])
+        self.assertNotIn("hard_blocked", updated["moonlight"])
+
+    def test_branch_resolution_adopts_only_strict_same_delivery_continuation(self):
+        state = self.branch_state()
+        state["moonlight"]["request"] = "开启月光宝盒处理这个需求"
+        facts = self.branch_facts(
+            explicit_continue=False,
+            last_state_sha256="last-state-sha",
+            previous_ticket="REQ-7",
+            previous_branch="feature/existing",
+            previous_head="9" * 40,
+            previous_head_is_ancestor=True,
+        )
+
+        result = resolve_moonlight_branch(state, facts, "now")
+
+        receipt = self.updated(result)["branch_resolution"]
+        self.assertEqual("moonlight-continuation", receipt["source"])
+        self.assertEqual("last-state-sha", receipt["last_state_sha256"])
+        self.assertEqual("9" * 40, receipt["previous_head"])
+
+    def test_branch_resolution_blocks_ambiguous_or_divergent_existing_work(self):
+        state = self.branch_state()
+        state["moonlight"]["request"] = "开启月光宝盒处理这个需求"
+        ambiguous = self.branch_facts(explicit_continue=False)
+
+        result = resolve_moonlight_branch(state, ambiguous, "now")
+
+        updated = self.updated(result)
+        self.assertEqual(
+            "branch_create", updated["moonlight"]["hard_blocked"]["step"])
+        self.assertNotIn("branch_resolution", updated)
+
+        ticket_name_only = self.branch_facts(
+            explicit_continue=False,
+            last_state_sha256="last-state-sha",
+            previous_ticket="REQ-7",
+            previous_branch="feature/REQ-7-but-not-current",
+            previous_head="9" * 40,
+            previous_head_is_ancestor=True,
+        )
+        result = resolve_moonlight_branch(
+            state, ticket_name_only, "still-now")
+        self.assertIn(
+            "拒绝猜测代码归属",
+            self.updated(result)["moonlight"]["hard_blocked"]["reason"])
+
+        divergent = self.branch_facts(base_is_ancestor=False)
+        result = resolve_moonlight_branch(state, divergent, "later")
+        self.assertIn(
+            "不包含当前基线",
+            self.updated(result)["moonlight"]["hard_blocked"]["reason"])
+
+    def test_branch_resolution_leaves_fresh_and_non_moonlight_paths_unchanged(self):
+        state = self.branch_state()
+        fresh = self.branch_facts(
+            current_branch="main", head="a" * 40,
+            explicit_continue=False)
+        self.assertEqual(
+            (), resolve_moonlight_branch(state, fresh, "now").effects)
+
+        state["moonlight"]["enabled"] = False
+        self.assertEqual(
+            (), resolve_moonlight_branch(
+                state, self.branch_facts(), "now").effects)
 
     def test_blocker_and_push_failure_create_durable_issue(self):
         state = self.state("build")

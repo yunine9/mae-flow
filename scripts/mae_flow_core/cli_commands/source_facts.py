@@ -1,7 +1,8 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    hashlib, json, os, re, source_paths, subprocess, time,
+    MoonlightBranchFacts, STATE_PATH, hashlib, json, os, read_bytes, re,
+    resolve_moonlight_branch, safe_read_json, source_paths, subprocess, time,
 )
 from .wiring import api
 
@@ -58,6 +59,78 @@ def _adopt_current_branch(st, ack):
         "用户明确选择沿用现有分支；本单分支由 %s 调整为 %s，"
         "裁决时 HEAD=%s" % (previous or "(未配置)", current, head[:10])
     )
+
+
+def _recorded_delivery_head(state):
+    moonlight = (state.get("moonlight") or {}) if isinstance(state, dict) else {}
+    current = str(state.get("current", "")) if isinstance(state, dict) else ""
+    step_head = (((state.get("step_heads") or {}).get(current, ""))
+                 if isinstance(state, dict) else "")
+    return str(step_head or moonlight.get("pushed_head", ""))
+
+
+def _last_delivery_snapshot():
+    path = STATE_PATH + ".last"
+    raw, error = safe_read_json(path)
+    if error or not isinstance(raw, dict):
+        return {}, ""
+    try:
+        digest = hashlib.sha256(read_bytes(path)).hexdigest()
+    except OSError:
+        return {}, ""
+    return raw, digest
+
+
+def _is_ancestor(ancestor, descendant):
+    if not ancestor or not descendant:
+        return False
+    return api.argv_out(
+        ["git", "merge-base", ancestor, descendant]) == ancestor
+
+
+def _resolve_moonlight_branch(flow, st):
+    """Resolve existing work before branch_create evidence in Moonlight only."""
+    if not api._moonlight(st) or st.get("current") != "branch_create":
+        return False
+    config = st.get("config") or {}
+    current = api.sh("git branch --show-current")
+    head = api.argv_out(["git", "rev-parse", "--verify", "HEAD"])
+    base = str(config.get("基线分支", "") or "")
+    base_head = (
+        api.argv_out(["git", "rev-parse", "--verify", base + "^{commit}"])
+        if base else ""
+    )
+    previous, previous_sha = _last_delivery_snapshot()
+    previous_config = previous.get("config") or {}
+    previous_head = _recorded_delivery_head(previous)
+    request = str((st.get("moonlight") or {}).get("request", "") or "")
+    facts = MoonlightBranchFacts(
+        current_branch=current,
+        head=head,
+        base_branch=base,
+        base_head=base_head,
+        base_is_ancestor=_is_ancestor(base_head, head),
+        explicit_continue=_branch_adoption_requested(request),
+        request_sha256=hashlib.sha256(
+            request.encode("utf-8")).hexdigest(),
+        last_state_sha256=previous_sha,
+        previous_ticket=str(previous_config.get("单号", "") or ""),
+        previous_branch=str(previous_config.get("分支名", "") or ""),
+        previous_head=previous_head,
+        previous_head_is_ancestor=_is_ancestor(previous_head, head),
+        dirty_paths=tuple(api._dirty_paths()[:100]),
+    )
+    result = resolve_moonlight_branch(
+        st, facts, time.strftime("%Y-%m-%d %H:%M:%S"))
+    if not result.effects:
+        return False
+    api._apply_moonlight_result(flow, st, result)
+    hard_blocked = (st.get("moonlight") or {}).get("hard_blocked") or {}
+    return (
+        hard_blocked.get("step") == "branch_create"
+        and not st.get("branch_resolution")
+    )
+
 
 def _unchanged_initial_dirty(path, st):
     """流程启动前已脏且指纹未变的文件不是本单变化，仍保留在状态中可审计。"""

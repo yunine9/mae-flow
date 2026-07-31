@@ -67,6 +67,16 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
         self.assertEqual("build_pace", steps["hf_open"]["next"])
         self.assertEqual("tw_pace", steps["tw_open"]["next"])
 
+    def test_branch_prompt_explains_moonlight_noninteractive_resolution(self):
+        with open(
+            os.path.join(ROOT, "flow", "steps", "branch_create.md"),
+            encoding="utf-8",
+        ) as stream:
+            prompt = stream.read()
+        self.assertIn("禁止执行 AskUserQuestion", prompt)
+        self.assertIn(".mae-flow.json.last", prompt)
+        self.assertIn("自动登记硬阻塞", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

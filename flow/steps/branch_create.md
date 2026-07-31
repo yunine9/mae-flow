@@ -1,3 +1,10 @@
+月光模式先判断当前 Git 现场，禁止执行 AskUserQuestion，也禁止伪造 ack/goto：
+- 当前在基线 HEAD、尚无既有工作：按下方普通路径创建约定分支；
+- 当前非基线分支已经带有提交：不要先 checkout、merge、cherry-pick 或 reset，直接执行 done。
+  harness 会优先按“启动原话明确要求沿用当前分支”判定；否则只在 `.mae-flow.json.last`
+  同单号、同分支且旧 HEAD 是当前 HEAD 祖先时自动沿用。满足时会写入绑定当前 HEAD/基线/来源摘要的裁决收据；
+  归属不明或不包含当前基线时会自动登记硬阻塞并停在本步，留待早晨处理。
+
 确保从基线切出:当前不在 {基线分支} 则先 git checkout {基线分支};然后 git checkout -b {分支名}。
 分支已存在时可直接 checkout，但 done 会核对其 HEAD 仍等于当前基线 HEAD；若已带入其他提交，
 不要 reset/cherry-pick 偷迁移，先展示当前分支、约定分支及提交差异，用 AskUserQuestion 让用户二选一：

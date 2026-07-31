@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
+from mae_flow_core.application.delivery.checkpoint_ready_recovery import (
+    ready_recovered_precommit,
+)
 from mae_flow_core.workflow.advancement import PACE_STEPS
 from mae_flow_core.quality.spec2code_artifacts import (
     roadmap_checkpoints,
@@ -28,6 +31,7 @@ class CheckpointPlanPorts:
     ack_cursor: Callable[[], object]
     now: Callable[[], str]
     process_artifacts: Callable[[], object] = lambda: {}
+    is_test_path: Callable[[str], bool] = lambda _path: False
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,7 @@ class CheckpointReadyPorts:
     has_commit: Callable[[str, str], bool]
     commit_tagged: Callable[[], object]
     source_files: Callable[[str, str], object]
+    delivery_snapshot: Callable[[str], object] = lambda _base: {}
 
 
 def _failure(message):
@@ -72,7 +77,10 @@ def _checkpoint_items(raw_items, ports):
     plan = dict(artifacts.get("plan") or {})
     errors = (
         validate_roadmap(roadmap.get("text", ""))
-        + validate_plan(plan.get("text", ""))
+        + validate_plan(
+            plan.get("text", ""),
+            is_test_path=ports.is_test_path,
+        )
     )
     if errors:
         return [], {}, "路线图/计划结构校验失败:" + "；".join(errors)
@@ -231,10 +239,11 @@ def _code_reviewer_enabled(review):
     return review.get("code_reviewer", "enabled") != "disabled"
 
 
-def _requires_craft_review(review):
+def _requires_craft_review(review, item):
     return (
         review.get("version") == 2
         and _code_reviewer_enabled(review)
+        and not item.get("craft_review_performed")
     )
 
 
@@ -312,8 +321,11 @@ def _ready_history_failure(base, head, ports):
 
 
 def _ready_precommit(review, item, base, head, agent_tasks, ports):
-    requires_craft = _requires_craft_review(review)
+    requires_craft = _requires_craft_review(review, item)
     if head != base:
+        if item.get("legacy_forced_goto_recovered"):
+            return ready_recovered_precommit(
+                review, item, base, head, agent_tasks, ports)
         return _failure(
             "%s 使用“先检视、后提交”，但固定基点之后已经产生提交。"
             "旧提交不能冒充 IDE 未提交 diff；保留现场并让用户决定如何归因，"
@@ -389,7 +401,7 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
 
 def _ready_committed(
         review, item, base, head, mode, agent_tasks, ports):
-    requires_craft = _requires_craft_review(review)
+    requires_craft = _requires_craft_review(review, item)
     dirty = tuple(ports.dirty_paths())
     if dirty:
         return _failure(

@@ -19,6 +19,49 @@ LOCKED_STATUSES = {
     "push_pending",
 }
 
+CHECKPOINT_REWIND_STEPS = {
+    "config_confirm",
+    "workflow_select",
+    "code_reviewer_ask",
+    "branch_create",
+    "grill_ask",
+    "grill",
+    "open",
+    "design",
+    "test_blueprint",
+    "story_ask",
+    "story",
+    "build_plan",
+    "build_pace",
+    "hf_open",
+    "tw_open",
+    "tw_pace",
+    "rf_triage",
+    "rf_pace",
+}
+
+POST_CHECKPOINT_STEPS = {
+    "build_review",
+    "verify_ponytail",
+    "verify_codecheck",
+    "verify_ut",
+    "verify_comet",
+    "tw_compile",
+    "tw_review",
+    "tw_codecheck",
+    "tw_ut",
+    "tw_verify",
+    "rf_compile",
+    "rf_review",
+    "rf_codecheck",
+    "rf_ut",
+    "delivery_review",
+    "archive_confirm",
+    "archive",
+    "push",
+    "end",
+}
+
 
 def development_review(state):
     data = state.get("development_review")
@@ -85,3 +128,43 @@ def review_pending(state, moonlight=False):
 
 def review_locked(state, moonlight=False):
     return False if moonlight else locked_item(state) is not None
+
+
+def checkpoint_goto_error(state, target):
+    """Reject a downstream goto while the current CP still owns the flow."""
+    data = development_review(state)
+    item = current_item(state)
+    if (
+        not data
+        or data.get("status") != "active"
+        or not item
+    ):
+        return ""
+    expected = expected_code_step(state)
+    if target == expected or target in CHECKPOINT_REWIND_STEPS:
+        return ""
+    return (
+        "检查点 %s [%s] 尚未闭环，goto 不能跳到 %s。"
+        "请回到 %s 并执行 checkpoint status；若要放弃当前开发方案，"
+        "只能显式回退到编码前步骤重新规划，不能跳过 CP 进入验证。"
+        % (
+            item.get("id", "当前 CP"),
+            item.get("status", "未知"),
+            target,
+            expected or "当前工作流编码步骤",
+        )
+    )
+
+
+def misplaced_checkpoint_step(state):
+    """Return the code step for an old state forced past an unfinished CP."""
+    item = current_item(state)
+    expected = expected_code_step(state)
+    if (
+        item
+        and expected
+        and state.get("current") in POST_CHECKPOINT_STEPS
+        and state.get("current") != expected
+    ):
+        return expected
+    return ""

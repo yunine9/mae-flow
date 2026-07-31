@@ -135,6 +135,49 @@ class EvidenceRegistryTests(unittest.TestCase):
             failures,
         )
 
+    def test_completed_checkpoint_compile_is_not_required_twice(self):
+        calls = []
+
+        def compile_evidence(_spec, _state):
+            calls.append("compile")
+            return False, "duplicate compile requested"
+
+        def tasks_evidence(_spec, _state):
+            calls.append("tasks")
+            return True, ""
+
+        registry = EvidenceRegistry({
+            "agent_or_no_source": compile_evidence,
+            "tasks_checked": tasks_evidence,
+        })
+        failures = evaluate_step_evidence(
+            {
+                "evidence": [
+                    {
+                        "type": "agent_or_no_source",
+                        "agent": "COMPILE",
+                    },
+                    {"type": "tasks_checked"},
+                ],
+            },
+            {
+                "current": "build",
+                "choices": {"workflow": "full"},
+                "development_review": {
+                    "version": 2,
+                    "status": "active",
+                    "current_index": 1,
+                    "checkpoints": [{
+                        "id": "CP1",
+                        "status": "accepted",
+                    }],
+                },
+            },
+            registry,
+        )
+        self.assertEqual([], failures)
+        self.assertEqual(["tasks"], calls)
+
     def test_unknown_name_and_evaluator_exception_are_not_hidden(self):
         registry = EvidenceRegistry({
             "explode": lambda _spec, _state: (

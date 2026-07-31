@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
 from .evidence import legacy_result
+from ..quality.implementation_tasks import implementation_task_progress
 
 
 SPEC_REGISTER_FIELDS = ("design_doc", "plan", "verification_report")
@@ -162,8 +163,8 @@ class WorkflowEvidenceRules:
         if text is None:
             return EvidenceResult(
                 False, "未找到本 change 的实现清单: " + label)
-        count = len(re.findall(
-            r"^\s*[-*]\s*\[\s\]", text, re.M))
+        progress = implementation_task_progress(text)
+        count = len(progress["incomplete"])
         return EvidenceResult(
             count == 0,
             "" if count == 0

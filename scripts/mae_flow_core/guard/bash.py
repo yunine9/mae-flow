@@ -69,7 +69,7 @@ def _pre_checkpoint(context):
             r"(?:^|[\s;&|(])git\s+commit\b", command, re.I)
         and context.checkpoint_status != "commit_pending"
     ):
-        return _block(
+        return _absolute(
             "bash-checkpoint-review-commit",
             "检查点 %s 的检视收据已冻结，当前状态 %s 不允许新增提交。"
             "等待检视时先取得用户裁决；待推送时只允许 push。"
@@ -84,7 +84,7 @@ def _pre_checkpoint(context):
             r"(?:^|[\s;&|(])git\s+push\b", command, re.I)
         and context.checkpoint_status != "push_pending"
     ):
-        return _block(
+        return _absolute(
             "bash-checkpoint-push-before-verify",
             "检查点 %s 当前为 %s；提交内容尚未通过 checkpoint status "
             "核验，禁止提前 push 或把 commit/push 合成一条命令。"

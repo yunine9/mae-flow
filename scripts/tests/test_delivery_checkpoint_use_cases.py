@@ -213,6 +213,11 @@ class CheckpointReadyUseCaseTests(unittest.TestCase):
                 source_files=supplied(
                     "source_files",
                     overrides.pop("source_files", ("src/main.py",))),
+                delivery_snapshot=supplied(
+                    "delivery_snapshot",
+                    overrides.pop(
+                        "delivery_snapshot",
+                        {"src/main.py": {"sha256": "committed"}})),
             ),
         }
         values.update(overrides)
@@ -276,6 +281,51 @@ class CheckpointReadyUseCaseTests(unittest.TestCase):
         self.assertFalse(any(
             "craft-code" in line for line in result.stdout
         ))
+
+    def test_v2_precommit_skips_second_craft_after_finding_repair(self):
+        review = self.review()
+        review.update({"version": 2, "code_reviewer": "enabled"})
+        review["checkpoints"][0]["craft_review_performed"] = True
+
+        result, _calls = self.call(review=review)
+
+        updated = thaw(result.effects[0].payload)
+        item = updated["checkpoints"][0]
+        self.assertEqual("review_pending", item["status"])
+        self.assertIn(
+            "render_worktree_review",
+            [effect.kind for effect in result.effects],
+        )
+        self.assertFalse(any(
+            "craft-code" in line for line in result.stdout
+        ))
+
+    def test_old_forced_goto_commit_recovers_to_local_user_review(self):
+        review = self.review()
+        review.update({"version": 2, "code_reviewer": "enabled"})
+        review["checkpoints"][0].update({
+            "craft_review_performed": True,
+            "legacy_forced_goto_recovered": True,
+        })
+        result, calls = self.call(
+            review=review,
+            head="committed-head",
+            agent_tasks={"COMPILE": {
+                "checkpoint": "CP1",
+                "sha256": "compile-sha",
+                "precommit_review": True,
+            }},
+        )
+        self.assertEqual(0, result.exit_code)
+        updated = thaw(result.effects[0].payload)
+        item = updated["checkpoints"][0]
+        self.assertEqual("review_pending", item["status"])
+        self.assertTrue(item["receipt"]["precommitted_recovery"])
+        self.assertEqual("committed-head", item["receipt"]["head"])
+        self.assertIn("delivery_snapshot", calls)
+        self.assertIn("show_checkpoint_review", [
+            effect.kind for effect in result.effects
+        ])
 
     def test_continuous_committed_checkpoint_advances_next_batch(self):
         review = self.review(mode="continuous", precommit=False, count=2)

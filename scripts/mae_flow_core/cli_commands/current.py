@@ -3,6 +3,7 @@
 from mae_flow_core.quality.spec2code_recovery import (
     recovery_guidance,
 )
+from mae_flow_core.delivery.checkpoints import misplaced_checkpoint_step
 
 from .shared import (
     CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STEPS_DIR, json,
@@ -177,6 +178,25 @@ def _defaults():
         return None, f"⚠ {DEFAULTS_PATH} 解析失败,已忽略(修复该 JSON 或删除): {e}"
 
 def print_current(flow, st):
+    recovery_step = misplaced_checkpoint_step(st)
+    if recovery_step:
+        previous = st.get("current", "")
+        item = api._checkpoint_current(st)
+        if item:
+            item["legacy_forced_goto_recovered"] = True
+        st["current"] = recovery_step
+        st.setdefault("history", []).append({
+            "step": previous,
+            "result": "checkpoint:auto-recover:" + recovery_step,
+            "note": "旧版本曾绕过未闭环 CP，自动恢复到所属编码步骤",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        })
+        api.save_state(st)
+        print(
+            "[mae-flow] 检测到旧版本把未闭环检查点跳到了 %s；"
+            "已保留全部文件和提交，自动恢复到 %s。"
+            % (previous, recovery_step)
+        )
     sid = st["current"]
     step = flow["steps"][sid]
     print(f"═══ 当前步骤: {sid} — {step['title']} ═══")

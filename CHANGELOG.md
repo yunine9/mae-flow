@@ -1,5 +1,20 @@
 # 更新记录
 
+## 2026-07-31：修复 CP 结束死锁并压缩重复流程
+
+- `craft_decision_pending` 允许在用户确认处置后保留已提前修改的源码并安全回到 `coding`，
+  不再出现 `craft-decide` 与 `checkpoint ready` 互相拒绝的无出口状态；
+- 每个 CP 的独立 CODE Reviewer 默认只运行一次，Finding 修复或用户调整后重新编译并直接进入
+  用户 CP 检视，不再自动开启第二轮 Reviewer；
+- CP 的 `checkpoint ready` 编译收据直接满足外层编码阶段，全部 CP 闭环后不再重复索要
+  COMPILE 令牌；tweak/review 同时跳过旧的重复 compile/review 节点；
+- `done` 优先执行 CP 结束校验并只给当前状态的唯一恢复动作；未闭环 CP 不能再通过
+  `allow`、`goto --force` 或提前 push 绕过；
+- 2.2.6 已被强跳到验证阶段、甚至已经产生本地提交的在途状态会自动回到所属 CP，保留现场，
+  重新编译后先做本地检视，不要求 amend/reset；
+- build 计划和 `change.md` 实现清单只包含生产代码/配置 Task；UT 蓝图仅作场景追踪，
+  测试文件、Fixture、Fake/Mock 和用例统一由 `verify_ut` 落位。旧单中 UT-only 勾选项不再阻塞。
+
 ## 2026-07-31：移除 UT 覆盖率门禁
 
 - UT PASS 不再要求或校验 `AC_COVERAGE`，旧报告携带该字段时也只忽略内容；

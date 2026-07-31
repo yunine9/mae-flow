@@ -1236,6 +1236,21 @@ class V5LayoutTests(unittest.TestCase):
         self.assertEqual(
             {"total": 2, "completed": 1}, status(self.root, "legacy-tasked")["tasks"])
 
+    def test_v5_legacy_ut_only_tasks_are_not_implementation_progress(self):
+        seed_project(self.root)
+        seed_v5_change(
+            self.root,
+            "legacy-ut-task",
+            tasks=(
+                "- [x] 1. 实现业务分支\n"
+                "- [ ] 2. 补充单元测试 PRACHCellObjImplTest.cpp\n"
+            ),
+        )
+        self.assertEqual(
+            {"total": 1, "completed": 1},
+            status(self.root, "legacy-ut-task")["tasks"],
+        )
+
     def test_v5_status_shape(self):
         seed_project(self.root, with_main_spec=True)
         seed_v5_change(self.root, "shaped", domains={"dom": ADDED_OK},

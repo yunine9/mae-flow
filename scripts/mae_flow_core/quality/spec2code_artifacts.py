@@ -182,7 +182,22 @@ def roadmap_checkpoints(text):
     return tuple(result)
 
 
-def validate_plan(text, checkpoint=""):
+def _plan_target_files(body):
+    match = re.search(
+        r"(?:^|\n)\s*-\s*创建/修改文件[：:]\s*(.+?)\s*$",
+        body,
+        re.M,
+    )
+    if not match:
+        return ()
+    return tuple(
+        value.strip().strip("`")
+        for value in re.split(r"[、,，;；]", match.group(1).rstrip("。"))
+        if value.strip().strip("`")
+    )
+
+
+def validate_plan(text, checkpoint="", is_test_path=None):
     errors = []
     tasks = _sections(text, "Task ")
     if not tasks:
@@ -197,6 +212,17 @@ def validate_plan(text, checkpoint=""):
         if "注释计划" in body and not _COMMENT_PLAN_RE.search(body):
             errors.append(
                 "%s 注释计划必须使用 ADD/UPDATE/REMOVE/NONE" % title)
+        if is_test_path is not None:
+            test_targets = [
+                path for path in _plan_target_files(body)
+                if is_test_path(path)
+            ]
+            if test_targets:
+                errors.append(
+                    "%s 指向测试文件 %s；编码 Task 只允许生产实现，"
+                    "对应 Scenario 保留在 UT 蓝图并由 verify_ut 生成和执行"
+                    % (title, "、".join(test_targets))
+                )
     return tuple(errors)
 
 

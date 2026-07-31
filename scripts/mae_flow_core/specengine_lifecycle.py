@@ -1,11 +1,12 @@
 """Change creation, instructions, status, and task progress."""
 
 from .specengine_base import (
-    DEFAULT_SCHEMA, SpecEngineError, _CONFIG_TEMPLATE_LINES, _TASK_DONE_RE,
-    _TASK_RE, _archive_dir, _change_dir, _main_specs_dir, _norm_newlines,
+    DEFAULT_SCHEMA, SpecEngineError, _CONFIG_TEMPLATE_LINES,
+    _archive_dir, _change_dir, _main_specs_dir, _norm_newlines,
     _openspec_dir, _posix, _read_text, _require_change_dir, _utc_today,
     _validate_change_name, atomic_write_text, os,
 )
+from .quality.implementation_tasks import implementation_task_progress
 from .specengine_config import (
     _config_path, _list_vendored_schemas, _load_schema, _load_template,
     _read_project_config, _resolve_schema_name,
@@ -159,14 +160,11 @@ def _build_order(schema):
 
 
 def _count_task_lines(text):
-    total = 0
-    completed = 0
-    for line in _norm_newlines(text).split("\n"):
-        if _TASK_RE.match(line):
-            total += 1
-            if _TASK_DONE_RE.match(line):
-                completed += 1
-    return {"total": total, "completed": completed}
+    progress = implementation_task_progress(_norm_newlines(text))
+    return {
+        "total": progress["total"],
+        "completed": progress["completed"],
+    }
 
 
 def _count_tasks(change_dir):
@@ -255,7 +253,9 @@ def _render_change_instructions(change, change_dir, schema_name, schema, tier,
     lines.append("- # 方案：技术方案结论（原 design 的浓缩）；讨论与勘察过程件"
                  "留在 .mae-flow-work/，不入库。")
     lines.append("- # 实现清单：\"- [ ] 编号. 任务\" 复选框，行首不缩进；"
-                 "完成后勾选为 [x]；批次备注写在任务行下的缩进行。")
+                 "只列生产代码/配置实现任务，不列 UT、测试文件或测试用例任务；"
+                 "UT 由 verify 阶段按已确认蓝图生成。完成后勾选为 [x]；"
+                 "批次备注写在任务行下的缩进行。")
     lines.append("- 骨架里的「（待填…）」占位必须全部替换为实际内容。")
     lines.append("</instruction>")
     lines.append("")

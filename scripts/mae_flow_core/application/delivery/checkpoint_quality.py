@@ -32,6 +32,7 @@ class CheckpointQualityPorts:
     role_task_sha: Callable[[str, str], str]
     registered_artifact_sha: Callable[[str], str]
     now: Callable[[], str]
+    is_test_path: Callable[[str], bool] = lambda _path: False
 
 
 def _failure(message):
@@ -85,7 +86,11 @@ def prepare_checkpoint_plan(
         plan_path, artifact_path("plan", ticket), ports)
     if why:
         return _failure(why)
-    errors = validate_plan(plan_text, checkpoint)
+    errors = validate_plan(
+        plan_text,
+        checkpoint,
+        is_test_path=ports.is_test_path,
+    )
     if errors:
         return _failure("当前 CP 计划结构校验失败: " + "；".join(errors))
     plan_sha256 = ports.digest(plan_text)
@@ -266,10 +271,9 @@ def record_craft_review(
             return _failure(
                 "%s 正在修复代码，旧 CODE Review 不能重复登记。"
                 "修复并编译后先执行 checkpoint ready %s；"
-                "状态进入 craft_pending 后执行 role-task craft-code "
-                "--checkpoint %s，启动新鲜 Reviewer，最后再执行 "
-                "checkpoint craft-reviewed。"
-                % (checkpoint, checkpoint, checkpoint))
+                "已完成本 CP 的独立走读时，编译收据会直接进入用户检视，"
+                "不会自动启动第二轮 Reviewer。"
+                % (checkpoint, checkpoint))
         return _failure(
             "当前检查点不是等待 CODE 走读的 %s；"
             "先执行 checkpoint status 查看下一条精确指令。"
@@ -295,6 +299,7 @@ def record_craft_review(
         "ack_cursor": ports.ack_cursor(),
         "at": ports.now(),
     }
+    item["craft_review_performed"] = True
     item["reviewed_at"] = ports.now()
     if review_has_findings(text):
         item["status"] = "craft_decision_pending"
@@ -337,15 +342,16 @@ def decide_craft_review(
             "当前没有等待用户裁决的 %s CODE Findings。"
             % checkpoint)
     receipt = item.get("craft_review") or {}
-    if item.get("compile_source_sha256") != current_source_sha256:
-        return _failure(
-            "用户裁决前源码已变化；旧 Findings 收据失效，"
-            "重新编译并派新鲜 CODE Reviewer。")
+    reviewed_source_sha256 = str(
+        receipt.get("source_sha256")
+        or item.get("compile_source_sha256")
+        or ""
+    )
     text, why = _validated_craft_text(
         review_path,
         ticket,
         checkpoint,
-        current_source_sha256,
+        reviewed_source_sha256,
         ports,
         moonlight=False,
     )
@@ -369,20 +375,10 @@ def decide_craft_review(
         "sha256": ports.digest(text),
         "decided_at": ports.now(),
     })
-    if review_requires_rework(text):
-        item["status"] = "coding"
-        item["craft_attempt"] = int(item.get("craft_attempt", 0) or 0) + 1
-        return _success(
-            updated,
-            (
-                "[mae-flow] %s 用户已接受待处理 Finding，"
-                "交回同一 CP Implementer 仅修改接受项。" % checkpoint,
-                "修改后执行编译，再依次执行 checkpoint ready %s、"
-                "role-task craft-code --checkpoint %s，启动新鲜 Reviewer "
-                "完成定向复审；旧 Review 不得复用。"
-                % (checkpoint, checkpoint),
-            ),
-            extra=(DeliveryEffect("invalidate_quality", {}),),
+    source_changed = current_source_sha256 != reviewed_source_sha256
+    if review_requires_rework(text) or source_changed:
+        return _resume_coding_after_craft_decision(
+            updated, item, checkpoint, source_changed,
         )
     if updated.get("mode") == "continuous":
         return _complete_continuous_craft(updated, item)
@@ -397,4 +393,33 @@ def decide_craft_review(
             "现在展示 CP 检视卡给用户。" % checkpoint,
         ),
         extra=(DeliveryEffect("show_checkpoint_review", {}),),
+    )
+
+
+def _resume_coding_after_craft_decision(
+        updated, item, checkpoint, source_changed):
+    item["status"] = "coding"
+    item["craft_attempt"] = int(item.get("craft_attempt", 0) or 0) + 1
+    item["craft_review_performed"] = True
+    if source_changed:
+        messages = (
+            "[mae-flow] %s 用户已确认 Finding 处置；"
+            "检测到源码已提前修改，已安全恢复到 coding。"
+            % checkpoint,
+            "旧编译证据已失效；保留当前修改并重新编译，随后执行 "
+            "checkpoint ready %s 进入用户 CP 检视，"
+            "不会自动启动第二轮 CODE Reviewer。" % checkpoint,
+        )
+    else:
+        messages = (
+            "[mae-flow] %s 用户已接受待处理 Finding，"
+            "交回同一 CP Implementer 仅修改接受项。" % checkpoint,
+            "修改后重新编译并执行 checkpoint ready %s；"
+            "本 CP 已完成独立走读，将直接进入用户检视。"
+            % checkpoint,
+        )
+    return _success(
+        updated,
+        messages,
+        extra=(DeliveryEffect("invalidate_quality", {}),),
     )

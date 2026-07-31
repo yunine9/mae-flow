@@ -122,6 +122,9 @@ def _decide_intermediate(
     if choice == "revise":
         return _revise_checkpoint(
             updated, item, current, ack, now)
+    if (item.get("receipt") or {}).get("precommitted_recovery"):
+        return _confirm_recovered_precommit(
+            updated, item, current, choice, ack, now, ports)
     if updated.get("review_before_commit"):
         return _confirm_worktree(
             updated, item, current, choice, ack, now, config, ports)
@@ -130,6 +133,36 @@ def _decide_intermediate(
             updated, item, current, ack, now, ports)
     return _accept_legacy_checkpoint(
         updated, item, current, ack, now, ports)
+
+
+def _confirm_recovered_precommit(
+        review, item, current, choice, ack, now, ports):
+    receipt_head = str((item.get("receipt") or {}).get("head", ""))
+    if ports.head() != receipt_head:
+        return _failure(
+            "恢复检视期间 HEAD 已变化；旧确认不能背书新提交。"
+            "选择调整后重新编译。")
+    if choice == "continuous":
+        return _switch_continuous(
+            review, item, current, ack, now, ports)
+    item["status"] = "push_pending"
+    item["head"] = receipt_head
+    item["confirmed_at"] = now
+    return _success(
+        effects=(
+            _set_review(review),
+            _history(
+                current,
+                "checkpoint:confirmed-recovered-commit:" + item["id"],
+                ack,
+                now,
+            ),
+        ),
+        stdout=(
+            "[mae-flow] 旧版本遗留的本地提交已由用户检视确认。"
+            "执行 git push -u origin HEAD；成功后执行 checkpoint status。",
+        ),
+    )
 
 
 def _decide_final_review(

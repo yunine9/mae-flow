@@ -147,6 +147,55 @@ class WorkflowAdvancementPolicyTests(unittest.TestCase):
                     )),
                 )
 
+    def test_completed_checkpoints_replace_duplicate_compile_and_review(self):
+        flow = {
+            "steps": {
+                "tw_change": {"next": "tw_compile"},
+                "tw_compile": {"next": "tw_review"},
+                "tw_review": {
+                    "choice_key": "tw_review_decision",
+                    "next": {"continue": "tw_codecheck"},
+                },
+                "tw_codecheck": {"next": "end"},
+            },
+        }
+        state = {
+            "choices": {},
+            "development_review": {
+                "version": 2,
+                "status": "active",
+                "mode": "staged",
+                "current_index": 1,
+                "checkpoints": [{
+                    "id": "CP1",
+                    "status": "accepted",
+                }],
+            },
+        }
+        self.assertEqual(
+            [
+                TransitionEvent(
+                    "audit",
+                    "tw_compile",
+                    "checkpoint:replaced-duplicate-compile",
+                    "检查点内已完成逐批编译",
+                ),
+                TransitionEvent(
+                    "audit",
+                    "tw_review",
+                    "checkpoint:replaced-legacy-review",
+                    "分阶段检查点已检视",
+                ),
+                TransitionEvent("target", "tw_codecheck"),
+            ],
+            list(transition_events(
+                flow,
+                state,
+                "tw_change",
+                flow["steps"]["tw_change"],
+            )),
+        )
+
     def test_moonlight_bypasses_consecutive_human_review_nodes(self):
         flow = {
             "steps": {

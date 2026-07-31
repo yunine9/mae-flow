@@ -141,6 +141,7 @@ def cmd_quality_artifact(_flow, state, args):
             read_text=lambda path: read_text(path, encoding="utf-8"),
             normalize_path=_relative_local_path,
             now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+            is_test_path=lambda path: api._is_test_file(path, state),
         ),
     )
     _apply_artifact_result(state, result)

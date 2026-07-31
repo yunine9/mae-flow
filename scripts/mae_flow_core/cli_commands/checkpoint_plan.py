@@ -81,7 +81,6 @@ def _registered_process_artifacts(st, supplied_paths):
         }
     return result
 
-
 def _checkpoint_plan_result(
         st, raw_items, supplied_paths, moonlight=None):
     return plan_checkpoint(
@@ -103,9 +102,9 @@ def _checkpoint_plan_result(
             now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
             process_artifacts=lambda: _registered_process_artifacts(
                 st, supplied_paths),
+            is_test_path=lambda path: api._is_test_file(path, st),
         ),
     )
-
 
 def _apply_checkpoint_plan_result(st, result):
     if result.exit_code:
@@ -118,7 +117,6 @@ def _apply_checkpoint_plan_result(st, result):
     api.save_state(st)
     for line in result.stdout:
         print(line)
-
 
 def cmd_checkpoint_plan(st, args):
     supplied = {
@@ -228,22 +226,30 @@ def cmd_checkpoint_ready(flow, st, args):
                 ]).splitlines()
                 if path and api._is_source_path(path, st, flow)
             ],
+            delivery_snapshot=lambda base:
+                api._checkpoint_delivery_snapshot(st, base, flow),
         ),
     )
     if result.exit_code:
         api.die(result.stderr[0], result.exit_code)
     render_items = []
+    show_review = False
     for effect in result.effects:
         if effect.kind == "set_development_review":
             st["development_review"] = thaw_delivery_payload(effect.payload)
         elif effect.kind == "render_worktree_review":
             render_items.append(thaw_delivery_payload(effect.payload))
+        elif effect.kind == "show_checkpoint_review":
+            show_review = True
         else:
             raise RuntimeError(
                 "unsupported checkpoint ready effect: " + effect.kind)
     api.save_state(st)
     for item in render_items:
         print("\n".join(api._checkpoint_worktree_review_lines(item)))
+    if show_review:
+        api._show_checkpoint_review(
+            st, api._development_review(st), api._checkpoint_current(st))
     for line in result.stdout:
         print(line)
 
@@ -329,7 +335,9 @@ def _show_checkpoint_review(st, data, item):
     elif item.get("status") == "craft_decision_pending":
         print(
             "%s CODE Findings 已登记，等待用户裁决；"
-            "主 Agent 不得自行修改或宣称关闭。"
+            "主 Agent 不得自行宣称关闭。用户确认处置后执行 "
+            "checkpoint craft-decide；即使源码已提前按确认项修改，"
+            "该命令也会保留现场并安全恢复到 coding。"
             % item.get("id", "当前 CP"))
 
 def _final_drifted_checkpoints(data):

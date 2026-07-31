@@ -210,6 +210,30 @@ def _done_require_evidence(step, st, args, sid):
         os.path.abspath(sys.argv[0])), 2)
 
 
+def _done_guard_checkpoint(step, st):
+    """Let the CP state machine own recovery before generic step evidence."""
+    spec = next(
+        (
+            item for item in step.get("evidence", [])
+            if item.get("type") == "checkpoint_plan_complete"
+        ),
+        None,
+    )
+    if not spec:
+        return
+    result = api._EVIDENCE_REGISTRY.evaluate(
+        "checkpoint_plan_complete", spec, st)
+    if result.passed:
+        return
+    api.save_state(st)
+    api.die(
+        "[mae-flow] CP 结束校验未完成。\n  - " + result.reason
+        + "\n只执行上述恢复动作；不要 accept-risk、allow 或 goto "
+          "跳过当前检查点。",
+        2,
+    )
+
+
 def _done_resolve_moonlight_branch(flow, st, sid):
     if sid == "branch_create" and api._resolve_moonlight_branch(flow, st):
         # A recorded hard blocker is a successful safe stop, not failed
@@ -271,6 +295,7 @@ def cmd_done(flow, st, args):
     _done_validate_choice_and_ack(step, st, args, sid)
     _done_commit_inputs(step, st, args, sid, pending_config)
     _done_guard_branch(st, sid)
+    _done_guard_checkpoint(step, st)
     if (_done_source_change(flow, st, sid, step)
             or _done_source_recheck(flow, st, sid, step)):
         return

@@ -75,10 +75,40 @@ def build_evidence_registry(*, workflow, agent, delivery, quality):
     ))
 
 
+def _checkpoint_compile_covered(state):
+    review = state.get("development_review")
+    if (
+        not isinstance(review, dict)
+        or review.get("status") != "active"
+    ):
+        return False
+    expected = {
+        "full": "build",
+        "hotfix": "build",
+        "tweak": "tw_change",
+        "review": "rf_fix",
+    }.get((state.get("choices") or {}).get("workflow", ""), "")
+    if state.get("current") != expected:
+        return False
+    items = review.get("checkpoints") or []
+    return bool(items) and int(
+        review.get("current_index", 0) or 0
+    ) >= len(items)
+
+
 def evaluate_step_evidence(step, state, registry):
     """Evaluate declared Evidence in order and return failure reasons."""
     failures = []
     for spec in step.get("evidence", []):
+        if (
+            spec.get("type") == "agent_or_no_source"
+            and str(spec.get("agent", "")).upper() == "COMPILE"
+            and _checkpoint_compile_covered(state)
+        ):
+            # Every CP ready receipt already required a compile token for its
+            # exact source snapshot. The enclosing build step must not demand
+            # another token after the reviewed snapshot is committed.
+            continue
         result = registry.evaluate(spec["type"], spec, state)
         if not result.passed:
             failures.append(result.reason)

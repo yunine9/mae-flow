@@ -54,6 +54,28 @@ class BashGatePolicyTests(unittest.TestCase):
         wide = decide_pre_commit(self.context(command="git add -A"))
         self.assertEqual("absolute", wide.kind)
 
+    def test_checkpoint_commit_and_push_locks_are_not_permittable(self):
+        commit = decide_pre_commit(self.context(
+            command="git commit --amend --no-edit",
+            checkpoint_locked=True,
+            checkpoint_label="CP1",
+            checkpoint_status="craft_decision_pending",
+        ))
+        self.assertEqual(
+            ("absolute", "bash-checkpoint-review-commit"),
+            (commit.kind, commit.rule),
+        )
+        push = decide_pre_commit(self.context(
+            command="git push",
+            checkpoint_locked=True,
+            checkpoint_label="CP1",
+            checkpoint_status="craft_decision_pending",
+        ))
+        self.assertEqual(
+            ("absolute", "bash-checkpoint-push-before-verify"),
+            (push.kind, push.rule),
+        )
+
     def test_commit_format_and_branch_are_checked_before_ownership(self):
         fmt = decide_pre_commit(self.context(
             command="git commit -m bad",

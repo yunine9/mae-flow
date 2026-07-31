@@ -137,6 +137,7 @@ def _checkpoint_quality_ports(st):
                 "sha256", "")
             or ""),
         now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
+        is_test_path=lambda path: api._is_test_file(path, st),
     )
 
 

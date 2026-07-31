@@ -147,9 +147,14 @@ Implementer，避免主会话变长后继续凭模糊记忆拆任务。编码前
 只记录带依据、证据、影响和最小改法的客观 Finding，不得替你决定处置或宣称关闭。
 
 CODE Reviewer 有 Finding 时，主 Agent 只能提出逐条处置建议并展示给你；得到你的明确确认后，
-接受项才会交回 Implementer。修复后必须重新编译、重新冻结 `checkpoint ready`、签发新任务卡并启动
-新鲜 Reviewer 做定向复查，旧 Review 不能复用。关闭 Reviewer 时，这整段 Agent 和过程件都跳过，
-但你的 CP 检视与最终检视仍保留。
+接受项才会交回 Implementer。每个 CP 的独立 CODE Reviewer 最多运行一次；修复后重新编译并
+`checkpoint ready`，直接展示更新后的 CP 快照给你，不再自动开启第二轮 Reviewer。即使 Agent
+在执行 Finding 裁决命令前已按你的确认修改了源码，状态机会保留现场并回到可编译状态，不会死锁。
+关闭 Reviewer 时，这整段 Agent 和过程件都跳过，但你的 CP 检视与最终检视仍保留。
+
+CP 内的细粒度 Task 和 `change.md` 实现清单只描述生产代码/配置落位。UT 蓝图在编码计划中只作为
+场景引用，不会被拆成测试文件 Task，更不会在 build 阶段因“UT Task 未勾选”阻塞；测试类、Fixture、
+Fake/Mock 和用例技术落位统一由 `verify_ut` 的 AutoUT 负责。
 
 计划检视、代码检视和你的 CP 检视都是修改 Loop：提出意见后会修订、重新检查并再次展示，
 直到你明确继续。代码注释统一读取固定的 Comment Standard，Task 会提前写明 ADD、UPDATE、
@@ -158,6 +163,10 @@ REMOVE 或 NONE，不把“适当补注释”留给编码现场猜。
 编译、长日志和反复修复交给专门的 Agent，主会话只接收结论和真正需要关注的问题。最终 AutoUT
 读取已确认蓝图，把每个场景映射到最终公开接口、测试文件和用例并真实运行；它可以补充技术落位，
 但不能重新发明业务期望。
+
+每个 CP 的 `checkpoint ready` 已绑定并验证该批真实代码快照，因此全部 CP 闭环后不会再要求一次
+重复 COMPILE。局部修改和评审修复流程也会跳过旧的重复编译/整体 review 节点，直接进入 CodeCheck/UT。
+CP 未闭环时，`done` 只给当前状态的唯一恢复动作；`allow`、`goto --force` 和提前 push 均不能越过它。
 
 分阶段模式会冻结本批未提交文件和内容指纹，直接让 IDE 展示相对 HEAD 的 Local Changes；确认后只允许
 提交这份快照，随后核对 commit 和远端 HEAD。如果你要求调整，旧批次基点不会前移，修复后重新展示完整组合差异。

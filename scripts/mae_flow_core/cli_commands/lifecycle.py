@@ -6,6 +6,7 @@ from .shared import (
     remove_with_retry, save_versioned_json, shutil, sys, time,
 )
 from .wiring import api
+from mae_flow_core.delivery.checkpoints import checkpoint_goto_error
 
 def cmd_report_all():
     """聚合历史交付账本:每单一行 + 均值,团队度量/推广数据出口。无状态命令,无在途单也可用。"""
@@ -92,6 +93,9 @@ def cmd_goto(flow, st, args):
             + "。证据不足应修证据或重跑 Agent，禁止用 goto 绕过关卡。", 2)
     if args.step not in flow["steps"]:
         api.die("未知步骤: " + args.step)
+    checkpoint_error = checkpoint_goto_error(st, args.step)
+    if checkpoint_error:
+        api.die(checkpoint_error, 2)
     source = st.get("current", "")
     branch_context = source == "branch_create" or args.step == "branch_create"
     branch_adoption = (
@@ -134,6 +138,7 @@ def cmd_goto(flow, st, args):
             "config_confirm", "workflow_select", "code_reviewer_ask",
             "branch_create", "grill_ask",
             "grill", "open", "design", "story_ask", "story",
+            "test_blueprint", "build_plan",
             "hf_open", "tw_open", "rf_triage",
             "build_pace", "tw_pace", "rf_pace"}:
         st.pop("development_review", None)

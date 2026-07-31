@@ -20,6 +20,7 @@ class ArtifactPorts:
     read_text: Callable[[str], str]
     normalize_path: Callable[[str], str]
     now: Callable[[], str]
+    is_test_path: Callable[[str], bool] = lambda _path: False
 
 
 @dataclass(frozen=True)
@@ -208,7 +209,11 @@ def register_artifact(process, kind, path, ticket, ports):
         text = ports.read_text(path)
     except (OSError, UnicodeDecodeError) as exc:
         return _failure("过程件读取失败: %s" % exc)
-    errors = _VALIDATORS[kind](text)
+    errors = (
+        validate_plan(text, is_test_path=ports.is_test_path)
+        if kind == "plan"
+        else _VALIDATORS[kind](text)
+    )
     if errors:
         return _failure(
             "%s 结构校验失败: %s" % (kind, "；".join(errors))

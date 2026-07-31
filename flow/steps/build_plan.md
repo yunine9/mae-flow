@@ -12,7 +12,9 @@
    `python "{MAEFLOW_PATH}" quality-artifact register roadmap ".mae-flow-work/roadmap-{单号}.md"`；
 2. 执行 `python "{MAEFLOW_PATH}" role-task task-analysis --checkpoint CP1`，用新鲜 CP Task Analyst
    把 CP1 写入任务卡指定 plan；每个 Task 必须回答“去哪写什么代码”，包含文件、符号与签名、
-   行为和错误语义、控制流、状态所有权、复用、禁止事项、注释计划、蓝图场景和定向检查；
+   行为和错误语义、控制流、状态所有权、复用、禁止事项、注释计划、蓝图场景和定向检查。
+   Task 只能落到生产代码/配置文件；蓝图场景只做可追踪引用，禁止新增 UT、测试文件、
+   Fixture、Fake/Mock 或测试用例 Task，这些统一由 verify_ut 技术落位；
 3. 校验并执行
    `python "{MAEFLOW_PATH}" quality-artifact register plan ".mae-flow-work/plan-{单号}.md"`；
 4. 登记成功后执行 `python "{MAEFLOW_PATH}" role-task craft-plan --checkpoint CP1`，用新鲜

@@ -194,6 +194,21 @@ class Spec2CodeArtifactTests(unittest.TestCase):
         )
         self.assertTrue(any("注释计划" in error for error in errors))
 
+    def test_plan_rejects_test_implementation_targets(self):
+        test_plan = PLAN.replace(
+            "src/service.py",
+            "service/PRACHCellObjImplTest.cpp",
+        )
+        errors = validate_plan(
+            test_plan,
+            "CP1",
+            is_test_path=lambda path: path.endswith("Test.cpp"),
+        )
+        self.assertTrue(any("verify_ut" in error for error in errors))
+        self.assertTrue(any(
+            "PRACHCellObjImplTest.cpp" in error for error in errors
+        ))
+
     def test_review_has_five_item_limit_and_disposition(self):
         self.assertEqual(
             (),

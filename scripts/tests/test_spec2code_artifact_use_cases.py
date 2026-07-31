@@ -19,7 +19,7 @@ from mae_flow_core.application.quality.spec2code_artifacts import (  # noqa: E40
     verify_confirmation,
 )
 from mae_flow_core.delivery.models import thaw  # noqa: E402
-from test_spec2code_artifacts import BLUEPRINT  # noqa: E402
+from test_spec2code_artifacts import BLUEPRINT, PLAN  # noqa: E402
 
 
 class Spec2CodeArtifactUseCaseTests(unittest.TestCase):
@@ -83,6 +83,28 @@ class Spec2CodeArtifactUseCaseTests(unittest.TestCase):
             2,
             thaw(again.effects[0].payload)["blueprint"]["revision"],
         )
+
+    def test_plan_registration_rejects_test_file_tasks(self):
+        path = ".mae-flow-work/plan-REQ-1.md"
+        text = PLAN.replace(
+            "src/service.py",
+            "tests/service_test.py",
+        )
+        result = register_artifact(
+            {},
+            "plan",
+            path,
+            "REQ-1",
+            ArtifactPorts(
+                is_file=lambda _path: True,
+                read_text=lambda _path: text,
+                normalize_path=lambda value: value,
+                now=lambda: "2026-07-30 12:01:00",
+                is_test_path=lambda value: value.startswith("tests/"),
+            ),
+        )
+        self.assertEqual(2, result.exit_code)
+        self.assertIn("verify_ut", result.stderr[0])
 
     def test_confirmation_binds_current_revision_digest_actor_and_time(self):
         registered = thaw(self.call().effects[0].payload)

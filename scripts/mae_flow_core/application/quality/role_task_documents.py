@@ -113,6 +113,9 @@ def _append_role_contract(document, role, context):
             "职责:只展开当前 CP 的细粒度 Task；不写业务源码。",
             "每个 Task 必须包含目标文件、符号/签名、状态所有权、复用、"
             "禁止事项、注释计划和蓝图场景。",
+            "对应 UT 蓝图场景只用于追踪生产实现覆盖的行为；"
+            "不得生成测试文件 Task，不得把 Fixture、Fake/Mock、测试用例"
+            "或 UT 执行写进当前 CP 计划。测试技术落位统一由 verify_ut 完成。",
             "唯一允许写入的过程件: "
             + (context.write_output or "（缺失；返回 NEEDS_INPUT）"),
             "只更新当前 CP Task；不得修改已确认路线图或其他 CP 合同。",
@@ -129,6 +132,8 @@ def _append_role_contract(document, role, context):
             "Comment Standard v1: runtime/standards/comment-standard-v1.md",
             "当前职责和非目标、状态所有权、复用、错误/兼容语义、"
             "注释计划、UT 蓝图场景、前序接口和后续接口均以已确认 Task 为准。",
+            "禁止编写或修改 UT、测试 Fixture、Fake/Mock；"
+            "蓝图 Scenario 只用于核对生产实现，测试统一留给 verify_ut。",
             "允许修改:",
         ])
         document.extend("- " + path for path in context.files)

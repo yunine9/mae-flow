@@ -99,6 +99,26 @@ class CheckpointDecisionUseCaseTests(unittest.TestCase):
         self.assertEqual(["now", "verify_ack", "worktree_fresh"], calls)
         self.assertIn("  git add -- src/main.py", result.stdout)
 
+    def test_recovered_precommitted_checkpoint_goes_to_push_not_commit(self):
+        review = self.review()
+        item = review["checkpoints"][0]
+        item["receipt"] = {
+            "base": "base",
+            "head": "candidate",
+            "ack_cursor": ["old"],
+            "snapshot": {"src/main.py": {"sha256": "one"}},
+            "precommitted_recovery": True,
+        }
+        result, calls = self.call(review=review, head="candidate")
+        self.assertEqual(0, result.exit_code)
+        updated = thaw(result.effects[0].payload)
+        self.assertEqual(
+            "push_pending",
+            updated["checkpoints"][0]["status"],
+        )
+        self.assertIn("git push -u origin HEAD", result.stdout[0])
+        self.assertNotIn("worktree_fresh", calls)
+
     def test_revise_returns_to_coding_and_invalidates_quality(self):
         result, calls = self.call(
             choice="revise",

@@ -195,6 +195,28 @@ class WorkflowEvidenceRuleTests(unittest.TestCase):
             tuple(rules.spec_field({"field": "design_doc"}, state)),
         )
 
+    def test_legacy_ut_only_tasks_do_not_block_implementation_progress(self):
+        state = {"config": {"CHANGE_NAME": "change-x"}}
+        rules = WorkflowEvidenceRules(make_ports(
+            tasks_source=lambda _root, _change: (
+                "change.md",
+                "- [x] 1. 实现 PRACH SUL 分支\n"
+                "- [ ] 2. UT频段类型判断 PRACHCellObjImplTest.cpp\n",
+            ),
+        ))
+        self.assertTrue(rules.tasks_checked({}, state).passed)
+
+        production_pending = WorkflowEvidenceRules(make_ports(
+            tasks_source=lambda _root, _change: (
+                "change.md",
+                "- [x] 1. 完成接口\n"
+                "- [ ] 2. 修正 PRACH 控制流\n",
+            ),
+        ))
+        result = production_pending.tasks_checked({}, state)
+        self.assertFalse(result.passed)
+        self.assertIn("1 个未勾选", result.reason)
+
     def test_tier_scope_requires_risk_or_small_change(self):
         rules = WorkflowEvidenceRules(make_ports(
             business_changed_files=lambda _state: (

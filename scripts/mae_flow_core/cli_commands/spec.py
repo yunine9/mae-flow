@@ -6,6 +6,9 @@ from .shared import (
     time, update_json,
 )
 from .wiring import api
+from mae_flow_core.quality.implementation_tasks import (
+    implementation_task_progress,
+)
 
 _USER_GIT_AUTHORIZATION_RULES = {
     "bash-cross-delivery-carryover",
@@ -321,9 +324,14 @@ def cmd_spec(flow, st, args):
             _label, tasks_txt = specengine.tasks_source(os.getcwd(), cn)
         except specengine.SpecEngineError as exc:
             api.die("实现清单无法读取:" + str(exc), 2)
-        if not re.search(r"^\s*[-*]\s*\[[ xX]\]", tasks_txt or "", re.M):
-            api.die("实现清单没有任何任务条目(空清单不能证明实现完成):"
-                "至少列出本单真实完成的任务并勾选后重试。", 2)
+        progress = implementation_task_progress(tasks_txt)
+        if not progress["total"]:
+            api.die(
+                "实现清单没有任何生产代码任务条目"
+                "(空清单或只有 verify 阶段 UT 任务不能证明实现完成)："
+                "至少列出本单真实完成的生产代码任务并勾选后重试。",
+                2,
+            )
         ok, why = api.ev_tasks_checked({}, st)
         if not ok:
             api.die("verify-pass 前实现清单仍有未完成项:" + why, 2)
@@ -358,6 +366,15 @@ def cmd_allow(flow, st, args):
     if rec.get("step") != st.get("current"):
         api.die("拦截编号 %s 属于步骤 %s,当前步骤是 %s;放行令只能在拦截发生的步骤签发。"
             % (bid, rec.get("step", "?"), st.get("current", "?")), 2)
+    if rec.get("rule") in {
+            "bash-checkpoint-review-commit",
+            "bash-checkpoint-push-before-verify"}:
+        api.die(
+            "该拦截属于检查点状态机完整性规则，不能签发 allow 放行令。"
+            "执行 checkpoint status 获取唯一恢复动作；"
+            "旧版本生成的拦截编号也不会绕过本限制。",
+            2,
+        )
     ok, authorization, authorization_receipt, why = (
         api._authorization_message(st, args.message_id))
     if not ok:

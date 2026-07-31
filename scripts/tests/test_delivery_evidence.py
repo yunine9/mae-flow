@@ -72,6 +72,26 @@ class DeliveryEvidenceRuleTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("检查点尚未闭环: CP1", result.reason)
 
+    def test_checkpoint_completion_reports_the_exact_state_action(self):
+        rules = DeliveryEvidenceRules(make_ports())
+        state = {
+            "development_review": {
+                "status": "active",
+                "mode": "staged",
+                "review_before_commit": True,
+                "current_index": 0,
+                "checkpoints": [{
+                    "id": "CP1",
+                    "status": "craft_decision_pending",
+                }],
+            },
+        }
+        result = rules.checkpoint_plan_complete({}, state)
+        self.assertFalse(result.passed)
+        self.assertIn("checkpoint craft-decide CP1", result.reason)
+        self.assertIn("源码已提前修改也可直接执行", result.reason)
+        self.assertNotIn("checkpoint ready", result.reason)
+
     def test_final_review_and_archive_outputs_must_be_clean(self):
         rules = DeliveryEvidenceRules(make_ports(
             final_review_delta=lambda _state: (["src/main.py"], ""),

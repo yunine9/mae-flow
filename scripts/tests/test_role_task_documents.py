@@ -80,6 +80,8 @@ class RoleTaskDocumentTests(unittest.TestCase):
         self.assertIn("允许修改:\n- src/service.py", body)
         self.assertIn("注释计划", body)
         self.assertIn("当前职责和非目标", body)
+        self.assertIn("禁止编写或修改 UT", body)
+        self.assertIn("verify_ut", body)
 
     def test_code_reviewer_receives_diff_but_no_write_permission(self):
         body = build("craft-code")
@@ -112,6 +114,8 @@ class RoleTaskDocumentTests(unittest.TestCase):
         self.assertIn("唯一允许写入的过程件", body)
         self.assertIn("/repo/.mae-flow-work/plan-REQ-1.md", body)
         self.assertNotIn("- plan: （未登记）", body)
+        self.assertIn("蓝图场景只用于追踪", body)
+        self.assertIn("不得生成测试文件 Task", body)
 
     def test_unknown_role_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "未知角色"):

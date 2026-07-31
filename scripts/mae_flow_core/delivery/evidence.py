@@ -76,6 +76,43 @@ def review_has_confirmed_fix(text):
     return review_status_count(text, "修复(已确认)") > 0
 
 
+def _checkpoint_next_action(data, item):
+    checkpoint = str(item.get("id", "当前 CP") or "当前 CP")
+    status = str(item.get("status", "") or "")
+    actions = {
+        "planned": (
+            "先展开本 CP 的生产代码 Task，并执行 checkpoint prepare"),
+        "plan_review_pending": (
+            "展示当前计划并执行 checkpoint plan-decide continue|revise"),
+        "coding": (
+            "完成生产代码修改和本批 compile-agent 后执行 "
+            "checkpoint ready %s" % checkpoint),
+        "craft_pending": (
+            "执行 role-task craft-code --checkpoint %s，走读完成后执行 "
+            "checkpoint craft-reviewed %s" % (checkpoint, checkpoint)),
+        "craft_decision_pending": (
+            "先执行 checkpoint craft-decide %s --review "
+            "\"<已登记 CODE Review 路径>\"；源码已提前修改也可直接执行，"
+            "命令会保留修改并安全回到 coding" % checkpoint),
+        "review_pending": (
+            "展示当前 CP 差异并执行 checkpoint decide "
+            "continue|revise|continuous"),
+        "commit_pending": (
+            "执行 checkpoint status，按输出精确提交已检视快照；"
+            "不要 amend 或重新 ready"),
+        "commit_recovery": (
+            "执行 checkpoint status，按输出让用户选择调整并安全拆回"),
+        "reset_pending": (
+            "执行 checkpoint status，按输出完成安全拆回"),
+        "push_pending": (
+            "执行 git push -u origin HEAD，成功后执行 checkpoint status"),
+    }
+    return actions.get(
+        status,
+        "执行 checkpoint status 获取当前状态的唯一恢复动作",
+    )
+
+
 class DeliveryEvidenceRules:
     def __init__(self, ports):
         self.ports = ports
@@ -133,17 +170,13 @@ class DeliveryEvidenceRules:
         ]
         if not pending:
             return EvidenceResult(True, "")
-        if mode == "staged" and self.ports.review_before_commit(data):
-            action = (
-                "保持本批代码未提交，完成 compile-agent 后执行 "
-                "checkpoint ready <CP编号>；用户检视确认后再精确提交、push")
-        elif mode == "staged":
-            action = (
-                "完成本批编译和 push 后 checkpoint status，等待用户检视")
-        else:
-            action = (
-                "完成本批编译后 checkpoint ready <CP编号>；"
-                "连续模式不会停下来")
+        index = int(data.get("current_index", 0) or 0)
+        current = items[index] if 0 <= index < len(items) else None
+        action = (
+            _checkpoint_next_action(data, current)
+            if current
+            else "执行 checkpoint status 获取当前状态的唯一恢复动作"
+        )
         return EvidenceResult(
             False,
             "检查点尚未闭环: %s。%s"

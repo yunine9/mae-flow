@@ -34,11 +34,12 @@
    “确认上述 Finding 处置”后，才执行
    `checkpoint craft-decide CPn --review "<CPn-code.md>"`。
 6. 存在用户接受的待处理项时交回同一 CP Implementer。修复后的铁序是：
-   新鲜编译 → `checkpoint ready CPn` → `role-task craft-code --checkpoint CPn`
-   → 新鲜 Reviewer 定向复查 → `checkpoint craft-reviewed CPn --review "<CPn-code.md>"`。
-   旧任务卡、旧 Review 和首次 `craft-reviewed` 命令均不得复用。
-7. CODE 走读闭环后才展示用户 CP 检视卡。用户意见仍交同一 CP Implementer 修改、重编译、定向复查；
-   用户明确继续后才进入下一 CP。
+   `checkpoint craft-decide` → 修改（若源码已提前改，命令会保留现场并自动回到 coding）
+   → 新鲜编译 → `checkpoint ready CPn` → 用户 CP 检视。
+   同一 CP 的独立 CODE Reviewer 只运行一次，不因接受项修复、注释修改或用户调整而自动开启第二轮；
+   编译和最终用户检视负责确认修复后的真实快照。
+7. CODE 走读闭环后才展示用户 CP 检视卡。用户意见仍交同一 CP Implementer修改并重编译；
+   再次 `checkpoint ready CPn` 后直接展示更新快照，用户明确继续后才进入下一 CP。
 
 写第一行码前确认当前 Task 能指到方案、规格和蓝图；矛盾或遗漏进入对应上游 Loop，不带病开工。
 批次边界严格沿用编码前已经确认的 CP1/CP2…方案，不按行数、文件数或每个 commit 临时切分。
@@ -61,12 +62,14 @@ superpowers 技能若坚持"先写测试":回应 tdd_mode=direct 已获 direct_o
 mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(错误堆成山难定位)。
 **build 收尾铁序**:最后一次改码之后必须再派一次 compile-agent 收尾——新鲜度绑定会强制这一点
 (编译令牌绑签发时代码状态,编译后再改码令牌即作废,done 过不去)。
+启用检查点时，每个 CP 的 `checkpoint ready` 编译收据就是本阶段的编译事实；全部 CP 闭环后
+`done` 不再索要第二个 COMPILE 令牌，tweak/review 也会跳过旧的重复 compile/review 节点。
 **编译总策略**:只要本轮存在源码、测试或构建入口变化，编译只有一条路——**派 compile-agent(编译隔离舱)**；
 纯文档/台账任务在实现清单和提交证据完成后直接尝试 done，由机器按真实文件范围自动放行，不生成空任务卡。
 需要编译时，compile-agent 按配置的编译方式执行(插件自带 build-fix Skill 或明确命令)。
 **你(主会话)永不直接执行编译命令、永不自行猜测编译方式、
 更不许让用户"自行编译"**;done 默认硬校验本步内 compile-agent 真实收尾过(COMPILE 令牌)。
-如果 agent 已长时间执行但令牌因宿主/收尾兼容问题始终签不出,不要自动无限重跑;把「无可验证编译结果,代码可能无法构建」的风险
+如果 CP 内 compile-agent 已长时间执行但令牌因宿主/收尾兼容问题始终签不出,不要自动无限重跑;把「无可验证编译结果,代码可能无法构建」的风险
 告知用户,由用户选择重跑或按 done 报错执行 `accept-risk compile`;这次放行会明确留痕,后续代码变化即失效。
 配置为空/调不起来 → 那是配置问题,回 config_confirm 与用户确认,不是现场即兴。
 编译/测试失败的修复纪律(systematic-debugging,superpowers 有此 skill 则启用,没有也按此执行):
@@ -85,8 +88,9 @@ mcde 单模块 5-10 分钟,别每个小任务都派;也别攒到最后一把梭(
 实现中发现**设计或规格条目本身有误**(实现揭出的矛盾/遗漏/做不到)——这是实现阶段的正常发现,不是事故:
 停手,呈报用户(问题+影响+建议修法),经确认后 goto design(设计误)或 goto open(spec 误)--ack "用户原话"
 回流修订,修订后顺流回来;**禁止不吭声地偏离设计"先做出来再说"**——偏离没有记录,评审和 verify 都会被骗过。
-全部完成、任务全勾选且最后一轮 compile-agent 已 OK，且分阶段模式最后一批已检视、精确提交并 push 后:
-展示任务状态与产物摘要后执行 done(状态机以任务清单、提交和编译令牌为证据,不重跑长编译)。
+全部生产代码任务完成并勾选，且分阶段模式最后一批已编译、检视、精确提交并 push 后:
+展示任务状态与产物摘要后执行 done。若 CP 尚未闭环，done 只给当前 CP 的唯一恢复动作；
+禁止用 accept-risk、allow 或 goto 跳过。CP 全闭环后不重跑长编译。
 新启动的普通流程按编码前选择执行检查点：分阶段模式每批完成计划、CODE 走读和人工检视，
 一次完成模式每批完成计划与 CODE 走读、质量链后统一人工检视；
 旧版在途流程仍进入原有 build_review，不会被升级强行改轨。所有普通流程在规格定稿前还会核对质量阶段是否产生

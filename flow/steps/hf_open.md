@@ -1,6 +1,7 @@
 按下方内嵌规则创建精简变更：先确认英文短名和范围，再执行
 `python "{MAEFLOW_PATH}" spec new "<英文短名>"`——它创建 **v5 四合一 change.md 骨架**(hotfix 档,
 本单唯一入库产物)。把问题、根因、修复目标与修复思路写进「# 为什么」节,修复任务写进「# 实现清单」节,
+实现清单只列生产代码/配置实现，不列 UT、测试文件或测试用例；UT 由 verify_ut 统一负责。
 「（待填…」占位全部替换;行为规格确有变化时才补「# 规格条目：<域名>」节(格式合同用
 `python "{MAEFLOW_PATH}" spec instructions change` 取,禁止手工猜格式)。
 下方原文里的 proposal/tasks/delta spec 产物话术一律以本页 change.md 小节为准。

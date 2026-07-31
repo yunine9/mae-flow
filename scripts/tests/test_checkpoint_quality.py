@@ -280,6 +280,50 @@ class CheckpointQualityTests(unittest.TestCase):
             "checkpoint ready CP1" in line for line in decided.stdout
         ))
 
+    def test_craft_decision_recovers_when_source_was_fixed_early(self):
+        code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
+        files = {
+            code_path: review(
+                status="待裁决",
+                disposition="待用户裁决",
+                target_sha=self.SOURCE_SHA,
+            ),
+        }
+        current = self.state()
+        current["checkpoints"][0].update({
+            "status": "craft_pending",
+            "compile_source_sha256": self.SOURCE_SHA,
+        })
+        pending = record_craft_review(
+            current,
+            "CP1",
+            code_path,
+            "REQ-1",
+            self.SOURCE_SHA,
+            self.ports(files),
+        )
+        files[code_path] = files[code_path].replace(
+            "待用户裁决", "验证后修改").replace(
+                "待裁决", "已解决")
+
+        decided = decide_craft_review(
+            thaw(pending.effects[0].payload),
+            "CP1",
+            code_path,
+            "REQ-1",
+            "e" * 64,
+            self.ports(files),
+        )
+
+        self.assertEqual(0, decided.exit_code)
+        item = thaw(decided.effects[0].payload)["checkpoints"][0]
+        self.assertEqual("coding", item["status"])
+        self.assertTrue(item["craft_review_performed"])
+        self.assertEqual("invalidate_quality", decided.effects[1].kind)
+        self.assertTrue(any(
+            "重新编译" in line for line in decided.stdout
+        ))
+
     def test_clean_craft_review_advances_without_decision(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
         current = self.state()
@@ -307,7 +351,7 @@ class CheckpointQualityTests(unittest.TestCase):
             thaw(accepted.effects[0].payload)["checkpoints"][0]["status"],
         )
 
-    def test_craft_review_wrong_state_explains_fresh_sequence(self):
+    def test_craft_review_wrong_state_explains_one_shot_sequence(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"
         current = self.state()
         current["checkpoints"][0]["status"] = "coding"
@@ -321,7 +365,7 @@ class CheckpointQualityTests(unittest.TestCase):
         )
         self.assertEqual(2, result.exit_code)
         self.assertIn("checkpoint ready CP1", result.stderr[0])
-        self.assertIn("role-task craft-code", result.stderr[0])
+        self.assertIn("不会自动启动第二轮 Reviewer", result.stderr[0])
 
     def test_continuous_craft_review_moves_to_next_planned_cp(self):
         code_path = ".mae-flow-work/reviews/REQ-1/CP1-code.md"

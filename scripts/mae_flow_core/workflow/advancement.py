@@ -11,6 +11,10 @@ LEGACY_CODE_REVIEW_STEPS = {
     "tw_review",
     "rf_review",
 }
+REDUNDANT_CHECKPOINT_COMPILE_STEPS = {
+    "tw_compile",
+    "rf_compile",
+}
 
 
 @dataclass(frozen=True)
@@ -96,13 +100,31 @@ def _legacy_delivery_review_events(
 
 def _checkpoint_review_events(
         flow, state, target, review_state):
+    items = (review_state or {}).get("checkpoints") or []
+    checkpoints_closed = bool(items) and int(
+        (review_state or {}).get("current_index", 0) or 0
+    ) >= len(items)
     while (
         not _moonlight_enabled(state)
         and review_state
         and review_state.get("status") == "active"
-        and target in LEGACY_CODE_REVIEW_STEPS
+        and (
+            target in LEGACY_CODE_REVIEW_STEPS
+            or (
+                checkpoints_closed
+                and target in REDUNDANT_CHECKPOINT_COMPILE_STEPS
+            )
+        )
     ):
         bypass = flow["steps"][target]
+        if target in REDUNDANT_CHECKPOINT_COMPILE_STEPS:
+            yield _audit(
+                target,
+                "checkpoint:replaced-duplicate-compile",
+                "检查点内已完成逐批编译",
+            )
+            target = next_step(bypass, state)
+            continue
         yield _audit(
             target,
             "checkpoint:replaced-legacy-review",

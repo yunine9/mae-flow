@@ -17,29 +17,35 @@ def _branch_adoption_requested(text):
         return False
     branch = r"(?:当前|现有|现在|这个)分支"
     keep = r"(?:继续|沿用|保留|使用|开发|往下做)"
-    patterns = (
-        branch + r"[^，。！？,;；]{0,12}" + keep,
-        keep + r"[^，。！？,;；]{0,12}" + branch,
+    action = (
+        r"(?:" + keep + r"(?:在)?" + branch
+        + r"|(?:在)?" + branch + r"(?:上)?" + keep + r")"
     )
-    meta_before = re.compile(
-        r"(文案|字样|文本|示例|例子|注释|测试|按钮)"
-        r"[^，。！？,;；]{0,16}"
-        r"(改成|写进|写入|补充|展示|显示|设为|作为)\s*$",
-        re.I,
+    suffix = (
+        r"(?:完成)?(?:本次|后续|剩余|这个|该)?"
+        r"(?:开发|实现|修复|处理|交付|工作|任务|需求)?"
     )
-    meta_after = re.compile(
-        r"^\s*(这个|该)?"
-        r"(写进|写入|改成|设为|作为|展示|显示|用作|用于|"
-        r"字样|文案|示例|例子|文本|测试)",
-        re.I,
+    lead = r"(?:我)?(?:请|选择|决定|要求|希望|同意)?(?:直接|就|仍然)?"
+    allowed = (
+        re.compile(r"^" + lead + action + suffix + r"$", re.I),
+        re.compile(
+            r"^[^，。！？,;；]{1,32}后(?:请|直接)?" + action
+            + suffix + r"$",
+            re.I,
+        ),
+        re.compile(
+            r"^(?:开启|启动)?月光宝盒(?:后)?(?:请|直接)?"
+            + action + suffix + r"$",
+            re.I,
+        ),
     )
-    for pattern in patterns:
-        for match in re.finditer(pattern, value, re.I):
-            before = value[max(0, match.start() - 40):match.start()]
-            after = value[match.end():match.end() + 32]
-            if not meta_before.search(before) and not meta_after.search(after):
-                return True
-    return False
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"[，。！？,;；\n]+", value)
+        if clause.strip()
+    ]
+    return any(pattern.fullmatch(clause)
+               for clause in clauses for pattern in allowed)
 
 def _adopt_current_branch(st, ack):
     """Bind the explicitly chosen existing branch to this delivery round."""

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Semantic contracts for distilled Mae-Flow native quality guidance."""
 
+import ast
 import importlib.util
 import json
 import os
@@ -30,35 +31,21 @@ GUIDANCE_NAMES = (
     "grill", "story-design", "construction", "review", "quality")
 PRESERVATION_STATUSES = {
     "preserved", "thin-replacement", "friction-removed", "migration-only"}
-SEMANTIC_TEST_IDS = {
-    "NG-REQUIREMENT-BRANCHING",
-    "NG-OBSERVABLE-WHAT",
-    "NG-WHAT-HOW-SEPARATION",
-    "NG-ROOT-CAUSE-FIRST",
-    "NG-REVIEW-FIRST-VERIFICATION",
-    "NG-SIMPLE-DESIGN",
-    "NG-BOUNDARY-OWNERSHIP",
-    "NG-CODING-TEST-SEAMS",
-    "NG-GRILL-INTERNAL-CHECKLIST",
-    "NG-REVIEW-CADENCE",
-    "NG-CONDITIONAL-INTEGRATION-REVIEW",
-    "NG-OPAQUE-ONE-SHOT-QUALITY",
-    "NG-BEHAVIOR-TEST-DESIGN",
-    "NG-FRESH-EVIDENCE",
-    "LC-CROSS-LANGUAGE-STRUCTURE",
-}
 REQUIRED_ROLE_CAPABILITIES = {
     ("role:grill-critic-agent", "Grill critic"),
     ("role:story-generator-agent", "Story generator"),
     ("role:cp-task-analyst-agent", "Task Analyst"),
     ("role:craft-reviewer-agent", "PLAN Reviewer"),
-    ("role:design-reviewer", "Design Reviewer"),
+    ("design-provenance:lean-story-review", "Design Reviewer"),
     ("role:craft-reviewer-agent", "CODE Reviewer"),
     ("role:test-design-agent", "test-design agent"),
     ("role:cp-implementer-agent", "CP implementer"),
     ("role:compile-agent", "compile agent"),
     ("role:codecheck-fix-agent", "CodeCheck fixer"),
     ("role:ut-generator-agent", "UT generator"),
+}
+REQUIRED_FILE_CAPABILITIES = {
+    ("file:flow/steps/grill.md", "Interactive Grill"),
 }
 
 
@@ -89,11 +76,41 @@ def guidance(testcase, name):
     return read_text(path)
 
 
+def test_method_exists(testcase, identifier):
+    match = re.fullmatch(
+        r"(scripts/tests/test_[a-z0-9_]+\.py):"
+        r"([A-Za-z_][A-Za-z0-9_]*)\."
+        r"(test_[A-Za-z0-9_]+)",
+        identifier,
+    )
+    testcase.assertIsNotNone(match, identifier)
+    relative, class_name, method_name = match.groups()
+    path = os.path.join(ROOT, *relative.split("/"))
+    testcase.assertTrue(os.path.isfile(path), path)
+    tree = ast.parse(read_text(path), filename=path)
+    classes = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+    }
+    testcase.assertIn(class_name, classes, identifier)
+    methods = {
+        node.name
+        for node in classes[class_name].body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    testcase.assertIn(method_name, methods, identifier)
+
+
 class CapabilityPreservationTests(unittest.TestCase):
-    def matrix_rows(self):
+    def matrix_document(self):
         self.assertTrue(os.path.isfile(MATRIX_PATH), MATRIX_PATH)
         document = read_json(MATRIX_PATH)
         self.assertEqual(1, document.get("schema"))
+        return document
+
+    def matrix_rows(self):
+        document = self.matrix_document()
         rows = document.get("capabilities")
         self.assertIsInstance(rows, list)
         return rows
@@ -109,6 +126,7 @@ class CapabilityPreservationTests(unittest.TestCase):
         }
         self.assertEqual(set(), runtime_loaded - classified)
         self.assertEqual(set(), REQUIRED_ROLE_CAPABILITIES - classified)
+        self.assertEqual(set(), REQUIRED_FILE_CAPABILITIES - classified)
 
     def test_rows_have_one_supported_status_and_unique_identity(self):
         rows = self.matrix_rows()
@@ -132,15 +150,68 @@ class CapabilityPreservationTests(unittest.TestCase):
 
     def test_retained_rows_reference_real_semantic_contracts(self):
         rows = self.matrix_rows()
-        referenced = set()
         for row in rows:
-            tests = set(row["semantic_tests"])
             with self.subTest(source=row["source"], capability=row["capability"]):
                 if row["status"] in {"preserved", "thin-replacement"}:
-                    self.assertTrue(tests)
-                self.assertEqual(set(), tests - SEMANTIC_TEST_IDS)
-                referenced.update(tests)
-        self.assertEqual(SEMANTIC_TEST_IDS, referenced)
+                    self.assertTrue(row["semantic_tests"])
+                for identifier in row["semantic_tests"]:
+                    test_method_exists(self, identifier)
+
+    def test_every_source_resolves_to_vendor_file_role_or_documented_design_provenance(self):
+        document = self.matrix_document()
+        provenance = document.get("design_provenance", {})
+        vendor_sources = {
+            "comet", "openspec", "superpowers", "ponytail", "lizard"}
+        for row in document["capabilities"]:
+            source = row["source"]
+            with self.subTest(source=source, capability=row["capability"]):
+                if source in vendor_sources:
+                    self.assertTrue(os.path.isdir(os.path.join(
+                        ROOT, "runtime", "vendor", source)))
+                elif source.startswith("role:"):
+                    name = source.split(":", 1)[1]
+                    self.assertTrue(os.path.isfile(os.path.join(
+                        ROOT, "agents", name + ".md")))
+                elif source.startswith("file:"):
+                    relative = source.split(":", 1)[1]
+                    self.assertTrue(os.path.isfile(os.path.join(
+                        ROOT, *relative.split("/"))))
+                elif source.startswith("design-provenance:"):
+                    name = source.split(":", 1)[1]
+                    self.assertIn(name, provenance)
+                    record = provenance[name]
+                    self.assertTrue(record.get("description", "").strip())
+                    self.assertTrue(record.get("sources"))
+                    for relative in record["sources"]:
+                        self.assertTrue(os.path.isfile(os.path.join(
+                            ROOT, *relative.split("/"))))
+                else:
+                    self.fail("unresolvable preservation source: " + source)
+
+    def test_specific_distillations_point_to_their_semantic_regressions(self):
+        rows = {
+            (row["source"], row["capability"]): row
+            for row in self.matrix_rows()
+        }
+        expected = {
+            ("comet", "Comet 小改规则"):
+                "test_focused_tweak_stays_fast_and_upgrades_by_semantic_risk",
+            ("comet", "Comet 构建阶段规则"):
+                "test_construction_records_and_reconciles_implementation_deviations",
+            ("openspec", "OpenSpec 规格符合检查"):
+                "test_review_compares_final_change_for_completeness_correctness_and_coherence",
+            ("file:flow/steps/grill.md", "Interactive Grill"):
+                "test_grill_separates_interactive_and_read_only_modes",
+            ("role:grill-critic-agent", "Grill critic"):
+                "test_grill_separates_interactive_and_read_only_modes",
+        }
+        for identity, method in expected.items():
+            with self.subTest(identity=identity):
+                self.assertIn(identity, rows)
+                self.assertTrue(any(
+                    identifier.endswith("." + method)
+                    for identifier in rows[identity]["semantic_tests"]
+                ))
 
 
 class NativeGuidanceSemanticTests(unittest.TestCase):
@@ -156,6 +227,57 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("grill owns requirement divergence", text)
         self.assertIn("does not duplicate brainstorming", text)
         self.assertNotIn("class or file design", text)
+
+    def test_grill_separates_interactive_and_read_only_modes(self):
+        text = guidance(self, "grill").lower()
+        self.assertIn("choose exactly one mode", text)
+        self.assertIn("interactive grill", text)
+        self.assertIn("one question", text)
+        self.assertIn("recommended answer", text)
+        self.assertIn("read-only critic", text)
+        self.assertIn("never asks the user", text)
+        self.assertIn("never makes a decision", text)
+        for concern in (
+                "unique meaning", "answers and code facts", "untestable",
+                "what/how mixing"):
+            self.assertIn(concern, text)
+
+    def test_focused_tweak_stays_fast_and_upgrades_by_semantic_risk(self):
+        text = guidance(self, "construction").lower()
+        self.assertIn("localized change", text)
+        self.assertIn("concise confirmed scope", text)
+        self.assertIn("proceed directly", text)
+        self.assertIn("upgrade to full", text)
+        for risk in (
+                "unclear behavior", "cross-module", "compatibility",
+                "security", "data", "public interface", "shared state",
+                "concurrency"):
+            self.assertIn(risk, text)
+        self.assertIn("semantic risk", text)
+        self.assertIn("not file or line count", text)
+
+    def test_construction_records_and_reconciles_implementation_deviations(self):
+        text = guidance(self, "construction").lower()
+        self.assertIn("implementation deviation", text)
+        self.assertIn("record", text)
+        self.assertIn("confirmed spec", text)
+        self.assertIn("behavior baseline", text)
+        self.assertIn("align the implementation", text)
+        self.assertIn("propose an artifact update", text)
+        self.assertIn("never silently rewrite", text)
+
+    def test_review_compares_final_change_for_completeness_correctness_and_coherence(self):
+        text = guidance(self, "review").lower()
+        for subject in (
+                "final implementation", "final diff", "confirmed spec",
+                "confirmed story"):
+            self.assertIn(subject, text)
+        self.assertIn("completeness", text)
+        self.assertIn("required observable behaviors", text)
+        self.assertIn("correctness", text)
+        self.assertIn("accepted scenarios", text)
+        self.assertIn("coherence", text)
+        self.assertIn("design decisions", text)
 
     def test_spec_is_what_and_story_is_how(self):
         grill = guidance(self, "grill").lower()

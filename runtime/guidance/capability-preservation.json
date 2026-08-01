@@ -5,14 +5,20 @@
       "source": "comet",
       "capability": "Comet 开启阶段规则",
       "new_home": "runtime/guidance/grill.md and story-design.md",
-      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-OBSERVABLE-WHAT"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "comet",
       "capability": "Comet 小改规则",
       "new_home": "runtime/guidance/construction.md",
-      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_focused_tweak_stays_fast_and_upgrades_by_semantic_risk",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
@@ -26,42 +32,59 @@
       "source": "comet",
       "capability": "Comet 构建阶段规则",
       "new_home": "runtime/guidance/construction.md",
-      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_construction_records_and_reconciles_implementation_deviations",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "comet",
       "capability": "Comet 设计阶段规则",
       "new_home": "runtime/guidance/story-design.md",
-      "semantic_tests": ["NG-WHAT-HOW-SEPARATION", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_spec_is_what_and_story_is_how",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "comet",
       "capability": "Comet 问题修复根因检查",
       "new_home": "runtime/guidance/review.md",
-      "semantic_tests": ["NG-ROOT-CAUSE-FIRST"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "preserved"
     },
     {
       "source": "comet",
       "capability": "Comet 问题修复规则",
       "new_home": "runtime/guidance/review.md and construction.md",
-      "semantic_tests": ["NG-ROOT-CAUSE-FIRST", "NG-REVIEW-FIRST-VERIFICATION"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "comet",
       "capability": "Comet 验证阶段规则",
       "new_home": "runtime/guidance/quality.md",
-      "semantic_tests": ["NG-OPAQUE-ONE-SHOT-QUALITY", "NG-FRESH-EVIDENCE"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_quality_is_opaque_one_shot_and_behavior_driven",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "comet",
       "capability": "跨 CP 集成正确性审查",
       "new_home": "runtime/guidance/review.md",
-      "semantic_tests": ["NG-CONDITIONAL-INTEGRATION-REVIEW"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic"
+      ],
       "status": "thin-replacement"
     },
     {
@@ -81,22 +104,29 @@
     {
       "source": "openspec",
       "capability": "OpenSpec 规格符合检查",
-      "new_home": "runtime/guidance/quality.md",
-      "semantic_tests": ["NG-OBSERVABLE-WHAT", "NG-BEHAVIOR-TEST-DESIGN", "NG-FRESH-EVIDENCE"],
+      "new_home": "runtime/guidance/review.md and quality.md",
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_review_compares_final_change_for_completeness_correctness_and_coherence"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "openspec",
       "capability": "OpenSpec 需求探索",
       "new_home": "runtime/guidance/grill.md",
-      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-OBSERVABLE-WHAT"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "openspec",
       "capability": "current and changed observable behavior",
       "new_home": "runtime/guidance/grill.md and story-design.md",
-      "semantic_tests": ["NG-OBSERVABLE-WHAT", "NG-WHAT-HOW-SEPARATION"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_spec_is_what_and_story_is_how"
+      ],
       "status": "preserved"
     },
     {
@@ -117,14 +147,19 @@
       "source": "ponytail",
       "capability": "Ponytail 复杂度审查",
       "new_home": "runtime/guidance/review.md and construction.md",
-      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-REVIEW-FIRST-VERIFICATION"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "ponytail",
       "capability": "Ponytail 精简纪律",
       "new_home": "runtime/guidance/construction.md",
-      "semantic_tests": ["NG-SIMPLE-DESIGN"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries"
+      ],
       "status": "preserved"
     },
     {
@@ -138,14 +173,19 @@
       "source": "superpowers",
       "capability": "Superpowers 完成前验证",
       "new_home": "runtime/guidance/quality.md",
-      "semantic_tests": ["NG-FRESH-EVIDENCE"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "preserved"
     },
     {
       "source": "superpowers",
       "capability": "Superpowers 实现计划",
       "new_home": "runtime/guidance/story-design.md and construction.md",
-      "semantic_tests": ["NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
@@ -159,21 +199,28 @@
       "source": "superpowers",
       "capability": "Superpowers 正确性审查",
       "new_home": "runtime/guidance/review.md and quality.md",
-      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-FRESH-EVIDENCE"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "superpowers",
       "capability": "Superpowers 系统化调试",
       "new_home": "runtime/guidance/review.md and quality.md",
-      "semantic_tests": ["NG-ROOT-CAUSE-FIRST"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "preserved"
     },
     {
       "source": "superpowers",
       "capability": "Superpowers 评审意见处理",
       "new_home": "runtime/guidance/review.md",
-      "semantic_tests": ["NG-REVIEW-FIRST-VERIFICATION"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "preserved"
     },
     {
@@ -198,28 +245,35 @@
       "status": "friction-removed"
     },
     {
-      "source": "grill-me",
-      "capability": "requirement decision-tree divergence",
+      "source": "file:flow/steps/grill.md",
+      "capability": "Interactive Grill",
       "new_home": "runtime/guidance/grill.md",
-      "semantic_tests": ["NG-REQUIREMENT-BRANCHING"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_grill_separates_interactive_and_read_only_modes",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
+      ],
       "status": "preserved"
     },
     {
-      "source": "grill-me",
+      "source": "file:flow/steps/grill.md",
       "capability": "fact lookup one-question cadence and recommended answers",
       "new_home": "runtime/guidance/grill.md",
-      "semantic_tests": ["NG-REQUIREMENT-BRANCHING"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
+      ],
       "status": "preserved"
     },
     {
-      "source": "grill-me",
+      "source": "file:flow/steps/grill.md",
       "capability": "coverage dimensions",
       "new_home": "runtime/guidance/grill.md internal checklist",
-      "semantic_tests": ["NG-GRILL-INTERNAL-CHECKLIST"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
+      ],
       "status": "thin-replacement"
     },
     {
-      "source": "grill-me",
+      "source": "file:flow/steps/grill.md",
       "capability": "required worksheet card and fixed closing report",
       "new_home": "none; useful questions and decisions are carried directly",
       "semantic_tests": [],
@@ -229,63 +283,87 @@
       "source": "lizard",
       "capability": "function discovery and structural parsing",
       "new_home": "Lightcheck runtime",
-      "semantic_tests": ["LC-CROSS-LANGUAGE-STRUCTURE"],
+      "semantic_tests": [
+        "scripts/tests/test_lightcheck.py:LightCheckTests.test_cpp_java_javascript_python_cover_all_four_rules"
+      ],
       "status": "preserved"
     },
     {
       "source": "role:grill-critic-agent",
       "capability": "Grill critic",
       "new_home": "runtime/guidance/grill.md",
-      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-GRILL-INTERNAL-CHECKLIST"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_grill_separates_interactive_and_read_only_modes"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "role:story-generator-agent",
       "capability": "Story generator",
       "new_home": "runtime/guidance/story-design.md",
-      "semantic_tests": ["NG-WHAT-HOW-SEPARATION", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_spec_is_what_and_story_is_how",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "role:cp-task-analyst-agent",
       "capability": "Task Analyst",
       "new_home": "runtime/guidance/story-design.md and construction.md",
-      "semantic_tests": ["NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "role:craft-reviewer-agent",
       "capability": "PLAN Reviewer",
       "new_home": "runtime/guidance/review.md Design Reviewer focus",
-      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-BOUNDARY-OWNERSHIP"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries"
+      ],
       "status": "thin-replacement"
     },
     {
-      "source": "role:design-reviewer",
+      "source": "design-provenance:lean-story-review",
       "capability": "Design Reviewer",
       "new_home": "runtime/guidance/review.md",
-      "semantic_tests": ["NG-REVIEW-CADENCE"],
-      "status": "preserved"
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic"
+      ],
+      "status": "thin-replacement"
     },
     {
       "source": "role:craft-reviewer-agent",
       "capability": "CODE Reviewer",
       "new_home": "runtime/guidance/review.md",
-      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-REVIEW-FIRST-VERIFICATION"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_root_cause_and_review_first_verification_survive"
+      ],
       "status": "preserved"
     },
     {
       "source": "role:test-design-agent",
       "capability": "test-design agent",
       "new_home": "runtime/guidance/quality.md",
-      "semantic_tests": ["NG-BEHAVIOR-TEST-DESIGN"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_quality_is_opaque_one_shot_and_behavior_driven"
+      ],
       "status": "thin-replacement"
     },
     {
       "source": "role:cp-implementer-agent",
       "capability": "CP implementer",
       "new_home": "runtime/guidance/construction.md",
-      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_testability_seams_are_created_during_coding"
+      ],
       "status": "thin-replacement"
     },
     {
@@ -306,8 +384,20 @@
       "source": "role:ut-generator-agent",
       "capability": "UT generator",
       "new_home": "runtime/guidance/quality.md and the configured UT capability",
-      "semantic_tests": ["NG-BEHAVIOR-TEST-DESIGN", "NG-OPAQUE-ONE-SHOT-QUALITY"],
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_quality_is_opaque_one_shot_and_behavior_driven"
+      ],
       "status": "thin-replacement"
     }
-  ]
+  ],
+  "design_provenance": {
+    "lean-story-review": {
+      "description": "Design Reviewer is introduced by the approved lean redesign and its Story phase contract; it is not an existing agent prompt.",
+      "sources": [
+        "docs/mae-flow/requirements/2026-08-01-workflow-redesign/spec.md",
+        "flow/phases/story.md",
+        "scripts/mae_flow_core/orchestration/transitions.py"
+      ]
+    }
+  }
 }

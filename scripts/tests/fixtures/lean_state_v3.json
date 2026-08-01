@@ -1,0 +1,6 @@
+{
+  "schema_version": 3,
+  "engine": "lean-v1",
+  "phase": "startup",
+  "ticket": "REQ-7"
+}

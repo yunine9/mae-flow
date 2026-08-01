@@ -13,6 +13,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_lean_transitions.py",), 90, 3000),
     ("Lean workflow guidance and harness",
      ("scripts/tests/test_lean_guidance.py",), 90, 3000),
+    ("Lean native quality guidance",
+     ("scripts/tests/test_native_guidance.py",), 90, 5000),
     ("Lean workflow migrated composition",
      ("scripts/tests/test_lean_composition.py",), 90, 3000),
     ("Lean delivery manifest boundary",

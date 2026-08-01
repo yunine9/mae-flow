@@ -1,0 +1,313 @@
+{
+  "schema": 1,
+  "capabilities": [
+    {
+      "source": "comet",
+      "capability": "Comet 开启阶段规则",
+      "new_home": "runtime/guidance/grill.md and story-design.md",
+      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-OBSERVABLE-WHAT"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 小改规则",
+      "new_home": "runtime/guidance/construction.md",
+      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 归档阶段规则",
+      "new_home": "cutover migration diagnostics; Delivery owns final user authorization",
+      "semantic_tests": [],
+      "status": "migration-only"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 构建阶段规则",
+      "new_home": "runtime/guidance/construction.md",
+      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 设计阶段规则",
+      "new_home": "runtime/guidance/story-design.md",
+      "semantic_tests": ["NG-WHAT-HOW-SEPARATION", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 问题修复根因检查",
+      "new_home": "runtime/guidance/review.md",
+      "semantic_tests": ["NG-ROOT-CAUSE-FIRST"],
+      "status": "preserved"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 问题修复规则",
+      "new_home": "runtime/guidance/review.md and construction.md",
+      "semantic_tests": ["NG-ROOT-CAUSE-FIRST", "NG-REVIEW-FIRST-VERIFICATION"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "Comet 验证阶段规则",
+      "new_home": "runtime/guidance/quality.md",
+      "semantic_tests": ["NG-OPAQUE-ONE-SHOT-QUALITY", "NG-FRESH-EVIDENCE"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "跨 CP 集成正确性审查",
+      "new_home": "runtime/guidance/review.md",
+      "semantic_tests": ["NG-CONDITIONAL-INTEGRATION-REVIEW"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "comet",
+      "capability": "state guards handoff hashes and archive ownership",
+      "new_home": "runtime/vendor/comet for migration diagnostics only",
+      "semantic_tests": [],
+      "status": "migration-only"
+    },
+    {
+      "source": "openspec",
+      "capability": "OpenSpec 变更创建",
+      "new_home": "native Spec and Story artifacts after production cutover",
+      "semantic_tests": [],
+      "status": "migration-only"
+    },
+    {
+      "source": "openspec",
+      "capability": "OpenSpec 规格符合检查",
+      "new_home": "runtime/guidance/quality.md",
+      "semantic_tests": ["NG-OBSERVABLE-WHAT", "NG-BEHAVIOR-TEST-DESIGN", "NG-FRESH-EVIDENCE"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "openspec",
+      "capability": "OpenSpec 需求探索",
+      "new_home": "runtime/guidance/grill.md",
+      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-OBSERVABLE-WHAT"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "openspec",
+      "capability": "current and changed observable behavior",
+      "new_home": "runtime/guidance/grill.md and story-design.md",
+      "semantic_tests": ["NG-OBSERVABLE-WHAT", "NG-WHAT-HOW-SEPARATION"],
+      "status": "preserved"
+    },
+    {
+      "source": "openspec",
+      "capability": "CLI schema artifact graph and archive lifecycle",
+      "new_home": "runtime/vendor/openspec for migration diagnostics only",
+      "semantic_tests": [],
+      "status": "migration-only"
+    },
+    {
+      "source": "openspec",
+      "capability": "fixed artifact graph and report formats",
+      "new_home": "natural-language native artifacts without a format gate",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "ponytail",
+      "capability": "Ponytail 复杂度审查",
+      "new_home": "runtime/guidance/review.md and construction.md",
+      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-REVIEW-FIRST-VERIFICATION"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "ponytail",
+      "capability": "Ponytail 精简纪律",
+      "new_home": "runtime/guidance/construction.md",
+      "semantic_tests": ["NG-SIMPLE-DESIGN"],
+      "status": "preserved"
+    },
+    {
+      "source": "ponytail",
+      "capability": "mechanical file and line minimization",
+      "new_home": "semantic-risk selection and the simplest fitting design",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 完成前验证",
+      "new_home": "runtime/guidance/quality.md",
+      "semantic_tests": ["NG-FRESH-EVIDENCE"],
+      "status": "preserved"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 实现计划",
+      "new_home": "runtime/guidance/story-design.md and construction.md",
+      "semantic_tests": ["NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 方案讨论",
+      "new_home": "external host capability; Grill alone owns Mae requirement divergence",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 正确性审查",
+      "new_home": "runtime/guidance/review.md and quality.md",
+      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-FRESH-EVIDENCE"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 系统化调试",
+      "new_home": "runtime/guidance/review.md and quality.md",
+      "semantic_tests": ["NG-ROOT-CAUSE-FIRST"],
+      "status": "preserved"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 评审意见处理",
+      "new_home": "runtime/guidance/review.md",
+      "semantic_tests": ["NG-REVIEW-FIRST-VERIFICATION"],
+      "status": "preserved"
+    },
+    {
+      "source": "superpowers",
+      "capability": "Superpowers 连续执行",
+      "new_home": "Mae phase cursor; guidance does not own orchestration",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "superpowers",
+      "capability": "mandatory test-first development",
+      "new_home": "runtime/guidance/story-design.md and construction.md create test seams without prescribing a coding ritual",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "superpowers",
+      "capability": "fixed retries subagent routing and revision identifiers",
+      "new_home": "semantic one-shot review and quality policies",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "grill-me",
+      "capability": "requirement decision-tree divergence",
+      "new_home": "runtime/guidance/grill.md",
+      "semantic_tests": ["NG-REQUIREMENT-BRANCHING"],
+      "status": "preserved"
+    },
+    {
+      "source": "grill-me",
+      "capability": "fact lookup one-question cadence and recommended answers",
+      "new_home": "runtime/guidance/grill.md",
+      "semantic_tests": ["NG-REQUIREMENT-BRANCHING"],
+      "status": "preserved"
+    },
+    {
+      "source": "grill-me",
+      "capability": "coverage dimensions",
+      "new_home": "runtime/guidance/grill.md internal checklist",
+      "semantic_tests": ["NG-GRILL-INTERNAL-CHECKLIST"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "grill-me",
+      "capability": "required worksheet card and fixed closing report",
+      "new_home": "none; useful questions and decisions are carried directly",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "lizard",
+      "capability": "function discovery and structural parsing",
+      "new_home": "Lightcheck runtime",
+      "semantic_tests": ["LC-CROSS-LANGUAGE-STRUCTURE"],
+      "status": "preserved"
+    },
+    {
+      "source": "role:grill-critic-agent",
+      "capability": "Grill critic",
+      "new_home": "runtime/guidance/grill.md",
+      "semantic_tests": ["NG-REQUIREMENT-BRANCHING", "NG-GRILL-INTERNAL-CHECKLIST"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:story-generator-agent",
+      "capability": "Story generator",
+      "new_home": "runtime/guidance/story-design.md",
+      "semantic_tests": ["NG-WHAT-HOW-SEPARATION", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:cp-task-analyst-agent",
+      "capability": "Task Analyst",
+      "new_home": "runtime/guidance/story-design.md and construction.md",
+      "semantic_tests": ["NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:craft-reviewer-agent",
+      "capability": "PLAN Reviewer",
+      "new_home": "runtime/guidance/review.md Design Reviewer focus",
+      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-BOUNDARY-OWNERSHIP"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:design-reviewer",
+      "capability": "Design Reviewer",
+      "new_home": "runtime/guidance/review.md",
+      "semantic_tests": ["NG-REVIEW-CADENCE"],
+      "status": "preserved"
+    },
+    {
+      "source": "role:craft-reviewer-agent",
+      "capability": "CODE Reviewer",
+      "new_home": "runtime/guidance/review.md",
+      "semantic_tests": ["NG-REVIEW-CADENCE", "NG-REVIEW-FIRST-VERIFICATION"],
+      "status": "preserved"
+    },
+    {
+      "source": "role:test-design-agent",
+      "capability": "test-design agent",
+      "new_home": "runtime/guidance/quality.md",
+      "semantic_tests": ["NG-BEHAVIOR-TEST-DESIGN"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:cp-implementer-agent",
+      "capability": "CP implementer",
+      "new_home": "runtime/guidance/construction.md",
+      "semantic_tests": ["NG-SIMPLE-DESIGN", "NG-BOUNDARY-OWNERSHIP", "NG-CODING-TEST-SEAMS"],
+      "status": "thin-replacement"
+    },
+    {
+      "source": "role:compile-agent",
+      "capability": "compile agent",
+      "new_home": "configured opaque Build capability after production cutover",
+      "semantic_tests": [],
+      "status": "migration-only"
+    },
+    {
+      "source": "role:codecheck-fix-agent",
+      "capability": "CodeCheck fixer",
+      "new_home": "runtime/guidance/quality.md advisory dispositions without an automatic fixer",
+      "semantic_tests": [],
+      "status": "friction-removed"
+    },
+    {
+      "source": "role:ut-generator-agent",
+      "capability": "UT generator",
+      "new_home": "runtime/guidance/quality.md and the configured UT capability",
+      "semantic_tests": ["NG-BEHAVIOR-TEST-DESIGN", "NG-OPAQUE-ONE-SHOT-QUALITY"],
+      "status": "thin-replacement"
+    }
+  ]
+}

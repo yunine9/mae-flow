@@ -33,6 +33,45 @@ class CapabilityAttempt:
 
 
 @dataclass(frozen=True)
+class MoonlightAuthorization:
+    """Exact user preauthorization for unattended delivery effects.
+
+    ``business_files`` uses the same repository-relative identity rules as an
+    exact delivery manifest.  The booleans are user authorization only; the
+    policy can still withhold either effect when current repository facts are
+    unsafe or ambiguous.
+    """
+
+    enabled: bool
+    business_files: tuple
+    allow_commit: bool
+    allow_push: bool
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("enabled must be a bool")
+        if type(self.allow_commit) is not bool:
+            raise ValueError("allow_commit must be a bool")
+        if type(self.allow_push) is not bool:
+            raise ValueError("allow_push must be a bool")
+        if not self.enabled and (self.allow_commit or self.allow_push):
+            raise ValueError(
+                "disabled Moonlight cannot authorize commit or push")
+        if isinstance(self.business_files, (str, bytes, set, frozenset, dict)):
+            raise ValueError(
+                "business_files must be an ordered collection of exact paths")
+        try:
+            files = tuple(self.business_files)
+        except TypeError as exc:
+            raise ValueError(
+                "business_files must be an ordered collection of exact paths"
+            ) from exc
+        if any(not isinstance(path, str) for path in files):
+            raise ValueError("business_files paths must be strings")
+        object.__setattr__(self, "business_files", files)
+
+
+@dataclass(frozen=True)
 class FlowState:
     ticket: str
     path: DeliveryPath

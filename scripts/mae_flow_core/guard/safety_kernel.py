@@ -2,13 +2,14 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+import ntpath
+import os
 import posixpath
 
 from ..foundation import git_intent
 from ..foundation.source_paths import (
     DOCUMENT_EXTENSIONS,
     normalize_path,
-    repo_relative_for_match,
     repository_path_identity,
 )
 from ..orchestration import DeliveryPath, FlowState, Phase
@@ -90,19 +91,58 @@ def _write_targets(tool, tool_input):
     return ()
 
 
+def _uses_windows_paths(repository_root):
+    normalized = normalize_path(repository_root).strip().strip("\"'")
+    drive, _ = ntpath.splitdrive(normalized)
+    return os.name == "nt" or bool(drive)
+
+
+def _canonical_repository_root(repository_root):
+    normalized = normalize_path(repository_root).strip().strip("\"'")
+    if not normalized:
+        raise ValueError("repository root is required")
+    return posixpath.normpath(normalized)
+
+
 def _relative_target(context, path):
     if not isinstance(path, str):
         return ""
     normalized = normalize_path(path).strip().strip("\"'")
     if not normalized:
         return ""
-    normalized = posixpath.normpath(normalized)
-    root = posixpath.normpath(
-        normalize_path(context.repository_root).rstrip("/"))
-    relative = repo_relative_for_match(normalized, root)
-    if relative is None:
-        return normalized
-    return posixpath.normpath(relative) if relative else "."
+    root = _canonical_repository_root(context.repository_root)
+    root_drive, _ = ntpath.splitdrive(root)
+    target_drive, target_tail = ntpath.splitdrive(normalized)
+    if target_drive and not target_tail.startswith("/"):
+        raise ValueError("drive-relative write targets are ambiguous")
+    if target_drive:
+        canonical = posixpath.normpath(normalized)
+    elif normalized.startswith("/"):
+        if root_drive and not normalized.startswith("//"):
+            canonical = posixpath.normpath(root_drive + normalized)
+        else:
+            canonical = posixpath.normpath(normalized)
+    else:
+        canonical = posixpath.normpath(posixpath.join(root, normalized))
+
+    case_insensitive = _uses_windows_paths(context.repository_root)
+    root_identity = repository_path_identity(
+        root, case_insensitive=case_insensitive)
+    canonical_identity = repository_path_identity(
+        canonical, case_insensitive=case_insensitive)
+    if canonical_identity == root_identity:
+        return "."
+    root_prefix = root_identity.rstrip("/") + "/"
+    if canonical_identity.startswith(root_prefix):
+        return canonical[len(root.rstrip("/")) + 1:]
+    return canonical
+
+
+def _write_identity(context, path):
+    return repository_path_identity(
+        path,
+        case_insensitive=_uses_windows_paths(context.repository_root),
+    )
 
 
 def _is_protected_control(path):
@@ -148,34 +188,36 @@ def _source_edit_allowed(state):
 
 
 def _edit_decision(context, tool, tool_input):
-    targets = tuple(
-        relative
-        for relative in (
-            _relative_target(context, path)
-            for path in _write_targets(tool, tool_input)
+    targets = []
+    try:
+        for path in _write_targets(tool, tool_input):
+            relative = _relative_target(context, path)
+            if relative:
+                targets.append(relative)
+    except ValueError:
+        return _block(
+            "source_edit",
+            "Write targets must be unambiguous repository paths.",
         )
-        if relative
-    )
     if any(_is_protected_control(path) for path in targets):
         return _block(
             "protected_control",
             "Mae-Flow control files cannot be edited by workflow tools.",
         )
-    safe_targets = _identities(
-        relative
-        for relative in (
-            _relative_target(context, path)
-            for path in context.safe_write_targets
-        )
-        if relative
-    )
+    safe_targets = set()
+    for path in context.safe_write_targets:
+        try:
+            relative = _relative_target(context, path)
+        except ValueError:
+            continue
+        if relative:
+            safe_targets.add(_write_identity(context, relative))
     controlled_targets = tuple(
         path for path in targets
         if (
             not _is_documentation(path)
             and not _is_local_work_package(path)
-            and repository_path_identity(path, case_insensitive=True)
-            not in safe_targets
+            and _write_identity(context, path) not in safe_targets
         )
     )
     if controlled_targets and not _source_edit_allowed(context.state):
@@ -283,62 +325,48 @@ def _manifest_has_unadopted_dirty(context, manifest):
     return bool((initial & delivery) - adopted)
 
 
-def _stage_decision(context, command):
-    intents = git_intent.git_add_intents(command)
-    if not intents:
-        return None
+def _stage_decision(context, intent):
+    if intent.opaque_pathspec:
+        return _block(
+            "git_staging",
+            "Opaque Git staging pathspecs cannot be authorized exactly.",
+        )
     manifest = _manifest(context)
-    for intent in intents:
-        paths = intent["pathspecs"]
-        if intent["all"]:
-            return _block(
-                "git_staging",
-                "Broad Git staging is not allowed; name exact files.",
-            )
-        if not paths:
-            continue
-        try:
-            requested = DeliveryManifest.from_paths(
-                paths, repository_root=context.repository_root)
-        except (TypeError, ValueError):
-            return _block(
-                "git_staging",
-                "Git staging pathspecs must identify exact files.",
-            )
-        if manifest is None or not manifest.files:
-            return _block(
-                "git_staging",
-                "Git staging requires an authorized delivery manifest.",
-            )
-        if not _identities(requested.files).issubset(
-                _identities(manifest.files)):
-            return _block(
-                "git_staging",
-                "Git staging includes files outside the authorized manifest.",
-            )
-        dirty = _identities(_initial_dirty_paths(context))
-        adopted = _identities(manifest.adopted_dirty)
-        if (_identities(requested.files) & dirty) - adopted:
-            return _block(
-                "git_staging",
-                "Startup-dirty files require explicit manifest adoption.",
-            )
+    paths = intent.pathspecs
+    if intent.all:
+        return _block(
+            "git_staging",
+            "Broad Git staging is not allowed; name exact files.",
+        )
+    if not paths:
+        return _allow("git_staging")
+    try:
+        requested = DeliveryManifest.from_paths(
+            paths, repository_root=context.repository_root)
+    except (TypeError, ValueError):
+        return _block(
+            "git_staging",
+            "Git staging pathspecs must identify exact files.",
+        )
+    if manifest is None or not manifest.files:
+        return _block(
+            "git_staging",
+            "Git staging requires an authorized delivery manifest.",
+        )
+    if not _identities(requested.files).issubset(
+            _identities(manifest.files)):
+        return _block(
+            "git_staging",
+            "Git staging includes files outside the authorized manifest.",
+        )
+    dirty = _identities(_initial_dirty_paths(context))
+    adopted = _identities(manifest.adopted_dirty)
+    if (_identities(requested.files) & dirty) - adopted:
+        return _block(
+            "git_staging",
+            "Startup-dirty files require explicit manifest adoption.",
+        )
     return _allow("git_staging")
-
-
-def _opaque_pathspec_decision(command):
-    for operation in git_intent.opaque_pathspec_mutations(command):
-        if operation == "add":
-            return _block(
-                "git_staging",
-                "Opaque Git staging pathspecs cannot be authorized exactly.",
-            )
-        if operation == "commit":
-            return _block(
-                "git_commit",
-                "Opaque commit pathspecs cannot be compared with the manifest.",
-            )
-    return None
 
 
 def _exact_manifest_decision(context, actual_files, rule):
@@ -363,26 +391,22 @@ def _exact_manifest_decision(context, actual_files, rule):
     return _allow(rule)
 
 
-def _commit_decision(context, command):
-    intents = git_intent.git_commit_intents(command)
-    if not intents:
-        return None
-    for intent in intents:
-        if intent["all"] or intent["include"] or intent["pathspecs"]:
-            return _block(
-                "git_commit",
-                "Commit must use the already-staged exact manifest.",
-            )
-        decision = _exact_manifest_decision(
-            context, context.staged_files, "git_commit")
-        if not decision.allow:
-            return decision
-    return _allow("git_commit")
+def _commit_decision(context, intent):
+    if intent.opaque_pathspec:
+        return _block(
+            "git_commit",
+            "Opaque commit pathspecs cannot be compared with the manifest.",
+        )
+    if intent.all or intent.include or intent.pathspecs:
+        return _block(
+            "git_commit",
+            "Commit must use the already-staged exact manifest.",
+        )
+    return _exact_manifest_decision(
+        context, context.staged_files, "git_commit")
 
 
-def _push_decision(context, command):
-    if not git_intent.has_git_subcommand(command, "push"):
-        return None
+def _push_decision(context):
     return _exact_manifest_decision(
         context, context.commit_files, "git_publish")
 
@@ -405,11 +429,13 @@ def decide_pretool(context, tool, tool_input):
         return edit
 
     if command:
-        opaque = _opaque_pathspec_decision(command)
-        if opaque is not None:
-            return opaque
-        for evaluator in (_stage_decision, _commit_decision, _push_decision):
-            decision = evaluator(context, command)
-            if decision is not None and not decision.allow:
+        for intent in git_intent.git_delivery_intents(command):
+            if intent.operation == "add":
+                decision = _stage_decision(context, intent)
+            elif intent.operation == "commit":
+                decision = _commit_decision(context, intent)
+            else:
+                decision = _push_decision(context)
+            if not decision.allow:
                 return decision
     return _allow()

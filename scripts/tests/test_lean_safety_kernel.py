@@ -271,6 +271,34 @@ class SourceEditAuthorizationTests(unittest.TestCase):
             (protected.allow, protected.rule),
         )
 
+    def test_safe_write_identity_follows_repository_path_style(self):
+        startup = _state(phase=Phase.STARTUP)
+
+        posix_case_mismatch = self.decision(
+            startup,
+            "Generated/Cache.bin",
+            safe_write_targets=("generated/cache.bin",),
+        )
+        windows_drive_match = self.decision(
+            startup,
+            r"C:\WORK\REPO\Generated\Cache.bin",
+            repository_root=r"c:\work\repo",
+            safe_write_targets=("generated/cache.bin",),
+        )
+        windows_unc_match = self.decision(
+            startup,
+            r"\\SERVER\SHARE\REPO\Generated\Cache.bin",
+            repository_root=r"\\server\share\repo",
+            safe_write_targets=(r"generated\cache.bin",),
+        )
+
+        self.assertEqual(
+            (False, "source_edit"),
+            (posix_case_mismatch.allow, posix_case_mismatch.rule),
+        )
+        self.assertTrue(windows_drive_match.allow)
+        self.assertTrue(windows_unc_match.allow)
+
     def test_protected_controls_precede_source_authorization(self):
         approved = _state(
             phase=Phase.CONSTRUCTION,
@@ -287,6 +315,7 @@ class SourceEditAuthorizationTests(unittest.TestCase):
     def test_protected_control_aliases_are_normalized_before_classification(self):
         aliases = (
             "work/../.mae-flow.yml",
+            "../repo/.mae-flow.yml",
             "/repo/work/../.mae-flow.yml",
             r"work\..\.MAE-FLOW.YML",
             ".MAE-FLOW.YML",
@@ -295,7 +324,11 @@ class SourceEditAuthorizationTests(unittest.TestCase):
 
         for target in aliases:
             with self.subTest(target=target):
-                decision = self.decision(state, target)
+                decision = self.decision(
+                    state,
+                    target,
+                    safe_write_targets=(target,),
+                )
                 self.assertEqual(
                     (False, "protected_control"),
                     (decision.allow, decision.rule),
@@ -305,10 +338,42 @@ class SourceEditAuthorizationTests(unittest.TestCase):
             state,
             r"C:\work\repo\work\..\.MaE-Flow.YmL",
             repository_root=r"c:\work\repo",
+            safe_write_targets=(r"work\..\.MaE-Flow.YmL",),
         )
         self.assertEqual(
             (False, "protected_control"),
             (windows.allow, windows.rule),
+        )
+
+        rooted_current_drive = self.decision(
+            state,
+            r"\work\repo\.mae-flow.yml",
+            repository_root=r"C:\work\repo",
+            safe_write_targets=(r"\work\repo\.mae-flow.yml",),
+        )
+        safe_alias = self.decision(
+            state,
+            "../repo/.mae-flow.yml",
+            safe_write_targets=("../repo/.mae-flow.yml",),
+        )
+        drive_relative = self.decision(
+            state,
+            r"C:.mae-flow.yml",
+            repository_root=r"C:\work\repo",
+            safe_write_targets=(r"C:.mae-flow.yml",),
+        )
+
+        self.assertEqual(
+            (False, "protected_control"),
+            (rooted_current_drive.allow, rooted_current_drive.rule),
+        )
+        self.assertEqual(
+            (False, "protected_control"),
+            (safe_alias.allow, safe_alias.rule),
+        )
+        self.assertEqual(
+            (False, "source_edit"),
+            (drive_relative.allow, drive_relative.rule),
         )
 
 
@@ -380,6 +445,52 @@ class GitManifestSafetyTests(unittest.TestCase):
                 )
                 self.assertEqual((False, "git_commit"), (
                     decision.allow, decision.rule))
+
+    def test_heterogeneous_git_blocks_follow_shell_source_order(self):
+        state = self.manifest_state()
+        exact = ("src/a.cpp", "tests/a_test.cpp")
+        cases = (
+            (
+                "git commit -a -m first && "
+                "git add --pathspec-from-file=paths.txt",
+                {"staged_files": exact},
+                "git_commit",
+            ),
+            (
+                "git add --pathspec-from-file=paths.txt && "
+                "git commit -a -m second",
+                {"staged_files": exact},
+                "git_staging",
+            ),
+            (
+                "git add src/a.cpp && "
+                "git commit --pathspec-from-file=paths.txt -m second && "
+                "git push origin main",
+                {"staged_files": exact, "commit_files": exact},
+                "git_commit",
+            ),
+            (
+                "git push origin main && "
+                "git add --pathspec-from-file=paths.txt",
+                {"commit_files": ("src/a.cpp",)},
+                "git_publish",
+            ),
+            (
+                "git add -A && "
+                "git commit --pathspec-from-file=paths.txt -m second && "
+                "git push origin main",
+                {"staged_files": exact, "commit_files": exact},
+                "git_staging",
+            ),
+        )
+
+        for command, facts, expected_rule in cases:
+            with self.subTest(command=command):
+                decision = self.bash(state, command, **facts)
+                self.assertEqual(
+                    (False, expected_rule),
+                    (decision.allow, decision.rule),
+                )
 
     def test_commit_requires_exact_actual_staged_manifest(self):
         state = self.manifest_state(capabilities=(CapabilityAttempt(

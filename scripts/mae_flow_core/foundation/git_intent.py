@@ -35,6 +35,16 @@ class GitAction:
     objects: tuple = ()
 
 
+@dataclass(frozen=True)
+class GitDeliveryIntent:
+    operation: str
+    arguments: tuple
+    pathspecs: tuple = ()
+    all: bool = False
+    include: bool = False
+    opaque_pathspec: bool = False
+
+
 def _is_git_executable(token):
     name = re.split(r"[\\/]", str(token or ""))[-1].lower()
     return name in ("git", "git.exe")
@@ -201,18 +211,22 @@ def inline_git_alias_mutations(command):
     )
 
 
+def _has_opaque_pathspec(arguments):
+    return any(
+        token == "--pathspec-from-file"
+        or token.startswith("--pathspec-from-file=")
+        or token == "--pathspec-file-nul"
+        for token in arguments
+    )
+
+
 def opaque_pathspec_mutations(command):
     return tuple(
         operation
         for operation, arguments in git_invocations(command)
         if (
             operation in GIT_MUTATION_OPERATIONS
-            and any(
-                token == "--pathspec-from-file"
-                or token.startswith("--pathspec-from-file=")
-                or token == "--pathspec-file-nul"
-                for token in arguments
-            )
+            and _has_opaque_pathspec(arguments)
         )
     )
 
@@ -492,3 +506,34 @@ def git_commit_intents(command):
 def git_commit_intent(command):
     intents = git_commit_intents(command)
     return intents[-1] if intents else _git_commit_intent([])
+
+
+def git_delivery_intents(command):
+    """Return ordered add/commit/push intents from the shared shell parser."""
+    intents = []
+    for operation, arguments in git_invocations(command):
+        if operation not in ("add", "commit", "push"):
+            continue
+        opaque = _has_opaque_pathspec(arguments)
+        values = {
+            "operation": operation,
+            "arguments": tuple(arguments),
+            "opaque_pathspec": opaque,
+        }
+        if operation == "add":
+            parsed = git_add_intent(list(arguments))
+            values.update(
+                pathspecs=(
+                    () if opaque else tuple(parsed["pathspecs"])),
+                all=parsed["all"],
+            )
+        elif operation == "commit":
+            parsed = _git_commit_intent(list(arguments))
+            values.update(
+                pathspecs=(
+                    () if opaque else tuple(parsed["pathspecs"])),
+                all=parsed["all"],
+                include=parsed["include"],
+            )
+        intents.append(GitDeliveryIntent(**values))
+    return tuple(intents)

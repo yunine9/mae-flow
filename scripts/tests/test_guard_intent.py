@@ -18,6 +18,7 @@ from mae_flow_core.guard.intent import (  # noqa: E402
     recursive_delete_targets,
 )
 from mae_flow_core.foundation.git_intent import (  # noqa: E402
+    git_delivery_intents,
     git_commit_intent,
     git_commit_intents,
 )
@@ -105,6 +106,37 @@ class GuardIntentTests(unittest.TestCase):
             intents,
         )
         self.assertEqual(intents[-1], git_commit_intent(command))
+
+    def test_delivery_intents_preserve_ordinary_and_opaque_source_order(self):
+        command = (
+            "git commit -a -m first && "
+            "git add --pathspec-from-file=paths.txt && "
+            "git add src/a.py && "
+            "git commit -m second && "
+            "git push origin main"
+        )
+
+        intents = git_delivery_intents(command)
+
+        self.assertEqual(
+            [
+                ("commit", False, (), True, False),
+                ("add", True, (), False, False),
+                ("add", False, ("src/a.py",), False, False),
+                ("commit", False, (), False, False),
+                ("push", False, (), False, False),
+            ],
+            [
+                (
+                    intent.operation,
+                    intent.opaque_pathspec,
+                    intent.pathspecs,
+                    intent.all,
+                    intent.include,
+                )
+                for intent in intents
+            ],
+        )
 
 
 if __name__ == "__main__":

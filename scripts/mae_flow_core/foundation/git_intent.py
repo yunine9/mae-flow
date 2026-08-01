@@ -4,11 +4,11 @@ from dataclasses import dataclass
 import re
 import shlex
 
+from .git_execution import executed_git_delivery_operations
 from .git_shell import (
     GIT_GLOBAL_VALUE_OPTIONS,
     _git_invocation_records,
     _is_git_executable,
-    executed_git_delivery_operations,
     git_invocations,
     shell_command_groups,
 )

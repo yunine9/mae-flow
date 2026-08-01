@@ -62,6 +62,64 @@ class GuardIntentTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertFalse(executes_delivery(command))
 
+    def test_delivery_execution_predicate_respects_sudo_mode_semantics(self):
+        executes_delivery = getattr(
+            git_intent, "executes_git_commit_or_push", lambda command: False)
+        cases = (
+            ("sudo -B -E -k -u root git push origin HEAD", True),
+            ("sudo --preserve-env --host=build --user=root git commit -m x", True),
+            ("sudo -i git push origin HEAD", True),
+            ("sudo --shell git commit -m update", True),
+            ("sudo -e git push", False),
+            ("sudo --edit git commit -m update", False),
+            ("sudo -V git push", False),
+            ("sudo --version git push", False),
+            ("sudo -v git push", False),
+            ("sudo --validate git commit -m update", False),
+            ("sudo -l git push", False),
+            ("sudo --list git commit -m update", False),
+            ("sudo -K git push", False),
+            ("sudo --remove-timestamp git commit -m update", False),
+            ("sudo --help git push", False),
+            ("sudo --user git push", False),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertIs(expected, executes_delivery(command))
+
+    def test_delivery_execution_predicate_uses_launcher_specific_shell_options(self):
+        executes_delivery = getattr(
+            git_intent, "executes_git_commit_or_push", lambda command: False)
+        cases = {
+            "sh": (
+                ("sh -eu -o errexit -c 'git push origin HEAD'", True),
+                ("sh -o -c 'git push origin HEAD'", False),
+                ("sh --help -c 'git push origin HEAD'", False),
+            ),
+            "bash": (
+                ("bash --noprofile -O extglob -c 'git commit -m update'", True),
+                ("bash -o errexit -c 'git push origin HEAD'", True),
+                ("bash -O -c 'git push origin HEAD'", False),
+                ("bash --init-command ready -c 'git push origin HEAD'", False),
+            ),
+            "zsh": (
+                ("zsh -o SH_WORD_SPLIT -c 'git push origin HEAD'", True),
+                ("zsh -o -c 'git push origin HEAD'", False),
+                ("zsh --noprofile -c 'git push origin HEAD'", False),
+            ),
+            "fish": (
+                ("fish -C 'echo ready' -c 'git push origin HEAD'", True),
+                ("fish --init-command='echo ready' --command='git commit -m update'", True),
+                ("fish -C -c 'git push origin HEAD'", False),
+                ("fish -O extglob -c 'git push origin HEAD'", False),
+                ("fish --version -c 'git push origin HEAD'", False),
+            ),
+        }
+        for launcher, launcher_cases in cases.items():
+            for command, expected in launcher_cases:
+                with self.subTest(launcher=launcher, command=command):
+                    self.assertIs(expected, executes_delivery(command))
+
     def test_parse_normalizes_slashes_and_tokenizes_bash_paths(self):
         intent = parse_intent(
             "bash",

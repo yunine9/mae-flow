@@ -22,7 +22,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|exit"
+            "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|migrate-flow|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
             "done 的 --set 可重复,值含空格要加引号；"
@@ -44,6 +44,9 @@ def parse_args(argv=None):
         "--new", action="store_true",
         help="保留已退出的旧现场并开启另一轮流程；未指定时恢复原流程")
     sub.add_parser("current")
+    sub.add_parser(
+        "migrate-flow",
+        help="内部升级命令：安全地把 schema-v2 在途状态迁移为 lean schema-v3")
     done = sub.add_parser("done")
     done.add_argument("--ack")
     done.add_argument("--choice")

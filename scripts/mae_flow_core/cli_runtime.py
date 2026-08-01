@@ -32,6 +32,7 @@ from .cli_commands import codecheck_commands as _codecheck_commands
 from .cli_commands import story_diag as _story_diag
 from .cli_commands import moonlight_commands as _moonlight_commands
 from .cli_commands import lifecycle as _lifecycle
+from .cli_commands import lean_migration as _lean_migration
 from .cli_commands import dispatch as _dispatch
 
 api.register(shared)
@@ -63,6 +64,7 @@ _COMMAND_MODULES = (
     _story_diag,
     _moonlight_commands,
     _lifecycle,
+    _lean_migration,
     _dispatch,
 )
 for _module in _COMMAND_MODULES:
@@ -84,6 +86,24 @@ api.register_values({
     if name in _EVIDENCE_COMPAT_NAMES or name.startswith("ev_")
 })
 globals().update(api.exports())
+
+_legacy_main = main
+
+
+def main():
+    """Intercept migration/current before schema-v2 runtime loading."""
+    args = parse_args()
+    root, _ = find_project_root()
+    if root != os.getcwd():
+        os.chdir(root)
+        if args.cmd != "gate":
+            print(
+                "[mae-flow] 调用目录非项目根,已定位到: %s" % root,
+                file=sys.stderr,
+            )
+    if handle_early_state_command(args):
+        return None
+    return _legacy_main()
 
 class _CliRuntimeModule(types.ModuleType):
     def __getattribute__(self, name):

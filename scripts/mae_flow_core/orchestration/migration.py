@@ -174,6 +174,16 @@ def _semantic_string(value):
     return _string(sanitized)
 
 
+def _first_semantic(values, default=""):
+    for value in values:
+        if not value:
+            continue
+        text = _semantic_string(value)
+        if text:
+            return text
+    return default
+
+
 def _legacy_workflow(raw):
     choices = _mapping(raw.get("choices"))
     config = _mapping(raw.get("config"))
@@ -336,13 +346,13 @@ def _capabilities(raw):
     attempts = []
     for raw_attempt in source:
         attempt = _mapping(raw_attempt)
-        kind = _semantic_string(attempt.get("kind"))
-        if not kind:
-            kind = _semantic_string(attempt.get("name"))
-        outcome = _semantic_string(attempt.get("outcome"))
-        if not outcome:
-            outcome = (_semantic_string(attempt.get("status"))
-                       or _semantic_string(attempt.get("result")))
+        kind = _first_semantic((
+            attempt.get("kind"), attempt.get("name")))
+        outcome = _first_semantic((
+            attempt.get("outcome"),
+            attempt.get("status"),
+            attempt.get("result"),
+        ))
         if not kind or not outcome:
             continue
         attempts.append(CapabilityAttempt(

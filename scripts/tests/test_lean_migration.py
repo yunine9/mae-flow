@@ -265,6 +265,38 @@ class LeanMigrationTests(unittest.TestCase):
                 "moonlight-receipt"):
             self.assertNotIn(forbidden, encoded)
 
+    def test_capability_identity_keeps_truthy_legacy_fallback_order(self):
+        result = migrate_legacy_flow(legacy(capabilities=[
+            {
+                "kind": False,
+                "name": "tests-from-falsy-kind",
+                "outcome": 0,
+                "status": "blocked-from-falsy-outcome",
+            },
+            {
+                "kind": {"tokens": {"UT": "kind-evidence"}},
+                "name": "tests-from-scrubbed-kind",
+                "outcome": [["receipt", "outcome-evidence"]],
+                "status": False,
+                "result": "passed-from-result",
+            },
+        ]))
+
+        self.assertEqual(
+            (
+                CapabilityAttempt(
+                    "tests-from-falsy-kind", "", "",
+                    "blocked-from-falsy-outcome", ""),
+                CapabilityAttempt(
+                    "tests-from-scrubbed-kind", "", "",
+                    "passed-from-result", ""),
+            ),
+            result.state.capabilities,
+        )
+        encoded = repr(result.state.to_dict())
+        self.assertNotIn("kind-evidence", encoded)
+        self.assertNotIn("outcome-evidence", encoded)
+
     def test_unknown_step_uses_last_safe_history_phase(self):
         result = migrate_legacy_flow(legacy(
             current="future_unclassified_step",

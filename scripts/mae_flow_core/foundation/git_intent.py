@@ -1,5 +1,6 @@
 """Pure parsing of Git add/commit intent from shell command text."""
 
+import ast
 from dataclasses import dataclass
 import re
 import shlex
@@ -259,6 +260,41 @@ def _python_wrapped_git_mutations(command):
     )
 
 
+def _literal_python_command(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if not isinstance(node, ast.List):
+        return None
+    values = tuple(item.value for item in node.elts if isinstance(
+        item, ast.Constant) and isinstance(item.value, str))
+    if len(values) != len(node.elts):
+        return None
+    return " ".join(shlex.quote(value) for value in values)
+
+
+def _python_leaf_script_git_mutations(script):
+    try:
+        tree = ast.parse(script)
+    except (SyntaxError, TypeError, ValueError):
+        return ()
+    mutations = []
+    launchers = {"os": {"system"}, "subprocess": {
+        "run", "call", "check_call", "check_output", "Popen"}}
+    for node in ast.walk(tree):
+        function = node.func if isinstance(node, ast.Call) else None
+        owner = function.value if isinstance(function, ast.Attribute) else None
+        if not isinstance(owner, ast.Name) or not node.args:
+            continue
+        if function.attr not in launchers.get(owner.id, set()):
+            continue
+        command = _literal_python_command(node.args[0])
+        for record in actual_command_records(command or ""):
+            invocation = git_invocation(record)
+            if invocation and invocation[0] in ("add", "commit", "push"):
+                mutations.append(invocation[0])
+    return tuple(dict.fromkeys(mutations))
+
+
 def _python_leaf_git_mutations(record):
     executable = re.split(r"[\\/]", record.executable)[-1]
     if not re.fullmatch(
@@ -270,8 +306,7 @@ def _python_leaf_git_mutations(record):
         return ()
     if index + 1 >= len(record.arguments):
         return ()
-    return tuple(dict.fromkeys(
-        _python_script_git_mutations(record.arguments[index + 1])))
+    return _python_leaf_script_git_mutations(record.arguments[index + 1])
 
 
 def _shell_wrapped_git_mutations(command):

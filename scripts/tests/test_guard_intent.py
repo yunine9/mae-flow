@@ -498,6 +498,41 @@ class GuardIntentTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual((), git_delivery_intents(command))
 
+    def test_python_leaf_ignores_git_launch_source_inside_string_literals(self):
+        commands = (
+            (
+                "python -c \"print(\\\"subprocess.run(['git', 'push', "
+                "'origin', 'HEAD'])\\\")\""
+            ),
+            (
+                "python -c \"import logging; "
+                "logging.info(\\\"os.system('git push origin HEAD')\\\")\""
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual((), git_delivery_intents(command))
+
+    def test_python_leaf_detects_real_literal_git_launch_calls(self):
+        commands = (
+            (
+                'python -c "import subprocess; '
+                "subprocess.run(['git','push','origin','HEAD'])\""
+            ),
+            (
+                'python -c "import os; '
+                "os.system('git push origin HEAD')\""
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                intents = git_delivery_intents(command)
+                self.assertEqual(1, len(intents))
+                self.assertEqual("push", intents[0].operation)
+                self.assertTrue(intents[0].opaque_pathspec)
+
     def test_synthetic_delivery_preserves_source_order_with_direct_git(self):
         python_push = (
             'python -c "import os; '

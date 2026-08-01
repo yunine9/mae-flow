@@ -8,6 +8,12 @@ from .capabilities import (
     record_attempt,
     retry_options,
 )
+from .delivery import (
+    CheckpointManifest,
+    CommitPlan,
+    DeliveryPlan,
+    plan_delivery,
+)
 from .models import CapabilityAttempt, CommitPace, DeliveryPath, FlowState, Phase
 from .migration import MigrationResult, migrate_legacy_flow
 from .state_schema import decode_flow_state, encode_flow_state
@@ -18,8 +24,11 @@ __all__ = [
     "AttemptContext",
     "CapabilityAttempt",
     "CapabilityKind",
+    "CheckpointManifest",
+    "CommitPlan",
     "CommitPace",
     "DeliveryPath",
+    "DeliveryPlan",
     "FlowState",
     "MigrationResult",
     "Phase",
@@ -33,6 +42,7 @@ __all__ = [
     "decode_flow_state",
     "encode_flow_state",
     "migrate_legacy_flow",
+    "plan_delivery",
     "record_attempt",
     "retry_options",
     "run_toolbox_request",

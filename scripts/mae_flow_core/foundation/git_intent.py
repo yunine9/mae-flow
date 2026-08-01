@@ -291,11 +291,13 @@ def _shell_wrapped_git_mutations(command):
     ]
 
 
-def wrapped_git_mutations(command):
+def wrapped_git_mutations(command, include_shell=True):
     """Detect high-confidence Agent interpreter wrappers around Git writes."""
+    mutations = _python_wrapped_git_mutations(command)
+    if include_shell:
+        mutations += _shell_wrapped_git_mutations(command)
     return tuple(dict.fromkeys(
-        _python_wrapped_git_mutations(command)
-        + _shell_wrapped_git_mutations(command)
+        mutations
     ))
 
 
@@ -421,4 +423,17 @@ def git_delivery_intents(command):
                 include=parsed["include"],
             )
         intents.append(GitDeliveryIntent(**values))
+    synthetic = (
+        wrapped_git_mutations(command, include_shell=False)
+        + inline_git_alias_mutations(command)
+    )
+    intents.extend(
+        GitDeliveryIntent(
+            operation=operation,
+            arguments=(),
+            opaque_pathspec=True,
+        )
+        for operation in synthetic
+        if operation in ("add", "commit", "push")
+    )
     return tuple(intents)

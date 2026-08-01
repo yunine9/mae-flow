@@ -615,6 +615,68 @@ class GitManifestSafetyTests(unittest.TestCase):
                 if not expected_allow:
                     self.assertEqual("git_destructive", decision.rule)
 
+    def test_actual_substitution_positions_drive_destructive_git_gate(self):
+        state = self.manifest_state()
+        cases = (
+            ('echo "$(git reset --hard HEAD)"', False),
+            ("echo `git clean -dfx`", False),
+            ("echo '$(git reset --hard HEAD)'", True),
+            ('echo "\\$(git reset --hard HEAD)"', True),
+            ("bash -n -c 'echo \"$(git reset --hard HEAD)\"'", True),
+        )
+        for command, expected_allow in cases:
+            with self.subTest(command=command):
+                decision = self.bash(state, command)
+                self.assertIs(expected_allow, decision.allow)
+                if not expected_allow:
+                    self.assertEqual("git_destructive", decision.rule)
+
+    def test_high_confidence_wrappers_and_inline_aliases_are_opaque_delivery(self):
+        state = self.manifest_state()
+        cases = (
+            (
+                'python -c "import subprocess; '
+                "subprocess.run(['git','add','src/a.cpp'])\"",
+                "git_staging",
+            ),
+            (
+                'python -c "import subprocess; '
+                "subprocess.run(['git','commit','-m','wrapped'])\"",
+                "git_commit",
+            ),
+            (
+                'python -c "import os; '
+                "os.system('git push origin HEAD')\"",
+                "git_publish",
+            ),
+            (
+                "git -c alias.ship='!git push origin HEAD' ship",
+                "git_publish",
+            ),
+        )
+        for command, expected_rule in cases:
+            with self.subTest(command=command):
+                decision = self.bash(
+                    state,
+                    command,
+                    staged_files=("src/a.cpp", "tests/a_test.cpp"),
+                    commit_files=("src/a.cpp", "tests/a_test.cpp"),
+                )
+                self.assertEqual(
+                    (False, expected_rule),
+                    (decision.allow, decision.rule),
+                )
+
+    def test_print_and_read_only_alias_text_remain_fail_open(self):
+        state = self.manifest_state()
+        commands = (
+            'python -c "print(\'git push origin HEAD\')"',
+            "git -c alias.lg='log --oneline' lg",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(self.bash(state, command).allow)
+
 
 class PublicValueTests(unittest.TestCase):
     def test_guard_package_exports_the_immutable_public_values(self):

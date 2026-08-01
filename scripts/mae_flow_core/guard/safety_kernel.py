@@ -406,7 +406,12 @@ def _commit_decision(context, intent):
         context, context.staged_files, "git_commit")
 
 
-def _push_decision(context):
+def _push_decision(context, intent):
+    if intent.opaque_pathspec:
+        return _block(
+            "git_publish",
+            "Opaque wrapped Git publish cannot be authorized exactly.",
+        )
     return _exact_manifest_decision(
         context, context.commit_files, "git_publish")
 
@@ -435,7 +440,7 @@ def decide_pretool(context, tool, tool_input):
             elif intent.operation == "commit":
                 decision = _commit_decision(context, intent)
             else:
-                decision = _push_decision(context)
+                decision = _push_decision(context, intent)
             if not decision.allow:
                 return decision
     return _allow()

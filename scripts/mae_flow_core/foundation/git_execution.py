@@ -7,7 +7,10 @@ import shlex
 from .git_shell import (
     _global_option_width,
     _is_git_executable,
-    shell_command_groups,
+)
+from .shell_execution import (
+    posix_execution_groups,
+    windows_command_groups,
 )
 
 
@@ -411,7 +414,12 @@ def _cmd_command(tokens, index, depth):
         if option in ("/c", "/k"):
             payload = tokens[index + 1:]
             if len(payload) == 1:
-                return _actual_command_records_text(payload[0], depth + 1)
+                return tuple(
+                    record
+                    for group in windows_command_groups(payload[0])
+                    for record in _actual_command_records_tokens(
+                        group, depth + 1)
+                )
             return _actual_command_records_tokens(payload, depth + 1)
         if option not in _CMD_FLAGS:
             return ()
@@ -449,7 +457,9 @@ def _actual_command_records_text(command, depth):
     if depth > _MAX_EXECUTION_DEPTH or not isinstance(command, str):
         return ()
     records = []
-    for tokens in shell_command_groups(command):
+    for substitutions, tokens in posix_execution_groups(command):
+        for payload in substitutions:
+            records.extend(_actual_command_records_text(payload, depth + 1))
         records.extend(_actual_command_records_tokens(tokens, depth))
     return tuple(records)
 

@@ -341,6 +341,143 @@ class GuardIntentTests(unittest.TestCase):
                 for intent in intents),
         )
 
+    def test_command_substitutions_emit_actual_delivery_leaves_in_order(self):
+        cases = (
+            (
+                'echo "$(git add src/double.cpp)"',
+                (("add", ("src/double.cpp",)),),
+            ),
+            (
+                "echo $(git commit -m inner)",
+                (("commit", ("-m", "inner")),),
+            ),
+            (
+                "echo `git push origin HEAD`",
+                (("push", ("origin", "HEAD")),),
+            ),
+            (
+                'git add src/outer.cpp && echo "$(git add src/inner.cpp)" '
+                "&& git commit -m final",
+                (
+                    ("add", ("src/outer.cpp",)),
+                    ("add", ("src/inner.cpp",)),
+                    ("commit", ("-m", "final")),
+                ),
+            ),
+            (
+                'echo "$(echo $(git add src/nested.cpp))"',
+                (("add", ("src/nested.cpp",)),),
+            ),
+            (
+                'echo "$(git add src/repeat.cpp)" '
+                '"$(git add src/repeat.cpp)"',
+                (
+                    ("add", ("src/repeat.cpp",)),
+                    ("add", ("src/repeat.cpp",)),
+                ),
+            ),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                intents = git_delivery_intents(command)
+                self.assertEqual(
+                    expected,
+                    tuple(
+                        (intent.operation, intent.arguments)
+                        for intent in intents),
+                )
+
+    def test_literal_and_noexec_substitutions_do_not_emit_delivery_leaves(self):
+        commands = (
+            "echo '$(git push origin HEAD)'",
+            'echo "\\$(git push origin HEAD)"',
+            'echo "\\`git push origin HEAD\\`"',
+            "bash -n -c 'echo \"$(git push origin HEAD)\"'",
+            "echo \"$(bash -n -c 'git push origin HEAD')\"",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual((), git_delivery_intents(command))
+
+    def test_recursive_delete_targets_expand_only_active_substitutions(self):
+        cases = (
+            ('echo "$(rm -rf /)"', ("/",)),
+            ("echo `rm -rf .`", (".",)),
+            ("git status && echo '$(rm -rf /)'", ()),
+            ('echo "\\$(rm -rf /)"', ()),
+            ("bash -n -c 'echo \"$(rm -rf /)\"'", ()),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    expected,
+                    recursive_delete_targets(parse_intent("bash", command)),
+                )
+
+    def test_cmd_payload_preserves_windows_paths_without_changing_bash_escape(self):
+        cases = (
+            (r"cmd.exe /d /c git add src\a.cpp", ("src/a.cpp",)),
+            (
+                r'cmd.exe /d /c git add "src\a b.cpp"',
+                ("src/a b.cpp",),
+            ),
+            (
+                r"cmd.exe /c git add C:\repo\src\a.cpp",
+                ("C:/repo/src/a.cpp",),
+            ),
+            (
+                r'cmd.exe /d /s /c "git add src\whole.cpp"',
+                ("src/whole.cpp",),
+            ),
+            (r"git add foo\ bar.cpp", ("foo bar.cpp",)),
+        )
+        for command, expected_paths in cases:
+            with self.subTest(command=command):
+                intents = git_delivery_intents(command)
+                self.assertEqual(1, len(intents))
+                self.assertEqual(expected_paths, intents[0].pathspecs)
+
+    def test_python_synthetic_delivery_coexists_after_same_direct_operation(self):
+        command = (
+            "git add src/a.cpp && "
+            'python -c "import subprocess; '
+            "subprocess.run(['git','add','.'])\""
+        )
+
+        intents = git_delivery_intents(command)
+
+        self.assertEqual(2, len(intents))
+        self.assertEqual(
+            ("add", ("src/a.cpp",), False),
+            (
+                intents[0].operation,
+                intents[0].pathspecs,
+                intents[0].opaque_pathspec,
+            ),
+        )
+        self.assertEqual(
+            ("add", (), True),
+            (
+                intents[1].operation,
+                intents[1].pathspecs,
+                intents[1].opaque_pathspec,
+            ),
+        )
+
+    def test_quoted_cmd_payload_preserves_multiple_git_operation_order(self):
+        intents = git_delivery_intents(
+            r'cmd.exe /d /c "git add src\a.cpp && git commit -m update"')
+
+        self.assertEqual(
+            (
+                ("add", ("src/a.cpp",)),
+                ("commit", ()),
+            ),
+            tuple(
+                (intent.operation, intent.pathspecs)
+                for intent in intents),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

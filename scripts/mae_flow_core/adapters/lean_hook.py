@@ -25,6 +25,7 @@ from ..state_store import (
     safe_read_json,
     update_json,
 )
+from .lean_exit import is_exit_snapshot_name, valid_exit_pointer
 
 
 SUMMARY_BUDGET = 1200
@@ -160,23 +161,8 @@ class LeanHookAdapter:
         self.pointer_writer = pointer_writer or atomic_write_json
 
     def _valid_pointer(self):
-        pointer, error = safe_read_json(self.pointer_path)
-        if error or not isinstance(pointer, Mapping):
-            return None
-        relative = pointer.get("snapshot")
-        if pointer.get("status") != "exited" or not isinstance(relative, str):
-            return None
-        normalized = relative.replace("\\", "/")
-        if not normalized or normalized.startswith(("/", "../")):
-            return None
-        snapshot = os.path.abspath(os.path.join(
-            self.root, *normalized.split("/")))
-        try:
-            if os.path.commonpath((self.root, snapshot)) != self.root:
-                return None
-        except ValueError:
-            return None
-        return pointer if os.path.isfile(snapshot) else None
+        return valid_exit_pointer(
+            self.root, self.pointer_path, self.snapshot_dir)
 
     def _runtime(self):
         if self._valid_pointer() is not None:
@@ -360,7 +346,7 @@ class LeanHookAdapter:
         try:
             names = sorted(
                 name for name in os.listdir(self.snapshot_dir)
-                if name.endswith(".json"))
+                if is_exit_snapshot_name(name))
         except OSError:
             names = []
         if not names:

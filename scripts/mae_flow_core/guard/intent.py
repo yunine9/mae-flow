@@ -19,6 +19,7 @@ class GateIntent:
     subject: str
     tokens: tuple
     branch: object = None
+    execution_subject: str = ""
 
 
 def _tokens(command):
@@ -65,7 +66,8 @@ def parse_intent(kind, subject):
         if kind == "bash"
         else None
     )
-    return GateIntent(kind, normalized, tokens, branch)
+    execution_subject = subject if isinstance(subject, str) else ""
+    return GateIntent(kind, normalized, tokens, branch, execution_subject)
 
 
 def hits_path(intent, pattern):
@@ -110,11 +112,19 @@ def _dangerous_delete_target(token):
     )
 
 
+def _execution_records(intent):
+    records = actual_command_records(
+        intent.execution_subject or intent.subject)
+    if not records and intent.execution_subject != intent.subject:
+        return actual_command_records(intent.subject)
+    return records
+
+
 def recursive_delete_targets(intent):
     """Return dangerous roots only from commands that actually execute."""
     return tuple(
         normalize_path(token)
-        for record in actual_command_records(intent.subject)
+        for record in _execution_records(intent)
         if _recursive_delete(record)
         for token in record.arguments
         if _dangerous_delete_target(token)

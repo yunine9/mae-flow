@@ -336,20 +336,23 @@ def _capabilities(raw):
     attempts = []
     for raw_attempt in source:
         attempt = _mapping(raw_attempt)
-        kind = _string(attempt.get("kind") or attempt.get("name"))
-        outcome = _string(
-            attempt.get("outcome") or attempt.get("status")
-            or attempt.get("result"))
+        kind = _semantic_string(attempt.get("kind"))
+        if not kind:
+            kind = _semantic_string(attempt.get("name"))
+        outcome = _semantic_string(attempt.get("outcome"))
+        if not outcome:
+            outcome = (_semantic_string(attempt.get("status"))
+                       or _semantic_string(attempt.get("result")))
         if not kind or not outcome:
             continue
         attempts.append(CapabilityAttempt(
-            kind=_semantic_string(kind),
+            kind=kind,
             source_revision=_semantic_string(
                 attempt.get("source_revision") or attempt.get("source")),
             environment_revision=_semantic_string(
                 attempt.get("environment_revision")
                 or attempt.get("environment")),
-            outcome=_semantic_string(outcome),
+            outcome=outcome,
             summary=_semantic_string(
                 attempt.get("summary") or attempt.get("detail")),
         ))

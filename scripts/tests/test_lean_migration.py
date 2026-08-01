@@ -204,13 +204,27 @@ class LeanMigrationTests(unittest.TestCase):
     def test_scrubs_structured_capability_and_risk_evidence_recursively(self):
         result = migrate_legacy_flow(legacy(
             capabilities=[{
-                "kind": "tests",
+                "kind": {
+                    "name": "tests",
+                    "tokens": {"UT": "kind-token"},
+                    "facts": [
+                        ["step_head", "kind-head"],
+                        ["category", "quality"],
+                    ],
+                },
                 "source_revision": {
                     "revision": "source-b",
                     "step_head": "source-head",
                 },
                 "environment_revision": "env-b",
-                "outcome": "blocked",
+                "outcome": {
+                    "status": "blocked",
+                    "receipt": "outcome-receipt",
+                    "facts": [
+                        {"key": "stepHeads", "value": "outcome-head"},
+                        ["impact", "manual recovery"],
+                    ],
+                },
                 "summary": {
                     "semantic": "compiler unavailable",
                     "tokens": {"COMPILE": "cap-token"},
@@ -240,12 +254,13 @@ class LeanMigrationTests(unittest.TestCase):
 
         encoded = repr(result.state.to_dict())
         for preserved in (
-                "source-b", "env-b", "blocked", "compiler unavailable",
-                "build cannot run", "database migration", "db-team",
-                "environment outage"):
+                "tests", "quality", "source-b", "env-b", "blocked",
+                "manual recovery", "compiler unavailable", "build cannot run",
+                "database migration", "db-team", "environment outage"):
             self.assertIn(preserved, encoded)
         for forbidden in (
-                "source-head", "cap-token", "cap-receipt", "cap-head",
+                "kind-token", "kind-head", "source-head", "outcome-receipt",
+                "outcome-head", "cap-token", "cap-receipt", "cap-head",
                 "risk-receipt", "risk-token", "risk-head",
                 "moonlight-receipt"):
             self.assertNotIn(forbidden, encoded)

@@ -74,20 +74,55 @@ def _normalized_authorization(authorization):
     )
 
 
+def _disabled_authorization():
+    return MoonlightAuthorization(False, (), False, False)
+
+
+def _reauthorization_reason(detail):
+    return "Moonlight reauthorization is required: %s" % detail
+
+
 def _stored_authorization(state):
-    values = {}
+    values = {
+        _ENABLED: [],
+        _ALLOW_COMMIT: [],
+        _ALLOW_PUSH: [],
+    }
     files = []
+    found = False
     for key, value in state.decisions:
         if key == _BUSINESS_FILE:
+            found = True
             files.append(value)
         elif key in {_ENABLED, _ALLOW_COMMIT, _ALLOW_PUSH}:
-            values[key] = value == "true"
-    enabled = values.get(_ENABLED, False)
+            found = True
+            values[key].append(value)
+    if not found:
+        return _disabled_authorization(), ""
+
+    for key in (_ENABLED, _ALLOW_COMMIT, _ALLOW_PUSH):
+        if len(values[key]) != 1:
+            return _disabled_authorization(), _reauthorization_reason(
+                "reserved decision %s is missing, duplicated, or conflicting."
+                % key)
+        if values[key][0] not in {"true", "false"}:
+            return _disabled_authorization(), _reauthorization_reason(
+                "reserved decision %s has an invalid value." % key)
+
+    enabled = values[_ENABLED][0] == "true"
+    allow_commit = values[_ALLOW_COMMIT][0] == "true"
+    allow_push = values[_ALLOW_PUSH][0] == "true"
     if not enabled:
-        return MoonlightAuthorization(False, (), False, False)
-    return _normalized_authorization(MoonlightAuthorization(
-        True, tuple(files), values.get(_ALLOW_COMMIT, False),
-        values.get(_ALLOW_PUSH, False)))
+        if allow_commit or allow_push:
+            return _disabled_authorization(), _reauthorization_reason(
+                "disabled policy contains delivery permission.")
+        return _disabled_authorization(), ""
+    try:
+        authorization = MoonlightAuthorization(
+            True, tuple(files), allow_commit, allow_push)
+        return _normalized_authorization(authorization), ""
+    except (TypeError, ValueError) as exc:
+        return _disabled_authorization(), _reauthorization_reason(str(exc))
 
 
 def _store_authorization(state, authorization):
@@ -208,7 +243,17 @@ def apply_moonlight_policy(state, decision):
         raise TypeError("state must be a FlowState")
 
     if isinstance(decision, MoonlightAuthorization):
-        requested = _normalized_authorization(decision)
+        try:
+            requested = _normalized_authorization(decision)
+        except (TypeError, ValueError) as exc:
+            reason = _reauthorization_reason(str(exc))
+            return MoonlightPolicyResult(
+                state=state,
+                authorization=_disabled_authorization(),
+                needs_user=True,
+                safe_stop=True,
+                reason=reason,
+            )
         updated = _store_authorization(state, requested)
         effective, reason = _effective_authorization(updated, requested)
         unsafe = bool(updated.risks) or (
@@ -229,8 +274,36 @@ def apply_moonlight_policy(state, decision):
         raise TypeError(
             "decision must be MoonlightAuthorization or AdvanceRequest")
 
-    requested = _stored_authorization(state)
     kind = decision.kind.strip().lower()
+    requested, authorization_issue = _stored_authorization(state)
+    if kind == "exit":
+        normal = advance_flow(state, decision)
+        return MoonlightPolicyResult(
+            state=normal.state,
+            authorization=requested,
+            needs_user=False,
+            safe_stop=False,
+            reason=normal.reason,
+        )
+
+    if authorization_issue:
+        if kind in {"commit-ready", "final-push", "delivery-completed"}:
+            return MoonlightPolicyResult(
+                state=state,
+                authorization=requested,
+                needs_user=True,
+                safe_stop=True,
+                reason=authorization_issue,
+            )
+        normal = advance_flow(state, decision)
+        return MoonlightPolicyResult(
+            state=normal.state,
+            authorization=requested,
+            needs_user=normal.needs_user,
+            safe_stop=False,
+            reason="%s %s" % (authorization_issue, normal.reason),
+        )
+
     if not requested.enabled:
         normal = advance_flow(state, decision)
         return MoonlightPolicyResult(
@@ -261,6 +334,29 @@ def apply_moonlight_policy(state, decision):
                 requested,
                 "A capability failure remains unresolved: %s." % names,
             )
+
+    if kind == "delivery-completed":
+        observation = decision.decision_value
+        if not isinstance(observation, str) or not observation.strip():
+            return _safe_stop(
+                state,
+                requested,
+                "A non-empty real adapter observation is required before "
+                "delivery can be completed.",
+            )
+        observed = AdvanceRequest(
+            kind,
+            decision.decision_key,
+            observation.strip(),
+        )
+        normal = advance_flow(state, observed)
+        return _policy_result(
+            normal.state,
+            requested,
+            normal.needs_user,
+            False,
+            normal.reason,
+        )
 
     effective, authorization_reason = _effective_authorization(
         state, requested)

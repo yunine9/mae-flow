@@ -78,6 +78,22 @@ class MoonlightAuthorizationTests(unittest.TestCase):
         self.assertTrue(result.safe_stop)
         self.assertIn("manifest", result.reason.lower())
 
+    def test_duplicate_alias_preauthorization_requests_renewed_authorization(self):
+        state = flow(delivery_files=("src/a.cpp",))
+
+        result = apply_moonlight_policy(
+            state,
+            MoonlightAuthorization(
+                True, ("src/A.cpp", r"SRC\a.cpp"), True, True),
+        )
+
+        self.assertFalse(result.authorization.allow_commit)
+        self.assertFalse(result.authorization.allow_push)
+        self.assertTrue(result.needs_user)
+        self.assertTrue(result.safe_stop)
+        self.assertIn("reauthor", result.reason.lower())
+        self.assertEqual(state.decisions, result.state.decisions)
+
     def test_conditional_document_is_excluded_unless_explicitly_named(self):
         story = ".mae-flow-work/REQ-42/story.md"
         state = flow(delivery_files=("src/a.cpp", story))
@@ -142,6 +158,90 @@ class MoonlightAuthorizationTests(unittest.TestCase):
 
 
 class MoonlightPolicyTests(unittest.TestCase):
+    def test_exit_is_immediate_even_with_existing_or_push_failure_risks(self):
+        existing = authorize(
+            flow(risks=("The environment is unavailable.",)),
+            ("src/a.cpp",),
+        )
+        pushed = authorize(
+            flow(phase=Phase.DELIVERY, delivery_files=("src/a.cpp",)),
+            ("src/a.cpp",),
+        )
+        pushed = apply_moonlight_policy(
+            pushed,
+            AdvanceRequest(
+                "push-failed",
+                decision_value="The remote rejected the push.",
+            ),
+        ).state
+
+        for state in (existing, pushed):
+            with self.subTest(risks=state.risks):
+                result = apply_moonlight_policy(
+                    state, AdvanceRequest("exit"))
+
+                self.assertEqual("exited", result.state.status)
+                self.assertFalse(result.needs_user)
+                self.assertFalse(result.safe_stop)
+                self.assertEqual(state.risks, result.state.risks)
+
+    def test_corrupt_authorization_fails_closed_without_breaking_normal_flow(self):
+        corrupt_decisions = (
+            (
+                (
+                    ("moonlight.enabled", "true"),
+                    ("moonlight.allow_commit", "true"),
+                    ("moonlight.allow_push", "true"),
+                    ("moonlight.business_file", "src/A.cpp"),
+                    ("moonlight.business_file", r"SRC\a.cpp"),
+                ),
+                "duplicate Windows aliases",
+            ),
+            (
+                (
+                    ("moonlight.enabled", "true"),
+                    ("moonlight.enabled", "false"),
+                    ("moonlight.allow_commit", "true"),
+                    ("moonlight.allow_push", "true"),
+                    ("moonlight.business_file", "src/a.cpp"),
+                ),
+                "conflicting reserved keys",
+            ),
+            (
+                (
+                    ("moonlight.enabled", "true"),
+                    ("moonlight.allow_commit", "yes"),
+                    ("moonlight.allow_push", "true"),
+                    ("moonlight.business_file", "src/a.cpp"),
+                ),
+                "invalid reserved value",
+            ),
+        )
+        for decisions, label in corrupt_decisions:
+            with self.subTest(label=label):
+                state = flow(
+                    decisions=decisions,
+                    delivery_files=("src/a.cpp",),
+                )
+
+                result = apply_moonlight_policy(
+                    state, AdvanceRequest("cp-progress"))
+
+                self.assertFalse(result.authorization.allow_commit)
+                self.assertFalse(result.authorization.allow_push)
+                self.assertFalse(result.safe_stop)
+                self.assertFalse(result.needs_user)
+                self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
+                self.assertIn("reauthor", result.reason.lower())
+
+                push = apply_moonlight_policy(
+                    replace(state, phase=Phase.DELIVERY),
+                    AdvanceRequest("final-push"),
+                )
+                self.assertTrue(push.safe_stop)
+                self.assertTrue(push.needs_user)
+                self.assertFalse(push.authorization.allow_push)
+
     def test_routine_confirmation_is_suppressed_without_changing_transitions(self):
         state = flow(phase=Phase.STARTUP)
         state = authorize(state, ("src/a.cpp",))
@@ -294,6 +394,46 @@ class MoonlightPolicyTests(unittest.TestCase):
         self.assertEqual("complete", completed.state.status)
         self.assertIn(
             ("delivery.result", "The adapter observed commit and push success."),
+            completed.state.decisions,
+        )
+
+    def test_delivery_completion_requires_nonempty_adapter_observation(self):
+        state = authorize(
+            flow(phase=Phase.DELIVERY, delivery_files=("src/a.cpp",)),
+            ("src/a.cpp",),
+        )
+        state = apply_moonlight_policy(
+            state, AdvanceRequest("delivery-confirmed")).state
+
+        for observation in ("", "  \t\r\n"):
+            with self.subTest(observation=repr(observation)):
+                result = apply_moonlight_policy(
+                    state,
+                    AdvanceRequest(
+                        "delivery-completed",
+                        decision_value=observation,
+                    ),
+                )
+
+                self.assertEqual("active", result.state.status)
+                self.assertTrue(result.needs_user)
+                self.assertTrue(result.safe_stop)
+                self.assertFalse(any(
+                    key == "delivery.result"
+                    for key, unused in result.state.decisions
+                ))
+                self.assertIn("adapter", result.reason.lower())
+
+        completed = apply_moonlight_policy(
+            state,
+            AdvanceRequest(
+                "delivery-completed",
+                decision_value="  observed remote update  ",
+            ),
+        )
+        self.assertEqual("complete", completed.state.status)
+        self.assertIn(
+            ("delivery.result", "observed remote update"),
             completed.state.decisions,
         )
 

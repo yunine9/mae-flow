@@ -84,21 +84,46 @@ _CONFIRMATION_DECISIONS = {
 }
 
 _REVIEW_DECISIONS = {
-    "grill-clear": (
-        Phase.SPEC,
+    (Phase.SPEC, "grill-clear"): (
         "review.grill",
         "The Grill critic found no unresolved product ambiguity.",
     ),
-    "design-review-approved": (
-        Phase.STORY,
+    (Phase.SPEC, "reviewer-clear"): (
+        "review.grill",
+        "The Grill critic found no unresolved product ambiguity.",
+    ),
+    (Phase.SPEC, "reviewer-tradeoff-resolved"): (
+        "review.grill",
+        "The user resolved the Grill critic's documented tradeoff.",
+    ),
+    (Phase.STORY, "design-review-approved"): (
         "review.design",
         "The Design Reviewer approved the design without a tradeoff.",
     ),
-    "design-review-clear": (
-        Phase.STORY,
+    (Phase.STORY, "design-review-clear"): (
         "review.design",
         "The Design Reviewer found no blocking design concern.",
     ),
+    (Phase.STORY, "reviewer-clear"): (
+        "review.design",
+        "The Design Reviewer found no blocking design concern.",
+    ),
+    (Phase.STORY, "reviewer-tradeoff-resolved"): (
+        "review.design",
+        "The user resolved the Design Reviewer's documented tradeoff.",
+    ),
+}
+
+_FULL_REQUIRED_REVIEWS = {
+    (Phase.SPEC, "spec-confirmed"): "review.grill",
+    (Phase.STORY, "story-confirmed"): "review.design",
+}
+
+_CROSS_CP_CAUSES = {
+    "checkpoint.coupling": "coupling",
+    "checkpoint.shared_state": "shared state",
+    "checkpoint.interface_change": "interface change",
+    "checkpoint.late_design_drift": "late design drift",
 }
 
 _NON_BLOCKING_EVENTS = {
@@ -120,19 +145,8 @@ def _with_review_decision(state, request, key, default_value):
     return state.with_decision(key, request.decision_value or default_value)
 
 
-def _semantic_text(request):
-    text = "%s %s" % (request.decision_key, request.decision_value)
-    return " ".join(text.lower().replace("_", " ").replace("-", " ").split())
-
-
-def _needs_cross_cp_review(request):
-    key = " ".join(request.decision_key.lower().replace(
-        "_", " ").replace("-", " ").split())
-    if "coupling" in key or "shared state" in key:
-        return True
-    if "interface change" in key or "interface changed" in key:
-        return True
-    return "design drift" in key and "late" in _semantic_text(request)
+def _cross_cp_cause(request):
+    return _CROSS_CP_CAUSES.get(request.decision_key.strip().lower())
 
 
 def _transition_table(path):
@@ -192,20 +206,23 @@ def advance_flow(state, request):
             "The Focused flow upgraded to Full specification.",
         )
 
-    review = _REVIEW_DECISIONS.get(kind)
+    review = _REVIEW_DECISIONS.get((state.phase, kind))
     if review is not None and state.path == DeliveryPath.FULL:
-        phase, key, value = review
-        if state.phase == phase:
-            reviewed = _with_review_decision(state, request, key, value)
-            return AdvanceResult(
-                reviewed, False,
-                "The reviewer result is clear and does not need a user stop.",
-            )
+        key, value = review
+        reviewed = _with_review_decision(state, request, key, value)
+        return AdvanceResult(
+            reviewed, False,
+            "The reviewer completed without creating another user stop.",
+        )
 
-    if kind == "cp-progress" and _needs_cross_cp_review(request):
+    cross_cp_cause = _cross_cp_cause(request)
+    if (kind == "cp-progress"
+            and state.phase == Phase.CONSTRUCTION
+            and cross_cp_cause is not None):
         return AdvanceResult(
             state, False,
-            "A cross-CP integration review is requested for semantic coupling.",
+            "A cross-CP integration review is requested for %s." %
+            cross_cp_cause,
         )
 
     if kind in _NON_BLOCKING_EVENTS:
@@ -231,6 +248,17 @@ def advance_flow(state, request):
         return AdvanceResult(
             replace(completed, status="complete"), False,
             "The reviewed delivery was confirmed and the flow is complete.",
+        )
+
+    required_review = None
+    if state.path == DeliveryPath.FULL:
+        required_review = _FULL_REQUIRED_REVIEWS.get((state.phase, kind))
+    if (required_review is not None
+            and not any(key == required_review
+                        for key, unused in state.decisions)):
+        return AdvanceResult(
+            state, False,
+            "The required reviewer has not completed this phase.",
         )
 
     target = _transition_table(state.path).get((state.phase, kind))

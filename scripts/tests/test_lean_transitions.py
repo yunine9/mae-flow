@@ -43,6 +43,14 @@ class FullTransitionTests(unittest.TestCase):
         for phase, event, expected in cases:
             with self.subTest(phase=phase, event=event):
                 original = flow(phase=phase)
+                if phase == Phase.SPEC:
+                    original = advance_flow(
+                        original, AdvanceRequest("grill-clear")).state
+                elif phase == Phase.STORY:
+                    original = advance_flow(
+                        original,
+                        AdvanceRequest("design-review-approved"),
+                    ).state
                 result = advance_flow(original, AdvanceRequest(
                     event,
                     "%s.decision" % phase.value,
@@ -51,6 +59,81 @@ class FullTransitionTests(unittest.TestCase):
                 self.assertEqual(expected, result.state.phase)
                 self.assertFalse(result.needs_user)
                 self.assertEqual(phase, original.phase)
+
+    def test_full_confirmation_cannot_skip_required_review(self):
+        cases = (
+            (Phase.SPEC, "spec-confirmed"),
+            (Phase.STORY, "story-confirmed"),
+        )
+        for phase, event in cases:
+            with self.subTest(phase=phase):
+                state = flow(phase=phase)
+                result = advance_flow(state, AdvanceRequest(event))
+                self.assertIs(state, result.state)
+                self.assertEqual(phase, result.state.phase)
+                self.assertFalse(result.needs_user)
+                self.assertIn("review", result.reason.lower())
+
+    def test_clear_or_approved_review_completion_allows_confirmation(self):
+        cases = (
+            (Phase.SPEC, "grill-clear", "spec-confirmed", Phase.STORY),
+            (
+                Phase.STORY,
+                "design-review-approved",
+                "story-confirmed",
+                Phase.CONSTRUCTION,
+            ),
+        )
+        for phase, review_event, confirmation, expected in cases:
+            with self.subTest(phase=phase):
+                reviewed = advance_flow(
+                    flow(phase=phase), AdvanceRequest(review_event))
+                result = advance_flow(
+                    reviewed.state, AdvanceRequest(confirmation))
+                self.assertFalse(reviewed.needs_user)
+                self.assertEqual(expected, result.state.phase)
+
+    def test_user_resolved_reviewer_tradeoff_completes_review_once(self):
+        cases = (
+            (
+                Phase.SPEC,
+                "review.grill",
+                "spec-confirmed",
+                Phase.STORY,
+            ),
+            (
+                Phase.STORY,
+                "review.design",
+                "story-confirmed",
+                Phase.CONSTRUCTION,
+            ),
+        )
+        for phase, review_key, confirmation, expected in cases:
+            with self.subTest(phase=phase):
+                state = flow(phase=phase)
+                tradeoff = advance_flow(
+                    state, AdvanceRequest("reviewer-tradeoff"))
+                first = advance_flow(tradeoff.state, AdvanceRequest(
+                    "reviewer-tradeoff-resolved",
+                    "review.resolution",
+                    "The user selected the documented reviewer tradeoff.",
+                ))
+                second = advance_flow(first.state, AdvanceRequest(
+                    "reviewer-tradeoff-resolved",
+                    "review.second_resolution",
+                    "The user selected the documented reviewer tradeoff.",
+                ))
+                advanced = advance_flow(
+                    second.state, AdvanceRequest(confirmation))
+                self.assertTrue(tradeoff.needs_user)
+                self.assertFalse(first.needs_user)
+                self.assertEqual(first.state, second.state)
+                self.assertEqual(
+                    1,
+                    sum(key == review_key
+                        for key, unused in second.state.decisions),
+                )
+                self.assertEqual(expected, advanced.state.phase)
 
     def test_full_high_value_points_ask_for_user_confirmation(self):
         cases = (
@@ -219,7 +302,10 @@ class SemanticGuardTests(unittest.TestCase):
             ("checkpoint.coupling", "Two components now coordinate."),
             ("checkpoint.shared_state", "The checkpoints mutate shared state."),
             ("checkpoint.interface_change", "A public interface changed."),
-            ("checkpoint.design_drift", "Late implementation drifted from design."),
+            (
+                "checkpoint.late_design_drift",
+                "Late implementation drifted from design.",
+            ),
         )
         for key, value in review_cases:
             with self.subTest(key=key):
@@ -240,6 +326,39 @@ class SemanticGuardTests(unittest.TestCase):
         )
         self.assertFalse(ordinary.needs_user)
         self.assertNotIn("integration review", ordinary.reason.lower())
+
+    def test_cross_cp_review_rejects_compound_or_non_late_cause_keys(self):
+        rejected = (
+            "checkpoint.no_coupling",
+            "checkpoint.decoupling",
+            "checkpoint.interface_change_absent",
+            "checkpoint.design_drift",
+            "checkpoint.ordinary_design_drift",
+        )
+        for key in rejected:
+            with self.subTest(key=key):
+                result = advance_flow(
+                    flow(phase=Phase.CONSTRUCTION),
+                    AdvanceRequest("cp-progress", key, "Ordinary local work."),
+                )
+                self.assertFalse(result.needs_user)
+                self.assertNotIn("integration review", result.reason.lower())
+
+    def test_cross_cp_review_is_never_requested_outside_construction(self):
+        for phase in Phase:
+            if phase == Phase.CONSTRUCTION:
+                continue
+            with self.subTest(phase=phase):
+                result = advance_flow(
+                    flow(phase=phase),
+                    AdvanceRequest(
+                        "cp-progress",
+                        "checkpoint.coupling",
+                        "Two components now coordinate.",
+                    ),
+                )
+                self.assertFalse(result.needs_user)
+                self.assertNotIn("integration review", result.reason.lower())
 
 
 class TerminalTransitionTests(unittest.TestCase):

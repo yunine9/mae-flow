@@ -88,6 +88,10 @@ _EVIDENCE_KEYS = {
     "requirement_sha256",
     "report_hash",
     "report_hashes",
+    "step_head",
+    "step_heads",
+    "stephead",
+    "stepheads",
     "task_card",
     "task_cards",
     "token",
@@ -164,7 +168,10 @@ def _semantic_value(value):
 
 
 def _semantic_string(value):
-    return _string(_semantic_value(value))
+    sanitized = _semantic_value(value)
+    if sanitized in (None, {}, []):
+        return ""
+    return _string(sanitized)
 
 
 def _legacy_workflow(raw):
@@ -336,14 +343,15 @@ def _capabilities(raw):
         if not kind or not outcome:
             continue
         attempts.append(CapabilityAttempt(
-            kind=kind,
-            source_revision=_string(
+            kind=_semantic_string(kind),
+            source_revision=_semantic_string(
                 attempt.get("source_revision") or attempt.get("source")),
-            environment_revision=_string(
+            environment_revision=_semantic_string(
                 attempt.get("environment_revision")
                 or attempt.get("environment")),
-            outcome=outcome,
-            summary=_string(attempt.get("summary") or attempt.get("detail")),
+            outcome=_semantic_string(outcome),
+            summary=_semantic_string(
+                attempt.get("summary") or attempt.get("detail")),
         ))
     return tuple(attempts)
 
@@ -358,11 +366,15 @@ def _delivery_files(raw):
 
 
 def _risks(raw):
-    risks = list(_strings(raw.get("risks")))
+    risks = []
+    for risk in _sequence(raw.get("risks")):
+        text = _semantic_string(risk)
+        if text:
+            risks.append(text)
     moonlight = _mapping(raw.get("moonlight"))
     for issue in _sequence(moonlight.get("issues")):
         item = _mapping(issue)
-        text = _string(item.get("summary") or item.get("detail"))
+        text = _semantic_string(item.get("summary") or item.get("detail"))
         if text:
             risks.append(text)
     return tuple(risks)

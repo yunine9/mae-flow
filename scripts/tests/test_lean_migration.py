@@ -173,6 +173,83 @@ class LeanMigrationTests(unittest.TestCase):
         self.assertTrue(result.warnings)
         self.assertIn("resume summary", result.warnings[0].lower())
 
+    def test_omits_step_head_aliases_from_all_decision_encodings(self):
+        result = migrate_legacy_flow(legacy(
+            config={
+                "单号": "REQ-42",
+                "recovery": {
+                    "step_heads": {"build": "head-from-dict"},
+                    "meaning": "keep-config",
+                },
+            },
+            decisions={
+                "nested": [
+                    ["step-head", "head-from-list"],
+                    {"key": "step heads", "value": "head-from-pair"},
+                    {"key": "stepHeads", "value": "head-from-camel"},
+                    ["meaning", "keep-decision"],
+                ],
+            },
+        ))
+
+        encoded = repr(result.state.to_dict())
+        for forbidden in (
+                "step_heads", "step-head", "step heads", "stepHeads",
+                "head-from-dict", "head-from-list", "head-from-pair",
+                "head-from-camel"):
+            self.assertNotIn(forbidden, encoded)
+        self.assertIn("keep-config", encoded)
+        self.assertIn("keep-decision", encoded)
+
+    def test_scrubs_structured_capability_and_risk_evidence_recursively(self):
+        result = migrate_legacy_flow(legacy(
+            capabilities=[{
+                "kind": "tests",
+                "source_revision": {
+                    "revision": "source-b",
+                    "step_head": "source-head",
+                },
+                "environment_revision": "env-b",
+                "outcome": "blocked",
+                "summary": {
+                    "semantic": "compiler unavailable",
+                    "tokens": {"COMPILE": "cap-token"},
+                    "facts": [
+                        ["receipt", "cap-receipt"],
+                        {"key": "stepHeads", "value": "cap-head"},
+                        ["impact", "build cannot run"],
+                    ],
+                },
+            }],
+            risks=[{
+                "risk": "database migration",
+                "receipts": {"review": "risk-receipt"},
+                "facts": [
+                    ["tokens", "risk-token"],
+                    {"key": "step-head", "value": "risk-head"},
+                    ["owner", "db-team"],
+                ],
+            }],
+            moonlight={"issues": [{
+                "summary": {
+                    "risk": "environment outage",
+                    "receipt": "moonlight-receipt",
+                },
+            }]},
+        ))
+
+        encoded = repr(result.state.to_dict())
+        for preserved in (
+                "source-b", "env-b", "blocked", "compiler unavailable",
+                "build cannot run", "database migration", "db-team",
+                "environment outage"):
+            self.assertIn(preserved, encoded)
+        for forbidden in (
+                "source-head", "cap-token", "cap-receipt", "cap-head",
+                "risk-receipt", "risk-token", "risk-head",
+                "moonlight-receipt"):
+            self.assertNotIn(forbidden, encoded)
+
     def test_unknown_step_uses_last_safe_history_phase(self):
         result = migrate_legacy_flow(legacy(
             current="future_unclassified_step",

@@ -53,6 +53,15 @@ from .codecheck_log import (
     codecheck_log_path,
     save_codecheck_artifact,
 )
+from .orchestration import (
+    CapabilityAttempt,
+    CommitPace,
+    DeliveryPath,
+    FlowState,
+    Phase,
+    decode_flow_state,
+    encode_flow_state,
+)
 
 __all__ = [
     "ACTION_FILE",
@@ -94,4 +103,11 @@ __all__ = [
     "append_codecheck_event",
     "codecheck_log_path",
     "save_codecheck_artifact",
+    "CapabilityAttempt",
+    "CommitPace",
+    "DeliveryPath",
+    "FlowState",
+    "Phase",
+    "decode_flow_state",
+    "encode_flow_state",
 ]

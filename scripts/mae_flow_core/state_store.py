@@ -160,6 +160,15 @@ def normalize_document(data, kind):
     if not isinstance(data, dict):
         raise ValueError("%s 状态必须是 JSON object" % kind)
     out = copy.deepcopy(data)
+
+    # Lean schema-v3 is an isolated recovery cursor.  It must not inherit the
+    # schema-v2 defaults, revision metadata, or legacy `current` requirement.
+    if kind == "flow" and out.get("engine") == "lean-v1":
+        if (type(out.get("schema_version")) is not int
+                or out.get("schema_version") != 3):
+            raise ValueError("lean-v1 flow 状态版本必须是 3")
+        return out
+
     version = int(out.get("schema_version", 0) or 0)
     if version > CURRENT_SCHEMA_VERSION:
         raise ValueError(
@@ -188,6 +197,9 @@ def normalize_document(data, kind):
 
 def save_versioned_json(path, data, kind, project_root=None, expected_revision=None):
     """Save a complete versioned document with optional compare-and-swap."""
+    if (kind == "flow" and isinstance(data, dict)
+            and data.get("engine") == "lean-v1"):
+        raise ValueError("lean-v1 test-only 状态不能使用 schema-v2 writer")
     root = project_root or os.getcwd()
     with ProjectStateLock(root):
         current, err = safe_read_json(path)
@@ -196,6 +208,9 @@ def save_versioned_json(path, data, kind, project_root=None, expected_revision=N
                 "%s 当前状态不可读，拒绝覆盖坏现场（%s）" % (kind, err))
         if current is not None:
             current = normalize_document(current, kind)
+            if kind == "flow" and current.get("engine") == "lean-v1":
+                raise ValueError(
+                    "lean-v1 test-only 状态不能使用 schema-v2 writer")
         current_revision = int((current or {}).get("revision", 0) or 0)
         wanted = expected_revision
         if wanted is None and isinstance(data, dict) and "revision" in data:
@@ -253,11 +268,17 @@ def update_versioned_json(path, kind, mutator, default=None, project_root=None):
             raise ValueError("状态文件不可读 %s (%s)" % (path, err))
         if current is None:
             current = copy.deepcopy(default or {})
+        if (kind == "flow" and isinstance(current, dict)
+                and current.get("engine") == "lean-v1"):
+            raise ValueError("lean-v1 test-only 状态不能使用 schema-v2 writer")
         current = normalize_document(current, kind)
         revision = int(current.get("revision", 0) or 0)
         result = mutator(current)
         if result is None:
             result = current
+        if (kind == "flow" and isinstance(result, dict)
+                and result.get("engine") == "lean-v1"):
+            raise ValueError("lean-v1 test-only 状态不能使用 schema-v2 writer")
         result = normalize_document(result, kind)
         result["revision"] = revision + 1
         result["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")

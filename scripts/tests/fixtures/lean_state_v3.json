@@ -2,15 +2,15 @@
   "schema_version": 3,
   "engine": "lean-v1",
   "ticket": "REQ-7",
-  "path": "docs/requests/REQ-7.md",
+  "path": "full",
   "phase": "startup",
-  "commit_pace": "checkpoint",
+  "commit_pace": "continuous",
   "status": "active",
-  "current_cp": null,
-  "artifacts": {},
+  "current_cp": "",
+  "artifacts": [],
   "decisions": [],
   "risks": [],
   "capabilities": [],
   "delivery_files": [],
-  "initial_dirty": false
+  "initial_dirty": []
 }

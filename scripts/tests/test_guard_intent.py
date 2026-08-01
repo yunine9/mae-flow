@@ -154,12 +154,17 @@ class GuardIntentTests(unittest.TestCase):
             ("sh -n +n -c 'git push origin HEAD'", True),
             ("bash -en +n -c 'git push origin HEAD'", True),
             ("zsh +n -c 'git commit -m update'", True),
+            ("sh -n +en -c 'git push origin HEAD'", True),
+            ("bash -n +in -c 'git push origin HEAD'", True),
+            ("zsh -n +en -c 'git commit -m update'", True),
             ("bash +o noexec -o noexec -c 'git push origin HEAD'", False),
             ("zsh +oNO_EXEC -oNO_EXEC -c 'git commit -m update'", False),
             ("sh +n -n -c 'git push origin HEAD'", False),
             ("bash +n -en -c 'git push origin HEAD'", False),
             ("zsh -nc 'git push origin HEAD'", False),
             ("bash +c 'git push origin HEAD'", False),
+            ("bash +nc 'git push origin HEAD'", False),
+            ("zsh +zn -c 'git push origin HEAD'", False),
         )
         for command, expected in cases:
             with self.subTest(command=command):

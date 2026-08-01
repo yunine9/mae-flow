@@ -303,12 +303,17 @@ def _traditional_shell_command(
                 noexec = attached_flag == "-o"
             index += 1
             continue
-        if option == "+n":
-            noexec = False
+        if option.startswith("+"):
+            flags = option[1:]
+            if (
+                    not flags
+                    or "c" in flags
+                    or not set(flags) <= (zero_short_flags | {"n"})):
+                return ()
+            if "n" in flags:
+                noexec = False
             index += 1
             continue
-        if option.startswith("+"):
-            return ()
         if option.startswith("-") and not option.startswith("--"):
             flags = option[1:]
             if not flags or not set(flags) <= (

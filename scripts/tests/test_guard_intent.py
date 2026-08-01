@@ -478,6 +478,63 @@ class GuardIntentTests(unittest.TestCase):
                 for intent in intents),
         )
 
+    def test_synthetic_detection_ignores_wrapper_source_in_printing_leaves(self):
+        commands = (
+            (
+                'echo python -c "import subprocess; '
+                "subprocess.run(['git','push','origin','HEAD'])\""
+            ),
+            (
+                'logger \'python -c "import os; '
+                "os.system(\\\"git push origin HEAD\\\")\"'"
+            ),
+            (
+                "printf '%s\\n' git -c "
+                "'alias.ship=!git push origin HEAD' ship"
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual((), git_delivery_intents(command))
+
+    def test_synthetic_delivery_preserves_source_order_with_direct_git(self):
+        python_push = (
+            'python -c "import os; '
+            "os.system('git push origin HEAD')\""
+        )
+        alias_push = "git -c alias.ship='!git push origin HEAD' ship"
+        cases = (
+            (
+                python_push + " && git add src/after.cpp",
+                (("push", (), True), ("add", ("src/after.cpp",), False)),
+            ),
+            (
+                "git add src/before.cpp && " + python_push,
+                (("add", ("src/before.cpp",), False), ("push", (), True)),
+            ),
+            (
+                alias_push + " && git add src/after-alias.cpp",
+                (
+                    ("push", (), True),
+                    ("add", ("src/after-alias.cpp",), False),
+                ),
+            ),
+        )
+
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    expected,
+                    tuple(
+                        (
+                            intent.operation,
+                            intent.pathspecs,
+                            intent.opaque_pathspec,
+                        )
+                        for intent in git_delivery_intents(command)),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

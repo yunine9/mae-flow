@@ -449,6 +449,57 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual("inactive", runtime.mode)
         self.assertIsNone(state)
 
+    def test_exit_pointer_rejects_symlinked_snapshot_directory_components(self):
+        pointer = {
+            "status": "exited",
+            "snapshot": ".mae-flow-work/exited/flow-77.json",
+            "exited_at_ns": 77,
+        }
+        for component in ("work", "exited"):
+            with self.subTest(component=component):
+                case_root = os.path.join(self.root, "symlink-" + component)
+                os.makedirs(case_root)
+                with open(
+                        os.path.join(case_root, ".mae-flow.json"),
+                        "w", encoding="utf-8") as stream:
+                    json.dump(FlowState.new(
+                        "REQ-SYMLINK",
+                        DeliveryPath.FULL,
+                        CommitPace.CONTINUOUS,
+                    ).to_dict(), stream)
+                work = os.path.join(case_root, ".mae-flow-work")
+                if component == "work":
+                    target = os.path.join(case_root, "real-work")
+                    snapshot_dir = os.path.join(target, "exited")
+                    os.makedirs(snapshot_dir)
+                    link = work
+                else:
+                    os.makedirs(work)
+                    target = os.path.join(case_root, "real-exited")
+                    os.makedirs(target)
+                    snapshot_dir = target
+                    link = os.path.join(work, "exited")
+                try:
+                    os.symlink(target, link)
+                except (OSError, NotImplementedError) as exc:
+                    self.skipTest("symlinks unavailable: %s" % exc)
+                with open(
+                        os.path.join(snapshot_dir, "flow-77.json"),
+                        "w", encoding="utf-8") as stream:
+                    stream.write("{}\n")
+                with open(
+                        os.path.join(case_root, ".mae-flow.json.exited"),
+                        "w", encoding="utf-8") as stream:
+                    json.dump(pointer, stream)
+
+                runtime, state = LeanHookAdapter(
+                    case_root,
+                    marker_root=os.path.join(case_root, "markers"),
+                )._runtime()
+
+                self.assertEqual("flow", runtime.mode)
+                self.assertIsNotNone(state)
+
     def test_exit_does_not_wait_twice_when_project_lock_is_held(self):
         original = b"corrupt active bytes"
         with open(self.state_path, "wb") as stream:

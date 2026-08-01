@@ -5,8 +5,9 @@ import re
 import shlex
 
 from .git_execution import (
+    actual_command_records,
     executed_git_delivery_operations,
-    executed_git_invocations,
+    git_invocation,
 )
 from .git_shell import (
     GIT_GLOBAL_VALUE_OPTIONS,
@@ -191,21 +192,14 @@ def git_actions(command, actor="agent-hook"):
     return tuple(actions)
 
 
-def _python_wrapped_git_mutations(command):
-    launcher = re.search(
-            r"(?:^|[\s;&|])(?:[^\s\"']*[\\/])?"
-            r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?\s+[^;&|]*-c\b",
-            command,
-            re.I)
-    if not launcher:
-        return []
+def _python_script_git_mutations(script):
     mutations = []
     call_pattern = re.compile(
         r"subprocess\.(?:run|call|check_call|check_output|Popen)"
         r"\s*\(\s*\[(.*?)\]\s*[,)]",
         re.I | re.S,
     )
-    for match in call_pattern.finditer(command):
+    for match in call_pattern.finditer(script):
         literals = re.findall(r"['\"]([^'\"]+)['\"]", match.group(1))
         if not literals or not _is_git_executable(literals[0]):
             continue
@@ -216,7 +210,7 @@ def _python_wrapped_git_mutations(command):
     for match in re.finditer(
             r"(?:os\.system|subprocess\.(?:run|call|check_call|Popen))"
             r"\s*\(\s*(['\"])(.*?)\1",
-            command,
+            script,
             re.I | re.S,
     ):
         inner = match.group(2)
@@ -234,7 +228,6 @@ def _python_wrapped_git_mutations(command):
     # subcommand, treat it as a high-confidence wrapper even when argv is
     # assembled indirectly.  This remains intentionally narrower than a claim
     # to understand arbitrary Python code.
-    script = command[launcher.end():]
     if (
             re.search(
                 r"\b(?:subprocess\.[A-Za-z_]\w*|"
@@ -252,6 +245,33 @@ def _python_wrapped_git_mutations(command):
             )
         )
     return mutations
+
+
+def _python_wrapped_git_mutations(command):
+    launcher = re.search(
+            r"(?:^|[\s;&|])(?:[^\s\"']*[\\/])?"
+            r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?\s+[^;&|]*-c\b",
+            command,
+            re.I)
+    return (
+        _python_script_git_mutations(command[launcher.end():])
+        if launcher else []
+    )
+
+
+def _python_leaf_git_mutations(record):
+    executable = re.split(r"[\\/]", record.executable)[-1]
+    if not re.fullmatch(
+            r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", executable, re.I):
+        return ()
+    try:
+        index = record.arguments.index("-c")
+    except ValueError:
+        return ()
+    if index + 1 >= len(record.arguments):
+        return ()
+    return tuple(dict.fromkeys(
+        _python_script_git_mutations(record.arguments[index + 1])))
 
 
 def _shell_wrapped_git_mutations(command):
@@ -395,45 +415,50 @@ def git_commit_intent(command):
     return intents[-1] if intents else _git_commit_intent([])
 
 
-def git_delivery_intents(command):
-    """Return actual add/commit/push intents in shell execution order."""
-    intents = []
-    for operation, arguments in executed_git_invocations(command):
-        if operation not in ("add", "commit", "push"):
-            continue
-        opaque = _has_opaque_pathspec(arguments)
-        values = {
-            "operation": operation,
-            "arguments": tuple(arguments),
-            "opaque_pathspec": opaque,
-        }
-        if operation == "add":
-            parsed = git_add_intent(list(arguments))
-            values.update(
-                pathspecs=(
-                    () if opaque else tuple(parsed["pathspecs"])),
-                all=parsed["all"],
-            )
-        elif operation == "commit":
-            parsed = _git_commit_intent(list(arguments))
-            values.update(
-                pathspecs=(
-                    () if opaque else tuple(parsed["pathspecs"])),
-                all=parsed["all"],
-                include=parsed["include"],
-            )
-        intents.append(GitDeliveryIntent(**values))
-    synthetic = (
-        wrapped_git_mutations(command, include_shell=False)
-        + inline_git_alias_mutations(command)
-    )
-    intents.extend(
-        GitDeliveryIntent(
-            operation=operation,
-            arguments=(),
-            opaque_pathspec=True,
+def _delivery_intent(operation, arguments, synthetic=False):
+    opaque = synthetic or _has_opaque_pathspec(arguments)
+    values = {
+        "operation": operation,
+        "arguments": tuple(arguments),
+        "opaque_pathspec": opaque,
+    }
+    if operation == "add":
+        parsed = git_add_intent(list(arguments))
+        values.update(
+            pathspecs=(() if opaque else tuple(parsed["pathspecs"])),
+            all=parsed["all"],
         )
-        for operation in synthetic
+    elif operation == "commit":
+        parsed = _git_commit_intent(list(arguments))
+        values.update(
+            pathspecs=(() if opaque else tuple(parsed["pathspecs"])),
+            all=parsed["all"],
+            include=parsed["include"],
+        )
+    return GitDeliveryIntent(**values)
+
+
+def _leaf_delivery_intents(record):
+    invocation = git_invocation(record)
+    if invocation is not None and invocation[0] in ("add", "commit", "push"):
+        return (_delivery_intent(invocation[0], invocation[1]),)
+    command = " ".join(shlex.quote(token) for token in record.tokens)
+    operations = (
+        inline_git_alias_mutations(command)
+        if invocation is not None
+        else _python_leaf_git_mutations(record)
+    )
+    return tuple(
+        _delivery_intent(operation, (), synthetic=True)
+        for operation in operations
         if operation in ("add", "commit", "push")
     )
-    return tuple(intents)
+
+
+def git_delivery_intents(command):
+    """Return actual and high-confidence synthetic intents in source order."""
+    return tuple(
+        intent
+        for record in actual_command_records(command)
+        for intent in _leaf_delivery_intents(record)
+    )

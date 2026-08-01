@@ -23,6 +23,16 @@ def _inside(parent, child):
         return False
 
 
+def _has_symlink_component(root, path):
+    current = os.path.abspath(root)
+    relative = os.path.relpath(path, current)
+    for component in relative.split(os.sep):
+        current = os.path.join(current, component)
+        if os.path.islink(current):
+            return True
+    return False
+
+
 def valid_exit_pointer(root, pointer_path, snapshot_dir):
     if os.path.islink(pointer_path):
         return None
@@ -48,7 +58,7 @@ def valid_exit_pointer(root, pointer_path, snapshot_dir):
         return None
 
     snapshot = os.path.join(root, *canonical.split("/"))
-    if os.path.islink(snapshot) or not os.path.isfile(snapshot):
+    if _has_symlink_component(root, snapshot) or not os.path.isfile(snapshot):
         return None
     real_root = os.path.normcase(os.path.realpath(root))
     real_dir = os.path.normcase(os.path.realpath(snapshot_dir))

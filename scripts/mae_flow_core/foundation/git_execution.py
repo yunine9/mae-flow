@@ -136,7 +136,7 @@ def _skip_assignments(tokens, index=0):
     return index
 
 
-def _git_invocation(record):
+def git_invocation(record):
     tokens = record.tokens
     if not tokens or not _is_git_executable(tokens[0]):
         return None
@@ -481,7 +481,7 @@ def executed_git_invocations(command):
     return tuple(
         invocation
         for record in actual_command_records(command)
-        for invocation in [_git_invocation(record)]
+        for invocation in [git_invocation(record)]
         if invocation is not None
     )
 

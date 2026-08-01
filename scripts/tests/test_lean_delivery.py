@@ -24,6 +24,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
 
 
 MESSAGE_KEY = "delivery.commit_message"
+CONDITIONAL_DOCUMENT_KEY = "delivery.conditional_document"
 
 
 def flow(pace=CommitPace.CONTINUOUS, files=(), decisions=(), ticket="REQ-42"):
@@ -76,12 +77,14 @@ class ContinuousDeliveryPlanningTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "commit message"):
                     plan_delivery(flow(files=("src/a.cpp",), decisions=decisions))
 
-    def test_business_message_uses_exact_literal_ticket_and_trimmed_description(self):
+    def test_business_message_uses_existing_exact_prefix_semantics(self):
         literal_ticket = "REQ.42+$"
         accepted = (
             "[REQ.42+$][feat]add query planning",
             "[REQ.42+$][fix]修复查询条件",
             "[REQ.42+$][feat]document [scope] in description",
+            "[REQ.42+$][feat]trailing space is preserved ",
+            "[REQ.42+$][fix]summary\nmultiline body",
         )
         for message in accepted:
             with self.subTest(message=message):
@@ -97,8 +100,6 @@ class ContinuousDeliveryPlanningTests(unittest.TestCase):
             "[REQ.42+$][docs]wrong kind",
             "[REQ.42+$][feat]",
             "[REQ.42+$][feat] leading",
-            "[REQ.42+$][feat]trailing ",
-            "[REQ.42+$][feat]line\nbreak",
         )
         for message in rejected:
             with self.subTest(message=message):
@@ -109,13 +110,14 @@ class ContinuousDeliveryPlanningTests(unittest.TestCase):
                         decisions=((MESSAGE_KEY, message),),
                     ))
 
-    def test_ticket_brackets_are_rejected_as_message_ambiguity(self):
-        with self.assertRaisesRegex(ValueError, "bracket"):
-            plan_delivery(flow(
-                ticket="REQ[42]",
-                files=("src/a.cpp",),
-                decisions=((MESSAGE_KEY, "[REQ[42]][feat]change"),),
-            ))
+    def test_ticket_is_matched_literally_even_when_it_contains_brackets(self):
+        plan = plan_delivery(flow(
+            ticket="REQ[42]",
+            files=("src/a.cpp",),
+            decisions=((MESSAGE_KEY, "[REQ[42]][feat]change"),),
+        ))
+
+        self.assertEqual("[REQ[42]][feat]change", plan.commits[0].message)
 
     def test_continuous_rejects_cp_manifests_instead_of_guessing(self):
         state = flow(
@@ -223,15 +225,26 @@ class StagedDeliveryPlanningTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "manifest|commit message"):
                     plan_delivery(state, (item,))
 
-    def test_staged_rejects_overlapping_windows_file_ownership(self):
+    def test_staged_allows_a_file_to_evolve_across_ordered_checkpoints(self):
         state = flow(pace=CommitPace.STAGED, files=("Src/A.cpp",))
         manifests = (
-            checkpoint("CP1", "[REQ-42][feat]first", ("Src/A.cpp",)),
+            CheckpointManifest(
+                "CP1",
+                "[REQ-42][feat]first",
+                DeliveryManifest.from_paths(
+                    ("Src/A.cpp",), adopted_dirty=("Src/A.cpp",)),
+                True,
+            ),
             checkpoint("CP2", "[REQ-42][fix]second", (r"src\a.cpp",)),
         )
 
-        with self.assertRaisesRegex(ValueError, "owned by more than one"):
-            plan_delivery(state, manifests)
+        plan = plan_delivery(state, manifests)
+
+        self.assertEqual(2, len(plan.commits))
+        self.assertEqual(("Src/A.cpp",), plan.commits[0].manifest.files)
+        self.assertEqual(
+            ("Src/A.cpp",), plan.commits[0].manifest.adopted_dirty)
+        self.assertEqual(("src/a.cpp",), plan.commits[1].manifest.files)
 
     def test_staged_union_must_equal_final_delivery_manifest(self):
         cases = (
@@ -272,6 +285,8 @@ class DeliveryManifestBoundaryTests(unittest.TestCase):
             "src/*.cpp",
             "-A",
             "--all",
+            ":(exclude)README.md",
+            ":/src/a.cpp",
             ".mae-flow.json",
             ".mae-flow.json.failures",
             "state/.MAE-FLOW.JSON.backup",
@@ -293,11 +308,69 @@ class DeliveryManifestBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "manifest"):
             plan_delivery(self.continuous(()))
 
-    def test_explicit_durable_conditional_document_is_allowed(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
-        plan = plan_delivery(self.continuous(("src/a.cpp", story)))
+    def test_conditional_documents_require_an_exact_independent_selection(self):
+        documents = (
+            "story.md",
+            "decisions.md",
+            "engineering.md",
+            "chain.md",
+            "review-ledger.md",
+            "codecheck-ledger.md",
+            "delivery-notes.md",
+        )
+        for filename in documents:
+            path = "docs/mae-flow/requirements/REQ-42/%s" % filename
+            state = self.continuous(("src/a.cpp", path))
+            with self.subTest(filename=filename, selection="missing"):
+                with self.assertRaisesRegex(ValueError, "conditional document"):
+                    plan_delivery(state)
 
-        self.assertEqual(("src/a.cpp", story), plan.commits[0].manifest.files)
+            selected = flow(
+                files=("src/a.cpp", path),
+                decisions=(
+                    (MESSAGE_KEY, "[REQ-42][feat]change"),
+                    (CONDITIONAL_DOCUMENT_KEY, path),
+                ),
+            )
+            with self.subTest(filename=filename, selection="exact"):
+                plan = plan_delivery(selected)
+                self.assertEqual(
+                    ("src/a.cpp", path), plan.commits[0].manifest.files)
+
+    def test_conditional_selection_is_not_satisfied_by_a_different_path(self):
+        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        state = flow(
+            files=("src/a.cpp", story),
+            decisions=(
+                (MESSAGE_KEY, "[REQ-42][feat]change"),
+                (
+                    CONDITIONAL_DOCUMENT_KEY,
+                    "docs/mae-flow/requirements/REQ-42/decisions.md",
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "conditional document"):
+            plan_delivery(state)
+
+    def test_staged_conditional_document_uses_the_same_selection_fact(self):
+        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        item = checkpoint(
+            "CP1", "[REQ-42][feat]ship story", ("src/a.cpp", story))
+        state = flow(
+            pace=CommitPace.STAGED,
+            files=("src/a.cpp", story),
+        )
+
+        with self.assertRaisesRegex(ValueError, "conditional document"):
+            plan_delivery(state, (item,))
+
+        selected = flow(
+            pace=CommitPace.STAGED,
+            files=("src/a.cpp", story),
+            decisions=((CONDITIONAL_DOCUMENT_KEY, story),),
+        )
+        self.assertEqual(1, len(plan_delivery(selected, (item,)).commits))
 
     def test_result_and_cp_inputs_are_immutable_values(self):
         item = checkpoint(

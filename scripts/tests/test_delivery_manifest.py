@@ -65,6 +65,9 @@ class DeliveryManifestTests(unittest.TestCase):
             "src/file?.cpp",
             "src/[ab].cpp",
             "src/",
+            ":(exclude)README.md",
+            ":/src/a.cpp",
+            ":literal-path",
         )
         for path in invalid_paths:
             with self.subTest(path=path):

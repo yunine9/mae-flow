@@ -2,12 +2,14 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-import re
 
+from ..foundation.commit_message import valid_business_commit_message
+from .documents import conditional_document_kind
 from .models import CommitPace, FlowState
 
 
 _COMMIT_MESSAGE_DECISION = "delivery.commit_message"
+_CONDITIONAL_DOCUMENT_DECISION = "delivery.conditional_document"
 _WIDE_STAGING_EXPRESSIONS = frozenset({"-a", "--all"})
 
 
@@ -90,8 +92,9 @@ def _validate_stage_path(path):
         raise ValueError("delivery must not stage local .mae-flow-work files")
 
 
-def _validated_manifest(paths):
-    manifest = _delivery_manifest_type().from_paths(paths)
+def _validated_manifest(paths, adopted_dirty=()):
+    manifest = _delivery_manifest_type().from_paths(
+        paths, adopted_dirty=adopted_dirty)
     if not manifest.files:
         raise ValueError("delivery manifest must not be empty")
     for path in manifest.files:
@@ -103,27 +106,50 @@ def _validate_existing_manifest(manifest):
     if not isinstance(manifest, _delivery_manifest_type()):
         raise TypeError("manifest must be a DeliveryManifest")
     # Reconstruct to keep the same portable exact-path checks at every entry.
-    return _validated_manifest(manifest.files)
+    return _validated_manifest(manifest.files, manifest.adopted_dirty)
+
+
+def _conditional_document_selections(state):
+    selections = set()
+    for decision in state.decisions:
+        try:
+            key, value = decision
+        except (TypeError, ValueError) as exc:
+            raise ValueError("state decisions must be key-value pairs") from exc
+        if key != _CONDITIONAL_DOCUMENT_DECISION:
+            continue
+        try:
+            selected = _validated_manifest((value,)).files[0]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "conditional document selection must be an exact durable path"
+            ) from exc
+        if not conditional_document_kind(selected):
+            raise ValueError(
+                "conditional document selection must name a durable "
+                "requirement document")
+        selections.add(_path_identity(selected))
+    return selections
+
+
+def _require_conditional_document_selections(state, manifest):
+    required = tuple(
+        path for path in manifest.files if conditional_document_kind(path))
+    if not required:
+        return
+    selected = _conditional_document_selections(state)
+    missing = tuple(
+        path for path in required if _path_identity(path) not in selected)
+    if missing:
+        raise ValueError(
+            "conditional document requires explicit delivery selection: %s"
+            % ", ".join(missing))
 
 
 def _validate_message(ticket, message):
-    if not isinstance(ticket, str) or not ticket:
-        raise ValueError("ticket must be non-empty text")
-    if "[" in ticket or "]" in ticket:
-        raise ValueError("ticket brackets make the commit message ambiguous")
-    if not isinstance(message, str):
-        raise ValueError("commit message must be text")
-    pattern = re.compile(
-        r"\[" + re.escape(ticket)
-        + r"\]\[(?:feat|fix)\](?P<description>[^\r\n]+)"
-    )
-    match = pattern.fullmatch(message)
-    if match is None:
+    if not valid_business_commit_message(ticket, message):
         raise ValueError(
             "commit message must be [ticket][feat|fix]description")
-    description = match.group("description")
-    if not description or description != description.strip():
-        raise ValueError("commit message description must be non-empty and trimmed")
     return message
 
 
@@ -167,7 +193,6 @@ def _ordered_checkpoints(cp_manifest):
 def _staged_commits(state, cp_manifest, final_manifest):
     checkpoints = _ordered_checkpoints(cp_manifest)
     checkpoint_names = set()
-    file_owners = {}
     commits = []
     cumulative = []
     for item in checkpoints:
@@ -183,11 +208,6 @@ def _staged_commits(state, cp_manifest, final_manifest):
         manifest = _validate_existing_manifest(item.manifest)
         message = _validate_message(state.ticket, item.message)
         for path in manifest.files:
-            identity = _path_identity(path)
-            if identity in file_owners:
-                raise ValueError(
-                    "delivery file is owned by more than one CP: %s" % path)
-            file_owners[identity] = name
             cumulative.append(path)
         commits.append(CommitPlan(message, manifest, True))
 
@@ -207,10 +227,14 @@ def plan_delivery(state, cp_manifest=None):
     approval of that checkpoint boundary only.  Every resulting commit still
     requires separate current-user authorization; a Moonlight adapter may
     satisfy that later without changing this planner's meaning.
+
+    This pure planner intentionally ignores phase and status.  A CLI adapter
+    must reject inactive state before executing any returned effect.
     """
     if not isinstance(state, FlowState):
         raise TypeError("state must be a FlowState")
     final_manifest = _validated_manifest(state.delivery_files)
+    _require_conditional_document_selections(state, final_manifest)
 
     if state.commit_pace == CommitPace.CONTINUOUS:
         if cp_manifest is not None:

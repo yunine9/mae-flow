@@ -16,6 +16,7 @@ if SCRIPTS not in sys.path:
 from mae_flow_core.orchestration.documents import (  # noqa: E402
     DocumentPaths,
     commit_policy,
+    conditional_document_kind,
 )
 
 
@@ -313,6 +314,41 @@ class LeanDocumentPathTests(unittest.TestCase):
 
 
 class LeanDocumentCommitPolicyTests(unittest.TestCase):
+    def test_conditional_durable_paths_reuse_document_kind_policy(self):
+        expected = {
+            "story.md": "story",
+            "decisions.md": "decisions",
+            "engineering.md": "engineering-notes",
+            "chain.md": "chain",
+            "review-ledger.md": "review-ledger",
+            "codecheck-ledger.md": "codecheck-ledger",
+            "delivery-notes.md": "delivery-notes",
+        }
+        for filename, kind in expected.items():
+            path = "docs/mae-flow/requirements/REQ-42/%s" % filename
+            with self.subTest(path=path):
+                self.assertEqual(kind, conditional_document_kind(path))
+                self.assertTrue(commit_policy(kind, True))
+                self.assertFalse(commit_policy(kind, False))
+
+        self.assertEqual(
+            "story",
+            conditional_document_kind(
+                r"DOCS\MAE-FLOW\REQUIREMENTS\REQ-42\STORY.MD"),
+        )
+
+    def test_nonconditional_or_local_paths_have_no_conditional_kind(self):
+        paths = (
+            "docs/mae-flow/requirements/REQ-42/spec.md",
+            "docs/mae-flow/behavior/query.md",
+            ".mae-flow-work/REQ-42/story.md",
+            "docs/mae-flow/requirements/REQ-42/nested/story.md",
+            "src/story.md",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual("", conditional_document_kind(path))
+
     def test_spec_and_behavior_baseline_are_durable_by_default(self):
         for kind in ("spec", "behavior", "behavior-baseline"):
             with self.subTest(kind=kind):

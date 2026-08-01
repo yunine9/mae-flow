@@ -422,6 +422,15 @@ class GitManifestSafetyTests(unittest.TestCase):
         self.assertEqual((False, "git_commit"), (
             commit.allow, commit.rule))
 
+    def test_git_pathspec_magic_cannot_be_authorized_as_an_exact_file(self):
+        state = self.manifest_state(
+            delivery_files=(":(exclude)README.md",))
+
+        add = self.bash(state, "git add -- ':(exclude)README.md'")
+
+        self.assertEqual((False, "git_staging"), (add.allow, add.rule))
+        self.assertIn("exact", add.message.lower())
+
     def test_every_commit_invocation_is_checked_in_shell_order(self):
         state = self.manifest_state()
         commands = (
@@ -525,6 +534,9 @@ class GitManifestSafetyTests(unittest.TestCase):
             ("git commit -m update", False),
             ("git commit -m '[REQ-8][fix]错误单号'", False),
             ("git commit -m '[REQ-7][feat]实现查询条件'", True),
+            ("git commit -m '[REQ-7][feat]保留尾部空格 '", True),
+            ("git commit -m '[REQ-7][feat]摘要\n正文'", True),
+            ("git commit -m '[REQ-7][feat] 描述前有空格'", False),
             (
                 'cmd.exe /d /c git commit -m "[REQ-7][fix]修复结果映射"',
                 True,

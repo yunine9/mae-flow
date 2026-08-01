@@ -5,9 +5,9 @@ from dataclasses import dataclass, replace
 import ntpath
 import os
 import posixpath
-import re
 
 from ..foundation import git_intent
+from ..foundation.commit_message import valid_business_commit_message
 from ..foundation.source_paths import (
     DOCUMENT_EXTENSIONS,
     normalize_path,
@@ -394,14 +394,7 @@ def _commit_decision(context, intent):
         )
     message = _commit_message(intent.arguments)
     ticket = context.state.ticket
-    if (
-            not isinstance(ticket, str)
-            or not ticket
-            or not isinstance(message, str)
-            or not re.match(
-                r"^\[" + re.escape(ticket) + r"\]\[(?:feat|fix)\](?=\S)",
-                message,
-            )):
+    if not valid_business_commit_message(ticket, message):
         return _block(
             "git_commit",
             "Commit message must use [%s][feat|fix]描述." % (ticket or "单号"),

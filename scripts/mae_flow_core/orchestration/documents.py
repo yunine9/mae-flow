@@ -38,6 +38,15 @@ _CONDITIONAL_KINDS = frozenset({
     "delivery",
     "delivery-notes",
 })
+_CONDITIONAL_FILENAMES = {
+    "story.md": "story",
+    "decisions.md": "decisions",
+    "engineering.md": "engineering-notes",
+    "chain.md": "chain",
+    "review-ledger.md": "review-ledger",
+    "codecheck-ledger.md": "codecheck-ledger",
+    "delivery-notes.md": "delivery-notes",
+}
 
 
 def _ticket_text(ticket):
@@ -185,3 +194,23 @@ def commit_policy(kind, explicitly_requested):
     if normalized in _CONDITIONAL_KINDS:
         return explicitly_requested
     return False
+
+
+def conditional_document_kind(path):
+    """Classify one exact durable requirement document, or return ``""``."""
+    if not isinstance(path, str):
+        raise TypeError("document path must be text")
+    normalized = path.replace("\\", "/")
+    parts = normalized.casefold().split("/")
+    if (
+            len(parts) != 5
+            or parts[:3] != ["docs", "mae-flow", "requirements"]
+            or not parts[3]):
+        return ""
+    kind = _CONDITIONAL_FILENAMES.get(parts[4], "")
+    if (
+            kind
+            and commit_policy(kind, True)
+            and not commit_policy(kind, False)):
+        return kind
+    return ""

@@ -57,6 +57,11 @@ def _parent_stays_in_repository(path, repository_root):
     return _relative_absolute(canonical_parent, canonical_root) is not None
 
 
+def _reject_git_pathspec_magic(path):
+    if path.startswith(":"):
+        raise ValueError("delivery paths must not use Git pathspec magic")
+
+
 def _normalize_path(path, repository_root):
     if not isinstance(path, str):
         raise ValueError("delivery paths must be strings")
@@ -67,6 +72,7 @@ def _normalize_path(path, repository_root):
         raise ValueError("Windows drive-relative delivery paths are invalid")
 
     normalized = path.replace("\\", "/")
+    _reject_git_pathspec_magic(normalized)
     if _GLOB_CHARACTERS.search(normalized):
         raise ValueError("delivery paths must not contain globs")
 

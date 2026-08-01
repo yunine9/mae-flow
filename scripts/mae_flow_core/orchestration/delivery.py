@@ -10,6 +10,7 @@ from .models import CommitPace, FlowState
 
 _COMMIT_MESSAGE_DECISION = "delivery.commit_message"
 _CONDITIONAL_DOCUMENT_DECISION = "delivery.conditional_document"
+_ADOPTED_DIRTY_DECISION = "delivery.adopted_dirty"
 _WIDE_STAGING_EXPRESSIONS = frozenset({"-a", "--all"})
 
 
@@ -109,15 +110,21 @@ def _validate_existing_manifest(manifest):
     return _validated_manifest(manifest.files, manifest.adopted_dirty)
 
 
-def _conditional_document_selections(state):
-    selections = set()
+def _decision_values(state, wanted_key):
+    values = []
     for decision in state.decisions:
         try:
             key, value = decision
         except (TypeError, ValueError) as exc:
             raise ValueError("state decisions must be key-value pairs") from exc
-        if key != _CONDITIONAL_DOCUMENT_DECISION:
-            continue
+        if key == wanted_key:
+            values.append(value)
+    return tuple(values)
+
+
+def _conditional_document_selections(state):
+    selections = set()
+    for value in _decision_values(state, _CONDITIONAL_DOCUMENT_DECISION):
         try:
             selected = _validated_manifest((value,)).files[0]
         except (TypeError, ValueError) as exc:
@@ -130,6 +137,29 @@ def _conditional_document_selections(state):
                 "requirement document")
         selections.add(_path_identity(selected))
     return selections
+
+
+def _global_delivery_manifest(state):
+    adopted_dirty = _decision_values(state, _ADOPTED_DIRTY_DECISION)
+    manifest = _validated_manifest(
+        state.delivery_files, adopted_dirty=adopted_dirty)
+
+    from ..guard.manifest import authorize_delivery
+    authorize_delivery(state, manifest)
+
+    initial_ids = {
+        _path_identity(path)
+        for path in _delivery_manifest_type().from_paths(
+            state.initial_dirty).files
+    }
+    delivery_ids = {_path_identity(path) for path in manifest.files}
+    adopted_ids = {_path_identity(path) for path in manifest.adopted_dirty}
+    missing = (initial_ids & delivery_ids) - adopted_ids
+    if missing:
+        raise ValueError(
+            "delivery adoption is required for every included initial-dirty "
+            "file")
+    return manifest
 
 
 def _require_conditional_document_selections(state, manifest):
@@ -205,7 +235,20 @@ def _staged_commits(state, cp_manifest, final_manifest):
         if not item.user_approved:
             raise ValueError("each CP manifest must be explicitly user-approved")
 
-        manifest = _validate_existing_manifest(item.manifest)
+        supplied = _validate_existing_manifest(item.manifest)
+        supplied_ids = {
+            _path_identity(path) for path in supplied.adopted_dirty}
+        file_ids = {_path_identity(path) for path in supplied.files}
+        expected_adoption = tuple(
+            path for path in final_manifest.adopted_dirty
+            if _path_identity(path) in file_ids)
+        expected_ids = {
+            _path_identity(path) for path in expected_adoption}
+        if supplied_ids - expected_ids:
+            raise ValueError(
+                "CP adopted_dirty conflicts with global delivery adoption")
+        manifest = _validated_manifest(
+            supplied.files, adopted_dirty=expected_adoption)
         message = _validate_message(state.ticket, item.message)
         for path in manifest.files:
             cumulative.append(path)
@@ -233,7 +276,7 @@ def plan_delivery(state, cp_manifest=None):
     """
     if not isinstance(state, FlowState):
         raise TypeError("state must be a FlowState")
-    final_manifest = _validated_manifest(state.delivery_files)
+    final_manifest = _global_delivery_manifest(state)
     _require_conditional_document_selections(state, final_manifest)
 
     if state.commit_pace == CommitPace.CONTINUOUS:

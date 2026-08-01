@@ -5,7 +5,7 @@
 import os
 import sys
 import unittest
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -38,11 +38,12 @@ def flow(pace=CommitPace.CONTINUOUS, files=(), decisions=(), ticket="REQ-42"):
     )
 
 
-def checkpoint(name, message, files, approved=True):
+def checkpoint(name, message, files, approved=True, adopted_dirty=()):
     return CheckpointManifest(
         checkpoint=name,
         message=message,
-        manifest=DeliveryManifest.from_paths(files),
+        manifest=DeliveryManifest.from_paths(
+            files, adopted_dirty=adopted_dirty),
         user_approved=approved,
     )
 
@@ -110,14 +111,64 @@ class ContinuousDeliveryPlanningTests(unittest.TestCase):
                         decisions=((MESSAGE_KEY, message),),
                     ))
 
-    def test_ticket_is_matched_literally_even_when_it_contains_brackets(self):
-        plan = plan_delivery(flow(
-            ticket="REQ[42]",
-            files=("src/a.cpp",),
-            decisions=((MESSAGE_KEY, "[REQ[42]][feat]change"),),
-        ))
+    def test_ticket_brackets_are_rejected_as_an_ambiguous_prefix(self):
+        with self.assertRaisesRegex(ValueError, "commit message"):
+            plan_delivery(flow(
+                ticket="REQ[42]",
+                files=("src/a.cpp",),
+                decisions=((MESSAGE_KEY, "[REQ[42]][feat]change"),),
+            ))
 
-        self.assertEqual("[REQ[42]][feat]change", plan.commits[0].message)
+    def test_continuous_preserves_global_windows_dirty_adoption(self):
+        state = flow(
+            files=("src/existing.cpp", "src/new.cpp"),
+            decisions=(
+                (MESSAGE_KEY, "[REQ-42][fix]adopt existing change"),
+                ("delivery.adopted_dirty", r"SRC\EXISTING.CPP"),
+            ),
+        )
+        state = replace(state, initial_dirty=("Src/Existing.cpp",))
+
+        plan = plan_delivery(state)
+
+        self.assertEqual(
+            ("SRC/EXISTING.CPP",),
+            plan.commits[0].manifest.adopted_dirty,
+        )
+
+    def test_global_dirty_adoption_must_be_exact_and_complete(self):
+        cases = (
+            (
+                ("src/a.cpp",),
+                ("src/a.cpp",),
+                (),
+                "adoption",
+            ),
+            (
+                ("src/a.cpp",),
+                ("src/a.cpp",),
+                ("src/new.cpp",),
+                "initial_dirty",
+            ),
+            (
+                ("src/a.cpp",),
+                ("src/other.cpp",),
+                ("src/a.cpp",),
+                "delivery",
+            ),
+        )
+        for initial_dirty, files, adopted, expected in cases:
+            decisions = [(MESSAGE_KEY, "[REQ-42][fix]change")]
+            decisions.extend(
+                ("delivery.adopted_dirty", path) for path in adopted)
+            state = flow(files=files, decisions=tuple(decisions))
+            state = replace(state, initial_dirty=initial_dirty)
+            with self.subTest(
+                    initial_dirty=initial_dirty,
+                    files=files,
+                    adopted=adopted):
+                with self.assertRaisesRegex(ValueError, expected):
+                    plan_delivery(state)
 
     def test_continuous_rejects_cp_manifests_instead_of_guessing(self):
         state = flow(
@@ -226,15 +277,14 @@ class StagedDeliveryPlanningTests(unittest.TestCase):
                     plan_delivery(state, (item,))
 
     def test_staged_allows_a_file_to_evolve_across_ordered_checkpoints(self):
-        state = flow(pace=CommitPace.STAGED, files=("Src/A.cpp",))
+        state = flow(
+            pace=CommitPace.STAGED,
+            files=("Src/A.cpp",),
+            decisions=(("delivery.adopted_dirty", r"SRC\A.CPP"),),
+        )
+        state = replace(state, initial_dirty=("src/a.cpp",))
         manifests = (
-            CheckpointManifest(
-                "CP1",
-                "[REQ-42][feat]first",
-                DeliveryManifest.from_paths(
-                    ("Src/A.cpp",), adopted_dirty=("Src/A.cpp",)),
-                True,
-            ),
+            checkpoint("CP1", "[REQ-42][feat]first", ("Src/A.cpp",)),
             checkpoint("CP2", "[REQ-42][fix]second", (r"src\a.cpp",)),
         )
 
@@ -243,8 +293,48 @@ class StagedDeliveryPlanningTests(unittest.TestCase):
         self.assertEqual(2, len(plan.commits))
         self.assertEqual(("Src/A.cpp",), plan.commits[0].manifest.files)
         self.assertEqual(
-            ("Src/A.cpp",), plan.commits[0].manifest.adopted_dirty)
+            ("SRC/A.CPP",), plan.commits[0].manifest.adopted_dirty)
         self.assertEqual(("src/a.cpp",), plan.commits[1].manifest.files)
+        self.assertEqual(
+            ("SRC/A.CPP",), plan.commits[1].manifest.adopted_dirty)
+
+    def test_staged_rejects_cp_supplied_adoption_outside_global_intersection(self):
+        state = flow(
+            pace=CommitPace.STAGED,
+            files=("src/existing.cpp", "src/new.cpp"),
+            decisions=(("delivery.adopted_dirty", "src/existing.cpp"),),
+        )
+        state = replace(state, initial_dirty=("src/existing.cpp",))
+        item = checkpoint(
+            "CP1",
+            "[REQ-42][fix]change",
+            ("src/existing.cpp", "src/new.cpp"),
+            adopted_dirty=("src/new.cpp",),
+        )
+
+        with self.assertRaisesRegex(ValueError, "CP.*adopted_dirty"):
+            plan_delivery(state, (item,))
+
+    def test_staged_accepts_matching_cp_adoption_alias_and_normalizes_global(self):
+        state = flow(
+            pace=CommitPace.STAGED,
+            files=("Src/Existing.cpp",),
+            decisions=(("delivery.adopted_dirty", "src/existing.cpp"),),
+        )
+        state = replace(state, initial_dirty=("SRC/EXISTING.CPP",))
+        item = checkpoint(
+            "CP1",
+            "[REQ-42][fix]change",
+            ("Src/Existing.cpp",),
+            adopted_dirty=(r"SRC\EXISTING.CPP",),
+        )
+
+        plan = plan_delivery(state, (item,))
+
+        self.assertEqual(
+            ("src/existing.cpp",),
+            plan.commits[0].manifest.adopted_dirty,
+        )
 
     def test_staged_union_must_equal_final_delivery_manifest(self):
         cases = (

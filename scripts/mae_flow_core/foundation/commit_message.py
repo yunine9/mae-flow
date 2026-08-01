@@ -5,7 +5,11 @@ import re
 
 def valid_business_commit_message(ticket, message):
     """Return whether ``message`` starts with the exact required prefix."""
-    if not isinstance(ticket, str) or not ticket:
+    if (
+            not isinstance(ticket, str)
+            or not ticket
+            or "[" in ticket
+            or "]" in ticket):
         return False
     if not isinstance(message, str):
         return False

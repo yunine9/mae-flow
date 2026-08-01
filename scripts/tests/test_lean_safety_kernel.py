@@ -557,6 +557,14 @@ class GitManifestSafetyTests(unittest.TestCase):
         self.assertEqual((False, "git_commit"), (
             missing_ticket.allow, missing_ticket.rule))
 
+        bracket_ticket = self.bash(
+            replace(state, ticket="REQ[7]"),
+            "git commit -m '[REQ[7]][feat]ambiguous ticket'",
+            staged_files=exact,
+        )
+        self.assertEqual((False, "git_commit"), (
+            bracket_ticket.allow, bracket_ticket.rule))
+
     def test_push_requires_exact_recorded_commit_manifest(self):
         state = self.manifest_state()
 

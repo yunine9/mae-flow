@@ -5,6 +5,14 @@ import subprocess
 
 
 REFACTOR_SAFETY_SUITES = (
+    ("Lean workflow state contract",
+     ("scripts/tests/test_lean_state.py",), 90, 3000),
+    ("Lean workflow migration contract",
+     ("scripts/tests/test_lean_migration.py",), 90, 3000),
+    ("Lean workflow transition contract",
+     ("scripts/tests/test_lean_transitions.py",), 90, 3000),
+    ("Lean workflow guidance and harness",
+     ("scripts/tests/test_lean_guidance.py",), 90, 3000),
     ("Spec2Code 固定 Prompt 与注释规范",
      ("scripts/tests/test_spec2code_prompt_resources.py",), 180, 5000),
     ("Spec2Code 本地过程件纯契约",

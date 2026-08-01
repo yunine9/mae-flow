@@ -19,6 +19,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     DeliveryPath,
     FlowState,
     Phase,
+    decode_flow_state,
 )
 from mae_flow_core.state_store import (  # noqa: E402
     normalize_document,
@@ -91,6 +92,35 @@ class LeanStateContractTests(unittest.TestCase):
         raw["schema_version"] = "3"
         with self.assertRaises(ValueError):
             normalize_document(raw, "flow")
+
+    def test_decoder_rejects_non_integer_schema_versions(self):
+        for invalid in (3.0, "3"):
+            with self.subTest(schema_version=invalid):
+                with open(FIXTURE, encoding="utf-8") as stream:
+                    raw = json.load(stream)
+                raw["schema_version"] = invalid
+                with self.assertRaises(ValueError):
+                    decode_flow_state(raw)
+
+    def test_decoder_rejects_missing_or_unknown_top_level_fields(self):
+        with open(FIXTURE, encoding="utf-8") as stream:
+            missing = json.load(stream)
+        missing.pop("phase")
+        with self.assertRaises(ValueError):
+            decode_flow_state(missing)
+
+        with open(FIXTURE, encoding="utf-8") as stream:
+            unknown = json.load(stream)
+        unknown["evidence"] = []
+        with self.assertRaises(ValueError):
+            decode_flow_state(unknown)
+
+    def test_decoder_rejects_malformed_nested_objects(self):
+        with open(FIXTURE, encoding="utf-8") as stream:
+            raw = json.load(stream)
+        raw["decisions"] = [{"key": "spec.approved"}]
+        with self.assertRaises(ValueError):
+            decode_flow_state(raw)
 
     def test_encoder_rejects_untyped_enum_values(self):
         state = FlowState.new(

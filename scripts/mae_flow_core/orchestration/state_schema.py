@@ -140,7 +140,8 @@ def decode_flow_state(raw):
         raise ValueError("lean flow state fields do not match schema-v3")
     if raw["engine"] != ENGINE:
         raise ValueError("lean flow state engine must be %s" % ENGINE)
-    if raw["schema_version"] != SCHEMA_VERSION:
+    if (type(raw["schema_version"]) is not int
+            or raw["schema_version"] != SCHEMA_VERSION):
         raise ValueError(
             "lean flow state schema_version must be %s" % SCHEMA_VERSION)
 

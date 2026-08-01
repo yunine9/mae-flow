@@ -95,6 +95,9 @@ class BashGatePolicyTests(unittest.TestCase):
         force = decide_post_commit(self.context(
             command="git push --force"))
         self.assertEqual("absolute", force.kind)
+        leased_force = decide_post_commit(self.context(
+            command="sh -c 'git push --force-with-lease origin HEAD'"))
+        self.assertEqual("absolute", leased_force.kind)
         wipe = decide_post_commit(self.context(
             command="git reset --hard"))
         self.assertEqual(("block", "bash-wipe-worktree"),

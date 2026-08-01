@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import re
 
+from ..foundation.git_execution import executed_git_invocations
 from .gate import GateDecision
 
 
@@ -157,10 +158,13 @@ def decide_pre_commit(context):
 
 def _post_early(context):
     command = context.command
-    if (
-        re.search(r"git\s+push\b.*(--force|-f\b)", command)
-        or re.search(r"git\s+push\b.*\s\+\S+", command)
-    ):
+    if any(
+            operation == "push" and any(
+                argument == "-f"
+                or argument.startswith("--force")
+                or argument.startswith("+")
+                for argument in arguments)
+            for operation, arguments in executed_git_invocations(command)):
         return _absolute(
             "bash-force-push",
             "禁止 force push(含 +refspec 形式)。")
@@ -213,6 +217,35 @@ def _post_repository(context):
     return None
 
 
+def _git_clean_ignored(git_commands):
+    return any(
+        operation == "clean" and any(
+            argument.startswith("-")
+            and not argument.startswith("--")
+            and "x" in argument[1:].casefold()
+            for argument in arguments)
+        for operation, arguments in git_commands
+    )
+
+
+def _git_wipes_worktree(git_commands):
+    return (
+        any(
+            operation == "reset" and "--hard" in arguments
+            for operation, arguments in git_commands)
+        or any(
+            operation in ("checkout", "restore")
+            and any(argument in (".", ":/") for argument in arguments)
+            for operation, arguments in git_commands)
+    )
+
+
+def _git_adds_worktree(git_commands):
+    return any(
+        operation == "worktree" and "add" in arguments
+        for operation, arguments in git_commands)
+
+
 def _post_dangerous(context):
     command = context.command
     if re.search(r"\bcomet\s+init\b", command):
@@ -230,19 +263,12 @@ def _post_dangerous(context):
         return _absolute(
             "bash-remote-script-pipe",
             "危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。")
-    if re.search(r"git\s+clean\s+-\S*[xX]", command):
+    git_commands = executed_git_invocations(command)
+    if _git_clean_ignored(git_commands):
         return _absolute(
             "bash-git-clean-ignored",
             "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。")
-    if context.state_active and (
-        re.search(
-            r"git\s+reset\s+(-\S+\s+)*--hard\b", command)
-        or re.search(
-            r"git\s+(checkout|restore)\s+(--\s+)?"
-            r"(\.|:/)(\s|$)",
-            command,
-        )
-    ):
+    if context.state_active and _git_wipes_worktree(git_commands):
         return _block(
             "bash-wipe-worktree",
             "全树不可逆清除拦截(git reset --hard / checkout -- .):未提交的"
@@ -256,7 +282,7 @@ def _post_dangerous(context):
             % context.recursive_delete_targets[0])
     if (
         context.state_active
-        and re.search(r"git\s+worktree\s+add", command)
+        and _git_adds_worktree(git_commands)
     ):
         return _block(
             "bash-worktree",

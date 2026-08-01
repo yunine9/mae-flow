@@ -229,6 +229,53 @@ class GuardIntentTests(unittest.TestCase):
             )),
         )
 
+    def test_delivery_intents_follow_actual_command_positions_and_wrappers(self):
+        cases = (
+            ("git add .", ("add",)),
+            ("git status && git add src/a.py", ("add",)),
+            ("sh -c 'git add .'", ("add",)),
+            ("env FOO=1 command git commit -m update", ("commit",)),
+            ("sudo -u root git push origin HEAD", ("push",)),
+            ("fish -C 'echo ready' -c 'git add src/a.py'", ("add",)),
+            ("pwsh -NoProfile -Command git commit -m update", ("commit",)),
+            ("cmd.exe /d /c git add .", ("add",)),
+            ("echo git add .", ()),
+            ("printf 'git commit -m update'", ()),
+            ("git status && echo git add .", ()),
+            ("bash -n -c 'git add .'", ()),
+            ("bash --help -c 'git add .'", ()),
+            ("command -v git commit", ()),
+            ("sudo --version git push", ()),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    expected,
+                    tuple(
+                        intent.operation
+                        for intent in git_delivery_intents(command)),
+                )
+
+    def test_recursive_delete_targets_follow_actual_command_positions(self):
+        cases = (
+            ("rm -rf /", ("/",)),
+            ("git status && rm -rf .", (".",)),
+            ("sh -c 'rm -rf /'", ("/",)),
+            ("cmd.exe /d /c rmdir /s C:/", ("C:/",)),
+            ("echo rm -rf /", ()),
+            ("printf 'rm -rf /'", ()),
+            ("git status && echo rm -rf /", ()),
+            ("bash -n -c 'rm -rf /'", ()),
+            ("bash --help -c 'rm -rf /'", ()),
+            ("rm --preserve-root /", ()),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    expected,
+                    recursive_delete_targets(parse_intent("bash", command)),
+                )
+
     def test_commit_intents_preserve_every_invocation_in_shell_order(self):
         command = (
             "git commit -am first && "
@@ -281,6 +328,17 @@ class GuardIntentTests(unittest.TestCase):
                 )
                 for intent in intents
             ],
+        )
+
+    def test_actual_projection_preserves_repeated_invocations(self):
+        intents = git_delivery_intents(
+            "git add src/a.cpp && git add src/a.cpp")
+
+        self.assertEqual(
+            (("add", ("src/a.cpp",)), ("add", ("src/a.cpp",))),
+            tuple(
+                (intent.operation, intent.pathspecs)
+                for intent in intents),
         )
 
 

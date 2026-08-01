@@ -593,6 +593,28 @@ class GitManifestSafetyTests(unittest.TestCase):
             destructive.allow, destructive.rule))
         self.assertTrue(read_only.allow)
 
+    def test_destructive_git_uses_actual_execution_positions(self):
+        state = self.manifest_state()
+        cases = (
+            ("git reset --hard HEAD", False),
+            ("git status && git reset --hard HEAD", False),
+            ("sh -c 'git reset --hard HEAD'", False),
+            ("sudo -u root git reset --hard HEAD", False),
+            ("pwsh -NoProfile -Command git reset --hard HEAD", False),
+            ("cmd.exe /d /c git reset --hard HEAD", False),
+            ("echo git reset --hard HEAD", True),
+            ("printf 'git reset --hard HEAD'", True),
+            ("git status && echo git reset --hard HEAD", True),
+            ("bash -n -c 'git reset --hard HEAD'", True),
+            ("bash --help -c 'git reset --hard HEAD'", True),
+        )
+        for command, expected_allow in cases:
+            with self.subTest(command=command):
+                decision = self.bash(state, command)
+                self.assertIs(expected_allow, decision.allow)
+                if not expected_allow:
+                    self.assertEqual("git_destructive", decision.rule)
+
 
 class PublicValueTests(unittest.TestCase):
     def test_guard_package_exports_the_immutable_public_values(self):

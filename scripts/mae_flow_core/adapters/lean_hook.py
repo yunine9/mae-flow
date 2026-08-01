@@ -16,7 +16,6 @@ from ..application.hooks.lean_events import (
     handle_lean_hook_event,
 )
 from ..application.hooks.models import HookResponse
-from ..foundation.git_intent import executes_git_commit_or_push
 from ..guard.safety_kernel import SafetyContext, decide_pretool
 from ..orchestration import CapabilityAttempt, FlowState
 from ..state_store import (
@@ -26,6 +25,9 @@ from ..state_store import (
     safe_read_json,
     update_json,
 )
+
+
+SUMMARY_BUDGET = 1200
 
 
 def _empty_paths(_payload):
@@ -124,12 +126,21 @@ def _clip(value, maximum=240):
     return text if len(text) <= maximum else text[:maximum - 1] + "…"
 
 
+def _brief_list(values, maximum, render):
+    rendered = [render(value) for value in values[:maximum]]
+    omitted = len(values) - len(rendered)
+    if omitted:
+        rendered.append("另有 %s 项" % omitted)
+    return "；".join(rendered) or "none"
+
+
 class LeanHookAdapter:
     """Compose lean Hook routing while treating adapter failures as ordinary."""
 
     def __init__(
             self, root, marker_root=None, fact_ports=None, event_sink=None,
-            clock_ns=None):
+            clock_ns=None, move_state=None, snapshot_writer=None,
+            pointer_writer=None, local_marker_root=None):
         self.root = os.path.abspath(root)
         self.state_path = os.path.join(self.root, ".mae-flow.json")
         self.pointer_path = os.path.join(self.root, ".mae-flow.json.exited")
@@ -139,11 +150,37 @@ class LeanHookAdapter:
             self.root, ".mae-flow-work", "exited")
         self.marker_root = marker_root or os.path.join(
             tempfile.gettempdir(), "mae-flow-lean-hook-sessions")
+        self.local_marker_root = local_marker_root or os.path.join(
+            self.root, ".mae-flow-work", ".lean-hook-sessions")
         self.facts = fact_ports or LeanHookFactPorts()
         self.event_sink = event_sink or self._append_user_event
         self.clock_ns = clock_ns or time.time_ns
+        self.move_state = move_state or _replace_with_retry
+        self.snapshot_writer = snapshot_writer or self._write_snapshot_bytes
+        self.pointer_writer = pointer_writer or atomic_write_json
+
+    def _valid_pointer(self):
+        pointer, error = safe_read_json(self.pointer_path)
+        if error or not isinstance(pointer, Mapping):
+            return None
+        relative = pointer.get("snapshot")
+        if pointer.get("status") != "exited" or not isinstance(relative, str):
+            return None
+        normalized = relative.replace("\\", "/")
+        if not normalized or normalized.startswith(("/", "../")):
+            return None
+        snapshot = os.path.abspath(os.path.join(
+            self.root, *normalized.split("/")))
+        try:
+            if os.path.commonpath((self.root, snapshot)) != self.root:
+                return None
+        except ValueError:
+            return None
+        return pointer if os.path.isfile(snapshot) else None
 
     def _runtime(self):
+        if self._valid_pointer() is not None:
+            return SimpleNamespace(mode="inactive"), None
         if not os.path.isfile(self.state_path):
             return SimpleNamespace(mode="inactive"), None
         raw, error = safe_read_json(self.state_path)
@@ -155,32 +192,50 @@ class LeanHookAdapter:
             return SimpleNamespace(mode="corrupt"), None
         return SimpleNamespace(mode="flow", flow=state), state
 
-    def _session_due(self, payload):
-        session = payload.get("session_id") or payload.get("sessionId")
-        if not isinstance(session, str) or not session:
-            return True
-        identity = hashlib.sha256(
-            (self.root + "\0" + session).encode(
-                "utf-8", errors="replace")).hexdigest()
-        marker = os.path.join(self.marker_root, identity + ".seen")
+    def _claim_session_marker(self, root, identity):
+        marker = os.path.join(root, identity + ".seen")
         try:
-            os.makedirs(self.marker_root, exist_ok=True)
+            os.makedirs(root, exist_ok=True)
+            if os.path.isfile(marker):
+                return False
             with open(marker, "x", encoding="utf-8", newline="\n"):
                 pass
             return True
         except FileExistsError:
-            return False
+            return False if os.path.isfile(marker) else None
         except OSError:
-            return True
+            return False if os.path.isfile(marker) else None
+
+    def _session_due(self, payload, state):
+        session = payload.get("session_id") or payload.get("sessionId")
+        if not isinstance(session, str) or not session:
+            session = "cursor\0%s\0%s\0%s\0%s" % (
+                state.ticket,
+                state.phase.value,
+                state.current_cp,
+                state.status,
+            )
+        identity = hashlib.sha256(
+            (self.root + "\0" + session).encode(
+                "utf-8", errors="replace")).hexdigest()
+        primary = self._claim_session_marker(self.marker_root, identity)
+        if primary is not None:
+            return primary
+        fallback = self._claim_session_marker(
+            self.local_marker_root, identity)
+        return bool(fallback)
 
     def _resume(self, state, payload):
-        if state is None or not self._session_due(payload):
+        if state is None or not self._session_due(payload, state):
             return HookResponse()
-        artifacts = ", ".join(
-            "%s=%s" % (_clip(kind, 60), _clip(path))
-            for kind, path in state.artifacts[:5]
-        ) or "none"
-        risks = "; ".join(_clip(risk) for risk in state.risks[:5]) or "none"
+        artifacts = _brief_list(
+            state.artifacts,
+            2,
+            lambda item: "%s=%s" % (
+                _clip(item[0], 24), _clip(item[1], 100)),
+        )
+        risks = _brief_list(
+            state.risks, 2, lambda risk: _clip(risk, 100))
         lines = [
             "[mae-flow] Recovery context",
             "Mode: %s" % state.path.value,
@@ -194,15 +249,18 @@ class LeanHookAdapter:
             lines.append(
                 "Last capability: %s | source=%s | environment=%s | "
                 "outcome=%s | summary=%s" % (
-                    _clip(fact.kind, 60),
-                    _clip(fact.source_revision, 100),
-                    _clip(fact.environment_revision, 100),
-                    _clip(fact.outcome, 100),
-                    _clip(fact.summary),
+                    _clip(fact.kind, 30),
+                    _clip(fact.source_revision, 50),
+                    _clip(fact.environment_revision, 50),
+                    _clip(fact.outcome, 50),
+                    _clip(fact.summary, 130),
                 ))
         else:
             lines.append("Last capability: none")
-        return HookResponse(stdout="\n".join(lines) + "\n")
+        summary = "\n".join(lines) + "\n"
+        if len(summary) > SUMMARY_BUDGET:
+            summary = "\n".join(lines[:4] + lines[-1:]) + "\n"
+        return HookResponse(stdout=summary)
 
     def _append_user_event(self, event, payload):
         row = {
@@ -220,7 +278,7 @@ class LeanHookAdapter:
             self.events_path,
             append,
             default=[],
-            project_root=self.root,
+            project_root=self.events_path,
             recover_corrupt=True,
         )
 
@@ -261,16 +319,6 @@ class LeanHookAdapter:
             payload.get("tool_name", ""),
             payload.get("tool_input", {}),
         )
-        tool_input = payload.get("tool_input", {})
-        command = (
-            tool_input.get("command", "")
-            if isinstance(tool_input, Mapping) else "")
-        if (
-                not decision.allow
-                and decision.rule in {"git_commit", "git_publish"}
-                and isinstance(command, str)
-                and not executes_git_commit_or_push(command)):
-            return HookResponse()
         if decision.allow:
             return HookResponse()
         return HookResponse(
@@ -304,13 +352,11 @@ class LeanHookAdapter:
         return HookResponse()
 
     def _existing_snapshot(self):
-        pointer, error = safe_read_json(self.pointer_path)
-        if not error and isinstance(pointer, Mapping):
-            relative = pointer.get("snapshot")
-            if isinstance(relative, str) and relative:
-                path = os.path.join(self.root, *relative.split("/"))
-                if os.path.isfile(path):
-                    return relative, path, pointer
+        pointer = self._valid_pointer()
+        if pointer is not None:
+            relative = pointer["snapshot"]
+            path = os.path.join(self.root, *relative.split("/"))
+            return relative, path, pointer
         try:
             names = sorted(
                 name for name in os.listdir(self.snapshot_dir)
@@ -325,37 +371,88 @@ class LeanHookAdapter:
     def _relative(self, path):
         return os.path.relpath(path, self.root).replace("\\", "/")
 
-    def _release_takeover(self):
-        with ProjectStateLock(self.root):
+    def _snapshot_path(self):
+        os.makedirs(self.snapshot_dir, exist_ok=True)
+        stamp = self.clock_ns()
+        snapshot = os.path.join(self.snapshot_dir, "flow-%s.json" % stamp)
+        suffix = 2
+        while os.path.exists(snapshot):
+            snapshot = os.path.join(
+                self.snapshot_dir, "flow-%s-%s.json" % (stamp, suffix))
+            suffix += 1
+        return snapshot, stamp
+
+    def _write_snapshot_bytes(self, path, data):
+        descriptor = None
+        try:
+            descriptor = os.open(
+                path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = None
+                stream.write(data)
+                stream.flush()
+                try:
+                    os.fsync(stream.fileno())
+                except OSError:
+                    pass
+        except Exception:
+            if descriptor is not None:
+                os.close(descriptor)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+
+    def _write_pointer(self, snapshot, stamp):
+        data = {
+            "status": "exited",
+            "snapshot": self._relative(snapshot),
+            "exited_at_ns": stamp,
+        }
+        self.pointer_writer(self.pointer_path, data)
+        if self._valid_pointer() is None:
+            raise OSError("exit pointer validation failed")
+        return data
+
+    def _normal_release(self):
+        with ProjectStateLock(self.root, timeout=0):
+            pointer = self._valid_pointer()
+            if pointer is not None:
+                return pointer
             if not os.path.exists(self.state_path):
                 relative, _path, pointer = self._existing_snapshot()
                 if pointer is not None:
                     return pointer
-                data = {
-                    "status": "exited",
-                    "snapshot": relative,
-                    "exited_at_ns": self.clock_ns(),
-                }
-                atomic_write_json(self.pointer_path, data)
-                return data
+                if not relative:
+                    raise OSError("no active state or recoverable snapshot")
+                return self._write_pointer(_path, self.clock_ns())
 
-            os.makedirs(self.snapshot_dir, exist_ok=True)
+            snapshot, stamp = self._snapshot_path()
+            self.move_state(self.state_path, snapshot)
+            return self._write_pointer(snapshot, stamp)
+
+    def _fallback_release(self):
+        pointer = self._valid_pointer()
+        if pointer is not None:
+            return pointer
+        if os.path.isfile(self.state_path):
+            with open(self.state_path, "rb") as stream:
+                original = stream.read()
+            snapshot, stamp = self._snapshot_path()
+            self.snapshot_writer(snapshot, original)
+        else:
+            _relative, snapshot, _pointer = self._existing_snapshot()
+            if not snapshot:
+                raise OSError("no active state or recoverable snapshot")
             stamp = self.clock_ns()
-            snapshot = os.path.join(
-                self.snapshot_dir, "flow-%s.json" % stamp)
-            suffix = 2
-            while os.path.exists(snapshot):
-                snapshot = os.path.join(
-                    self.snapshot_dir, "flow-%s-%s.json" % (stamp, suffix))
-                suffix += 1
-            _replace_with_retry(self.state_path, snapshot)
-            data = {
-                "status": "exited",
-                "snapshot": self._relative(snapshot),
-                "exited_at_ns": stamp,
-            }
-            atomic_write_json(self.pointer_path, data)
-            return data
+        return self._write_pointer(snapshot, stamp)
+
+    def _release_takeover(self):
+        try:
+            return self._normal_release()
+        except (Exception, SystemExit):
+            return self._fallback_release()
 
     def handle(self, event, raw_input):
         """Handle one raw Hook invocation and return protocol output."""
@@ -368,14 +465,20 @@ class LeanHookAdapter:
         if _prompt_event(event) and _explicit_exit(payload.get("prompt")):
             try:
                 self._release_takeover()
-            except (Exception, SystemExit):
-                pass
+            except (Exception, SystemExit) as exc:
+                return HookResponse(
+                    exit_code=2,
+                    stderr=(
+                        "[mae-flow] exit could not release workflow control "
+                        "(%s); retry the same exit request.\n"
+                        % type(exc).__name__),
+                )
             self._record_event(event, payload)
             return HookResponse()
 
         try:
             runtime, state = self._runtime()
-            if _prompt_event(event) and os.path.isfile(self.state_path):
+            if _prompt_event(event) and runtime.mode in ("flow", "corrupt"):
                 self._record_event(event, payload)
             ports = LeanHookPorts(
                 resume=lambda value: self._resume(state, value),

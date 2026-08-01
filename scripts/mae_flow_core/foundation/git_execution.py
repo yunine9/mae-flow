@@ -1,5 +1,6 @@
-"""Discover Git delivery operations reached through command launchers."""
+"""Project actual command positions through bounded command launchers."""
 
+from dataclasses import dataclass
 import re
 import shlex
 
@@ -112,6 +113,16 @@ _SUDO_TERMINAL_FLAGS = {
 _SUDO_TERMINAL_SHORT_FLAGS = set("eKlVv")
 
 
+@dataclass(frozen=True)
+class ActualCommand:
+    executable: str
+    arguments: tuple = ()
+
+    @property
+    def tokens(self):
+        return (self.executable,) + self.arguments
+
+
 def _executable_name(token):
     return re.split(r"[\\/]", str(token or ""))[-1].lower()
 
@@ -122,21 +133,19 @@ def _skip_assignments(tokens, index=0):
     return index
 
 
-def _git_delivery_operation(tokens):
+def _git_invocation(record):
+    tokens = record.tokens
     if not tokens or not _is_git_executable(tokens[0]):
-        return ""
+        return None
     index = 1
     while index < len(tokens):
         width = _global_option_width(tokens, index)
-        if not width:
+        if not width or index + width > len(tokens):
             break
-        if index + width > len(tokens):
-            return ""
         index += width
-    if index >= len(tokens):
-        return ""
-    operation = tokens[index].lower()
-    return operation if operation in _DELIVERY_OPERATIONS else ""
+    if index >= len(tokens) or tokens[index].startswith("-"):
+        return None
+    return tokens[index].lower(), tuple(tokens[index + 1:])
 
 
 def _prefixed_command(tokens, index, kind):
@@ -252,7 +261,7 @@ def _env_command(tokens, index, depth):
                 split_tokens = tuple(shlex.split(split_value, posix=True))
             except ValueError:
                 return ()
-            return _executed_delivery_operations(
+            return _actual_command_records_tokens(
                 split_tokens + remainder, depth + 1)
         elif token in ("-i", "--ignore-environment", "-0", "--null"):
             index += 1
@@ -262,7 +271,7 @@ def _env_command(tokens, index, depth):
             break
         if index > len(tokens):
             return ()
-    return _executed_delivery_operations(tokens[index:], depth + 1)
+    return _actual_command_records_tokens(tokens[index:], depth + 1)
 
 
 def _is_noexec_value(value):
@@ -283,7 +292,7 @@ def _traditional_shell_command(
             if noexec:
                 return ()
             return (
-                _executed_delivery_text(tokens[index + 1], depth + 1)
+                _actual_command_records_text(tokens[index + 1], depth + 1)
                 if index + 1 < len(tokens) else ())
         if option in value_flags:
             if index + 1 >= len(tokens):
@@ -325,7 +334,7 @@ def _traditional_shell_command(
                 if noexec:
                     return ()
                 return (
-                    _executed_delivery_text(tokens[index + 1], depth + 1)
+                    _actual_command_records_text(tokens[index + 1], depth + 1)
                     if index + 1 < len(tokens) else ())
             index += 1
         elif option in zero_long_flags:
@@ -364,10 +373,10 @@ def _fish_command(tokens, index, depth):
             return ()
         if index > len(tokens):
             return ()
-    operations = []
+    records = []
     for command in commands:
-        operations.extend(_executed_delivery_text(command, depth + 1))
-    return tuple(operations)
+        records.extend(_actual_command_records_text(command, depth + 1))
+    return tuple(records)
 
 
 def _shell_command(tokens, index, depth, executable):
@@ -383,8 +392,8 @@ def _powershell_command(tokens, index, depth):
         if option in ("-command", "-c"):
             payload = tokens[index + 1:]
             if len(payload) == 1:
-                return _executed_delivery_text(payload[0], depth + 1)
-            return _executed_delivery_operations(payload, depth + 1)
+                return _actual_command_records_text(payload[0], depth + 1)
+            return _actual_command_records_tokens(payload, depth + 1)
         if option in _POWERSHELL_FLAGS:
             index += 1
         elif option.split("=", 1)[0] in _POWERSHELL_VALUE_FLAGS:
@@ -402,32 +411,28 @@ def _cmd_command(tokens, index, depth):
         if option in ("/c", "/k"):
             payload = tokens[index + 1:]
             if len(payload) == 1:
-                return _executed_delivery_text(payload[0], depth + 1)
-            return _executed_delivery_operations(payload, depth + 1)
+                return _actual_command_records_text(payload[0], depth + 1)
+            return _actual_command_records_tokens(payload, depth + 1)
         if option not in _CMD_FLAGS:
             return ()
         index += 1
     return ()
 
 
-def _executed_delivery_operations(tokens, depth):
+def _actual_command_records_tokens(tokens, depth):
     if depth > _MAX_EXECUTION_DEPTH:
         return ()
     index = _skip_assignments(tokens)
     if index >= len(tokens):
         return ()
     tokens = tuple(tokens[index:])
-    direct = _git_delivery_operation(tokens)
-    if direct:
-        return (direct,)
-
     executable = _executable_name(tokens[0])
     if executable in ("command", "command.exe", "exec", "exec.exe"):
         kind = executable.split(".", 1)[0]
-        return _executed_delivery_operations(
+        return _actual_command_records_tokens(
             _prefixed_command(tokens, 1, kind), depth + 1)
     if executable in ("sudo", "sudo.exe"):
-        return _executed_delivery_operations(
+        return _actual_command_records_tokens(
             _sudo_command(tokens, 1), depth + 1)
     if executable in ("env", "env.exe"):
         return _env_command(tokens, 1, depth)
@@ -437,28 +442,44 @@ def _executed_delivery_operations(tokens, depth):
         return _powershell_command(tokens, 1, depth)
     if executable in ("cmd", "cmd.exe"):
         return _cmd_command(tokens, 1, depth)
-    return ()
+    return (ActualCommand(tokens[0], tuple(tokens[1:])),)
 
 
-def _executed_delivery_text(command, depth):
+def _actual_command_records_text(command, depth):
     if depth > _MAX_EXECUTION_DEPTH or not isinstance(command, str):
         return ()
-    operations = []
+    records = []
     for tokens in shell_command_groups(command):
-        operations.extend(_executed_delivery_operations(tokens, depth))
-    return tuple(operations)
+        records.extend(_actual_command_records_tokens(tokens, depth))
+    return tuple(records)
+
+
+def actual_command_records(command):
+    """Return leaf commands reached through the supported launcher grammar."""
+    if not isinstance(command, str):
+        return ()
+    spelling = command
+    if re.search(
+            r"(?i)[A-Za-z]:\\(?:[^\\\s\"']+\\)*git\.exe\b",
+            command):
+        spelling = command.replace("\\", "/")
+    return _actual_command_records_text(spelling, 0)
+
+
+def executed_git_invocations(command):
+    """Return actual Git subcommands and arguments in shell source order."""
+    return tuple(
+        invocation
+        for record in actual_command_records(command)
+        for invocation in [_git_invocation(record)]
+        if invocation is not None
+    )
 
 
 def executed_git_delivery_operations(command):
     """Return commit/push operations actually executed at command positions."""
-    if not isinstance(command, str):
-        return ()
-    spellings = [command]
-    if re.search(
-            r"(?i)[A-Za-z]:\\(?:[^\\\s\"']+\\)*git\.exe\b",
-            command):
-        spellings.append(command.replace("\\", "/"))
-    operations = []
-    for spelling in dict.fromkeys(spellings):
-        operations.extend(_executed_delivery_text(spelling, 0))
-    return tuple(dict.fromkeys(operations))
+    return tuple(dict.fromkeys(
+        operation
+        for operation, unused_arguments in executed_git_invocations(command)
+        if operation in _DELIVERY_OPERATIONS
+    ))

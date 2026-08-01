@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import re
 
+from ..foundation.git_execution import actual_command_records
 from ..foundation.source_paths import normalize_path
 
 
@@ -74,33 +75,47 @@ def hits_path(intent, pattern):
     )
 
 
-def recursive_delete_targets(intent):
-    targets = []
-    for segment in re.split(
-            r"&&|\|\||[;\n]", intent.subject):
-        if not (
-            re.search(r"\brm\s+-\S*r", segment, re.I)
-            or re.search(r"\b(rd|rmdir)\s+/s", segment, re.I)
-        ):
-            continue
-        destructive = {
-            "/",
-            "~",
-            "*",
-            ".",
-            "..",
-            "$home",
-            "%userprofile%",
-        }
-        for token in re.split(r"""[\s'"]+""", segment):
-            lowered = token.lower()
-            if (
-                token
-                and not token.startswith("-")
-                and (
-                    lowered in destructive
-                    or re.match(r"^[a-z]:[\\/]*$", lowered)
+def _recursive_delete(record):
+    executable = re.split(r"[\\/]", record.executable)[-1].casefold()
+    if executable == "rm":
+        return any(
+                argument == "--recursive"
+                or (
+                    argument.startswith("-")
+                    and not argument.startswith("--")
+                    and argument != "--"
+                    and "r" in argument.casefold()[1:]
                 )
-            ):
-                targets.append(token)
-    return tuple(targets)
+            for argument in record.arguments
+        )
+    if executable in {"rd", "rmdir", "rd.exe", "rmdir.exe"}:
+        return any(
+            argument.casefold() == "/s" for argument in record.arguments)
+    return False
+
+
+def _dangerous_delete_target(token):
+    lowered = token.casefold()
+    return (
+        bool(token)
+        and token != "--"
+        and not token.startswith("-")
+        and lowered not in {"/s", "/q"}
+        and (
+            lowered in {
+                "/", "~", "*", ".", "..", "$home", "%userprofile%",
+            }
+            or bool(re.fullmatch(r"[a-z]:[\\/]*", lowered))
+        )
+    )
+
+
+def recursive_delete_targets(intent):
+    """Return dangerous roots only from commands that actually execute."""
+    return tuple(
+        normalize_path(token)
+        for record in actual_command_records(intent.subject)
+        if _recursive_delete(record)
+        for token in record.arguments
+        if _dangerous_delete_target(token)
+    )

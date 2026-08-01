@@ -7,8 +7,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 
 TESTS = os.path.abspath(os.path.dirname(__file__))
@@ -28,6 +30,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     FlowState,
     Phase,
 )
+from mae_flow_core.state_store import ProjectStateLock  # noqa: E402
 
 
 class LeanHookAdapterTests(unittest.TestCase):
@@ -131,6 +134,123 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertLess(len(text), 1800)
         self.assertEqual(b"", second.stdout)
 
+    def test_session_marker_falls_back_from_unavailable_primary(self):
+        state = self.write_state()
+        primary_file = os.path.join(self.root, "occupied-primary")
+        with open(primary_file, "w", encoding="utf-8") as stream:
+            stream.write("not a directory")
+        fallback = os.path.join(
+            self.root, ".mae-flow-work", ".lean-hook-sessions")
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=primary_file,
+            local_marker_root=fallback,
+        )
+        payload = {"session_id": "windows-permission-session"}
+
+        first = adapter.handle("SessionStart", payload)
+        second = adapter.handle("SessionStart", payload)
+
+        self.assertIn("Phase: %s" % state.phase.value, first.stdout)
+        self.assertEqual("", second.stdout)
+        self.assertEqual(1, len(os.listdir(fallback)))
+
+    def test_session_marker_falls_back_from_permission_error(self):
+        state = self.write_state()
+        primary = os.path.join(self.root, "permission-denied-primary")
+        fallback = os.path.join(
+            self.root, ".mae-flow-work", ".lean-hook-sessions")
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=primary,
+            local_marker_root=fallback,
+        )
+        real_makedirs = os.makedirs
+
+        def makedirs(path, *args, **kwargs):
+            if os.path.abspath(path) == os.path.abspath(primary):
+                raise PermissionError("simulated Windows access denial")
+            return real_makedirs(path, *args, **kwargs)
+
+        payload = {"session_id": "permission-error-session"}
+        with mock.patch(
+                "mae_flow_core.adapters.lean_hook.os.makedirs",
+                side_effect=makedirs):
+            first = adapter.handle("SessionStart", payload)
+            second = adapter.handle("SessionStart", payload)
+
+        self.assertIn("Phase: %s" % state.phase.value, first.stdout)
+        self.assertEqual("", second.stdout)
+        self.assertEqual(1, len(os.listdir(fallback)))
+
+    def test_session_summary_stays_quiet_if_both_marker_roots_fail(self):
+        self.write_state()
+        primary = os.path.join(self.root, "occupied-primary")
+        fallback = os.path.join(self.root, "occupied-fallback")
+        for path in (primary, fallback):
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("not a directory")
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=primary,
+            local_marker_root=fallback,
+        )
+
+        first = adapter.handle(
+            "SessionStart", {"session_id": "unwritable-session"})
+        second = adapter.handle(
+            "SessionStart", {"session_id": "unwritable-session"})
+
+        self.assertEqual("", first.stdout)
+        self.assertEqual("", second.stdout)
+
+    def test_missing_session_id_uses_one_stable_cursor_marker(self):
+        self.write_state()
+        adapter = LeanHookAdapter(self.root, marker_root=self.marker_root)
+
+        first = adapter.handle("SessionStart", {})
+        second = adapter.handle("SessionStart", {})
+
+        self.assertIn("Phase: startup", first.stdout)
+        self.assertEqual("", second.stdout)
+        self.assertEqual(1, len(os.listdir(self.marker_root)))
+
+    def test_resume_summary_has_total_budget_and_omission_counts(self):
+        long_text = "长字段" * 400
+        state = FlowState(
+            ticket="REQ-BUDGET",
+            path=DeliveryPath.FULL,
+            phase=Phase.DELIVERY,
+            commit_pace=CommitPace.STAGED,
+            current_cp="CP-FINAL-" + long_text,
+            artifacts=tuple(
+                ("artifact-%02d-%s" % (index, long_text),
+                 "path/%02d/%s" % (index, long_text))
+                for index in range(20)),
+            risks=tuple(
+                "risk-%02d-%s" % (index, long_text)
+                for index in range(20)),
+            capabilities=(CapabilityAttempt(
+                "build-opaque-" + long_text,
+                "source-opaque-" + long_text,
+                "environment-opaque-" + long_text,
+                "returned-opaque-" + long_text,
+                "summary-opaque-" + long_text,
+            ),),
+        )
+        self.write_state(state)
+
+        response = LeanHookAdapter(
+            self.root, marker_root=self.marker_root).handle(
+                "SessionStart", {"session_id": "budget-session"})
+
+        self.assertLessEqual(len(response.stdout), 1200)
+        self.assertIn("Phase: delivery", response.stdout)
+        self.assertIn("CP: CP-FINAL-", response.stdout)
+        self.assertEqual(2, response.stdout.count("另有 18 项"))
+        self.assertIn("Last capability: build-opaque-", response.stdout)
+        self.assertIn("outcome=returned-opaque-", response.stdout)
+
     def test_prompt_is_recorded_raw_without_ack_or_choice_validation(self):
         self.write_state()
         payload = {
@@ -208,6 +328,102 @@ class LeanHookAdapterTests(unittest.TestCase):
         )
         self.assertEqual(0, response.exit_code)
         self.assertEqual([("UserPromptSubmit", False, True)], observed)
+
+    def test_exit_falls_back_to_snapshot_pointer_when_state_move_fails(self):
+        original = b'{"engine":"lean-v1","partial":"bytes"}'
+        with open(self.state_path, "wb") as stream:
+            stream.write(original)
+
+        def fail_move(unused_source, unused_target):
+            raise PermissionError("Windows scanner holds state path")
+
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=self.marker_root,
+            move_state=fail_move,
+        )
+        response = adapter.handle(
+            "UserPromptSubmit", {"prompt": "退出 mae-flow"})
+
+        self.assertEqual(0, response.exit_code, response.stderr)
+        self.assertTrue(os.path.isfile(self.state_path))
+        with open(self.pointer_path, encoding="utf-8") as stream:
+            pointer = json.load(stream)
+        snapshot = os.path.join(self.root, *pointer["snapshot"].split("/"))
+        with open(snapshot, "rb") as stream:
+            self.assertEqual(original, stream.read())
+        resumed = adapter.handle(
+            "SessionStart", {"session_id": "after-exit"})
+        self.assertEqual("", resumed.stdout)
+        with open(self.events_path, encoding="utf-8") as stream:
+            captured_before = json.load(stream)
+        adapter.handle("UserPromptSubmit", {"prompt": "普通开发继续"})
+        with open(self.events_path, encoding="utf-8") as stream:
+            self.assertEqual(captured_before, json.load(stream))
+
+    def test_exit_does_not_wait_twice_when_project_lock_is_held(self):
+        original = b"corrupt active bytes"
+        with open(self.state_path, "wb") as stream:
+            stream.write(original)
+        adapter = LeanHookAdapter(self.root, marker_root=self.marker_root)
+
+        started = time.monotonic()
+        with ProjectStateLock(self.root):
+            response = adapter.handle(
+                "UserPromptSubmit", {"prompt": "退出 mae-flow"})
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(0, response.exit_code, response.stderr)
+        self.assertLess(elapsed, 0.5)
+        self.assertTrue(os.path.isfile(self.state_path))
+        with open(self.pointer_path, encoding="utf-8") as stream:
+            pointer = json.load(stream)
+        with open(
+                os.path.join(self.root, *pointer["snapshot"].split("/")),
+                "rb") as stream:
+            self.assertEqual(original, stream.read())
+
+    def test_failed_snapshot_release_returns_two_without_audit(self):
+        self.write_state()
+        audited = []
+
+        def fail_snapshot(unused_path, unused_data):
+            raise OSError("snapshot directory is unavailable")
+
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=self.marker_root,
+            snapshot_writer=fail_snapshot,
+            event_sink=lambda event, payload: audited.append((event, payload)),
+        )
+        with ProjectStateLock(self.root):
+            response = adapter.handle(
+                "UserPromptSubmit", {"prompt": "退出 mae-flow"})
+
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("exit", response.stderr.casefold())
+        self.assertTrue(os.path.isfile(self.state_path))
+        self.assertFalse(os.path.exists(self.pointer_path))
+        self.assertEqual([], audited)
+
+    def test_failed_pointer_release_returns_two_without_audit(self):
+        self.write_state()
+        audited = []
+
+        def fail_pointer(unused_path, unused_data):
+            raise OSError("pointer cannot be replaced")
+
+        response = LeanHookAdapter(
+            self.root,
+            marker_root=self.marker_root,
+            pointer_writer=fail_pointer,
+            event_sink=lambda event, payload: audited.append((event, payload)),
+        ).handle("UserPromptSubmit", {"prompt": "退出 mae-flow"})
+
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("exit", response.stderr.casefold())
+        self.assertFalse(os.path.exists(self.pointer_path))
+        self.assertEqual([], audited)
 
     def test_unambiguous_natural_exit_variants_release_immediately(self):
         prompts = (

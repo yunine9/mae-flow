@@ -4,7 +4,10 @@ from dataclasses import dataclass
 import re
 import shlex
 
-from .git_execution import executed_git_delivery_operations
+from .git_execution import (
+    executed_git_delivery_operations,
+    executed_git_invocations,
+)
 from .git_shell import (
     GIT_GLOBAL_VALUE_OPTIONS,
     _git_invocation_records,
@@ -391,9 +394,9 @@ def git_commit_intent(command):
 
 
 def git_delivery_intents(command):
-    """Return ordered add/commit/push intents from the shared shell parser."""
+    """Return actual add/commit/push intents in shell execution order."""
     intents = []
-    for operation, arguments in git_invocations(command):
+    for operation, arguments in executed_git_invocations(command):
         if operation not in ("add", "commit", "push"):
             continue
         opaque = _has_opaque_pathspec(arguments)

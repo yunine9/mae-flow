@@ -14,6 +14,7 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core.guard import (  # noqa: E402
     DeliveryManifest,
+    ManifestComparison,
     authorize_delivery,
     compare_staged,
 )
@@ -70,6 +71,49 @@ class DeliveryManifestTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     DeliveryManifest.from_paths([path])
 
+    def test_rejects_windows_drive_relative_paths_on_every_host(self):
+        invalid_paths = (
+            "C:foo",
+            "C:..\\outside.txt",
+            "C:.\\inside.txt",
+            "C:",
+        )
+        for path in invalid_paths:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "drive"):
+                    DeliveryManifest.from_paths([path])
+
+        manifest = DeliveryManifest.from_paths(
+            ["C:\\Repo\\Src\\A.cpp"],
+            repository_root="c:\\repo",
+        )
+        self.assertEqual(("Src/A.cpp",), manifest.files)
+
+        unc_manifest = DeliveryManifest.from_paths(
+            ["\\\\Server\\Share\\Src\\A.cpp"],
+            repository_root="\\\\server\\share",
+        )
+        self.assertEqual(("Src/A.cpp",), unc_manifest.files)
+
+    def test_rejects_unordered_path_collections_at_every_entry_point(self):
+        unordered = (
+            {"src/a.cpp"},
+            frozenset(("src/a.cpp",)),
+            {"src/a.cpp": True},
+        )
+        for paths in unordered:
+            with self.subTest(kind=type(paths).__name__):
+                with self.assertRaisesRegex(ValueError, "ordered"):
+                    DeliveryManifest.from_paths(paths)
+                with self.assertRaisesRegex(ValueError, "ordered"):
+                    DeliveryManifest.from_paths(
+                        ["src/a.cpp"], adopted_dirty=paths)
+                with self.assertRaisesRegex(ValueError, "ordered"):
+                    compare_staged(
+                        DeliveryManifest.from_paths(["src/a.cpp"]), paths)
+                with self.assertRaisesRegex(ValueError, "ordered"):
+                    ManifestComparison(False, paths, ())
+
     def test_rejects_existing_directories_and_outside_absolute_paths(self):
         with tempfile.TemporaryDirectory() as parent:
             root = os.path.join(parent, "repo")
@@ -104,6 +148,64 @@ class DeliveryManifestTests(unittest.TestCase):
 
             self.assertEqual(("scripts",), manifest.files)
 
+    def test_absolute_path_rejects_existing_parent_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as parent:
+            root = os.path.join(parent, "repo")
+            outside = os.path.join(parent, "outside")
+            os.makedirs(root)
+            os.makedirs(outside)
+            link = os.path.join(root, "escape")
+            try:
+                os.symlink(outside, link, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest("directory symlinks unavailable: %s" % exc)
+
+            with self.assertRaisesRegex(ValueError, "outside"):
+                DeliveryManifest.from_paths(
+                    [os.path.join(link, "new.cpp")],
+                    repository_root=root,
+                )
+
+    def test_final_file_symlink_and_new_file_under_safe_parents_are_allowed(self):
+        with tempfile.TemporaryDirectory() as parent:
+            root = os.path.join(parent, "repo")
+            source = os.path.join(root, "src")
+            outside = os.path.join(parent, "outside.cpp")
+            outside_directory = os.path.join(parent, "outside-directory")
+            os.makedirs(source)
+            os.makedirs(outside_directory)
+            with open(outside, "w", encoding="utf-8") as stream:
+                stream.write("outside target")
+            final_link = os.path.join(root, "tracked-link.cpp")
+            final_directory_link = os.path.join(root, "tracked-directory-link")
+            try:
+                os.symlink(outside, final_link)
+                os.symlink(
+                    outside_directory,
+                    final_directory_link,
+                    target_is_directory=True,
+                )
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest("file symlinks unavailable: %s" % exc)
+
+            manifest = DeliveryManifest.from_paths(
+                [
+                    final_link,
+                    final_directory_link,
+                    os.path.join(source, "new.cpp"),
+                ],
+                repository_root=root,
+            )
+
+            self.assertEqual(
+                (
+                    "tracked-link.cpp",
+                    "tracked-directory-link",
+                    "src/new.cpp",
+                ),
+                manifest.files,
+            )
+
     @unittest.skipIf(os.name == "nt", "Windows absolute paths ignore case")
     def test_posix_absolute_repository_membership_is_case_sensitive(self):
         with self.assertRaisesRegex(ValueError, "outside"):
@@ -129,6 +231,19 @@ class DeliveryManifestTests(unittest.TestCase):
             manifest.files = ()
         with self.assertRaises((AttributeError, TypeError)):
             comparison.matches = False
+
+    def test_comparison_cannot_retain_caller_owned_mutable_collections(self):
+        missing = ["src/missing.cpp"]
+        extra = ["src/extra.cpp"]
+
+        comparison = ManifestComparison(False, missing, extra)
+        missing.append("src/later.cpp")
+        extra.clear()
+
+        self.assertEqual(("src/missing.cpp",), comparison.missing)
+        self.assertEqual(("src/extra.cpp",), comparison.extra)
+        with self.assertRaisesRegex(ValueError, "strings"):
+            ManifestComparison(False, [["src/mutable.cpp"]], ())
 
     def test_direct_construction_cannot_retain_mutable_path_collections(self):
         files = ["Src\\A.cpp"]

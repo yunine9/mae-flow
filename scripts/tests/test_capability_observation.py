@@ -150,6 +150,28 @@ class CapabilityRegistryTests(unittest.TestCase):
 
         self.assertIsNone(matched)
 
+    def test_known_and_unknown_identity_fields_fail_open_but_same_is_valid(self):
+        registry = load_capability_registry("/missing")
+
+        unknown = match_capability({
+            "tool_name": "Skill",
+            "tool_input": {
+                "skill": "build-fix",
+                "name": "unknown-skill",
+            },
+        }, registry)
+        same = match_capability({
+            "tool_name": "Skill",
+            "tool_input": {
+                "skill": "build-fix",
+                "name": "build-fix",
+            },
+        }, registry)
+
+        self.assertIsNone(unknown)
+        self.assertEqual(("build", "build-fix"), (
+            same.kind, same.identity))
+
     def test_invalid_optional_config_fails_open_to_defaults(self):
         with tempfile.TemporaryDirectory() as root:
             with open(

@@ -84,17 +84,21 @@ DEFAULT_CAPABILITY_REGISTRY = (
 
 def _selector_matches(selector, tool_input):
     values = dict(selector.values)
-    matches = []
-    for field in selector.identity_fields:
-        identity = tool_input.get(field)
-        if isinstance(identity, str) and identity in values:
-            matches.append(CapabilityMatch(
-                values[identity], selector.tool_name, field, identity))
-    distinct = {
-        (match.kind, match.identity)
-        for match in matches
-    }
-    return matches[0] if len(distinct) == 1 else None
+    supplied = tuple(
+        (field, tool_input[field])
+        for field in selector.identity_fields
+        if field in tool_input
+    )
+    if not supplied:
+        return None
+    identity = supplied[0][1]
+    if (
+            not isinstance(identity, str)
+            or identity not in values
+            or any(value != identity for _field, value in supplied[1:])):
+        return None
+    return CapabilityMatch(
+        values[identity], selector.tool_name, supplied[0][0], identity)
 
 
 def match_capability(payload, registry):

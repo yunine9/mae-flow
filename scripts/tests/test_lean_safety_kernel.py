@@ -92,6 +92,10 @@ class LeanSafetyKernelFixtureTest(unittest.TestCase):
             "C:\\work\\repo\\.tmp\\task-7",
             windows_case["context"]["task_owned_temp_dir"],
         )
+        self.assertEqual(
+            ["C:\\work\\repo\\src\\a.cpp"],
+            windows_case["context"]["authorized_manifest"]["files"],
+        )
 
 
 if __name__ == "__main__":

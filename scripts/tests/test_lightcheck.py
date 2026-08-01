@@ -348,6 +348,30 @@ class LightCheckTests(unittest.TestCase):
             [item["literal"] for item in self.magic_findings(result)],
             ["10"], result)
 
+    def test_multiline_python_named_constant_masks_assignment_numbers(self):
+        source = (
+            "RETRY_WINDOW = (\n"
+            "    BASE_LIMIT * 5 * 100\n"
+            ")\n"
+            "def retry(value):\n"
+            "    return value * 10\n")
+        result = self.analyze("constants.py", source)
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["10"], result)
+
+    def test_multiline_python_lowercase_initializer_is_not_a_named_constant(self):
+        source = (
+            "retry_window = (\n"
+            "    base_limit * 5 * 100\n"
+            ")\n"
+            "def retry(value):\n"
+            "    return value * 10\n")
+        result = self.analyze("variables.py", source)
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["5", "100", "10"], result)
+
     def test_enum_members_are_extraction_not_magic_number_usage(self):
         fixtures = (
             ("state.cpp", "enum class State { Ready = 1, Done = 2 };\n"),

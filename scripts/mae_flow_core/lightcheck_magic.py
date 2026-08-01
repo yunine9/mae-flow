@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import tokenize
 from dataclasses import dataclass
+from io import StringIO
 
 from .lightcheck_source import (
     _classified_lines, _normalized, _parse_python_tree, ast,
@@ -37,8 +39,7 @@ _TEST_FILE = re.compile(
 _CONSTANT_WORD = re.compile(
     r"\b(?:const|constexpr|readonly)\b|\bstatic\s+final\b")
 _DEFINE = re.compile(r"^\s*#\s*define\s+[A-Za-z_]\w*(?:\s|$)")
-_PYTHON_CONSTANT = re.compile(
-    r"^\s*[A-Z][A-Z0-9_]*(?:\s*:\s*[^=]+)?\s*=(?!=)")
+_PYTHON_CONSTANT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _DIRECTIVE = re.compile(
     r"(?i)^\s*(?:todo|fixme|xxx|hack|noqa|nosonar|nolint|"
     r"lint(?:[-_: ]|$)|eslint(?:[-_: ]|$)|pylint(?:[-_: ]|$)|"
@@ -239,23 +240,21 @@ def _statement_start(code, position):
     ) + 1
 
 
-def _constant_initializer_start(path, code, offset=0):
+def _constant_initializer_start(code, offset=0):
     for assignment in _ASSIGNMENT.finditer(code, offset):
         start = _statement_start(code, assignment.start())
         declaration = code[start:assignment.start()]
-        if path.lower().endswith((".py", ".pyi")):
-            if _PYTHON_CONSTANT.search(declaration + "="):
-                return assignment.end()
-        elif _CONSTANT_WORD.search(declaration):
+        if _CONSTANT_WORD.search(declaration):
             return assignment.end()
     return None
 
 
 def _constant_initializer_spans(path, classified):
+    if path.lower().endswith((".py", ".pyi")):
+        return {}
     result = {}
     active = False
     remaining = 0
-    is_python = path.lower().endswith((".py", ".pyi"))
     for line in sorted(classified):
         code = classified[line].code
         cursor = 0
@@ -273,7 +272,7 @@ def _constant_initializer_spans(path, classified):
             active = False
             cursor = end + (terminator >= 0)
         while cursor < len(code):
-            initializer = _constant_initializer_start(path, code, cursor)
+            initializer = _constant_initializer_start(code, cursor)
             if initializer is None:
                 break
             terminator = code.find(";", initializer)
@@ -282,9 +281,8 @@ def _constant_initializer_spans(path, classified):
                 cursor = terminator + 1
                 continue
             _add_span(result, line, initializer, len(code))
-            if not is_python:
-                active = True
-                remaining = _MAX_DECLARATION_LINES
+            active = True
+            remaining = _MAX_DECLARATION_LINES
             break
     return result
 
@@ -293,6 +291,64 @@ def _is_masked_number(spans, line, match):
     return any(
         start <= match.start() and match.end() <= end
         for start, end in spans.get(line, ()))
+
+
+def _python_constant_value(node):
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign):
+        targets = (node.target,)
+    else:
+        return None
+    if any(
+            isinstance(target, ast.Name)
+            and _PYTHON_CONSTANT_NAME.fullmatch(target.id)
+            for target in targets):
+        return node.value
+    return None
+
+
+def _inside_node(token, node):
+    start = (node.lineno, node.col_offset)
+    end = (
+        getattr(node, "end_lineno", node.lineno),
+        getattr(node, "end_col_offset", node.col_offset),
+    )
+    return token.start >= start and token.end <= end
+
+
+def _python_constant_number_tokens(source):
+    tree = _parse_python_tree(source)
+    if tree is None:
+        return None
+    values = [
+        value for value in (
+            _python_constant_value(node) for node in ast.walk(tree))
+        if value is not None
+    ]
+    try:
+        tokens = list(tokenize.generate_tokens(StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    result = {}
+    for token in tokens:
+        if token.type == tokenize.NUMBER:
+            result.setdefault(token.start[0], []).append((
+                token.string,
+                any(_inside_node(token, value) for value in values),
+            ))
+    return result
+
+
+def _python_number_is_masked(tokens, indices, line, literal):
+    items = tokens.get(line, ())
+    index = indices.get(line, 0)
+    while index < len(items) and items[index][0] != literal:
+        index += 1
+    if index >= len(items):
+        return False
+    indices[line] = index + 1
+    return items[index][1]
 
 
 def _has_explanation(comment):
@@ -314,6 +370,12 @@ def find_magic_numbers(path, source, changed_lines):
     if enum_spans is None:
         return None
     constant_spans = _constant_initializer_spans(path, classified)
+    python_tokens = {}
+    if path.lower().endswith((".py", ".pyi")):
+        python_tokens = _python_constant_number_tokens(source)
+        if python_tokens is None:
+            return None
+    python_indices = {}
     findings = []
     for line in sorted(set(changed_lines)):
         facts = classified.get(line)
@@ -322,11 +384,15 @@ def find_magic_numbers(path, source, changed_lines):
         if _has_explanation(facts.comment):
             continue
         for match in _NUMBER.finditer(facts.code):
+            literal = match.group(0)
+            python_masked = _python_number_is_masked(
+                python_tokens, python_indices, line, literal)
             if _is_enum_member_number(enum_spans, line, match):
                 continue
             if _is_masked_number(constant_spans, line, match):
                 continue
-            literal = match.group(0)
+            if python_masked:
+                continue
             findings.append(MagicNumberFinding(
                 line=line,
                 literal=literal,

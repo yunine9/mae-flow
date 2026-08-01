@@ -11,7 +11,6 @@ _BUSINESS_FILE = "moonlight.business_file"
 _ALLOW_COMMIT = "moonlight.allow_commit"
 _ALLOW_PUSH = "moonlight.allow_push"
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
-_RISK_RESOLUTION = "risk.resolution"
 _AUTHORIZATION_KEYS = {
     _ENABLED,
     _BUSINESS_FILE,
@@ -231,55 +230,6 @@ def _safe_stop(state, requested, risk):
     return _policy_result(stopped, requested, True, True, risk)
 
 
-def _resolve_risk(state, requested, decision):
-    identity = decision.decision_key
-    resolution = decision.decision_value
-    matches = tuple(
-        index for index, risk in enumerate(state.risks)
-        if isinstance(identity, str) and risk == identity)
-    if not isinstance(identity, str) or not identity or len(matches) != 1:
-        return _policy_result(
-            state,
-            requested,
-            True,
-            True,
-            "Risk resolution requires one exact, currently stored risk "
-            "identity.",
-        )
-    if not isinstance(resolution, str) or not resolution.strip():
-        return _policy_result(
-            state,
-            requested,
-            True,
-            True,
-            "Risk resolution requires a non-empty natural-language decision.",
-        )
-
-    index = matches[0]
-    remaining = state.risks[:index] + state.risks[index + 1:]
-    audit = "%s Resolved risk: %s" % (resolution.strip(), identity)
-    updated = replace(
-        state,
-        risks=remaining,
-        decisions=state.decisions + ((_RISK_RESOLUTION, audit),),
-    )
-    if remaining:
-        return _policy_result(
-            updated,
-            requested,
-            True,
-            True,
-            "The identified risk was resolved; other risks remain.",
-        )
-    return _policy_result(
-        updated,
-        requested,
-        False,
-        False,
-        "The identified risk was resolved by a natural-language decision.",
-    )
-
-
 def apply_moonlight_policy(state, decision):
     """Apply authorization or one semantic event without adding a workflow.
 
@@ -337,7 +287,14 @@ def apply_moonlight_policy(state, decision):
         )
 
     if kind == "risk-resolved":
-        return _resolve_risk(state, requested, decision)
+        normal = advance_flow(state, decision)
+        return _policy_result(
+            normal.state,
+            requested,
+            normal.needs_user,
+            normal.needs_user,
+            normal.reason,
+        )
 
     if authorization_issue:
         if kind in {"commit-ready", "final-push", "delivery-completed"}:

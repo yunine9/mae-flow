@@ -217,6 +217,46 @@ class LeanMigrationCliTests(unittest.TestCase):
         self.assertIn("natural-language", second.stdout)
         self.assertNotIn("迁移完成", second.stdout)
 
+    def test_migrated_ambiguity_must_be_resolved_before_delivery(self):
+        from mae_flow_core.orchestration import (  # noqa: E402
+            AdvanceRequest,
+            FlowState,
+            Phase,
+            advance_flow,
+        )
+
+        self.write_state(legacy(current="verify_future_tool"))
+        migrated = self.run_cli()
+        self.assertEqual(0, migrated.returncode, migrated.stderr)
+        state = FlowState.from_dict(self.read_state())
+        migration_risk = state.risks[-1]
+
+        blocked = advance_flow(
+            state, AdvanceRequest("quality-complete"))
+        resolved = advance_flow(blocked.state, AdvanceRequest(
+            "risk-resolved",
+            decision_key=migration_risk,
+            decision_value="用户确认该旧步骤属于质量阶段，可以进入交付。",
+        ))
+        advanced = advance_flow(
+            resolved.state, AdvanceRequest("quality-complete"))
+
+        self.assertIs(state, blocked.state)
+        self.assertEqual(Phase.QUALITY, blocked.state.phase)
+        self.assertTrue(blocked.needs_user)
+        self.assertEqual((), resolved.state.risks)
+        self.assertFalse(resolved.needs_user)
+        self.assertIn(
+            (
+                "risk.resolution",
+                "用户确认该旧步骤属于质量阶段，可以进入交付。 "
+                "Resolved risk: %s" % migration_risk,
+            ),
+            resolved.state.decisions,
+        )
+        self.assertEqual(Phase.DELIVERY, advanced.state.phase)
+        self.assertFalse(advanced.needs_user)
+
     def test_existing_schema_v3_current_is_read_only(self):
         from mae_flow_core.orchestration import (  # noqa: E402
             CommitPace,

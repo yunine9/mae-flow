@@ -150,6 +150,8 @@ _NON_BLOCKING_EVENTS = {
     "reviewer-clear": "The reviewer found no user-level tradeoff.",
 }
 
+_RISK_RESOLUTION = "risk.resolution"
+
 
 def _with_decision(state, request, default_key, default_value):
     key = request.decision_key or default_key
@@ -179,6 +181,47 @@ def _user_stops(path):
     return _FOCUSED_USER_STOPS
 
 
+def _resolve_risk(state, request):
+    identity = request.decision_key
+    resolution = request.decision_value
+    matches = tuple(
+        index for index, risk in enumerate(state.risks)
+        if isinstance(identity, str) and identity and risk == identity)
+    if len(matches) != 1:
+        return AdvanceResult(
+            state,
+            True,
+            "Risk resolution requires one exact, currently stored risk "
+            "identity.",
+        )
+    if not isinstance(resolution, str) or not resolution.strip():
+        return AdvanceResult(
+            state,
+            True,
+            "Risk resolution requires a non-empty natural-language decision.",
+        )
+
+    index = matches[0]
+    remaining = state.risks[:index] + state.risks[index + 1:]
+    audit = "%s Resolved risk: %s" % (resolution.strip(), identity)
+    updated = replace(
+        state,
+        risks=remaining,
+        decisions=state.decisions + ((_RISK_RESOLUTION, audit),),
+    )
+    if remaining:
+        return AdvanceResult(
+            updated,
+            True,
+            "The identified risk was resolved; other risks remain.",
+        )
+    return AdvanceResult(
+        updated,
+        False,
+        "The identified risk was resolved by a natural-language decision.",
+    )
+
+
 def advance_flow(state, request):
     """Apply one semantic event without performing orchestration side effects."""
     if not isinstance(state, FlowState):
@@ -196,6 +239,9 @@ def advance_flow(state, request):
             "The flow exited unconditionally at its current phase.",
         )
 
+    if kind == "risk-resolved":
+        return _resolve_risk(state, request)
+
     if state.status != "active":
         return AdvanceResult(
             state, False,
@@ -207,6 +253,13 @@ def advance_flow(state, request):
             return AdvanceResult(
                 state, False,
                 "Delivery completion applies only in the Delivery phase.",
+            )
+        if state.risks:
+            return AdvanceResult(
+                state,
+                True,
+                "Delivery cannot complete while workflow risks remain "
+                "unresolved.",
             )
         if not any(
                 key == "delivery.confirmation"
@@ -296,6 +349,16 @@ def advance_flow(state, request):
         return AdvanceResult(
             state, False,
             "The required reviewer has not completed this phase.",
+        )
+
+    if (state.phase == Phase.QUALITY
+            and kind == "quality-complete"
+            and state.risks):
+        return AdvanceResult(
+            state,
+            True,
+            "Quality cannot advance to Delivery while workflow risks remain "
+            "unresolved.",
         )
 
     target = _transition_table(state.path).get((state.phase, kind))

@@ -5,6 +5,7 @@
 import os
 import sys
 import unittest
+from dataclasses import replace
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -341,6 +342,103 @@ class FocusedTransitionTests(unittest.TestCase):
 
 
 class SemanticGuardTests(unittest.TestCase):
+    def test_exact_risks_resolve_one_at_a_time_for_full_and_focused(self):
+        first_risk = "The migrated phase has two plausible meanings."
+        second_risk = "The delivery scope still needs confirmation."
+        for path in (DeliveryPath.FULL, DeliveryPath.FOCUSED):
+            with self.subTest(path=path):
+                state = replace(
+                    flow(path=path, phase=Phase.QUALITY),
+                    risks=(first_risk, second_risk),
+                )
+
+                first = advance_flow(state, AdvanceRequest(
+                    "risk-resolved",
+                    decision_key=first_risk,
+                    decision_value="用户确认按兼容语义继续，并保留第二项待决。",
+                ))
+                second = advance_flow(first.state, AdvanceRequest(
+                    "risk-resolved",
+                    decision_key=second_risk,
+                    decision_value="  用户逐文件确认了最终交付范围。  ",
+                ))
+
+                self.assertEqual((second_risk,), first.state.risks)
+                self.assertTrue(first.needs_user)
+                self.assertEqual((), second.state.risks)
+                self.assertFalse(second.needs_user)
+                self.assertTrue(any(
+                    key == "risk.resolution"
+                    and first_risk in value
+                    and "用户确认按兼容语义继续" in value
+                    for key, value in first.state.decisions
+                ))
+                self.assertTrue(any(
+                    key == "risk.resolution"
+                    and value.startswith("用户逐文件确认")
+                    for key, value in second.state.decisions
+                ))
+
+    def test_invalid_risk_resolution_never_mutates_general_flow(self):
+        risk = "The migrated delivery boundary is ambiguous."
+        cases = (
+            ((risk,), "", "The user omitted the risk identity."),
+            ((risk,), "A different risk.", "The selected risk is stale."),
+            ((risk, risk), risk, "The duplicate risk is ambiguous."),
+            ((risk,), risk, "  \t\r\n"),
+        )
+        for risks, identity, resolution in cases:
+            with self.subTest(risks=risks, identity=identity):
+                state = replace(
+                    flow(phase=Phase.QUALITY), risks=risks)
+
+                result = advance_flow(state, AdvanceRequest(
+                    "risk-resolved",
+                    decision_key=identity,
+                    decision_value=resolution,
+                ))
+
+                self.assertIs(state, result.state)
+                self.assertTrue(result.needs_user)
+                self.assertIn("risk", result.reason.lower())
+
+    def test_unresolved_risk_blocks_quality_to_delivery_for_both_paths(self):
+        for path in (DeliveryPath.FULL, DeliveryPath.FOCUSED):
+            with self.subTest(path=path):
+                state = replace(
+                    flow(path=path, phase=Phase.QUALITY),
+                    risks=("The migration needs a user decision.",),
+                )
+
+                result = advance_flow(
+                    state, AdvanceRequest("quality-complete"))
+
+                self.assertIs(state, result.state)
+                self.assertEqual(Phase.QUALITY, result.state.phase)
+                self.assertTrue(result.needs_user)
+                self.assertIn("risk", result.reason.lower())
+
+    def test_unresolved_risk_prevents_delivery_completion(self):
+        authorized = advance_flow(
+            flow(phase=Phase.DELIVERY),
+            AdvanceRequest("delivery-confirmed"),
+        ).state
+        state = replace(
+            authorized, risks=("The final remote target is uncertain.",))
+
+        result = advance_flow(
+            state,
+            AdvanceRequest(
+                "delivery-completed",
+                decision_value="The adapter observed a successful push.",
+            ),
+        )
+
+        self.assertIs(state, result.state)
+        self.assertEqual("active", result.state.status)
+        self.assertTrue(result.needs_user)
+        self.assertIn("risk", result.reason.lower())
+
     def test_only_material_exception_categories_stop_for_the_user(self):
         stop_events = (
             "ambiguity",
@@ -451,6 +549,18 @@ class TerminalTransitionTests(unittest.TestCase):
                     self.assertEqual("exited", result.state.status)
                     self.assertEqual(phase, result.state.phase)
                     self.assertFalse(result.needs_user)
+
+    def test_exit_remains_unconditional_with_unresolved_risks(self):
+        state = replace(
+            flow(phase=Phase.QUALITY),
+            risks=("The migration still needs a user decision.",),
+        )
+
+        result = advance_flow(state, AdvanceRequest("exit"))
+
+        self.assertEqual("exited", result.state.status)
+        self.assertEqual(state.risks, result.state.risks)
+        self.assertFalse(result.needs_user)
 
     def test_complete_alias_only_finishes_authorized_delivery(self):
         for phase in Phase:

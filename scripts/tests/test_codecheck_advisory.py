@@ -151,10 +151,18 @@ class CodeCheckTargetTests(unittest.TestCase):
         )
         self.assertEqual((), target.functions)
 
-    def test_test_detection_has_path_boundaries(self):
+    def test_default_test_detection_requires_a_real_test_name_boundary(self):
         target = build_codecheck_target(
             changed_lines={
                 "src/ContestDataService.java": {3},
+                "src/Contest.java": {3},
+                "src/Protest.cs": {3},
+                "src/Latest.kt": {3},
+                "src/FooTest.java": {3},
+                "src/FooTests.cs": {3},
+                "src/UpperTest.JAVA": {3},
+                "src/UpperTests.CS": {3},
+                "tests/Foo.java": {3},
                 "src/test/Fixture.java": {3},
                 "lib/spec/helper.ts": {3},
                 "src/service.spec.ts": {3},
@@ -163,19 +171,61 @@ class CodeCheckTargetTests(unittest.TestCase):
             function_ranges={},
         )
 
-        self.assertEqual(("src/ContestDataService.java",), target.files)
+        self.assertEqual(
+            (
+                "src/ContestDataService.java",
+                "src/Contest.java",
+                "src/Protest.cs",
+                "src/Latest.kt",
+            ),
+            target.files,
+        )
 
     def test_custom_test_classifier_can_exclude_private_test_roots(self):
         target = build_codecheck_target(
             changed_lines={
                 "product/main.cpp": {2},
                 "verification/main.cpp": {2},
+                "product/service.spec.ts": {2},
             },
             function_ranges={},
             is_test_path=lambda path: path.startswith("verification/"),
         )
 
-        self.assertEqual(("product/main.cpp",), target.files)
+        self.assertEqual(
+            ("product/main.cpp", "product/service.spec.ts"),
+            target.files,
+            "a supplied is_test_path predicate is authoritative",
+        )
+
+    def test_casefold_range_fallback_requires_unique_changed_path_identity(self):
+        changed = {
+            "src/Foo.cpp": {4},
+            "src/foo.cpp": {4},
+        }
+        exact = build_codecheck_target(
+            changed_lines=changed,
+            function_ranges={
+                "src/Foo.cpp": (
+                    {"start": 1, "end": 8, "name": "upper"},
+                ),
+            },
+        )
+        fallback_only = build_codecheck_target(
+            changed_lines=changed,
+            function_ranges={
+                "SRC/FOO.CPP": (
+                    {"start": 1, "end": 8, "name": "ambiguous"},
+                ),
+            },
+        )
+
+        self.assertEqual(
+            (("src/Foo.cpp", "upper"),),
+            exact.functions,
+            "the missing exact lowercase range must remain file-level",
+        )
+        self.assertEqual((), fallback_only.functions)
 
     def test_target_builder_rejects_raw_tool_output_instead_of_parsing_it(self):
         with self.assertRaises(TypeError):

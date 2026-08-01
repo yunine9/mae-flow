@@ -21,8 +21,10 @@ _DEFAULT_TEST_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
     r"(_test|\.test|\.spec)\."
     r"(c|cc|cpp|cxx|h|hh|hpp|hxx|inl|ipp|tpp|py|go|rs|"
     r"js|jsx|cjs|mjs|ts|tsx|cts|mts)$",
-    r"Tests?\.(c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$",
 ))
+_CAMEL_CASE_TEST_NAME = re.compile(
+    r"(^|/)[^/]*Tests?\."
+    r"(?i:c|cc|cpp|cxx|h|hh|hpp|hxx|java|kt|cs)$")
 
 
 def _path(value):
@@ -108,34 +110,56 @@ class CodeCheckDisposition:
 
 
 def _default_test_path(path):
-    return any(pattern.search(path) for pattern in _DEFAULT_TEST_PATTERNS)
+    return bool(
+        _CAMEL_CASE_TEST_NAME.search(path)
+        or any(pattern.search(path) for pattern in _DEFAULT_TEST_PATTERNS)
+    )
 
 
 def _is_test(path, classifier):
-    if _default_test_path(path):
-        return True
     if classifier is None:
-        return False
+        return _default_test_path(path)
     try:
         return bool(classifier(path))
     except Exception:
         return False
 
 
-def _normalized_mapping_value(mapping, path):
+def _mapping_entries(mapping):
     if mapping is None:
-        return None
-    matches = []
-    wanted = path.casefold()
+        return ()
+    entries = []
     for raw_path, value in mapping.items():
         try:
             normalized = _path(raw_path)
         except ValueError:
             continue
-        if normalized == path:
-            return value
-        if normalized.casefold() == wanted:
-            matches.append(value)
+        entries.append((normalized, value))
+    return tuple(entries)
+
+
+def _normalized_mapping_value(mapping, path, changed_paths):
+    entries = _mapping_entries(mapping)
+    exact = [value for normalized, value in entries if normalized == path]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
+    wanted = path.casefold()
+    changed_identities = {
+        candidate for candidate in changed_paths
+        if candidate.casefold() == wanted
+    }
+    matches = [
+        value for normalized, value in entries
+        if normalized.casefold() == wanted
+    ]
+    range_identities = {
+        normalized for normalized, _value in entries
+        if normalized.casefold() == wanted
+    }
+    if len(changed_identities) != 1 or len(range_identities) != 1:
+        return None
     return matches[0] if len(matches) == 1 else None
 
 
@@ -227,17 +251,22 @@ def build_codecheck_target(
         raise TypeError("function_ranges must be a path-to-ranges mapping")
     if is_test_path is not None and not callable(is_test_path):
         raise TypeError("is_test_path must be callable")
+    changed_items = tuple(
+        (_path(raw_path), raw_lines)
+        for raw_path, raw_lines in changed_lines.items()
+    )
+    changed_paths = tuple(path for path, _lines in changed_items)
     files = []
     functions = []
     seen = set()
-    for raw_path, raw_lines in changed_lines.items():
-        path = _path(raw_path)
+    for path, raw_lines in changed_items:
         if path in seen or _is_test(path, is_test_path):
             continue
         seen.add(path)
         files.append(path)
         changed = _changed_line_numbers(raw_lines)
-        ranges = _normalized_mapping_value(function_ranges, path)
+        ranges = _normalized_mapping_value(
+            function_ranges, path, changed_paths)
         functions.extend(_touched_functions(path, changed, ranges))
     return CodeCheckTarget(tuple(files), tuple(functions))
 

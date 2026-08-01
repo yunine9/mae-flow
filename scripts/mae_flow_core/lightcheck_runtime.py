@@ -6,10 +6,11 @@ from .lightcheck_analysis import _ChangedAnalyzer
 
 def analyze_changed(
         root, files, changed_lines, baseline_sources=None,
-        current_sources=None):
+        current_sources=None, magic_changed_lines=None):
     """Analyze current source while reporting only newly triggered rules."""
     analyzer = _ChangedAnalyzer(
-        root, files, changed_lines, baseline_sources or {}, current_sources)
+        root, files, changed_lines, baseline_sources or {}, current_sources,
+        magic_changed_lines)
     return analyzer.run()
 
 
@@ -45,11 +46,13 @@ def _process_context():
 
 
 def _process_arguments(
-        root, files, changed_lines, baseline_sources, current_sources):
+        root, files, changed_lines, baseline_sources, current_sources,
+        magic_changed_lines):
     sources = baseline_sources
     if sources is None:
         sources = {}
-    return root, files, changed_lines, sources, current_sources
+    return (root, files, changed_lines, sources, current_sources,
+            magic_changed_lines)
 
 
 def _await_analysis_result(receiver, process, timeout_seconds):
@@ -75,13 +78,15 @@ def analyze_changed_with_timeout(
     """Run the analyzer in an isolated process; timeout is always advisory."""
     options = options or {}
     current_sources = options.get("current_sources")
+    magic_changed_lines = options.get("magic_changed_lines")
     timeout_seconds = options.get("timeout_seconds", 8)
     context = _process_context()
     receiver, sender = context.Pipe(duplex=False)
     process = context.Process(
         target=_analyze_worker,
         args=(sender, _process_arguments(
-            root, files, changed_lines, baseline_sources, current_sources)),
+            root, files, changed_lines, baseline_sources, current_sources,
+            magic_changed_lines)),
     )
     try:
         process.start()

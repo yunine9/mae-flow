@@ -54,7 +54,7 @@ def _decode_diff_path(value):
     except UnicodeError:
         return ""
 
-def _diff_hunk_range(line):
+def _diff_hunk_range(line, deletion_anchor=True):
     match = re.match(
         r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
     if not match:
@@ -62,14 +62,17 @@ def _diff_hunk_range(line):
     start = int(match.group(1))
     count = int(
         match.group(2) if match.group(2) is not None else "1")
-    return set(range(start, start + max(count, 1)))
+    if count == 0:
+        return {start} if deletion_anchor else set()
+    return set(range(start, start + count))
 
-def _record_changed_hunk(result, current, line):
+def _record_changed_hunk(result, current, line, deletion_anchor=True):
     if current not in result or not line.startswith("@@ "):
         return
-    result[current].update(_diff_hunk_range(line))
+    result[current].update(_diff_hunk_range(line, deletion_anchor))
 
-def _changed_lines_for_diff(diff, files, cached=False):
+def _changed_lines_for_diff(
+        diff, files, cached=False, deletion_anchors=True):
     """批量解析指定 Git diff 的 + 侧变更行，删除 hunk 锚定相邻行。"""
     result = {api.norm(path): set() for path in files}
     current = ""
@@ -77,8 +80,13 @@ def _changed_lines_for_diff(diff, files, cached=False):
         if line.startswith("+++ "):
             current = _diff_header_path(line)
             continue
-        _record_changed_hunk(result, current, line)
+        _record_changed_hunk(
+            result, current, line, deletion_anchors)
     return result
+
+def _content_changed_lines_for_diff(diff, files, cached=False):
+    return _changed_lines_for_diff(
+        diff, files, cached=cached, deletion_anchors=False)
 
 def _changed_lines(st, files):
     """本单每文件的变更行集合(+侧,git diff -U0 解析)——范围过滤的唯一数据源。
@@ -233,11 +241,15 @@ def _available_snapshot_files(code_files, current_sources):
     ]
 
 def _run_lightcheck_analysis(
-        code_files, changed, baseline_sources, current_sources):
+        code_files, changed, baseline_sources, current_sources,
+        magic_changed):
     return analyze_changed_with_timeout(
         os.getcwd(), code_files, changed,
         baseline_sources=baseline_sources,
-        options={"current_sources": current_sources})
+        options={
+            "current_sources": current_sources,
+            "magic_changed_lines": magic_changed,
+        })
 
 def _run_lightcheck_diff(diff, files, scope):
     code_files = _lightcheck_code_files(files, require_worktree=False)
@@ -248,11 +260,12 @@ def _run_lightcheck_diff(diff, files, scope):
         result["report_path"] = _save_lightcheck_result(result, scope)
         return result
     changed = _changed_lines_for_diff(diff, code_files)
+    magic_changed = _content_changed_lines_for_diff(diff, code_files)
     current_sources = _lightcheck_diff_sources(diff, code_files)
     code_files = _available_snapshot_files(code_files, current_sources)
     result = _run_lightcheck_analysis(
         code_files, changed, _git_sources_at(baseline, code_files),
-        current_sources)
+        current_sources, magic_changed)
     result["report_path"] = _save_lightcheck_result(result, scope)
     return result
 
@@ -284,24 +297,28 @@ def _working_lightcheck_inputs(files):
     tracked = {api.norm(path) for path in tracked}
     changed = _changed_lines_for_diff(
         "HEAD", [path for path in files if path in tracked])
+    magic_changed = _content_changed_lines_for_diff(
+        "HEAD", [path for path in files if path in tracked])
     sources = _git_sources_at("HEAD", tracked)
     _add_untracked_lightcheck_inputs(
-        files, tracked, changed, sources)
-    return changed, sources
+        files, tracked, changed, magic_changed, sources)
+    return changed, magic_changed, sources
 
 def _add_untracked_lightcheck_inputs(
-        files, tracked, changed, sources):
+        files, tracked, changed, magic_changed, sources):
     for path in files:
         if path not in tracked:
             changed[path] = _untracked_changed_lines(path)
+            magic_changed[path] = set(changed[path])
             sources[path] = None
 
 def _working_lightcheck_scope(st, candidates=None):
     """Inspect current-flow code dirt while preserving unchanged user dirt."""
     dirty = _working_code_files(st, candidates)
-    changed, sources = _working_lightcheck_inputs(dirty)
+    changed, magic_changed, sources = _working_lightcheck_inputs(dirty)
     result = analyze_changed_with_timeout(
-        os.getcwd(), dirty, changed, baseline_sources=sources)
+        os.getcwd(), dirty, changed, baseline_sources=sources,
+        options={"magic_changed_lines": magic_changed})
     scope = ("提交前：本次提交候选代码"
              if candidates is not None
              else "提交前：本轮当前代码差异（排除未变化的启动前脏文件）")
@@ -344,20 +361,23 @@ def _pending_lightcheck_inputs(working, indexed):
     changed = _changed_lines_for_diff("HEAD", working)
     changed.update(_changed_lines_for_diff(
         "HEAD", indexed, cached=True))
+    magic_changed = _content_changed_lines_for_diff("HEAD", working)
+    magic_changed.update(_content_changed_lines_for_diff(
+        "HEAD", indexed, cached=True))
     current_sources = _git_sources_at(":", indexed)
     current_sources.update(_read_worktree_sources(working))
-    return changed, current_sources
+    return changed, magic_changed, current_sources
 
 def _pending_lightcheck_scope(st, snapshot):
     code_files, working, indexed = _pending_lightcheck_groups(
         st, snapshot)
-    changed, current_sources = _pending_lightcheck_inputs(
+    changed, magic_changed, current_sources = _pending_lightcheck_inputs(
         working, indexed)
     code_files = _available_snapshot_files(
         code_files, current_sources)
     result = _run_lightcheck_analysis(
         code_files, changed, _git_sources_at("HEAD", code_files),
-        current_sources)
+        current_sources, magic_changed)
     result["report_path"] = _save_lightcheck_result(
         result, "提交前：本次提交候选快照")
     return result

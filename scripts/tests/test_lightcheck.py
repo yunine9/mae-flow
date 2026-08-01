@@ -308,6 +308,28 @@ class LightCheckTests(unittest.TestCase):
                 result = self.analyze(path, source)
                 self.assertEqual(self.magic_findings(result), [], result)
 
+    def test_named_constant_expressions_and_object_macros_are_extraction(self):
+        fixtures = (
+            ("limits.cpp", (
+                "constexpr int RETRY_WINDOW = BASE_LIMIT * 100;\n"
+                "#define TIMEOUT_MS (5 * 100)\n")),
+            ("limits.py", "RETRY_WINDOW = BASE_LIMIT * 100\n"),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_named_constant_usage_still_reports_direct_literal(self):
+        source = (
+            "int scale(int value) {\n"
+            "  return RETRY_LIMIT * value * 100;\n"
+            "}\n")
+        result = self.analyze("usage.cpp", source, changed={2})
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["100"], result)
+
     def test_enum_members_are_extraction_not_magic_number_usage(self):
         fixtures = (
             ("state.cpp", "enum class State { Ready = 1, Done = 2 };\n"),
@@ -324,6 +346,23 @@ class LightCheckTests(unittest.TestCase):
                 result = self.analyze(path, source)
                 self.assertEqual(self.magic_findings(result), [], result)
 
+    def test_enum_methods_and_enum_typed_functions_still_scan_logic(self):
+        fixtures = (
+            ("State.java", (
+                "enum State {\n  Ready(1);\n"
+                "  int scale() { return 100; }\n"
+                "  State(int code) {}\n}\n"), 3),
+            ("state.cpp", (
+                "enum State { Ready = 1 };\n"
+                "int scale(enum State state) { return 100; }\n"), 2),
+        )
+        for path, source, line in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source, changed={line})
+                self.assertEqual(
+                    [item["literal"] for item in self.magic_findings(result)],
+                    ["100"], result)
+
     def test_same_line_explanation_accepts_magic_number(self):
         fixtures = (
             ("logic.cpp", (
@@ -332,11 +371,28 @@ class LightCheckTests(unittest.TestCase):
             ("logic.py", (
                 "def scale(value):\n"
                 "    return value * 100  # convert ratio to percent\n")),
+            ("logic-cn.cpp", (
+                "int scale(int value) {\n"
+                "  return value * 100; // 转换为百分比\n}\n")),
         )
         for path, source in fixtures:
             with self.subTest(path=path):
                 result = self.analyze(path, source)
                 self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_directives_and_pure_comment_labels_do_not_explain_numbers(self):
+        comments = ("TODO", "noqa", "NOSONAR", "lint-disable magic-number",
+                    "threshold")
+        for index, comment in enumerate(comments):
+            with self.subTest(comment=comment):
+                source = (
+                    "int scale_%d(int value) {\n" % index
+                    + "  return value * 100; // " + comment + "\n}\n")
+                result = self.analyze(
+                    "comment_%d.cpp" % index, source, changed={2})
+                self.assertEqual(
+                    [item["literal"] for item in self.magic_findings(result)],
+                    ["100"], result)
 
     def test_strings_comments_generated_code_and_test_data_are_not_magic(self):
         fixtures = (
@@ -353,6 +409,22 @@ class LightCheckTests(unittest.TestCase):
             with self.subTest(path=path):
                 result = self.analyze(path, source)
                 self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_fixture_words_inside_production_basenames_are_not_test_data(self):
+        fixtures = (
+            ("ContestDataService.java", (
+                "class ContestDataService {\n"
+                "  int score() { return 100; }\n}\n")),
+            ("FixtureService.cs", (
+                "class FixtureService {\n"
+                "  int Score() { return 100; }\n}\n")),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source, changed={2})
+                self.assertEqual(
+                    [item["literal"] for item in self.magic_findings(result)],
+                    ["100"], result)
 
     def test_magic_numbers_only_scan_changed_lines(self):
         source = (
@@ -638,6 +710,47 @@ class LightCheckTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn("MF-MAGIC-NUMBER", run.stderr)
+
+    def test_deletion_anchor_touches_function_without_scanning_adjacent_magic(self):
+        repo = os.path.join(self.root, "deletion-repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "lightcheck@test.invalid"],
+            cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Light Check"],
+            cwd=repo, check=True)
+        path = "logic.cpp"
+        _write(
+            repo, path,
+            "int calculate(int a, int b, int c, int d, int e, int f) {\n"
+            "  return 100;\n"
+            "  int removed = 1;\n"
+            "}\n")
+        subprocess.run(["git", "add", path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+        _write(
+            repo, path,
+            "int calculate(int a, int b, int c, int d, int e, int f) {\n"
+            "  return 100;\n"
+            "}\n")
+        environment = dict(os.environ)
+        environment["PYTHONPYCACHEPREFIX"] = os.path.join(
+            self.root, "deletion-pycache")
+        run = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+             "lightcheck", "--quiet"],
+            cwd=repo, text=True, capture_output=True, env=environment,
+            timeout=20,
+        )
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        report = os.path.join(
+            repo, ".mae-flow-work", "lightcheck", "latest.md")
+        with open(report, encoding="utf-8") as stream:
+            content = stream.read()
+        self.assertIn("MF-PARAM-5", content)
+        self.assertNotIn("MF-MAGIC-NUMBER", content)
 
 
 if __name__ == "__main__":

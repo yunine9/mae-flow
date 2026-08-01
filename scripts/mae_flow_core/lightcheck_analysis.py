@@ -16,12 +16,13 @@ from .lightcheck_nesting import annotate_control_nesting
 class _ChangedAnalyzer:
     def __init__(
             self, root, files, changed_lines, baseline_sources,
-            current_sources=None):
+            current_sources=None, magic_changed_lines=None):
         self.root = root
         self.files = list(dict.fromkeys(files))
         self.changed_lines = changed_lines
         self.baseline_sources = baseline_sources
         self.current_sources = current_sources or {}
+        self.magic_changed_lines = magic_changed_lines
         self.result = _empty_result()
         self.total_bytes = 0
         self.started = time.monotonic()
@@ -70,14 +71,23 @@ class _ChangedAnalyzer:
             return None
         return source
 
-    def _changed_for(self, path):
+    @staticmethod
+    def _lines_for(mapping, path):
         changed = set()
-        for line in self.changed_lines.get(path, set()):
+        for line in mapping.get(path, set()):
             try:
                 changed.add(int(line))
             except (TypeError, ValueError):
                 continue
         return changed
+
+    def _changed_for(self, path):
+        return self._lines_for(self.changed_lines, path)
+
+    def _magic_changed_for(self, path, changed):
+        if self.magic_changed_lines is None:
+            return changed
+        return self._lines_for(self.magic_changed_lines, path)
 
     def _parse(self, path, source):
         try:
@@ -192,7 +202,7 @@ class _ChangedAnalyzer:
             self._record_metric(
                 context["path"], function, metrics, old_metrics, rule_spec)
 
-    def _analyze_source(self, path, source, changed):
+    def _analyze_source(self, path, source, changed, magic_changed):
         if _looks_generated(source):
             self._skip(path + ": 文件声明为自动生成")
             return
@@ -205,7 +215,7 @@ class _ChangedAnalyzer:
         baseline_matches = _baseline_matches(
             current_info.function_list, baseline_data[1])
         self._add_line_findings(path, source, code_lines, changed)
-        self._add_magic_findings(path, source, changed)
+        self._add_magic_findings(path, source, magic_changed)
         context = {
             "path": path, "source": source,
             "code_lines": code_lines, "changed": changed,
@@ -226,7 +236,8 @@ class _ChangedAnalyzer:
         changed = self._changed_for(path)
         if not changed:
             return
-        self._analyze_source(path, source, changed)
+        self._analyze_source(
+            path, source, changed, self._magic_changed_for(path, changed))
 
     def _finish(self):
         order = lambda item: (item["file"], item["line"], item["rule"])

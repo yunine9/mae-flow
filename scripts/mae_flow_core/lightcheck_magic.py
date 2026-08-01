@@ -30,13 +30,27 @@ _TEST_PARTS = {
     "testdata", "test-data", "test_data",
 }
 _TEST_FILE = re.compile(
-    r"(?i)(?:^test_|[_-]tests?\.|\.(?:test|spec)\.|fixture|test[_-]?data)")
+    r"(?i)(?:^test_|\.(?:test|spec)\.|"
+    r"(?:^|[._-])tests?(?:[._-]|$)|"
+    r"(?:^|[._-])fixtures?(?:[._-]|$)|"
+    r"(?:^|[._-])test[_-]?data(?:[._-]|$))")
 _CONSTANT_WORD = re.compile(
     r"\b(?:const|constexpr|readonly)\b|\bstatic\s+final\b")
-_DEFINE = re.compile(r"^\s*#\s*define\s+[A-Za-z_]\w*")
+_DEFINE = re.compile(r"^\s*#\s*define\s+[A-Za-z_]\w*(?:\s|$)")
 _PYTHON_CONSTANT = re.compile(
-    r"^\s*[A-Z][A-Z0-9_]*(?:\s*:\s*[^=]+)?\s*=")
-_EXPLANATION = re.compile(r"[A-Za-z_\u0080-\uffff]")
+    r"^\s*[A-Z][A-Z0-9_]*(?:\s*:\s*[^=]+)?\s*=(?!=)")
+_DIRECTIVE = re.compile(
+    r"(?i)^\s*(?:todo|fixme|xxx|hack|noqa|nosonar|nolint|"
+    r"lint(?:[-_: ]|$)|eslint(?:[-_: ]|$)|pylint(?:[-_: ]|$)|"
+    r"stylelint(?:[-_: ]|$)|tslint(?:[-_: ]|$)|noinspection|"
+    r"prettier-ignore|istanbul\s+ignore|c8\s+ignore)\b")
+_COMMENT_WORD = re.compile(r"[A-Za-z][A-Za-z_-]*")
+_COMMENT_CJK = re.compile(r"[\u3400-\u9fff]")
+_ENUM_DECLARATION = re.compile(
+    r"^\s*(?:(?:typedef|public|protected|private|internal|static|export|"
+    r"declare|const)\s+)*enum\b(?:\s+(?:class|struct))?"
+    r"(?:\s+[A-Za-z_]\w*)?")
+_JAVA_ENUM_MEMBER = re.compile(r"(?:^|,)\s*[A-Za-z_]\w*\s*\(")
 
 
 def _is_test_data_path(path):
@@ -47,19 +61,22 @@ def _is_test_data_path(path):
         or _TEST_FILE.search(os.path.basename(normalized)))
 
 
-def _python_enum_lines(source):
+def _python_enum_spans(source, classified):
     tree = _parse_python_tree(source)
     if tree is None:
         return None
-    result = set()
+    result = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef) or not _is_enum_class(node):
             continue
         for statement in node.body:
             if isinstance(statement, (ast.Assign, ast.AnnAssign)):
-                result.update(range(
-                    statement.lineno,
-                    getattr(statement, "end_lineno", statement.lineno) + 1))
+                for line in range(
+                        statement.lineno,
+                        getattr(statement, "end_lineno", statement.lineno) + 1):
+                    code = classified.get(line)
+                    if code is not None:
+                        result.setdefault(line, []).append((0, len(code.code)))
     return result
 
 
@@ -72,55 +89,79 @@ def _is_enum_class(node):
     return False
 
 
-def _braced_enum_lines(classified):
-    result = set()
+def _enum_member_segment(segment, is_java):
+    return bool("=" in segment or (
+        is_java and _JAVA_ENUM_MEMBER.search(segment)))
+
+
+def _braced_enum_spans(path, classified):
+    result = {}
     depth = 0
     enum_depth = None
     pending = False
+    member_section = False
+    is_java = path.lower().endswith(".java")
     for line in sorted(classified):
         code = classified[line].code
-        if re.search(r"\benum\b", code):
+        if enum_depth is None and not pending and _ENUM_DECLARATION.search(code):
             pending = True
+        start = 0
         if pending and "{" in code and enum_depth is None:
+            start = code.find("{") + 1
             enum_depth = depth + 1
-        if enum_depth is not None or pending:
-            result.add(line)
+            pending = False
+            member_section = True
+        if enum_depth is not None and member_section:
+            end = len(code)
+            closing = code.find("}", start)
+            if closing >= 0:
+                end = min(end, closing)
+            separator = code.find(";", start) if is_java else -1
+            if separator >= 0:
+                end = min(end, separator)
+                member_section = False
+            if end > start and _enum_member_segment(
+                    code[start:end], is_java):
+                result.setdefault(line, []).append((start, end))
         depth += code.count("{") - code.count("}")
         if enum_depth is not None and depth < enum_depth:
             enum_depth = None
             pending = False
+            member_section = False
         elif pending and enum_depth is None and ";" in code:
             pending = False
     return result
 
 
-def _enum_lines(path, source, classified):
+def _enum_member_spans(path, source, classified):
     if path.lower().endswith((".py", ".pyi")):
-        return _python_enum_lines(source)
-    return _braced_enum_lines(classified)
+        return _python_enum_spans(source, classified)
+    return _braced_enum_spans(path, classified)
 
 
-def _is_direct_constant(path, code, match):
-    prefix = code[:match.start()]
-    suffix = code[match.end():]
-    equals = prefix.rfind("=")
-    if equals < 0:
-        return False
-    between = prefix[equals + 1:].strip()
-    if between not in ("", "+", "-"):
-        return False
-    if suffix.lstrip()[:1] not in ("", ";", ",", "}"):
-        return False
-    declaration = prefix[:equals]
-    if path.lower().endswith((".py", ".pyi")):
-        return bool(_PYTHON_CONSTANT.search(declaration + "="))
+def _is_enum_member_number(spans, line, match):
+    return any(
+        start <= match.start() and match.end() <= end
+        for start, end in spans.get(line, ()))
+
+
+def _is_constant_declaration(path, code):
     if _DEFINE.search(code):
         return True
-    return bool(_CONSTANT_WORD.search(declaration))
+    equals = code.find("=")
+    if equals < 0:
+        return False
+    if path.lower().endswith((".py", ".pyi")):
+        return bool(_PYTHON_CONSTANT.search(code))
+    return bool(_CONSTANT_WORD.search(code[:equals]))
 
 
 def _has_explanation(comment):
-    return bool(comment and _EXPLANATION.search(comment))
+    if not comment or _DIRECTIVE.search(comment):
+        return False
+    if len(_COMMENT_CJK.findall(comment)) >= 4:
+        return True
+    return len(_COMMENT_WORD.findall(comment)) >= 3
 
 
 def find_magic_numbers(path, source, changed_lines):
@@ -130,18 +171,20 @@ def find_magic_numbers(path, source, changed_lines):
     classified = _classified_lines(path, source)
     if classified is None:
         return None
-    enum_lines = _enum_lines(path, source, classified)
-    if enum_lines is None:
+    enum_spans = _enum_member_spans(path, source, classified)
+    if enum_spans is None:
         return None
     findings = []
     for line in sorted(set(changed_lines)):
         facts = classified.get(line)
-        if facts is None or line in enum_lines:
+        if facts is None:
             continue
         if _has_explanation(facts.comment):
             continue
+        if _is_constant_declaration(path, facts.code):
+            continue
         for match in _NUMBER.finditer(facts.code):
-            if _is_direct_constant(path, facts.code, match):
+            if _is_enum_member_number(enum_spans, line, match):
                 continue
             literal = match.group(0)
             findings.append(MagicNumberFinding(

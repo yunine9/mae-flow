@@ -265,16 +265,14 @@ def _env_command(tokens, index, depth):
     return _executed_delivery_operations(tokens[index:], depth + 1)
 
 
-def _enables_noexec(option, value):
-    return (
-        option == "-o"
-        and str(value).replace("_", "").lower() == "noexec"
-    )
+def _is_noexec_value(value):
+    return str(value).replace("_", "").lower() == "noexec"
 
 
 def _traditional_shell_command(
         tokens, index, depth, zero_short_flags, value_flags,
         zero_long_flags, attached_value_flags):
+    noexec = False
     while index < len(tokens):
         option = tokens[index]
         if option == "--":
@@ -282,14 +280,18 @@ def _traditional_shell_command(
         if option in _SHELL_TERMINAL_LONG_FLAGS:
             return ()
         if option == "-c":
+            if noexec:
+                return ()
             return (
                 _executed_delivery_text(tokens[index + 1], depth + 1)
                 if index + 1 < len(tokens) else ())
         if option in value_flags:
             if index + 1 >= len(tokens):
                 return ()
-            if _enables_noexec(option, tokens[index + 1]):
-                return ()
+            if (
+                    option in ("-o", "+o")
+                    and _is_noexec_value(tokens[index + 1])):
+                noexec = option == "-o"
             index += 2
             continue
         attached_flag = next((
@@ -297,25 +299,30 @@ def _traditional_shell_command(
             if option.startswith(flag) and option != flag
         ), "")
         if attached_flag:
-            if _enables_noexec(
-                    attached_flag, option[len(attached_flag):]):
-                return ()
+            if _is_noexec_value(option[len(attached_flag):]):
+                noexec = attached_flag == "-o"
             index += 1
             continue
+        if option == "+n":
+            noexec = False
+            index += 1
+            continue
+        if option.startswith("+"):
+            return ()
         if option.startswith("-") and not option.startswith("--"):
             flags = option[1:]
-            if "n" in flags:
+            if not flags or not set(flags) <= (
+                    zero_short_flags | {"c", "n"}):
                 return ()
+            if "n" in flags:
+                noexec = True
             if "c" in flags:
-                if not set(flags) <= (zero_short_flags | {"c"}):
+                if noexec:
                     return ()
                 return (
                     _executed_delivery_text(tokens[index + 1], depth + 1)
                     if index + 1 < len(tokens) else ())
-            if flags and set(flags) <= zero_short_flags:
-                index += 1
-            else:
-                return ()
+            index += 1
         elif option in zero_long_flags:
             index += 1
         else:

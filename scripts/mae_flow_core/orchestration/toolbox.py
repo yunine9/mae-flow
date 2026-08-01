@@ -1,8 +1,14 @@
 """Stateless rendering for Mae-Flow's one-shot toolbox actions."""
 
 from dataclasses import dataclass
+import ntpath
+import os
 import posixpath
 
+from mae_flow_core.foundation.source_paths import (
+    normalize_path,
+    repository_path_identity,
+)
 from mae_flow_core.quality import (
     build_codecheck_target,
     render_codecheck_request,
@@ -22,14 +28,31 @@ def _files(values):
     except TypeError as exc:
         raise TypeError("files must be iterable") from exc
     result = []
-    seen = set()
+    identities = []
     for value in values:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("files must contain non-empty text paths")
-        path = posixpath.normpath(value.strip().replace("\\", "/"))
-        if path not in seen:
+        raw = value.strip()
+        windows_path = (
+            os.name == "nt"
+            or "\\" in raw
+            or bool(ntpath.splitdrive(normalize_path(raw))[0])
+        )
+        path = normalize_path(
+            ntpath.normpath(raw)
+            if windows_path
+            else posixpath.normpath(raw)
+        )
+        exact = repository_path_identity(path, case_insensitive=False)
+        folded = repository_path_identity(path, case_insensitive=True)
+        duplicate = any(
+            exact == prior_exact
+            or ((windows_path or prior_windows) and folded == prior_folded)
+            for prior_exact, prior_folded, prior_windows in identities
+        )
+        if not duplicate:
             result.append(path)
-            seen.add(path)
+            identities.append((exact, folded, windows_path))
     return tuple(result)
 
 

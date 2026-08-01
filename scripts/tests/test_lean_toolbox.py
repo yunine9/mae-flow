@@ -72,6 +72,52 @@ class LeanToolboxTests(unittest.TestCase):
         self.assertIn("fail open", result.guidance)
         self.assertIn("Do not schedule a recheck", result.guidance)
 
+    def test_windows_drive_parent_and_case_aliases_keep_one_absolute_target(self):
+        result = self.run_without_lifecycle_files(ToolboxRequest(
+            "codecheck",
+            "检查 Windows 目标",
+            (r"C:\..\Service.cpp", r"c:\SERVICE.cpp"),
+        ))
+
+        self.assertEqual(("C:/Service.cpp",), result.artifacts)
+        self.assertIn("C:/Service.cpp", result.guidance)
+
+    def test_windows_unc_parent_and_case_aliases_keep_one_share_target(self):
+        result = self.run_without_lifecycle_files(ToolboxRequest(
+            "ut",
+            "覆盖共享目录中的实现",
+            (
+                r"\\Server\Share\src\..\Query.cpp",
+                r"//server/share/query.cpp",
+            ),
+        ))
+
+        self.assertEqual(
+            ("//Server/Share/Query.cpp",),
+            result.artifacts,
+        )
+
+    def test_windows_relative_backslashes_use_case_insensitive_identity(self):
+        result = self.run_without_lifecycle_files(ToolboxRequest(
+            "story",
+            "读取设计材料",
+            (r"Docs\Design.md", r"docs\design.md"),
+        ))
+
+        self.assertEqual(("Docs/Design.md",), result.artifacts)
+
+    def test_posix_parent_resolution_keeps_case_distinct_targets(self):
+        result = self.run_without_lifecycle_files(ToolboxRequest(
+            "story",
+            "读取 POSIX 设计材料",
+            ("docs/drafts/../Design.md", "docs/design.md"),
+        ))
+
+        self.assertEqual(
+            ("docs/Design.md", "docs/design.md"),
+            result.artifacts,
+        )
+
     def test_story_and_chain_accept_source_documents_without_git_effects(self):
         cases = (
             (

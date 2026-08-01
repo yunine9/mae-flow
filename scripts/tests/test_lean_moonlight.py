@@ -242,6 +242,130 @@ class MoonlightPolicyTests(unittest.TestCase):
                 self.assertTrue(push.needs_user)
                 self.assertFalse(push.authorization.allow_push)
 
+    def test_exact_risks_can_be_resolved_with_natural_language_one_at_a_time(self):
+        first_risk = "The interface contract has two plausible meanings."
+        second_risk = "The dependency owner has not confirmed availability."
+        state = authorize(
+            flow(
+                delivery_files=("src/a.cpp",),
+                risks=(first_risk, second_risk),
+            ),
+            ("src/a.cpp",),
+        )
+
+        first = apply_moonlight_policy(
+            state,
+            AdvanceRequest(
+                "risk-resolved",
+                decision_key=first_risk,
+                decision_value="用户确认按兼容语义实现，并记录后续清理项。",
+            ),
+        )
+
+        self.assertEqual((second_risk,), first.state.risks)
+        self.assertTrue(first.needs_user)
+        self.assertTrue(first.safe_stop)
+        self.assertTrue(any(
+            key == "risk.resolution"
+            and first_risk in value
+            and "用户确认按兼容语义实现" in value
+            for key, value in first.state.decisions
+        ))
+
+        second = apply_moonlight_policy(
+            first.state,
+            AdvanceRequest(
+                "risk-resolved",
+                decision_key=second_risk,
+                decision_value="  依赖负责人已确认当前版本可用。  ",
+            ),
+        )
+        continued = apply_moonlight_policy(
+            second.state, AdvanceRequest("cp-progress"))
+
+        self.assertEqual((), second.state.risks)
+        self.assertFalse(second.needs_user)
+        self.assertFalse(second.safe_stop)
+        self.assertTrue(second.authorization.allow_commit)
+        self.assertTrue(second.authorization.allow_push)
+        self.assertFalse(continued.needs_user)
+        self.assertFalse(continued.safe_stop)
+
+    def test_invalid_risk_resolution_never_clears_or_expands_authorization(self):
+        risk = "The remote state is unknown."
+        cases = (
+            ((risk,), "", "The user supplied no risk identity."),
+            ((risk,), "A different risk.", "The selected risk is not current."),
+            ((risk, risk), risk, "The stored risk identity is ambiguous."),
+            ((risk,), risk, "  \t\r\n"),
+        )
+        for risks, identity, resolution in cases:
+            with self.subTest(
+                    risks=risks, identity=identity, resolution=repr(resolution)):
+                state = authorize(
+                    flow(delivery_files=("src/a.cpp",), risks=risks),
+                    ("src/a.cpp",),
+                    allow_commit=False,
+                    allow_push=False,
+                )
+
+                result = apply_moonlight_policy(
+                    state,
+                    AdvanceRequest(
+                        "risk-resolved",
+                        decision_key=identity,
+                        decision_value=resolution,
+                    ),
+                )
+
+                self.assertEqual(state, result.state)
+                self.assertTrue(result.needs_user)
+                self.assertTrue(result.safe_stop)
+                self.assertFalse(result.authorization.allow_commit)
+                self.assertFalse(result.authorization.allow_push)
+
+    def test_push_failure_resolution_requires_fresh_push_authorization(self):
+        state = authorize(
+            flow(phase=Phase.DELIVERY, delivery_files=("src/a.cpp",)),
+            ("src/a.cpp",),
+        )
+        failed = apply_moonlight_policy(
+            state,
+            AdvanceRequest(
+                "push-failed",
+                decision_value="The remote rejected the final update.",
+            ),
+        )
+
+        exited = apply_moonlight_policy(
+            failed.state, AdvanceRequest("exit"))
+        resolved = apply_moonlight_policy(
+            failed.state,
+            AdvanceRequest(
+                "risk-resolved",
+                decision_key="The remote rejected the final update.",
+                decision_value="网络已恢复，是否重试交给用户重新授权。",
+            ),
+        )
+        blocked_retry = apply_moonlight_policy(
+            resolved.state, AdvanceRequest("final-push"))
+        reauthorized = apply_moonlight_policy(
+            resolved.state,
+            MoonlightAuthorization(True, ("src/a.cpp",), True, True),
+        )
+        retry = apply_moonlight_policy(
+            reauthorized.state, AdvanceRequest("final-push"))
+
+        self.assertEqual("exited", exited.state.status)
+        self.assertEqual((), resolved.state.risks)
+        self.assertFalse(resolved.authorization.allow_push)
+        self.assertTrue(blocked_retry.needs_user)
+        self.assertTrue(blocked_retry.safe_stop)
+        self.assertIn("fresh push authorization", blocked_retry.reason.lower())
+        self.assertFalse(retry.needs_user)
+        self.assertFalse(retry.safe_stop)
+        self.assertTrue(retry.authorization.allow_push)
+
     def test_routine_confirmation_is_suppressed_without_changing_transitions(self):
         state = flow(phase=Phase.STARTUP)
         state = authorize(state, ("src/a.cpp",))

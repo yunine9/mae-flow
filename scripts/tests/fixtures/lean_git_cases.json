@@ -100,6 +100,13 @@
       "expected": {"allowed": true}
     },
     {
+      "case": "allowed_windows_exact_file_git_add",
+      "operation_family": "git_staging",
+      "command": {"argv": ["git", "add", "C:\\work\\repo\\src\\a.cpp"]},
+      "context": {"working_directory": "C:\\work\\repo", "task_owned_temp_dir": "C:\\work\\repo\\.tmp\\task-7", "source_edit_confirmed": true, "authorized_manifest": {"authorized": true, "files": ["C:\\work\\repo\\src\\a.cpp"]}, "preexisting_dirty_files": []},
+      "expected": {"allowed": true}
+    },
+    {
       "case": "allowed_read_only_git",
       "operation_family": "git_read_only",
       "command": {"argv": ["git", "status", "--short"]},

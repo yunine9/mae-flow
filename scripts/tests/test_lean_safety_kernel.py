@@ -29,6 +29,7 @@ EXPECTED_CASES = {
     "blocked_preexisting_dirty_file_smuggling": ("git_staging", False),
     "allowed_authorized_source_edit": ("source_edit", True),
     "allowed_exact_file_git_add": ("git_staging", True),
+    "allowed_windows_exact_file_git_add": ("git_staging", True),
     "allowed_read_only_git": ("git_read_only", True),
     "allowed_build_command": ("build", True),
     "allowed_user_owned_dirty_file_untouched": ("source_edit", True),
@@ -75,6 +76,22 @@ class LeanSafetyKernelFixtureTest(unittest.TestCase):
             for item in self.fixture["cases"]
         }
         self.assertEqual(EXPECTED_CASES, actual_cases)
+
+    def test_windows_drive_letter_and_backslash_argv_survive_json_load(self):
+        windows_case = next(
+            item
+            for item in self.fixture["cases"]
+            if item["case"] == "allowed_windows_exact_file_git_add"
+        )
+        self.assertEqual(
+            ["git", "add", "C:\\work\\repo\\src\\a.cpp"],
+            windows_case["command"]["argv"],
+        )
+        self.assertEqual("C:\\work\\repo", windows_case["context"]["working_directory"])
+        self.assertEqual(
+            "C:\\work\\repo\\.tmp\\task-7",
+            windows_case["context"]["task_owned_temp_dir"],
+        )
 
 
 if __name__ == "__main__":

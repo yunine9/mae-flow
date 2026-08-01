@@ -201,6 +201,56 @@ class LeanMigrationTests(unittest.TestCase):
         self.assertIn("keep-config", encoded)
         self.assertIn("keep-decision", encoded)
 
+    def test_preserves_business_fields_that_end_like_evidence_fields(self):
+        result = migrate_legacy_flow(legacy(
+            config={
+                "单号": "REQ-42",
+                "password_hash": "argon2-business-value",
+                "row_lock": "pessimistic",
+                "session_token": "customer-session-value",
+            },
+            decisions={
+                "authentication": {
+                    "password_hash": "nested-argon2-value",
+                    "session_token": "nested-session-value",
+                },
+            },
+        ))
+
+        encoded = repr(result.state.to_dict())
+        for preserved in (
+                "password_hash", "argon2-business-value", "row_lock",
+                "pessimistic", "session_token", "customer-session-value",
+                "nested-argon2-value", "nested-session-value"):
+            self.assertIn(preserved, encoded)
+
+    def test_scrubs_known_legacy_evidence_aliases_by_exact_name(self):
+        result = migrate_legacy_flow(legacy(
+            config={
+                "单号": "REQ-42",
+                "user_ack": "fixed-confirmation",
+                "scope_confirmation_receipt": "scope-proof",
+                "business_context": "keep-config-business-context",
+            },
+            decisions={
+                "quality": {
+                    "plan_receipt": "plan-proof",
+                    "result_hashes": ["quality-proof"],
+                    "outcome": "keep-quality-outcome",
+                },
+            },
+        ))
+
+        encoded = repr(result.state.to_dict())
+        for forbidden in (
+                "user_ack", "fixed-confirmation",
+                "scope_confirmation_receipt", "scope-proof",
+                "plan_receipt", "plan-proof",
+                "result_hashes", "quality-proof"):
+            self.assertNotIn(forbidden, encoded)
+        self.assertIn("keep-config-business-context", encoded)
+        self.assertIn("keep-quality-outcome", encoded)
+
     def test_scrubs_structured_capability_and_risk_evidence_recursively(self):
         result = migrate_legacy_flow(legacy(
             capabilities=[{
@@ -296,6 +346,37 @@ class LeanMigrationTests(unittest.TestCase):
         encoded = repr(result.state.to_dict())
         self.assertNotIn("kind-evidence", encoded)
         self.assertNotIn("outcome-evidence", encoded)
+
+    def test_capability_metadata_uses_sanitized_semantic_fallbacks(self):
+        result = migrate_legacy_flow(legacy(capabilities=[{
+            "kind": "tests",
+            "source_revision": {"step_head": "source-evidence"},
+            "source": "source-semantic",
+            "environment_revision": {"tokens": {"UT": "env-evidence"}},
+            "environment": "environment-semantic",
+            "outcome": "passed",
+            "summary": {"receipt": "summary-evidence"},
+            "detail": "tests completed with the selected environment",
+        }]))
+
+        self.assertEqual((CapabilityAttempt(
+            "tests",
+            "source-semantic",
+            "environment-semantic",
+            "passed",
+            "tests completed with the selected environment",
+        ),), result.state.capabilities)
+
+    def test_moonlight_summary_uses_sanitized_detail_fallback(self):
+        result = migrate_legacy_flow(legacy(moonlight={"issues": [{
+            "summary": {"receipt": "risk-evidence"},
+            "detail": "deployment needs a manual database window",
+        }]}))
+
+        self.assertEqual(
+            ("deployment needs a manual database window",),
+            result.state.risks,
+        )
 
     def test_unknown_step_uses_last_safe_history_phase(self):
         result = migrate_legacy_flow(legacy(

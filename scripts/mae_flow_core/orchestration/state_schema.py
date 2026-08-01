@@ -27,11 +27,19 @@ _FIELDS = {
     "delivery_files",
     "initial_dirty",
 }
+_STATUSES = {"active", "paused", "complete", "exited"}
 
 
 def _string(value, field):
     if not isinstance(value, str):
         raise ValueError("%s must be a string" % field)
+    return value
+
+
+def _status(value):
+    value = _string(value, "status")
+    if value not in _STATUSES:
+        raise ValueError("status must be one of %s" % sorted(_STATUSES))
     return value
 
 
@@ -117,7 +125,7 @@ def encode_flow_state(state):
         "phase": _enum_value(state.phase, Phase, "phase"),
         "commit_pace": _enum_value(
             state.commit_pace, CommitPace, "commit_pace"),
-        "status": _string(state.status, "status"),
+        "status": _status(state.status),
         "current_cp": _string(state.current_cp, "current_cp"),
         "artifacts": _encoded_pairs(
             state.artifacts, "artifacts", "kind", "path"),
@@ -179,7 +187,7 @@ def decode_flow_state(raw):
         path=path,
         phase=phase,
         commit_pace=pace,
-        status=_string(raw["status"], "status"),
+        status=_status(raw["status"]),
         current_cp=_string(raw["current_cp"], "current_cp"),
         artifacts=_pair_objects(
             raw["artifacts"], "artifacts", "kind", "path"),

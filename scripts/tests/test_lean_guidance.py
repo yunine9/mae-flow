@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -21,6 +22,7 @@ from mae_flow_core.orchestration.models import (  # noqa: E402
     Phase,
 )
 from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
+from mae_flow_core import state_store  # noqa: E402
 import lean_harness  # noqa: E402
 
 
@@ -89,6 +91,27 @@ class LeanGuidanceTests(unittest.TestCase):
         self.assertIn("at most once", quality)
         self.assertIn("meaningful change", quality)
         self.assertIn("user chooses", quality)
+
+    def test_empty_artifacts_render_as_none(self):
+        text = render_guidance(FlowState.new(
+            "REQ-EMPTY", DeliveryPath.FULL, CommitPace.CONTINUOUS))
+        self.assertIn("Artifacts: none", text)
+
+    def test_spec_and_story_render_one_shot_review_policy(self):
+        spec = render_guidance(state_for(Phase.SPEC))
+        story = render_guidance(state_for(Phase.STORY))
+        for guidance in (spec, story):
+            self.assertIn("exactly once", guidance)
+            self.assertIn("without a user stop", guidance)
+            self.assertIn("without automatic retry", guidance)
+            self.assertIn("real reviewer tradeoff", guidance)
+
+    def test_construction_plans_testability_without_running_formal_ut(self):
+        construction = render_guidance(state_for(Phase.CONSTRUCTION))
+        self.assertIn("testability seams early", construction)
+        self.assertIn("cumulative UT handoff", construction)
+        self.assertIn("does not write, compile, or run formal UT", construction)
+        self.assertNotIn("tests leading each behavior change", construction)
 
 
 class LeanHarnessTests(unittest.TestCase):
@@ -172,6 +195,29 @@ class LeanHarnessTests(unittest.TestCase):
 
             with open(path, "rb") as stream:
                 self.assertEqual(seeded, stream.read())
+            self.assertEqual(["flow.json"], os.listdir(root))
+
+    def test_save_retries_windows_replace_in_the_caller_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "flow.json")
+            real_replace = os.replace
+            calls = []
+
+            def flaky_replace(source, destination):
+                calls.append((source, destination))
+                if len(calls) == 1:
+                    raise PermissionError("temporary Windows file lock")
+                real_replace(source, destination)
+
+            with mock.patch.object(
+                    state_store.os, "replace", side_effect=flaky_replace), \
+                    mock.patch.object(state_store.time, "sleep"):
+                lean_harness._save(path, state_for(Phase.QUALITY))
+
+            self.assertEqual(2, len(calls))
+            for temporary, destination in calls:
+                self.assertEqual(root, os.path.dirname(temporary))
+                self.assertEqual(path, destination)
             self.assertEqual(["flow.json"], os.listdir(root))
 
 

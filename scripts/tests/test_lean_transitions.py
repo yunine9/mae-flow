@@ -164,7 +164,7 @@ class FullTransitionTests(unittest.TestCase):
         ), result.state.decisions)
         self.assertFalse(result.needs_user)
 
-    def test_delivery_confirmation_completes_full_flow(self):
+    def test_delivery_confirmation_authorizes_without_completing_full_flow(self):
         result = advance_flow(
             flow(phase=Phase.DELIVERY),
             AdvanceRequest(
@@ -173,9 +173,36 @@ class FullTransitionTests(unittest.TestCase):
                 "Deliver the reviewed manifest to the target branch.",
             ),
         )
-        self.assertEqual("complete", result.state.status)
+        self.assertEqual("active", result.state.status)
         self.assertEqual(Phase.DELIVERY, result.state.phase)
+        self.assertIn((
+            "delivery.confirmation",
+            "Deliver the reviewed manifest to the target branch.",
+        ), result.state.decisions)
         self.assertFalse(result.needs_user)
+
+    def test_delivery_completion_requires_authorization_and_a_later_event(self):
+        state = flow(phase=Phase.DELIVERY)
+        premature = advance_flow(
+            state, AdvanceRequest("delivery-completed"))
+        authorized = advance_flow(
+            state, AdvanceRequest("delivery-confirmed"))
+        completed = advance_flow(
+            authorized.state,
+            AdvanceRequest(
+                "delivery-completed",
+                "delivery.result",
+                "The commit and push completed successfully.",
+            ),
+        )
+        self.assertEqual("active", premature.state.status)
+        self.assertIn("authorization", premature.reason.lower())
+        self.assertEqual("active", authorized.state.status)
+        self.assertEqual("complete", completed.state.status)
+        self.assertIn((
+            "delivery.result",
+            "The commit and push completed successfully.",
+        ), completed.state.decisions)
 
     def test_grill_clear_is_non_blocking_and_recorded_only_once(self):
         state = flow(phase=Phase.SPEC)
@@ -217,6 +244,42 @@ class FullTransitionTests(unittest.TestCase):
             sum(key == "review.design" for key, unused in second.state.decisions),
         )
 
+    def test_review_failure_is_recorded_once_without_retry_or_user_stop(self):
+        cases = (
+            (
+                Phase.SPEC,
+                "grill-failed",
+                "grill-clear",
+                "review.grill",
+                "spec-confirmed",
+                Phase.STORY,
+            ),
+            (
+                Phase.STORY,
+                "design-review-failed",
+                "design-review-approved",
+                "review.design",
+                "story-confirmed",
+                Phase.CONSTRUCTION,
+            ),
+        )
+        for phase, failure, retry, key, confirmation, target in cases:
+            with self.subTest(phase=phase):
+                failed = advance_flow(
+                    flow(phase=phase), AdvanceRequest(failure))
+                repeated = advance_flow(
+                    failed.state, AdvanceRequest(retry))
+                advanced = advance_flow(
+                    repeated.state, AdvanceRequest(confirmation))
+                self.assertFalse(failed.needs_user)
+                self.assertEqual(failed.state, repeated.state)
+                self.assertEqual(
+                    1,
+                    sum(existing == key
+                        for existing, unused in repeated.state.decisions),
+                )
+                self.assertEqual(target, advanced.state.phase)
+
 
 class FocusedTransitionTests(unittest.TestCase):
     def test_focused_uses_only_startup_and_delivery_confirmation_stops(self):
@@ -240,12 +303,27 @@ class FocusedTransitionTests(unittest.TestCase):
         self.assertFalse(cp.needs_user)
         self.assertTrue(delivery.needs_user)
 
-    def test_focused_delivery_confirmation_completes_flow(self):
+    def test_migrated_focused_spec_and_story_resume_without_mandatory_reviews(self):
+        cases = (
+            (Phase.SPEC, "spec-confirmed"),
+            (Phase.STORY, "story-confirmed"),
+        )
+        for phase, event in cases:
+            with self.subTest(phase=phase):
+                result = advance_flow(
+                    flow(path=DeliveryPath.FOCUSED, phase=phase),
+                    AdvanceRequest(event),
+                )
+                self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
+                self.assertFalse(result.needs_user)
+                self.assertNotIn("review", result.reason.lower())
+
+    def test_focused_delivery_confirmation_only_authorizes_flow(self):
         result = advance_flow(
             flow(path=DeliveryPath.FOCUSED, phase=Phase.DELIVERY),
             AdvanceRequest("delivery-confirmed"),
         )
-        self.assertEqual("complete", result.state.status)
+        self.assertEqual("active", result.state.status)
         self.assertFalse(result.needs_user)
 
     def test_focused_can_upgrade_semantically_to_full_specification(self):
@@ -362,20 +440,28 @@ class SemanticGuardTests(unittest.TestCase):
 
 
 class TerminalTransitionTests(unittest.TestCase):
-    def test_exit_succeeds_from_every_valid_phase(self):
+    def test_exit_succeeds_from_every_valid_phase_and_status(self):
         for phase in Phase:
-            with self.subTest(phase=phase):
-                result = advance_flow(flow(phase=phase), AdvanceRequest("exit"))
-                self.assertEqual("exited", result.state.status)
-                self.assertEqual(phase, result.state.phase)
-                self.assertFalse(result.needs_user)
+            for status in ("active", "paused", "complete", "exited"):
+                with self.subTest(phase=phase, status=status):
+                    result = advance_flow(
+                        flow(phase=phase, status=status),
+                        AdvanceRequest("exit"),
+                    )
+                    self.assertEqual("exited", result.state.status)
+                    self.assertEqual(phase, result.state.phase)
+                    self.assertFalse(result.needs_user)
 
-    def test_complete_succeeds_from_every_valid_phase(self):
+    def test_complete_alias_only_finishes_authorized_delivery(self):
         for phase in Phase:
             with self.subTest(phase=phase):
-                result = advance_flow(
-                    flow(phase=phase), AdvanceRequest("complete"))
-                self.assertEqual("complete", result.state.status)
+                state = flow(phase=phase)
+                if phase == Phase.DELIVERY:
+                    state = advance_flow(
+                        state, AdvanceRequest("delivery-confirmed")).state
+                result = advance_flow(state, AdvanceRequest("complete"))
+                expected = "complete" if phase == Phase.DELIVERY else "active"
+                self.assertEqual(expected, result.state.status)
                 self.assertEqual(phase, result.state.phase)
                 self.assertFalse(result.needs_user)
 

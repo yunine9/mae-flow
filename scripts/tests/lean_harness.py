@@ -27,6 +27,7 @@ from mae_flow_core.orchestration.transitions import (  # noqa: E402
     AdvanceRequest,
     advance_flow,
 )
+from mae_flow_core.state_store import _replace_with_retry  # noqa: E402
 
 
 def _parser():
@@ -81,7 +82,7 @@ def _save(path, state):
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _replace_with_retry(temporary, path)
         temporary = None
     finally:
         if descriptor is not None:

@@ -13,6 +13,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_lean_transitions.py",), 90, 3000),
     ("Lean workflow guidance and harness",
      ("scripts/tests/test_lean_guidance.py",), 90, 3000),
+    ("Lean workflow migrated composition",
+     ("scripts/tests/test_lean_composition.py",), 90, 3000),
     ("Spec2Code 固定 Prompt 与注释规范",
      ("scripts/tests/test_spec2code_prompt_resources.py",), 180, 5000),
     ("Spec2Code 本地过程件纯契约",

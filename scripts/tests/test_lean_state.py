@@ -102,6 +102,24 @@ class LeanStateContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     decode_flow_state(raw)
 
+    def test_decoder_rejects_unknown_status(self):
+        with open(FIXTURE, encoding="utf-8") as stream:
+            raw = json.load(stream)
+        raw["status"] = "recovering"
+        with self.assertRaisesRegex(ValueError, "status"):
+            decode_flow_state(raw)
+
+    def test_encoder_rejects_unknown_status(self):
+        state = FlowState(
+            ticket="REQ-7",
+            path=DeliveryPath.FULL,
+            phase=Phase.STARTUP,
+            commit_pace=CommitPace.CONTINUOUS,
+            status="recovering",
+        )
+        with self.assertRaisesRegex(ValueError, "status"):
+            state.to_dict()
+
     def test_decoder_rejects_missing_or_unknown_top_level_fields(self):
         with open(FIXTURE, encoding="utf-8") as stream:
             missing = json.load(stream)

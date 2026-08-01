@@ -74,41 +74,57 @@ _ARTIFACT_ALIASES = {
 _EVIDENCE_KEYS = {
     "ack",
     "ack_cursor",
+    "actual_ack",
+    "adoption_ack",
     "agent_tasks",
+    "all_ack",
+    "authorization_ack",
+    "authorization_receipt",
+    "cc_ack",
+    "checkpoint_ack",
     "confirmation_receipt",
+    "confirmation_receipts",
+    "config_ack",
+    "cp_receipt",
+    "current_ack",
     "evidence",
     "exact_ack",
     "failure_lock",
     "failure_locks",
     "freshness_hash",
     "freshness_hashes",
+    "full_ack",
+    "fullcheck_receipt",
+    "implicit_ack",
+    "moon_ack",
+    "out_of_scope_ack",
+    "plan_receipt",
     "receipt",
     "receipts",
     "recovery_ack",
     "requirement_sha256",
     "report_hash",
     "report_hashes",
+    "result_hash",
+    "result_hashes",
+    "risk_ack",
+    "scope_ack",
+    "scope_confirmation_receipt",
+    "scope_confirmed_ack",
+    "short_ack",
+    "source_tokens",
     "step_head",
     "step_heads",
     "stephead",
     "stepheads",
+    "structured_ack",
     "task_card",
     "task_cards",
     "token",
     "tokens",
+    "user_ack",
+    "verify_ack",
 }
-_EVIDENCE_SUFFIXES = (
-    "_ack",
-    "_ack_cursor",
-    "_hash",
-    "_hashes",
-    "_lock",
-    "_locks",
-    "_receipt",
-    "_receipts",
-    "_token",
-    "_tokens",
-)
 
 
 def _mapping(value):
@@ -137,8 +153,7 @@ def _sequence(value):
 
 def _evidence_key(value):
     normalized = re.sub(r"[^a-z0-9]+", "_", _string(value).lower()).strip("_")
-    return (normalized in _EVIDENCE_KEYS
-            or normalized.endswith(_EVIDENCE_SUFFIXES))
+    return normalized in _EVIDENCE_KEYS
 
 
 def _semantic_value(value):
@@ -357,14 +372,15 @@ def _capabilities(raw):
             continue
         attempts.append(CapabilityAttempt(
             kind=kind,
-            source_revision=_semantic_string(
-                attempt.get("source_revision") or attempt.get("source")),
-            environment_revision=_semantic_string(
-                attempt.get("environment_revision")
-                or attempt.get("environment")),
+            source_revision=_first_semantic((
+                attempt.get("source_revision"), attempt.get("source"))),
+            environment_revision=_first_semantic((
+                attempt.get("environment_revision"),
+                attempt.get("environment"),
+            )),
             outcome=outcome,
-            summary=_semantic_string(
-                attempt.get("summary") or attempt.get("detail")),
+            summary=_first_semantic((
+                attempt.get("summary"), attempt.get("detail"))),
         ))
     return tuple(attempts)
 
@@ -387,7 +403,7 @@ def _risks(raw):
     moonlight = _mapping(raw.get("moonlight"))
     for issue in _sequence(moonlight.get("issues")):
         item = _mapping(issue)
-        text = _semantic_string(item.get("summary") or item.get("detail"))
+        text = _first_semantic((item.get("summary"), item.get("detail")))
         if text:
             risks.append(text)
     return tuple(risks)

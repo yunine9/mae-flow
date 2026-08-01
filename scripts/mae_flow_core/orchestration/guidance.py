@@ -27,7 +27,7 @@ def render_guidance(state):
     with open(phase_path, encoding="utf-8") as stream:
         phase_guidance = stream.read().strip()
 
-    artifacts = (
+    artifacts = tuple(
         "%s: %s" % (kind, path) for kind, path in state.artifacts)
     context = (
         "Ticket: %s\n"

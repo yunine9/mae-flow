@@ -29,6 +29,8 @@ _FULL_TRANSITIONS = {
 
 _FOCUSED_TRANSITIONS = {
     (Phase.STARTUP, "startup-confirmed"): Phase.CONSTRUCTION,
+    (Phase.SPEC, "spec-confirmed"): Phase.CONSTRUCTION,
+    (Phase.STORY, "story-confirmed"): Phase.CONSTRUCTION,
     (Phase.CONSTRUCTION, "construction-complete"): Phase.QUALITY,
     (Phase.QUALITY, "quality-complete"): Phase.DELIVERY,
 }
@@ -96,6 +98,14 @@ _REVIEW_DECISIONS = {
         "review.grill",
         "The user resolved the Grill critic's documented tradeoff.",
     ),
+    (Phase.SPEC, "grill-failed"): (
+        "review.grill",
+        "The Grill critic failure was recorded without automatic retry.",
+    ),
+    (Phase.SPEC, "reviewer-failed"): (
+        "review.grill",
+        "The Grill critic failure was recorded without automatic retry.",
+    ),
     (Phase.STORY, "design-review-approved"): (
         "review.design",
         "The Design Reviewer approved the design without a tradeoff.",
@@ -111,6 +121,14 @@ _REVIEW_DECISIONS = {
     (Phase.STORY, "reviewer-tradeoff-resolved"): (
         "review.design",
         "The user resolved the Design Reviewer's documented tradeoff.",
+    ),
+    (Phase.STORY, "design-review-failed"): (
+        "review.design",
+        "The Design Reviewer failure was recorded without automatic retry.",
+    ),
+    (Phase.STORY, "reviewer-failed"): (
+        "review.design",
+        "The Design Reviewer failure was recorded without automatic retry.",
     ),
 }
 
@@ -172,21 +190,40 @@ def advance_flow(state, request):
 
     kind = request.kind.strip().lower()
 
+    if kind == "exit":
+        return AdvanceResult(
+            replace(state, status="exited"), False,
+            "The flow exited unconditionally at its current phase.",
+        )
+
     if state.status != "active":
         return AdvanceResult(
             state, False,
             "The flow is inactive; new or resume behavior is handled elsewhere.",
         )
 
-    if kind == "exit":
-        return AdvanceResult(
-            replace(state, status="exited"), False,
-            "The active flow exited at its current phase.",
+    if kind in {"delivery-completed", "complete"}:
+        if state.phase != Phase.DELIVERY:
+            return AdvanceResult(
+                state, False,
+                "Delivery completion applies only in the Delivery phase.",
+            )
+        if not any(
+                key == "delivery.confirmation"
+                for key, unused in state.decisions):
+            return AdvanceResult(
+                state, False,
+                "Delivery completion requires prior delivery authorization.",
+            )
+        completed = _with_review_decision(
+            state,
+            request,
+            "delivery.result",
+            "The delivery adapter reported completed side effects.",
         )
-    if kind == "complete":
         return AdvanceResult(
-            replace(state, status="complete"), False,
-            "The active flow is complete.",
+            replace(completed, status="complete"), False,
+            "The authorized delivery side effects completed.",
         )
 
     stop_reason = _CONDITIONAL_USER_STOPS.get(kind)
@@ -243,11 +280,11 @@ def advance_flow(state, request):
         )
 
     if kind == "delivery-confirmed" and state.phase == Phase.DELIVERY:
-        completed = _with_decision(
-            state, request, *_CONFIRMATION_DECISIONS[kind])
+        key, value = _CONFIRMATION_DECISIONS[kind]
+        authorized = _with_review_decision(state, request, key, value)
         return AdvanceResult(
-            replace(completed, status="complete"), False,
-            "The reviewed delivery was confirmed and the flow is complete.",
+            authorized, False,
+            "The reviewed delivery was authorized; side effects remain pending.",
         )
 
     required_review = None

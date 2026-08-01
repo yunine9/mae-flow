@@ -66,10 +66,16 @@ def _diff_paths(values):
     )
 
 
+def _artifact_path_line(label, value):
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "%s path: not provided; continue with available context." % label
+    return "%s path (exact): %s" % (label, _path_text(value, label + " path"))
+
+
 def render_ut_context(spec_path, story_path, handoff_text, diff_paths):
     """Render facts and ownership for the final, self-contained UT action."""
-    spec = _path_text(spec_path, "Spec path")
-    story = _path_text(story_path, "Story path")
+    spec_line = _artifact_path_line("Spec", spec_path)
+    story_line = _artifact_path_line("Story", story_path)
     handoff = _text(handoff_text, "handoff_text", allow_empty=True)
     paths = _diff_paths(diff_paths)
     handoff_section = (
@@ -83,8 +89,8 @@ def render_ut_context(spec_path, story_path, handoff_text, diff_paths):
         else "No paths are present in the final diff; continue with the supplied context."
     )
     return "\n".join((
-        "Spec path (exact): " + spec,
-        "Story path (exact): " + story,
+        spec_line,
+        story_line,
         "",
         "Cumulative construction handoff:",
         handoff_section,
@@ -92,8 +98,11 @@ def render_ut_context(spec_path, story_path, handoff_text, diff_paths):
         "Final diff paths:",
         diff_section,
         "",
-        "Review coverage against the final implementation, including any deviation "
-        "from Spec, Story, or the cumulative handoff.",
+        "The cumulative construction handoff is historical coverage guidance only; "
+        "it may be outdated and is not an authority or deviation baseline.",
+        "Treat the final implementation and final diff as authoritative.",
+        "Review coverage against them and compare with the confirmed Spec and Story "
+        "when provided.",
         "The UT Skill owns the complete action: write UT, compile UT, and run UT.",
         "Do not prescribe a language or test framework output format.",
         "Do not require mocks of a database connection or stable execution framework; "

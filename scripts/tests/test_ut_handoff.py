@@ -88,6 +88,27 @@ class AppendUtHandoffTests(unittest.TestCase):
 
 
 class RenderUtContextTests(unittest.TestCase):
+    def test_missing_spec_or_story_paths_are_context_not_a_gate(self):
+        cases = (
+            ("", "story.md", "Story path (exact): story.md"),
+            ("spec.md", "", "Spec path (exact): spec.md"),
+            ("", "", "Final diff paths:"),
+        )
+        for spec, story, remaining_path in cases:
+            with self.subTest(spec=spec, story=story):
+                context = render_ut_context(
+                    spec,
+                    story,
+                    "CP history remains available.",
+                    ("src/final.cpp",),
+                )
+
+                self.assertIn("not provided", context.lower())
+                self.assertIn("continue", context.lower())
+                self.assertIn(remaining_path, context)
+                self.assertIn("CP history remains available.", context)
+                self.assertIn("src/final.cpp", context)
+
     def test_context_combines_exact_paths_handoff_and_final_diff_paths(self):
         spec = r"C:\repo\docs\REQ-42\spec.md"
         story = r"C:\repo\.mae-flow-work\REQ-42\story.md"
@@ -119,6 +140,26 @@ class RenderUtContextTests(unittest.TestCase):
         self.assertIn("compile", context)
         self.assertIn("run", context)
         self.assertIn("ut skill", context)
+
+    def test_final_implementation_outranks_historical_handoff(self):
+        context = render_ut_context(
+            "confirmed-spec.md",
+            "confirmed-story.md",
+            "An early CP expected the old result mapping.",
+            ("src/final-result-mapper.cpp",),
+        ).lower()
+
+        self.assertIn("historical coverage", context)
+        self.assertIn("may be outdated", context)
+        self.assertIn("not an authority or deviation baseline", context)
+        self.assertIn("final implementation", context)
+        self.assertIn("final diff", context)
+        self.assertIn("authoritative", context)
+        self.assertIn("confirmed spec and story when provided", context)
+        self.assertNotIn(
+            "deviation from spec, story, or the cumulative handoff",
+            context,
+        )
 
     def test_context_avoids_framework_output_and_mock_contracts(self):
         context = render_ut_context(

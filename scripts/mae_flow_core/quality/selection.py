@@ -42,8 +42,9 @@ _FOCUSED_FACTS = (
     (
         "weak_legacy_cpp_boundary",
         ("build", "unit_test"),
-        "A weak legacy C++ boundary needs Build and UT of seams and deterministic "
-        "business logic; do not mock the stable framework merely for coverage.",
+        "A weak legacy C++ boundary needs Build and UT. During Construction, "
+        "extract deterministic business logic and create test seams. Final UT "
+        "consumes them and must not mock the stable framework.",
     ),
 )
 

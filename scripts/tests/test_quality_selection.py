@@ -110,9 +110,11 @@ class QualitySelectionTests(unittest.TestCase):
 
         self.assertCapabilities(recommendation, (True, True, False, False))
         explanation = " ".join(recommendation.reasons).lower()
-        self.assertIn("deterministic", explanation)
-        self.assertIn("not mock", explanation)
-        self.assertIn("framework", explanation)
+        self.assertIn("during construction", explanation)
+        self.assertIn("extract deterministic", explanation)
+        self.assertIn("create test seams", explanation)
+        self.assertIn("final ut consumes", explanation)
+        self.assertIn("not mock the stable framework", explanation)
 
     def test_user_adjustment_changes_the_recommendation_not_an_execution_state(self):
         original = recommend_quality("focused", behavior_change=True)

@@ -2,10 +2,12 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+import posixpath
 
 from ..foundation import git_intent
 from ..foundation.source_paths import (
-    known_source_classification,
+    DOCUMENT_EXTENSIONS,
+    normalize_path,
     repo_relative_for_match,
     repository_path_identity,
 )
@@ -40,6 +42,7 @@ class SafetyContext:
     commit_files: tuple = ()
     initial_dirty: tuple = ()
     current_dirty_fingerprints: tuple = ()
+    safe_write_targets: tuple = ()
 
 
 def _allow(rule=""):
@@ -90,8 +93,16 @@ def _write_targets(tool, tool_input):
 def _relative_target(context, path):
     if not isinstance(path, str):
         return ""
-    relative = repo_relative_for_match(path, context.repository_root)
-    return relative or ""
+    normalized = normalize_path(path).strip().strip("\"'")
+    if not normalized:
+        return ""
+    normalized = posixpath.normpath(normalized)
+    root = posixpath.normpath(
+        normalize_path(context.repository_root).rstrip("/"))
+    relative = repo_relative_for_match(normalized, root)
+    if relative is None:
+        return normalized
+    return posixpath.normpath(relative) if relative else "."
 
 
 def _is_protected_control(path):
@@ -105,6 +116,18 @@ def _is_protected_control(path):
         or first.startswith(".mae-flow.")
         or first.startswith(".mae-flow-")
     )
+
+
+def _is_local_work_package(path):
+    identity = repository_path_identity(path, case_insensitive=True)
+    return (
+        identity == ".mae-flow-work"
+        or identity.startswith(".mae-flow-work/")
+    )
+
+
+def _is_documentation(path):
+    return path.casefold().endswith(DOCUMENT_EXTENSIONS)
 
 
 def _has_decision(state, key):
@@ -138,15 +161,24 @@ def _edit_decision(context, tool, tool_input):
             "protected_control",
             "Mae-Flow control files cannot be edited by workflow tools.",
         )
-    source_targets = tuple(
-        path for path in targets
-        if known_source_classification(
-            path,
-            project_root=context.repository_root,
-            require_membership=True,
-        ) is True
+    safe_targets = _identities(
+        relative
+        for relative in (
+            _relative_target(context, path)
+            for path in context.safe_write_targets
+        )
+        if relative
     )
-    if source_targets and not _source_edit_allowed(context.state):
+    controlled_targets = tuple(
+        path for path in targets
+        if (
+            not _is_documentation(path)
+            and not _is_local_work_package(path)
+            and repository_path_identity(path, case_insensitive=True)
+            not in safe_targets
+        )
+    )
+    if controlled_targets and not _source_edit_allowed(context.state):
         return _block(
             "source_edit",
             "Source edits require semantic authorization for this path and phase.",
@@ -294,6 +326,21 @@ def _stage_decision(context, command):
     return _allow("git_staging")
 
 
+def _opaque_pathspec_decision(command):
+    for operation in git_intent.opaque_pathspec_mutations(command):
+        if operation == "add":
+            return _block(
+                "git_staging",
+                "Opaque Git staging pathspecs cannot be authorized exactly.",
+            )
+        if operation == "commit":
+            return _block(
+                "git_commit",
+                "Opaque commit pathspecs cannot be compared with the manifest.",
+            )
+    return None
+
+
 def _exact_manifest_decision(context, actual_files, rule):
     manifest = _manifest(context)
     if (
@@ -317,16 +364,20 @@ def _exact_manifest_decision(context, actual_files, rule):
 
 
 def _commit_decision(context, command):
-    if not git_intent.has_git_subcommand(command, "commit"):
+    intents = git_intent.git_commit_intents(command)
+    if not intents:
         return None
-    intent = git_intent.git_commit_intent(command)
-    if intent["all"] or intent["include"] or intent["pathspecs"]:
-        return _block(
-            "git_commit",
-            "Commit must use the already-staged exact manifest.",
-        )
-    return _exact_manifest_decision(
-        context, context.staged_files, "git_commit")
+    for intent in intents:
+        if intent["all"] or intent["include"] or intent["pathspecs"]:
+            return _block(
+                "git_commit",
+                "Commit must use the already-staged exact manifest.",
+            )
+        decision = _exact_manifest_decision(
+            context, context.staged_files, "git_commit")
+        if not decision.allow:
+            return decision
+    return _allow("git_commit")
 
 
 def _push_decision(context, command):
@@ -354,6 +405,9 @@ def decide_pretool(context, tool, tool_input):
         return edit
 
     if command:
+        opaque = _opaque_pathspec_decision(command)
+        if opaque is not None:
+            return opaque
         for evaluator in (_stage_decision, _commit_decision, _push_decision):
             decision = evaluator(context, command)
             if decision is not None and not decision.allow:

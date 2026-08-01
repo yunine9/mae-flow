@@ -471,9 +471,7 @@ def short_option_flags(tokens):
         if match)
 
 
-def git_commit_intent(command):
-    token_sets = git_subcommand_tokens(command, "commit")
-    tokens = token_sets[-1] if token_sets else []
+def _git_commit_intent(tokens):
     token_set = set(tokens)
     short_flags = short_option_flags(tokens)
     return {
@@ -481,3 +479,16 @@ def git_commit_intent(command):
         "all": "a" in short_flags or "--all" in token_set,
         "include": "i" in short_flags or "--include" in token_set,
     }
+
+
+def git_commit_intents(command):
+    """Return every parsed commit intent in shell execution order."""
+    return [
+        _git_commit_intent(tokens)
+        for tokens in git_subcommand_tokens(command, "commit")
+    ]
+
+
+def git_commit_intent(command):
+    intents = git_commit_intents(command)
+    return intents[-1] if intents else _git_commit_intent([])

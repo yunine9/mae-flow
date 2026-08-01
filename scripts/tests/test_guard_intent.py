@@ -17,6 +17,10 @@ from mae_flow_core.guard.intent import (  # noqa: E402
     parse_intent,
     recursive_delete_targets,
 )
+from mae_flow_core.foundation.git_intent import (  # noqa: E402
+    git_commit_intent,
+    git_commit_intents,
+)
 
 
 class GuardIntentTests(unittest.TestCase):
@@ -78,6 +82,29 @@ class GuardIntentTests(unittest.TestCase):
                 "rd /s C:\\",
             )),
         )
+
+    def test_commit_intents_preserve_every_invocation_in_shell_order(self):
+        command = (
+            "git commit -am first && "
+            "git commit --include src/a.py -m second && "
+            "git commit -m third"
+        )
+
+        intents = git_commit_intents(command)
+
+        self.assertEqual(
+            [
+                {"pathspecs": [], "all": True, "include": False},
+                {
+                    "pathspecs": ["src/a.py"],
+                    "all": False,
+                    "include": True,
+                },
+                {"pathspecs": [], "all": False, "include": False},
+            ],
+            intents,
+        )
+        self.assertEqual(intents[-1], git_commit_intent(command))
 
 
 if __name__ == "__main__":

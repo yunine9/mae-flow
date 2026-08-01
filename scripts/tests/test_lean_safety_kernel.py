@@ -141,6 +141,13 @@ class LeanSafetyKernelFixtureTests(unittest.TestCase):
             isinstance(decision, SafetyDecision)
             for decision in decisions.values()
         ))
+        for item in self.fixture["cases"]:
+            if not item["expected"]["allowed"]:
+                self.assertEqual(
+                    item["operation_family"],
+                    decisions[item["case"]].rule,
+                    item["case"],
+                )
 
     def test_windows_argv_is_adapted_without_losing_drive_or_backslashes(self):
         item = next(
@@ -154,9 +161,12 @@ class LeanSafetyKernelFixtureTests(unittest.TestCase):
 
 
 class SourceEditAuthorizationTests(unittest.TestCase):
-    def decision(self, state, target):
+    def decision(self, state, target, **context_facts):
         return decide_pretool(
-            _context(state), "Edit", {"targets": (target,)})
+            _context(state, **context_facts),
+            "Edit",
+            {"targets": (target,)},
+        )
 
     def test_full_source_edits_require_construction_or_quality_fix_approval(self):
         construction = self.decision(
@@ -209,6 +219,58 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         self.assertTrue(documentation.allow)
         self.assertTrue(work_package.allow)
 
+    def test_unknown_repository_writes_are_scope_controlled(self):
+        targets = (
+            "web/index.html",
+            "web/site.css",
+            "LICENSE",
+            "config/application.yaml",
+            "tests/page.snapshot",
+        )
+        full_before = _state(phase=Phase.STORY)
+        full_after = _state(phase=Phase.CONSTRUCTION)
+        focused_before = _state(path=DeliveryPath.FOCUSED)
+        focused_after = _state(
+            path=DeliveryPath.FOCUSED,
+            decisions=((
+                "focused.scope_approved",
+                "The user approved the focused change scope.",
+            ),),
+        )
+
+        for target in targets:
+            with self.subTest(target=target):
+                full_blocked = self.decision(full_before, target)
+                focused_blocked = self.decision(focused_before, target)
+                self.assertEqual(
+                    (False, "source_edit"),
+                    (full_blocked.allow, full_blocked.rule),
+                )
+                self.assertTrue(self.decision(full_after, target).allow)
+                self.assertEqual(
+                    (False, "source_edit"),
+                    (focused_blocked.allow, focused_blocked.rule),
+                )
+                self.assertTrue(self.decision(focused_after, target).allow)
+
+    def test_adapter_can_explicitly_classify_a_non_source_target_as_safe(self):
+        safe = self.decision(
+            _state(phase=Phase.STARTUP),
+            "generated/cache.bin",
+            safe_write_targets=("generated/cache.bin",),
+        )
+        protected = self.decision(
+            _state(phase=Phase.CONSTRUCTION),
+            ".mae-flow.yml",
+            safe_write_targets=(".mae-flow.yml",),
+        )
+
+        self.assertTrue(safe.allow)
+        self.assertEqual(
+            (False, "protected_control"),
+            (protected.allow, protected.rule),
+        )
+
     def test_protected_controls_precede_source_authorization(self):
         approved = _state(
             phase=Phase.CONSTRUCTION,
@@ -220,6 +282,33 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         self.assertEqual(
             (False, "protected_control"),
             (decision.allow, decision.rule),
+        )
+
+    def test_protected_control_aliases_are_normalized_before_classification(self):
+        aliases = (
+            "work/../.mae-flow.yml",
+            "/repo/work/../.mae-flow.yml",
+            r"work\..\.MAE-FLOW.YML",
+            ".MAE-FLOW.YML",
+        )
+        state = _state(phase=Phase.CONSTRUCTION)
+
+        for target in aliases:
+            with self.subTest(target=target):
+                decision = self.decision(state, target)
+                self.assertEqual(
+                    (False, "protected_control"),
+                    (decision.allow, decision.rule),
+                )
+
+        windows = self.decision(
+            state,
+            r"C:\work\repo\work\..\.MaE-Flow.YmL",
+            repository_root=r"c:\work\repo",
+        )
+        self.assertEqual(
+            (False, "protected_control"),
+            (windows.allow, windows.rule),
         )
 
 
@@ -248,6 +337,49 @@ class GitManifestSafetyTests(unittest.TestCase):
         self.assertEqual((False, "git_staging"), (add.allow, add.rule))
         self.assertEqual((False, "git_commit"), (
             commit.allow, commit.rule))
+
+    def test_opaque_add_and_commit_pathspecs_block_before_manifest_checks(self):
+        state = self.manifest_state()
+
+        add = self.bash(
+            state,
+            "git add --pathspec-from-file=paths.txt",
+            staged_files=("src/a.cpp", "tests/a_test.cpp"),
+        )
+        commit = self.bash(
+            state,
+            "git commit --pathspec-from-file paths.txt -m update",
+            staged_files=("src/a.cpp", "tests/a_test.cpp"),
+        )
+
+        self.assertEqual((False, "git_staging"), (add.allow, add.rule))
+        self.assertEqual((False, "git_commit"), (
+            commit.allow, commit.rule))
+
+    def test_every_commit_invocation_is_checked_in_shell_order(self):
+        state = self.manifest_state()
+        commands = (
+            "git commit -a -m first && git commit -m second",
+            "git commit -m first && git commit -a -m second",
+            (
+                "git commit --include src/a.cpp -m first && "
+                "git commit -m second"
+            ),
+            (
+                "git commit -m first && "
+                "git commit --include src/a.cpp -m second"
+            ),
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                decision = self.bash(
+                    state,
+                    command,
+                    staged_files=("src/a.cpp", "tests/a_test.cpp"),
+                )
+                self.assertEqual((False, "git_commit"), (
+                    decision.allow, decision.rule))
 
     def test_commit_requires_exact_actual_staged_manifest(self):
         state = self.manifest_state(capabilities=(CapabilityAttempt(

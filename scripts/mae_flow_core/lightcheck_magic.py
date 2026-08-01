@@ -308,12 +308,39 @@ def _python_constant_value(node):
     return None
 
 
-def _inside_node(token, node):
-    start = (node.lineno, node.col_offset)
-    end = (
-        getattr(node, "end_lineno", node.lineno),
-        getattr(node, "end_col_offset", node.col_offset),
-    )
+def _byte_to_character_column(line, byte_column):
+    if not isinstance(byte_column, int) or byte_column < 0:
+        return None
+    encoded = line.encode("utf-8")
+    if byte_column > len(encoded):
+        return None
+    try:
+        prefix = encoded[:byte_column].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return len(prefix)
+
+
+def _python_character_span(node, source_lines):
+    end_line = getattr(node, "end_lineno", None)
+    end_column = getattr(node, "end_col_offset", None)
+    if end_line is None or end_column is None:
+        return None
+    if not (1 <= node.lineno <= len(source_lines)):
+        return None
+    if not (1 <= end_line <= len(source_lines)):
+        return None
+    start_column = _byte_to_character_column(
+        source_lines[node.lineno - 1], node.col_offset)
+    end_character = _byte_to_character_column(
+        source_lines[end_line - 1], end_column)
+    if start_column is None or end_character is None:
+        return None
+    return (node.lineno, start_column), (end_line, end_character)
+
+
+def _inside_span(token, span):
+    start, end = span
     return token.start >= start and token.end <= end
 
 
@@ -326,6 +353,13 @@ def _python_constant_number_tokens(source):
             _python_constant_value(node) for node in ast.walk(tree))
         if value is not None
     ]
+    source_lines = source.splitlines()
+    spans = [
+        _python_character_span(value, source_lines)
+        for value in values
+    ]
+    if any(span is None for span in spans):
+        return None
     try:
         tokens = list(tokenize.generate_tokens(StringIO(source).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError):
@@ -335,7 +369,7 @@ def _python_constant_number_tokens(source):
         if token.type == tokenize.NUMBER:
             result.setdefault(token.start[0], []).append((
                 token.string,
-                any(_inside_node(token, value) for value in values),
+                any(_inside_span(token, span) for span in spans),
             ))
     return result
 

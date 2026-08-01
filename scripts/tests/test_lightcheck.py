@@ -372,6 +372,22 @@ class LightCheckTests(unittest.TestCase):
             [item["literal"] for item in self.magic_findings(result)],
             ["5", "100", "10"], result)
 
+    def test_python_constant_ast_byte_columns_align_with_unicode_tokens(self):
+        fixtures = (
+            ("unicode_assign.py", (
+                "LIMIT = (\n"
+                "    中文变量名称很长 * 5); x = 10\n")),
+            ("unicode_annassign.py", (
+                "LIMIT: Final[int] = (\n"
+                "    中文变量名称很长 * 5); x = 10\n")),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(
+                    [item["literal"] for item in self.magic_findings(result)],
+                    ["10"], result)
+
     def test_enum_members_are_extraction_not_magic_number_usage(self):
         fixtures = (
             ("state.cpp", "enum class State { Ready = 1, Done = 2 };\n"),

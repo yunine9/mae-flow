@@ -8,6 +8,7 @@ from .git_shell import (
     GIT_GLOBAL_VALUE_OPTIONS,
     _git_invocation_records,
     _is_git_executable,
+    executed_git_delivery_operations,
     git_invocations,
     shell_command_groups,
 )
@@ -23,6 +24,11 @@ COMMIT_VALUE_OPTIONS = {
 GIT_MUTATION_OPERATIONS = {
     "add", "commit", "push", "restore", "checkout", "rm", "revert",
 }
+
+
+def executes_git_commit_or_push(command):
+    """Whether shell execution reaches a Git commit or push command."""
+    return bool(executed_git_delivery_operations(command))
 
 
 @dataclass(frozen=True)

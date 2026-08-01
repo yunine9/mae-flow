@@ -17,6 +17,7 @@ from mae_flow_core.guard.intent import (  # noqa: E402
     parse_intent,
     recursive_delete_targets,
 )
+from mae_flow_core.foundation import git_intent  # noqa: E402
 from mae_flow_core.foundation.git_intent import (  # noqa: E402
     git_delivery_intents,
     git_commit_intent,
@@ -25,6 +26,42 @@ from mae_flow_core.foundation.git_intent import (  # noqa: E402
 
 
 class GuardIntentTests(unittest.TestCase):
+    def test_delivery_execution_predicate_follows_real_wrapper_positions(self):
+        executes_delivery = getattr(
+            git_intent, "executes_git_commit_or_push", lambda command: False)
+        commands = (
+            "git push origin HEAD",
+            "env FOO=1 command git push origin HEAD",
+            "sudo -u root git commit -m update",
+            "bash --noprofile -O extglob -c 'git push origin HEAD'",
+            "powershell.exe -NoProfile -Command git commit -m update",
+            "cmd.exe /d /s /c git push origin HEAD",
+            "bash -c \"sh -c 'git commit -m update'\"",
+            "cmd /c cmd /c cmd /c cmd /c cmd /c cmd /c git push",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(executes_delivery(command))
+
+    def test_delivery_execution_predicate_rejects_inspection_and_bad_arity(self):
+        executes_delivery = getattr(
+            git_intent, "executes_git_commit_or_push", lambda command: False)
+        commands = (
+            "echo git push origin HEAD",
+            "command -v git push",
+            "sudo -u git push",
+            "env printf -S 'git push'",
+            "bash --not-a-shell-option -c 'git push'",
+            "bash -c git push",
+            "powershell.exe -Bogus -Command git push",
+            "cmd.exe /bogus /c git push",
+            "python -c \"print('git push')\"",
+            "cmd /c cmd /c cmd /c cmd /c cmd /c cmd /c cmd /c git push",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertFalse(executes_delivery(command))
+
     def test_parse_normalizes_slashes_and_tokenizes_bash_paths(self):
         intent = parse_intent(
             "bash",

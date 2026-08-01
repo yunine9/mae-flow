@@ -43,6 +43,7 @@ class LeanHookEventTests(unittest.TestCase):
         expected = {
             "SessionStart": "resume",
             "session_start": "resume",
+            "Session Start": "resume",
             "UserPromptSubmit": "prompt",
             "USER-PROMPT": "prompt",
             "PreToolUse": "pretool",
@@ -61,7 +62,8 @@ class LeanHookEventTests(unittest.TestCase):
     def test_legacy_stop_events_and_unrelated_names_never_call_ports(self):
         for event in (
                 "Stop", "stop", "SubagentStop", "subagent_stop",
-                "BeforePreToolUse", "UserPromptSubmitted", "tooluse"):
+                "BeforePreToolUse", "UserPromptSubmitted", "tooluse",
+                "session/start", "pre.tool.use", "user+prompt"):
             with self.subTest(event=event):
                 ports, calls = self.ports()
                 response = handle_lean_hook_event(
@@ -70,14 +72,33 @@ class LeanHookEventTests(unittest.TestCase):
                 self.assertEqual([], calls)
 
     def test_inactive_complete_and_exited_states_bypass_ordinary_ports(self):
-        for status in ("inactive", "complete", "exited"):
-            with self.subTest(status=status):
+        runtimes = (
+            SimpleNamespace(mode="inactive"),
+            SimpleNamespace(status="complete"),
+            SimpleNamespace(status="exited"),
+        )
+        for runtime in runtimes:
+            with self.subTest(runtime=runtime):
                 ports, calls = self.ports()
                 response = handle_lean_hook_event(
                     "PreToolUse", {"tool_name": "Edit"},
-                    SimpleNamespace(status=status), ports)
+                    runtime, ports)
                 self.assertEqual("inactive\n", response.stdout)
                 self.assertEqual(["inactive"], [name for name, _args in calls])
+
+    def test_paused_and_structurally_valid_flow_modes_route(self):
+        for runtime in (
+                SimpleNamespace(status="paused"),
+                SimpleNamespace(
+                    mode="flow", flow=SimpleNamespace(status="active")),
+                SimpleNamespace(
+                    mode="flow", flow=SimpleNamespace(status="paused"))):
+            with self.subTest(runtime=runtime):
+                ports, calls = self.ports()
+                response = handle_lean_hook_event(
+                    "SessionStart", {}, runtime, ports)
+                self.assertEqual("resume\n", response.stdout)
+                self.assertEqual(["resume"], [name for name, _args in calls])
 
     def test_corrupt_state_routes_only_commit_and_push_to_pretool(self):
         blocked = HookResponse(exit_code=2, stderr="manifest mismatch\n")
@@ -94,7 +115,7 @@ class LeanHookEventTests(unittest.TestCase):
             posttool=lambda payload: HookResponse(stdout="posttool\n"),
             inactive=lambda event, payload: HookResponse(stdout="inactive\n"),
         )
-        runtime = SimpleNamespace(status="corrupt")
+        runtime = SimpleNamespace(mode="corrupt")
         deliveries = (
             {"tool_name": "Bash", "tool_input": {
                 "command": "git commit -m update"}},
@@ -105,7 +126,7 @@ class LeanHookEventTests(unittest.TestCase):
             {"tool_name": "Bash", "tool_input": {
                 "command": "LC_ALL=C git commit -m update"}},
             {"tool_name": "Bash", "tool_input": {
-                "command": "env LC_ALL=C git push origin HEAD"}},
+                "command": "env FOO=1 command git push origin HEAD"}},
             {"tool_name": "Bash", "tool_input": {
                 "command": "env -S 'git push origin HEAD'"}},
             {"tool_name": "Bash", "tool_input": {
@@ -113,14 +134,20 @@ class LeanHookEventTests(unittest.TestCase):
             {"tool_name": "Bash", "tool_input": {
                 "command": "exec git commit -m update"}},
             {"tool_name": "Bash", "tool_input": {
-                "command": "sudo git push origin HEAD"}},
+                "command": "sudo -u root git push origin HEAD"}},
             {"tool_name": "Bash", "tool_input": {
-                "command": "bash -c 'git push origin HEAD'"}},
+                "command": (
+                    "bash --noprofile -O extglob "
+                    "-c 'git push origin HEAD'")}},
             {"tool_name": "Bash", "tool_input": {
                 "command": (
                     "bash -c \"sh -c 'zsh -c \\\"git push origin HEAD\\\"'\"")}},
             {"tool_name": "Bash", "tool_input": {
-                "command": "cmd.exe /c git commit -m update"}},
+                "command": (
+                    "powershell.exe -NoProfile "
+                    "-Command git commit -m update")}},
+            {"tool_name": "Bash", "tool_input": {
+                "command": "cmd.exe /d /s /c git commit -m update"}},
         )
         for payload in deliveries:
             with self.subTest(payload=payload):
@@ -144,6 +171,18 @@ class LeanHookEventTests(unittest.TestCase):
                 "command": "cmd.exe -c git push"}}),
             ("PreToolUse", {"tool_name": "Bash", "tool_input": {
                 "command": "bash -c git push"}}),
+            ("PreToolUse", {"tool_name": "Bash", "tool_input": {
+                "command": "command -v git push"}}),
+            ("PreToolUse", {"tool_name": "Bash", "tool_input": {
+                "command": "sudo -u git push"}}),
+            ("PreToolUse", {"tool_name": "Bash", "tool_input": {
+                "command": "env printf -S 'git push'"}}),
+            ("PreToolUse", {"tool_name": "Bash", "tool_input": {
+                "command": "powershell.exe -Bogus -Command git push"}}),
+            ("PreToolUse", {"tool_name": "B-ash", "tool_input": {
+                "command": "git push"}}),
+            ("PreToolUse", {"tool_name": "Bash/", "tool_input": {
+                "command": "git push"}}),
         )
         for event, payload in ordinary:
             with self.subTest(event=event, payload=payload):
@@ -160,7 +199,18 @@ class LeanHookEventTests(unittest.TestCase):
             ("SessionStart", {}, object()),
             ("PreToolUse", {
                 "tool_name": "Bash", "tool_input": {"command": 7}},
-             SimpleNamespace(status="corrupt")),
+             SimpleNamespace(mode="corrupt")),
+            ("SessionStart", {}, SimpleNamespace(status="act/ive")),
+            ("SessionStart", {}, SimpleNamespace(status="inactive")),
+            ("SessionStart", {}, SimpleNamespace(status="completed")),
+            ("SessionStart", {}, SimpleNamespace(status="corrupt")),
+            ("SessionStart", {}, SimpleNamespace(mode="active")),
+            ("SessionStart", {}, SimpleNamespace(mode="flow")),
+            ("SessionStart", {}, SimpleNamespace(
+                mode="flow", status="active",
+                flow=SimpleNamespace(status="active"))),
+            ("SessionStart", {}, SimpleNamespace(
+                mode="flow", flow=SimpleNamespace(status="act/ive"))),
         )
         for event, payload, runtime in malformed:
             with self.subTest(event=event, payload=payload, runtime=runtime):
@@ -183,6 +233,49 @@ class LeanHookEventTests(unittest.TestCase):
                     handle_lean_hook_event(
                         event, {}, SimpleNamespace(status="active"), ports),
                 )
+
+        ports, _calls = self.ports()
+        ports = LeanHookPorts(
+            resume=ports.resume,
+            prompt=ports.prompt,
+            pretool=lambda payload: (_ for _ in ()).throw(SystemExit(2)),
+            posttool=ports.posttool,
+            inactive=ports.inactive,
+        )
+        try:
+            response = handle_lean_hook_event(
+                "PreToolUse", {}, SimpleNamespace(status="active"), ports)
+        except SystemExit:
+            self.fail("SystemExit escaped the fail-open Hook boundary")
+        self.assertEqual(HookResponse(), response)
+
+    def test_active_pretool_preserves_confirmed_block_identity(self):
+        blocked = HookResponse(exit_code=2, stderr="dangerous\n")
+        ports, _calls = self.ports()
+        ports = LeanHookPorts(
+            resume=ports.resume,
+            prompt=ports.prompt,
+            pretool=lambda payload: blocked,
+            posttool=ports.posttool,
+            inactive=ports.inactive,
+        )
+        self.assertIs(
+            blocked,
+            handle_lean_hook_event(
+                "PreToolUse", {}, SimpleNamespace(status="active"), ports),
+        )
+
+    def test_legacy_stop_precedes_explosive_runtime_payload_and_ports(self):
+        class Explosive:
+            def __getattribute__(self, name):
+                raise AssertionError("touched " + name)
+
+        explosive = Explosive()
+        self.assertEqual(
+            HookResponse(),
+            handle_lean_hook_event("SubagentStop", explosive, explosive,
+                                   explosive),
+        )
 
     def test_ports_are_immutable(self):
         ports, _calls = self.ports()

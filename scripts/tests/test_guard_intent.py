@@ -208,7 +208,7 @@ class GuardIntentTests(unittest.TestCase):
 
     def test_recursive_delete_targets_only_inspects_delete_segment(self):
         self.assertEqual(
-            (),
+            ("build",),
             recursive_delete_targets(parse_intent(
                 "bash",
                 "rm -rf build && cmake -S . -B build",
@@ -258,10 +258,12 @@ class GuardIntentTests(unittest.TestCase):
 
     def test_recursive_delete_targets_follow_actual_command_positions(self):
         cases = (
+            ("rm -rf build", ("build",)),
             ("rm -rf /", ("/",)),
             ("git status && rm -rf .", (".",)),
             ("sh -c 'rm -rf /'", ("/",)),
             ("cmd.exe /d /c rmdir /s C:/", ("C:/",)),
+            ("echo rm -rf build", ()),
             ("echo rm -rf /", ()),
             ("printf 'rm -rf /'", ()),
             ("git status && echo rm -rf /", ()),

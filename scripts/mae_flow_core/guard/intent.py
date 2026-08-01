@@ -96,20 +96,20 @@ def _recursive_delete(record):
     return False
 
 
-def _dangerous_delete_target(token):
-    lowered = token.casefold()
-    return (
-        bool(token)
-        and token != "--"
-        and not token.startswith("-")
-        and lowered not in {"/s", "/q"}
-        and (
-            lowered in {
-                "/", "~", "*", ".", "..", "$home", "%userprofile%",
-            }
-            or bool(re.fullmatch(r"[a-z]:[\\/]*", lowered))
-        )
-    )
+def _recursive_delete_arguments(record):
+    executable = re.split(r"[\\/]", record.executable)[-1].casefold()
+    positional = False
+    for argument in record.arguments:
+        if argument == "--":
+            positional = True
+            continue
+        if executable == "rm" and not positional and argument.startswith("-"):
+            continue
+        if executable in {"rd", "rmdir", "rd.exe", "rmdir.exe"} and (
+                argument.casefold() in {"/s", "/q"}):
+            continue
+        if argument:
+            yield argument
 
 
 def _execution_records(intent):
@@ -121,11 +121,10 @@ def _execution_records(intent):
 
 
 def recursive_delete_targets(intent):
-    """Return dangerous roots only from commands that actually execute."""
+    """Return recursive-delete targets only from commands that execute."""
     return tuple(
         normalize_path(token)
         for record in _execution_records(intent)
         if _recursive_delete(record)
-        for token in record.arguments
-        if _dangerous_delete_target(token)
+        for token in _recursive_delete_arguments(record)
     )

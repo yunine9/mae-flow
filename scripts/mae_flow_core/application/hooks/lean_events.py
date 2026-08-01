@@ -6,7 +6,7 @@ import re
 from typing import Callable
 
 from mae_flow_core.application.hooks.models import HookResponse
-from mae_flow_core.foundation.git_intent import executes_git_commit_or_push
+from mae_flow_core.guard.command_policy import stateless_command_relevant
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ def _runtime_status(runtime):
     return ""
 
 
-def _delivery_command(payload):
+def _stateless_safety_command(payload):
     tool = payload.get("tool_name", "")
     if not isinstance(tool, str) or tool.lower() != "bash":
         return False
@@ -93,7 +93,7 @@ def _delivery_command(payload):
     command = tool_input.get("command", "")
     if not isinstance(command, str):
         return False
-    return executes_git_commit_or_push(command)
+    return stateless_command_relevant(command)
 
 
 def handle_lean_hook_event(event, payload, runtime, ports):
@@ -112,7 +112,9 @@ def handle_lean_hook_event(event, payload, runtime, ports):
         if status == "inactive":
             return ports.inactive(normalized, payload)
         if status == "corrupt":
-            if normalized == "pretooluse" and _delivery_command(payload):
+            if (
+                    normalized == "pretooluse"
+                    and _stateless_safety_command(payload)):
                 return ports.pretool(payload)
             return allow
 

@@ -100,7 +100,7 @@ class LeanHookEventTests(unittest.TestCase):
                 self.assertEqual("resume\n", response.stdout)
                 self.assertEqual(["resume"], [name for name, _args in calls])
 
-    def test_corrupt_state_routes_only_commit_and_push_to_pretool(self):
+    def test_corrupt_state_routes_stateless_safety_commands_to_pretool(self):
         blocked = HookResponse(exit_code=2, stderr="manifest mismatch\n")
         calls = []
 
@@ -117,6 +117,10 @@ class LeanHookEventTests(unittest.TestCase):
         )
         runtime = SimpleNamespace(mode="corrupt")
         deliveries = (
+            {"tool_name": "Bash", "tool_input": {
+                "command": "git reset --hard HEAD"}},
+            {"tool_name": "Bash", "tool_input": {
+                "command": "rm -rf build"}},
             {"tool_name": "Bash", "tool_input": {
                 "command": "git commit -m update"}},
             {"tool_name": "bash", "tool_input": {

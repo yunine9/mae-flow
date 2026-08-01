@@ -6,6 +6,7 @@ import os
 import shlex
 import sys
 import unittest
+from dataclasses import replace
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -498,7 +499,7 @@ class GitManifestSafetyTests(unittest.TestCase):
 
         exact = self.bash(
             state,
-            "git commit -m update",
+            "git commit -m '[REQ-7][fix]修复查询映射'",
             staged_files=("tests/a_test.cpp", "src/a.cpp"),
         )
         missing = self.bash(
@@ -516,6 +517,33 @@ class GitManifestSafetyTests(unittest.TestCase):
         self.assertEqual((False, "git_commit"), (
             missing.allow, missing.rule))
         self.assertEqual((False, "git_commit"), (extra.allow, extra.rule))
+
+    def test_commit_message_uses_ticket_and_actual_wrapper_arguments(self):
+        state = self.manifest_state()
+        exact = ("tests/a_test.cpp", "src/a.cpp")
+        cases = (
+            ("git commit -m update", False),
+            ("git commit -m '[REQ-8][fix]错误单号'", False),
+            ("git commit -m '[REQ-7][feat]实现查询条件'", True),
+            (
+                'cmd.exe /d /c git commit -m "[REQ-7][fix]修复结果映射"',
+                True,
+            ),
+        )
+        for command, expected_allow in cases:
+            with self.subTest(command=command):
+                decision = self.bash(
+                    state, command, staged_files=exact)
+                self.assertIs(expected_allow, decision.allow)
+                if not expected_allow:
+                    self.assertEqual("git_commit", decision.rule)
+        missing_ticket = self.bash(
+            replace(state, ticket=""),
+            "git commit -m '[][fix]缺少单号'",
+            staged_files=exact,
+        )
+        self.assertEqual((False, "git_commit"), (
+            missing_ticket.allow, missing_ticket.rule))
 
     def test_push_requires_exact_recorded_commit_manifest(self):
         state = self.manifest_state()
@@ -540,12 +568,13 @@ class GitManifestSafetyTests(unittest.TestCase):
 
         commit_after_add = self.bash(
             state,
-            "git add src/a.cpp && git commit -m update",
+            "git add src/a.cpp && "
+            "git commit -m '[REQ-7][fix]提交部分文件'",
             staged_files=("src/a.cpp",),
         )
         push_after_commit = self.bash(
             state,
-            "git commit -m update && git push origin main",
+            "git commit -m '[REQ-7][fix]提交并推送' && git push origin main",
             staged_files=("src/a.cpp", "tests/a_test.cpp"),
             commit_files=("src/a.cpp",),
         )
@@ -582,6 +611,19 @@ class GitManifestSafetyTests(unittest.TestCase):
             blocked.allow, blocked.rule))
         self.assertTrue(allowed.allow)
         self.assertTrue(context_allowed.allow)
+
+    def test_recursive_delete_blocks_outside_and_allows_task_owned_temp(self):
+        state = self.manifest_state()
+        facts = {"task_owned_temp_dir": "/repo/.tmp/task-7"}
+
+        outside = self.bash(state, "rm -rf build", **facts)
+        inside = self.bash(state, "rm -rf /repo/.tmp/task-7", **facts)
+        displayed = self.bash(state, "echo rm -rf build", **facts)
+
+        self.assertEqual((False, "filesystem"), (
+            outside.allow, outside.rule))
+        self.assertTrue(inside.allow)
+        self.assertTrue(displayed.allow)
 
     def test_destructive_recognition_precedes_read_only_fail_open(self):
         state = self.manifest_state()

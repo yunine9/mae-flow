@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import ntpath
 import os
 import posixpath
+import re
 
 from ..foundation import git_intent
 from ..foundation.source_paths import (
@@ -13,21 +14,13 @@ from ..foundation.source_paths import (
     repository_path_identity,
 )
 from ..orchestration import DeliveryPath, FlowState, Phase
-from .bash import BashGateContext, decide_post_commit
-from .intent import parse_intent, recursive_delete_targets
+from .command_policy import dangerous_bash_result, recursive_delete_facts
 from .manifest import DeliveryManifest, authorize_delivery, compare_staged
 
 
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
 _FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
 _QUALITY_SOURCE_FIX_APPROVED = "quality.source_fix_approved"
-_DESTRUCTIVE_BASH_RULES = {
-    "bash-force-push",
-    "bash-git-clean-ignored",
-    "bash-wipe-worktree",
-}
-
-
 @dataclass(frozen=True)
 class SafetyDecision:
     allow: bool
@@ -44,6 +37,7 @@ class SafetyContext:
     initial_dirty: tuple = ()
     current_dirty_fingerprints: tuple = ()
     safe_write_targets: tuple = ()
+    task_owned_temp_dir: str = ""
 
 
 def _allow(rule=""):
@@ -228,38 +222,34 @@ def _edit_decision(context, tool, tool_input):
     return None
 
 
-def _bash_gate_context(command, delete_targets):
-    return BashGateContext(
-        command=command,
-        has_internal_state_path=False,
-        branch_name="",
-        branch_creating=False,
-        step="",
-        wanted_branch="",
-        base_branch="",
-        checkpoint_locked=False,
-        checkpoint_label="",
-        checkpoint_status="",
-        ticket="",
-        commit_message_present=False,
-        commit_message="",
-        current_branch="",
-        add_paths=(),
-        recursive_delete_targets=tuple(delete_targets),
-        state_active=True,
-    )
+def _unsafe_delete_targets(context, targets):
+    if not context.task_owned_temp_dir:
+        return tuple(targets)
+    try:
+        task_temp = _relative_target(context, context.task_owned_temp_dir)
+        task_identity = _write_identity(context, task_temp).rstrip("/")
+    except ValueError:
+        return tuple(targets)
+    unsafe = []
+    for target in targets:
+        try:
+            relative = _relative_target(context, target)
+            identity = _write_identity(context, relative).rstrip("/")
+        except ValueError:
+            unsafe.append(target)
+            continue
+        if identity != task_identity and not identity.startswith(
+                task_identity + "/"):
+            unsafe.append(target)
+    return tuple(unsafe)
 
 
-def _dangerous_bash_decision(command, tool_input):
+def _dangerous_bash_decision(context, command, tool_input):
     supplied = _values(tool_input, "recursive_delete_targets")
-    delete_targets = supplied or recursive_delete_targets(
-        parse_intent("bash", command))
-    gate = decide_post_commit(_bash_gate_context(command, delete_targets))
-    if gate.rule == "bash-recursive-delete":
-        return _block("filesystem", gate.message)
-    if gate.rule in _DESTRUCTIVE_BASH_RULES:
-        return _block("git_destructive", gate.message)
-    return None
+    delete_targets = supplied or recursive_delete_facts(command)
+    rule, message = dangerous_bash_result(
+        command, _unsafe_delete_targets(context, delete_targets))
+    return _block(rule, message) if rule else None
 
 
 def _adopted_paths(state):
@@ -402,8 +392,33 @@ def _commit_decision(context, intent):
             "git_commit",
             "Commit must use the already-staged exact manifest.",
         )
+    message = _commit_message(intent.arguments)
+    ticket = context.state.ticket
+    if (
+            not isinstance(ticket, str)
+            or not ticket
+            or not isinstance(message, str)
+            or not re.match(
+                r"^\[" + re.escape(ticket) + r"\]\[(?:feat|fix)\](?=\S)",
+                message,
+            )):
+        return _block(
+            "git_commit",
+            "Commit message must use [%s][feat|fix]描述." % (ticket or "单号"),
+        )
     return _exact_manifest_decision(
         context, context.staged_files, "git_commit")
+
+
+def _commit_message(arguments):
+    for index, token in enumerate(arguments):
+        if token in ("-m", "--message"):
+            return arguments[index + 1] if index + 1 < len(arguments) else ""
+        if token.startswith("--message="):
+            return token.split("=", 1)[1]
+        if token.startswith("-m") and token != "-m":
+            return token[2:]
+    return None
 
 
 def _push_decision(context, intent):
@@ -425,7 +440,7 @@ def decide_pretool(context, tool, tool_input):
 
     command = _command(tool_input)
     if command:
-        dangerous = _dangerous_bash_decision(command, tool_input)
+        dangerous = _dangerous_bash_decision(context, command, tool_input)
         if dangerous is not None:
             return dangerous
 
@@ -443,4 +458,30 @@ def decide_pretool(context, tool, tool_input):
                 decision = _push_decision(context, intent)
             if not decision.allow:
                 return decision
+    return _allow()
+
+
+def decide_stateless_pretool(
+        repository_root, tool, tool_input, task_owned_temp_dir=""):
+    """Keep confirmed danger blocked when FlowState cannot be decoded."""
+    if str(tool or "").casefold() != "bash":
+        return _allow()
+    context = SafetyContext(
+        state=None,
+        repository_root=repository_root,
+        task_owned_temp_dir=task_owned_temp_dir,
+    )
+    command = _command(tool_input)
+    if not command:
+        return _allow()
+    dangerous = _dangerous_bash_decision(context, command, tool_input)
+    if dangerous is not None:
+        return dangerous
+    if any(
+            intent.operation in ("commit", "push")
+            for intent in git_intent.git_delivery_intents(command)):
+        return _block(
+            "git_delivery",
+            "Delivery is blocked because the exact manifest state is unavailable.",
+        )
     return _allow()

@@ -340,6 +340,29 @@ class DeliveryAuthorizationTests(unittest.TestCase):
         self.assertEqual(("src/existing.cpp",), authorized.delivery_files)
         self.assertEqual((), authorized.decisions)
 
+    def test_reauthorization_replaces_prior_dirty_adoption(self):
+        original = self.state(
+            initial_dirty=("src/a.cpp", "src/b.cpp"),
+            decisions=(("focused.scope_approved", "approved"),),
+        )
+        first = authorize_delivery(
+            original,
+            DeliveryManifest.from_paths(
+                ["src/a.cpp"], adopted_dirty=["src/a.cpp"]),
+        )
+
+        second = authorize_delivery(
+            first,
+            DeliveryManifest.from_paths(
+                ["src/b.cpp"], adopted_dirty=["src/b.cpp"]),
+        )
+
+        self.assertEqual(("src/b.cpp",), second.delivery_files)
+        self.assertEqual((
+            ("focused.scope_approved", "approved"),
+            ("delivery.adopted_dirty", "src/b.cpp"),
+        ), second.decisions)
+
 
 if __name__ == "__main__":
     unittest.main()

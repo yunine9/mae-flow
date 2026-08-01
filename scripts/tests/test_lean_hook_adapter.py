@@ -625,12 +625,37 @@ class LeanHookAdapterTests(unittest.TestCase):
                     (result.stdout + result.stderr).decode("utf-8"),
                 )
 
+    def test_recursive_delete_uses_actual_commands_and_task_temp_fact(self):
+        state = replace(self.write_state(), phase=Phase.CONSTRUCTION)
+        self.write_state(state)
+        task_temp = os.path.join(self.root, ".tmp", "task-5")
+        facts = LeanHookFactPorts(
+            task_owned_temp_dir=lambda unused: task_temp)
+        adapter = LeanHookAdapter(
+            self.root, marker_root=self.marker_root, fact_ports=facts)
+        cases = (
+            ("rm -rf build", 2),
+            ("rm -rf %s" % task_temp, 0),
+            ("echo rm -rf build", 0),
+            ("printf 'rm -rf build'", 0),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                response = adapter.handle("PreToolUse", {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                })
+                self.assertEqual(expected, response.exit_code, response.stderr)
+
     def test_corrupt_state_blocks_delivery_but_not_ordinary_unknown_work(self):
         with open(self.state_path, "wb") as stream:
             stream.write(b"broken-state")
         for command, expected in (
                 ("git push origin HEAD", 2),
-                ("git commit -m update", 2),
+                ("git commit -m '[REQ-5][fix]修复状态'", 2),
+                ("git reset --hard HEAD", 2),
+                ("rm -rf build", 2),
+                ("echo rm -rf build", 0),
                 ("git status --short", 0),
                 ("internal-codecheck --unknown", 0)):
             with self.subTest(command=command):
@@ -654,13 +679,37 @@ class LeanHookAdapterTests(unittest.TestCase):
         )
         adapter = LeanHookAdapter(
             self.root, marker_root=self.marker_root, fact_ports=facts)
-        for command in ("git commit -m update", "git push origin HEAD"):
+        for command in (
+                "git commit -m '[REQ-5][fix]修复提交格式'",
+                "git push origin HEAD"):
             with self.subTest(command=command):
                 response = adapter.handle("PreToolUse", {
                     "tool_name": "Bash",
                     "tool_input": {"command": command},
                 })
                 self.assertEqual(0, response.exit_code, response.stderr)
+
+    def test_exact_manifest_does_not_bypass_commit_message_contract(self):
+        state = replace(
+            self.write_state(),
+            phase=Phase.DELIVERY,
+            delivery_files=("src/a.cpp", "tests/a_test.cpp"),
+        )
+        self.write_state(state)
+        files = ("tests/a_test.cpp", "src/a.cpp")
+        adapter = LeanHookAdapter(
+            self.root,
+            marker_root=self.marker_root,
+            fact_ports=LeanHookFactPorts(staged_files=lambda unused: files),
+        )
+
+        response = adapter.handle("PreToolUse", {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m update"},
+        })
+
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("[REQ-5][feat|fix]", response.stderr)
 
     def test_fact_port_failure_does_not_hide_an_independent_danger(self):
         state = replace(self.write_state(), phase=Phase.CONSTRUCTION)

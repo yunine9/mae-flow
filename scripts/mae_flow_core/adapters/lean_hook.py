@@ -16,7 +16,12 @@ from ..application.hooks.lean_events import (
     handle_lean_hook_event,
 )
 from ..application.hooks.models import HookResponse
-from ..guard.safety_kernel import SafetyContext, decide_pretool
+from ..guard.command_policy import recursive_delete_facts
+from ..guard.safety_kernel import (
+    SafetyContext,
+    decide_pretool,
+    decide_stateless_pretool,
+)
 from ..orchestration import CapabilityAttempt, FlowState
 from ..state_store import (
     ProjectStateLock,
@@ -44,6 +49,7 @@ class LeanHookFactPorts:
     initial_dirty: object = _empty_paths
     current_dirty_fingerprints: object = _empty_paths
     safe_write_targets: object = _empty_paths
+    task_owned_temp_dir: object = _empty_paths
 
 
 def _decode_json(raw):
@@ -281,30 +287,41 @@ class LeanHookAdapter:
         except (Exception, SystemExit):
             return ()
 
+    def _fact_text(self, port, payload):
+        try:
+            value = port(payload)
+            return value if isinstance(value, str) else ""
+        except (Exception, SystemExit):
+            return ""
+
     def _pretool(self, state, payload):
+        tool = payload.get("tool_name", "")
+        tool_input = payload.get("tool_input", {})
+        command = tool_input.get("command", "") if isinstance(
+            tool_input, Mapping) else ""
+        delete_targets = recursive_delete_facts(command) if isinstance(
+            command, str) else ()
+        if delete_targets:
+            tool_input = dict(tool_input)
+            tool_input["recursive_delete_targets"] = delete_targets
+        task_temp = self._fact_text(self.facts.task_owned_temp_dir, payload)
         if state is None:
-            return HookResponse(
-                exit_code=2,
-                stderr=(
-                    "[mae-flow] Delivery is blocked because the exact "
-                    "manifest state is unavailable.\n"),
+            decision = decide_stateless_pretool(
+                self.root, tool, tool_input, task_temp)
+        else:
+            context = SafetyContext(
+                state=state,
+                repository_root=self.root,
+                staged_files=self._fact_paths(self.facts.staged_files, payload),
+                commit_files=self._fact_paths(self.facts.commit_files, payload),
+                initial_dirty=self._fact_paths(self.facts.initial_dirty, payload),
+                current_dirty_fingerprints=self._fact_paths(
+                    self.facts.current_dirty_fingerprints, payload),
+                safe_write_targets=self._fact_paths(
+                    self.facts.safe_write_targets, payload),
+                task_owned_temp_dir=task_temp,
             )
-        context = SafetyContext(
-            state=state,
-            repository_root=self.root,
-            staged_files=self._fact_paths(self.facts.staged_files, payload),
-            commit_files=self._fact_paths(self.facts.commit_files, payload),
-            initial_dirty=self._fact_paths(self.facts.initial_dirty, payload),
-            current_dirty_fingerprints=self._fact_paths(
-                self.facts.current_dirty_fingerprints, payload),
-            safe_write_targets=self._fact_paths(
-                self.facts.safe_write_targets, payload),
-        )
-        decision = decide_pretool(
-            context,
-            payload.get("tool_name", ""),
-            payload.get("tool_input", {}),
-        )
+            decision = decide_pretool(context, tool, tool_input)
         if decision.allow:
             return HookResponse()
         return HookResponse(

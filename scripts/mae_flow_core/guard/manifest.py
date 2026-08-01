@@ -221,8 +221,10 @@ def authorize_delivery(state, manifest):
 
     adoption_facts = tuple(
         (_ADOPTION_DECISION, path) for path in manifest.adopted_dirty)
-    decisions = state.decisions + tuple(
-        fact for fact in adoption_facts if fact not in state.decisions)
+    decisions = tuple(
+        fact for fact in state.decisions
+        if fact[0] != _ADOPTION_DECISION
+    ) + adoption_facts
     return replace(
         state,
         delivery_files=manifest.files,

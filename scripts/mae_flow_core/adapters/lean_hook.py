@@ -15,6 +15,9 @@ from ..application.hooks.lean_events import (
     LeanHookPorts,
     handle_lean_hook_event,
 )
+from ..application.hooks.capability_observation import (
+    handle_capability_posttool,
+)
 from ..application.hooks.models import HookResponse
 from ..guard.command_policy import recursive_delete_facts
 from ..guard.safety_kernel import (
@@ -22,7 +25,8 @@ from ..guard.safety_kernel import (
     decide_pretool,
     decide_stateless_pretool,
 )
-from ..orchestration import CapabilityAttempt, FlowState
+from ..orchestration import FlowState
+from ..orchestration.capability_registry import load_capability_registry
 from ..state_store import (
     ProjectStateLock,
     _replace_with_retry,
@@ -338,21 +342,12 @@ class LeanHookAdapter:
             atomic_write_json(self.state_path, mutate(state).to_dict())
 
     def _posttool(self, payload):
-        raw = payload.get("capability_fact")
-        fields = {
-            "kind", "source_revision", "environment_revision", "outcome",
-            "summary",
-        }
-        if not isinstance(raw, Mapping) or set(raw) != fields:
-            return HookResponse()
-        if not all(isinstance(raw[field], str) for field in fields):
-            return HookResponse()
-        fact = CapabilityAttempt(
-            raw["kind"], raw["source_revision"],
-            raw["environment_revision"], raw["outcome"], raw["summary"])
-        self._update_state(lambda state: replace(
-            state, capabilities=(state.capabilities + (fact,))[-20:]))
-        return HookResponse()
+        return handle_capability_posttool(
+            payload,
+            load_capability_registry(self.root),
+            self._record_event,
+            self._update_state,
+        )
 
     def _existing_snapshot(self):
         pointer = self._valid_pointer()

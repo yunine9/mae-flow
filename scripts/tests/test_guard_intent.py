@@ -99,20 +99,28 @@ class GuardIntentTests(unittest.TestCase):
             "bash": (
                 ("bash --noprofile -O extglob -c 'git commit -m update'", True),
                 ("bash -o errexit -c 'git push origin HEAD'", True),
+                ("bash -l -c 'git push origin HEAD'", True),
                 ("bash -O -c 'git push origin HEAD'", False),
+                ("bash -oerrexit -c 'git push origin HEAD'", False),
                 ("bash --init-command ready -c 'git push origin HEAD'", False),
             ),
             "zsh": (
                 ("zsh -o SH_WORD_SPLIT -c 'git push origin HEAD'", True),
+                ("zsh -oSH_WORD_SPLIT -c 'git push origin HEAD'", True),
+                ("zsh -l -c 'git commit -m update'", True),
                 ("zsh -o -c 'git push origin HEAD'", False),
                 ("zsh --noprofile -c 'git push origin HEAD'", False),
             ),
             "fish": (
                 ("fish -C 'echo ready' -c 'git push origin HEAD'", True),
                 ("fish --init-command='echo ready' --command='git commit -m update'", True),
+                ("fish -C 'git push origin HEAD' -c 'echo ready'", True),
+                ("fish --init-command='git commit -m x' --command='echo ready'", True),
+                ("fish -c 'git push origin HEAD' arg0", True),
                 ("fish -C -c 'git push origin HEAD'", False),
                 ("fish -O extglob -c 'git push origin HEAD'", False),
                 ("fish --version -c 'git push origin HEAD'", False),
+                ("fish -c 'echo ready' arg0 -c 'git push origin HEAD'", False),
             ),
         }
         for launcher, launcher_cases in cases.items():

@@ -14,11 +14,11 @@ _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
 _DELIVERY_OPERATIONS = {"commit", "push"}
 _MAX_EXECUTION_DEPTH = 6
 
-_SH_ZERO_SHORT_FLAGS = set("abefhikmptuvxCrs")
+_SH_ZERO_SHORT_FLAGS = set("abefhiklmptuvxCrs")
 _SH_VALUE_FLAGS = {"-o", "+o"}
 _SH_ZERO_LONG_FLAGS = {"--login", "--posix", "--restricted", "--verbose"}
 
-_BASH_ZERO_SHORT_FLAGS = set("abefhikmptuvxBCHPirs")
+_BASH_ZERO_SHORT_FLAGS = set("abefhiklmptuvxBCHPirs")
 _BASH_VALUE_FLAGS = {
     "-o", "+o", "-O", "+O", "--init-file", "--rcfile",
 }
@@ -28,8 +28,9 @@ _BASH_ZERO_LONG_FLAGS = {
     "--wordexp",
 }
 
-_ZSH_ZERO_SHORT_FLAGS = set("abefhikmptuvxBCirs")
+_ZSH_ZERO_SHORT_FLAGS = set("abefhiklmptuvxBCirs")
 _ZSH_VALUE_FLAGS = {"-o", "+o"}
+_ZSH_ATTACHED_VALUE_FLAGS = {"-o", "+o"}
 _ZSH_ZERO_LONG_FLAGS = {
     "--globalrcs", "--interactive", "--login", "--no-globalrcs",
     "--no-rcs", "--rcs", "--verbose",
@@ -40,16 +41,19 @@ _TRADITIONAL_SHELL_GRAMMARS = {
         _SH_ZERO_SHORT_FLAGS,
         _SH_VALUE_FLAGS,
         _SH_ZERO_LONG_FLAGS,
+        set(),
     ),
     "bash": (
         _BASH_ZERO_SHORT_FLAGS,
         _BASH_VALUE_FLAGS,
         _BASH_ZERO_LONG_FLAGS,
+        set(),
     ),
     "zsh": (
         _ZSH_ZERO_SHORT_FLAGS,
         _ZSH_VALUE_FLAGS,
         _ZSH_ZERO_LONG_FLAGS,
+        _ZSH_ATTACHED_VALUE_FLAGS,
     ),
 }
 _FISH_NAMES = {"fish", "fish.exe"}
@@ -263,7 +267,7 @@ def _env_command(tokens, index, depth):
 
 def _traditional_shell_command(
         tokens, index, depth, zero_short_flags, value_flags,
-        zero_long_flags):
+        zero_long_flags, attached_value_flags):
     while index < len(tokens):
         option = tokens[index]
         if option == "--":
@@ -278,6 +282,11 @@ def _traditional_shell_command(
             index += 2
             if index > len(tokens):
                 return ()
+            continue
+        if any(
+                option.startswith(flag) and option != flag
+                for flag in attached_value_flags):
+            index += 1
             continue
         if option.startswith("-") and not option.startswith("--"):
             flags = option[1:]
@@ -307,6 +316,8 @@ def _fish_command(tokens, index, depth):
     while index < len(tokens):
         option = tokens[index]
         base, separator, value = option.partition("=")
+        if option == "--":
+            break
         if base in _FISH_TERMINAL_FLAGS:
             return ()
         if base in (
@@ -314,10 +325,15 @@ def _fish_command(tokens, index, depth):
             value, index = _option_operand(tokens, index, separator, value)
             if index < 0:
                 return ()
-            if base in _FISH_COMMAND_FLAGS:
+            if base in _FISH_INIT_FLAGS:
                 commands.append(value)
+            elif base in _FISH_COMMAND_FLAGS:
+                commands.append(value)
+                break
         elif option in _FISH_ZERO_FLAGS:
             index += 1
+        elif not option.startswith("-"):
+            break
         else:
             return ()
         if index > len(tokens):

@@ -239,14 +239,14 @@ def advance_flow(state, request):
             "The flow exited unconditionally at its current phase.",
         )
 
-    if kind == "risk-resolved":
-        return _resolve_risk(state, request)
-
     if state.status != "active":
         return AdvanceResult(
             state, False,
             "The flow is inactive; new or resume behavior is handled elsewhere.",
         )
+
+    if kind == "risk-resolved":
+        return _resolve_risk(state, request)
 
     if kind in {"delivery-completed", "complete"}:
         if state.phase != Phase.DELIVERY:

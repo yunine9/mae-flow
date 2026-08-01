@@ -562,6 +562,31 @@ class TerminalTransitionTests(unittest.TestCase):
         self.assertEqual(state.risks, result.state.risks)
         self.assertFalse(result.needs_user)
 
+    def test_inactive_risk_resolution_is_an_exact_no_op(self):
+        risk = "The historical flow retained an unresolved risk."
+        for status in ("paused", "complete", "exited"):
+            with self.subTest(status=status):
+                state = replace(
+                    flow(phase=Phase.QUALITY, status=status),
+                    decisions=(("existing.decision", "preserve exactly"),),
+                    risks=(risk,),
+                )
+
+                result = advance_flow(state, AdvanceRequest(
+                    "risk-resolved",
+                    decision_key=risk,
+                    decision_value="用户现在给出了解决说明，但终态不能被回写。",
+                ))
+
+                self.assertIs(state, result.state)
+                self.assertEqual((risk,), result.state.risks)
+                self.assertEqual(
+                    (("existing.decision", "preserve exactly"),),
+                    result.state.decisions,
+                )
+                self.assertFalse(result.needs_user)
+                self.assertIn("inactive", result.reason.lower())
+
     def test_complete_alias_only_finishes_authorized_delivery(self):
         for phase in Phase:
             with self.subTest(phase=phase):

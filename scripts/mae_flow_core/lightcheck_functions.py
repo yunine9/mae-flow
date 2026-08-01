@@ -275,6 +275,13 @@ def _finding(rule, path, line, actual, details):
     }
 
 
+def _mark_pre_existing(item, baseline):
+    item["baseline"] = int(baseline)
+    item["pre_existing"] = True
+    item["message"] += "（基线已存在，因本次触及函数纳入处置）"
+    return item
+
+
 _FUNCTION_RULES = (
     ("MF-PARAM-5", "parameter_count", PARAMETER_LIMIT, "函数入参超过 5 个"),
     ("MF-FUNC-50", "effective_lines", FUNCTION_LINE_LIMIT,

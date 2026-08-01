@@ -311,7 +311,7 @@ CHECKPOINT_LOCKED_STATUSES = delivery_checkpoints.LOCKED_STATUSES
 
 CODE_EXTS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
-    ".java", ".js", ".jsx", ".cjs", ".mjs",
+    ".java", ".cs", ".js", ".jsx", ".cjs", ".mjs",
     ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
 )
 

@@ -15,6 +15,7 @@ import re
 import sys
 import time
 import tokenize
+from dataclasses import dataclass
 from io import StringIO
 
 
@@ -30,7 +31,7 @@ MAX_REPORTED_ITEMS = 200
 
 SUPPORTED_EXTENSIONS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
-    ".inl", ".ipp", ".tpp", ".java",
+    ".inl", ".ipp", ".tpp", ".java", ".cs",
     ".js", ".jsx", ".cjs", ".mjs",
     ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
 )
@@ -43,6 +44,12 @@ _GENERATED_MARKERS = re.compile(
     r"(?i)(?:@generated|auto[- ]generated|generated code|do not edit|"
     r"automatically generated)")
 _DELIMITER_ONLY = re.compile(r"^[{}\[\]();,]+$")
+
+
+@dataclass(frozen=True)
+class _ClassifiedLine:
+    code: str
+    comment: str = ""
 
 
 def _load_lizard():
@@ -146,6 +153,7 @@ class _CLikeScanner:
         self.quote = ""
         self.raw_end = ""
         self.escaped = False
+        self.comment = []
 
     def _consume_raw(self, raw_line, index, visible):
         marker = self.raw_end
@@ -159,7 +167,9 @@ class _CLikeScanner:
     def _consume_block_comment(self, raw_line, index):
         end = raw_line.find("*/", index)
         if end < 0:
+            self.comment.append(raw_line[index:])
             return len(raw_line)
+        self.comment.append(raw_line[index:end])
         self.in_block_comment = False
         return end + 2
 
@@ -183,6 +193,7 @@ class _CLikeScanner:
             return index + raw_match.end()
         token = raw_line[index:index + 2]
         if token == "//":
+            self.comment.append(raw_line[index + 2:])
             return len(raw_line)
         if token == "/*":
             self.in_block_comment = True
@@ -195,12 +206,18 @@ class _CLikeScanner:
         visible.append(char)
         return index + 1
 
-    def scan_line(self, raw_line):
+    def classify_line(self, raw_line):
         index = 0
         visible = []
+        self.comment = []
         while index < len(raw_line):
             index = self._consume_state(raw_line, index, visible)
-        compact = re.sub(r"\s+", "", "".join(visible))
+        return _ClassifiedLine(
+            "".join(visible), " ".join(self.comment).strip())
+
+    def scan_line(self, raw_line):
+        classified = self.classify_line(raw_line)
+        compact = re.sub(r"\s+", "", classified.code)
         return compact if compact else ""
 
     def _consume_state(self, raw_line, index, visible):
@@ -213,7 +230,7 @@ class _CLikeScanner:
         return self._consume_plain(raw_line, index, visible)
 
     def incomplete(self):
-        return bool(self.in_block_comment or self.raw_end)
+        return bool(self.in_block_comment or self.raw_end or self.quote)
 
 
 def _effective_compact_line(compact):
@@ -233,6 +250,45 @@ def _clike_code_lines(source):
     if scanner.incomplete():
         return None
     return code_lines
+
+
+def _python_classified_lines(source):
+    parts = {}
+    comments = {}
+    ignored = {
+        tokenize.ENCODING, tokenize.ENDMARKER, tokenize.INDENT,
+        tokenize.DEDENT, tokenize.NEWLINE, tokenize.NL, tokenize.STRING,
+    }
+    try:
+        tokens = list(tokenize.generate_tokens(StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    for token in tokens:
+        line = token.start[0]
+        if token.type == tokenize.COMMENT:
+            comments[line] = token.string.lstrip("#").strip()
+        elif token.type not in ignored and token.string.strip():
+            parts.setdefault(line, []).append(token.string)
+    return {
+        line: _ClassifiedLine(
+            " ".join(parts.get(line, [])), comments.get(line, ""))
+        for line in set(parts) | set(comments)
+    }
+
+
+def _clike_classified_lines(source):
+    scanner = _CLikeScanner()
+    result = {}
+    for number, raw_line in enumerate(source.splitlines(), 1):
+        result[number] = scanner.classify_line(raw_line)
+    return None if scanner.incomplete() else result
+
+
+def _classified_lines(path, source):
+    """Return string/comment-free line facts, or None when lexing is unsure."""
+    if path.lower().endswith((".py", ".pyi")):
+        return _python_classified_lines(source)
+    return _clike_classified_lines(source)
 
 
 def _code_lines(path, source):

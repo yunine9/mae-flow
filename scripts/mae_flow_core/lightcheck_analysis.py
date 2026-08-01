@@ -7,8 +7,10 @@ from .lightcheck_source import (
 )
 from .lightcheck_functions import (
     _FUNCTION_RULES, _baseline_matches, _empty_result, _finding,
-    _function_metrics, _function_start, _valid_line_number,
+    _function_metrics, _function_start, _mark_pre_existing,
+    _valid_line_number,
 )
+from .lightcheck_magic import find_magic_numbers
 from .lightcheck_nesting import annotate_control_nesting
 
 class _ChangedAnalyzer:
@@ -123,6 +125,24 @@ class _ChangedAnalyzer:
             if item is not None:
                 self.result["findings"].append(item)
 
+    def _add_magic_findings(self, path, source, changed):
+        findings = find_magic_numbers(path, source, changed)
+        if findings is None:
+            self._skip(path + ": 数值字面量词法分析不确定，已自动放行")
+            return
+        for finding in findings:
+            self.result["findings"].append({
+                "rule": "MF-MAGIC-NUMBER",
+                "file": _normalized(path),
+                "line": int(finding.line),
+                "function": "",
+                "literal": finding.literal,
+                "reason": finding.reason,
+                "message": finding.reason,
+                "actual": 1,
+                "limit": 0,
+            })
+
     @staticmethod
     def _touches(function, changed):
         start = _function_start(function)
@@ -147,8 +167,8 @@ class _ChangedAnalyzer:
             return
         item["baseline"] = int(old)
         if old > limit:
-            item["message"] += "（基线已存在，仅留痕）"
-            self.result["existing_debt"].append(item)
+            self.result["findings"].append(
+                _mark_pre_existing(item, old))
             return
         self.result["findings"].append(item)
 
@@ -185,6 +205,7 @@ class _ChangedAnalyzer:
         baseline_matches = _baseline_matches(
             current_info.function_list, baseline_data[1])
         self._add_line_findings(path, source, code_lines, changed)
+        self._add_magic_findings(path, source, changed)
         context = {
             "path": path, "source": source,
             "code_lines": code_lines, "changed": changed,

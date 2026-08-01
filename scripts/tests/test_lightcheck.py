@@ -88,11 +88,17 @@ class LightCheckTests(unittest.TestCase):
     def assert_all_rules(self, path, source):
         result = self.analyze(path, source)
         self.assertEqual(result["status"], "FINDINGS", result)
-        self.assertEqual(
-            {item["rule"] for item in result["findings"]},
-            {"MF-PARAM-5", "MF-FUNC-50", "MF-NEST-5", "MF-LINE-120"},
-            result,
-        )
+        rules = {item["rule"] for item in result["findings"]}
+        self.assertTrue(
+            {"MF-PARAM-5", "MF-FUNC-50", "MF-NEST-5", "MF-LINE-120"}
+            .issubset(rules), result)
+
+    @staticmethod
+    def magic_findings(result):
+        return [
+            item for item in result["findings"]
+            if item["rule"] == "MF-MAGIC-NUMBER"
+        ]
 
     def test_cpp_java_javascript_python_cover_all_four_rules(self):
         cpp = _nested_braced(
@@ -130,8 +136,11 @@ class LightCheckTests(unittest.TestCase):
             "int boundary(int a, int b, int c, int d, int e) {",
             depth=5, body_count=43, long_return=False)
         result = self.analyze("boundary.cpp", source)
-        self.assertEqual(result["status"], "CLEAN", result)
-        self.assertEqual(result["findings"], [], result)
+        structural_rules = {
+            item["rule"] for item in result["findings"]
+            if item["rule"] != "MF-MAGIC-NUMBER"
+        }
+        self.assertEqual(structural_rules, set(), result)
 
     def test_parallel_branches_and_compound_conditions_do_not_accumulate(self):
         fixtures = {
@@ -240,7 +249,7 @@ class LightCheckTests(unittest.TestCase):
             result,
         )
 
-    def test_existing_violation_without_regression_is_only_logged(self):
+    def test_touched_preexisting_threshold_violation_is_reported(self):
         baseline = _nested_braced(
             "int oldDebt(int a, int b, int c, int d, int e, int f) {")
         current_lines = baseline.splitlines()
@@ -248,12 +257,116 @@ class LightCheckTests(unittest.TestCase):
         current = "\n".join(current_lines) + "\n"
         result = self.analyze(
             "legacy.cpp", current, changed={3}, baseline=baseline)
-        self.assertEqual(result["findings"], [], result)
         self.assertEqual(
-            {item["rule"] for item in result["existing_debt"]},
+            {item["rule"] for item in result["findings"]},
             {"MF-PARAM-5", "MF-FUNC-50", "MF-NEST-5"},
             result,
         )
+        self.assertEqual(result["existing_debt"], [], result)
+        for finding in result["findings"]:
+            self.assertGreater(finding["baseline"], finding["limit"])
+            self.assertTrue(finding["pre_existing"], finding)
+
+    def test_cross_language_changed_logic_reports_every_numeric_literal(self):
+        fixtures = (
+            ("logic.cpp", "int apply(int value) {\n  return value * 0;\n}\n", 2, "0"),
+            ("Logic.java", (
+                "class Logic {\n  int apply(int value) {\n"
+                "    return value + 1;\n  }\n}\n"), 3, "1"),
+            ("Logic.cs", (
+                "class Logic {\n  int Apply(int value) {\n"
+                "    return value - 2;\n  }\n}\n"), 3, "2"),
+            ("logic.js", (
+                "function apply(value) {\n  return value * 10;\n}\n"), 2, "10"),
+            ("logic.ts", (
+                "function apply(value: number) {\n"
+                "  return value / 100;\n}\n"), 2, "100"),
+            ("logic.py", (
+                "def apply(value):\n    return value + 10\n"), 2, "10"),
+        )
+        for path, source, line, literal in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source, changed={line})
+                magic = self.magic_findings(result)
+                self.assertEqual(len(magic), 1, result)
+                self.assertEqual(magic[0]["line"], line, result)
+                self.assertEqual(magic[0]["literal"], literal, result)
+
+    def test_named_constants_are_extraction_not_magic_number_usage(self):
+        fixtures = (
+            ("limits.cpp", "constexpr int RETRY_LIMIT = 10;\n"),
+            ("Limits.java", (
+                "class Limits {\n  static final int RETRY_LIMIT = 10;\n}\n")),
+            ("Limits.cs", (
+                "class Limits {\n  const int RetryLimit = 10;\n}\n")),
+            ("limits.js", "const RETRY_LIMIT = 10;\n"),
+            ("limits.ts", "const RETRY_LIMIT: number = 10;\n"),
+            ("limits.py", "RETRY_LIMIT = 10\n"),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_enum_members_are_extraction_not_magic_number_usage(self):
+        fixtures = (
+            ("state.cpp", "enum class State { Ready = 1, Done = 2 };\n"),
+            ("State.java", (
+                "enum State {\n  Ready(1), Done(2);\n}\n")),
+            ("State.cs", "enum State { Ready = 1, Done = 2 }\n"),
+            ("state.ts", "enum State { Ready = 1, Done = 2 }\n"),
+            ("state.py", (
+                "from enum import Enum\nclass State(Enum):\n"
+                "    Ready = 1\n    Done = 2\n")),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_same_line_explanation_accepts_magic_number(self):
+        fixtures = (
+            ("logic.cpp", (
+                "int scale(int value) {\n"
+                "  return value * 100; // convert ratio to percent\n}\n")),
+            ("logic.py", (
+                "def scale(value):\n"
+                "    return value * 100  # convert ratio to percent\n")),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_strings_comments_generated_code_and_test_data_are_not_magic(self):
+        fixtures = (
+            ("text.cpp", (
+                "const char* text() {\n  return \"100\";\n}\n"
+                "// released 2026-08-02\n")),
+            ("text.py", (
+                "def text():\n    return \"100\"\n"
+                "# released 2026-08-02\n")),
+            ("generated/model.cpp", "int value() { return 100; }\n"),
+            ("tests/fixtures/data.py", "DATA = [0, 1, 2, 10, 100]\n"),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
+                self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_magic_numbers_only_scan_changed_lines(self):
+        source = (
+            "int calculate(int value) {\n"
+            "  value *= 100;\n"
+            "  return value;\n"
+            "}\n")
+        result = self.analyze("scope.cpp", source, changed={3})
+        self.assertEqual(self.magic_findings(result), [], result)
+
+    def test_uncertain_tokenization_fails_open_for_magic_numbers(self):
+        source = "int calculate() {\n  return 100; /* unterminated\n}\n"
+        result = self.analyze("uncertain.cpp", source, changed={2})
+        self.assertEqual(self.magic_findings(result), [], result)
 
     def test_new_nesting_threshold_crossing_is_reported(self):
         baseline = _nested_braced(
@@ -287,7 +400,7 @@ class LightCheckTests(unittest.TestCase):
 
     def test_untouched_bad_function_is_outside_scope(self):
         source = "\n".join([
-            "int safe() {", "  return 1;", "}", "",
+            "int safe() {", "  return value;", "}", "",
             "int untouched(int a, int b, int c, int d, int e, int f) {",
             *["  if (v%d) v%d++;" % (index, index) for index in range(6)],
             *["  int value%d = %d;" % (index, index) for index in range(45)],
@@ -492,6 +605,39 @@ class LightCheckTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(report))
         with open(report, encoding="utf-8") as stream:
             self.assertIn("MF-PARAM-5", stream.read())
+
+    def test_cli_discovers_changed_csharp_magic_number(self):
+        repo = os.path.join(self.root, "csharp-repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "lightcheck@test.invalid"],
+            cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Light Check"],
+            cwd=repo, check=True)
+        path = "Logic.cs"
+        _write(
+            repo, path,
+            "class Logic {\n  int Apply(int value) {\n"
+            "    return value;\n  }\n}\n")
+        subprocess.run(["git", "add", path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+        _write(
+            repo, path,
+            "class Logic {\n  int Apply(int value) {\n"
+            "    return value + 100;\n  }\n}\n")
+        environment = dict(os.environ)
+        environment["PYTHONPYCACHEPREFIX"] = os.path.join(
+            self.root, "csharp-pycache")
+        run = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+             "lightcheck", "--quiet"],
+            cwd=repo, text=True, capture_output=True, env=environment,
+            timeout=20,
+        )
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("MF-MAGIC-NUMBER", run.stderr)
 
 
 if __name__ == "__main__":

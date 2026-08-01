@@ -265,6 +265,13 @@ def _env_command(tokens, index, depth):
     return _executed_delivery_operations(tokens[index:], depth + 1)
 
 
+def _enables_noexec(option, value):
+    return (
+        option == "-o"
+        and str(value).replace("_", "").lower() == "noexec"
+    )
+
+
 def _traditional_shell_command(
         tokens, index, depth, zero_short_flags, value_flags,
         zero_long_flags, attached_value_flags):
@@ -279,13 +286,20 @@ def _traditional_shell_command(
                 _executed_delivery_text(tokens[index + 1], depth + 1)
                 if index + 1 < len(tokens) else ())
         if option in value_flags:
-            index += 2
-            if index > len(tokens):
+            if index + 1 >= len(tokens):
                 return ()
+            if _enables_noexec(option, tokens[index + 1]):
+                return ()
+            index += 2
             continue
-        if any(
-                option.startswith(flag) and option != flag
-                for flag in attached_value_flags):
+        attached_flag = next((
+            flag for flag in attached_value_flags
+            if option.startswith(flag) and option != flag
+        ), "")
+        if attached_flag:
+            if _enables_noexec(
+                    attached_flag, option[len(attached_flag):]):
+                return ()
             index += 1
             continue
         if option.startswith("-") and not option.startswith("--"):

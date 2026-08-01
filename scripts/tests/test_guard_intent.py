@@ -128,6 +128,23 @@ class GuardIntentTests(unittest.TestCase):
                 with self.subTest(launcher=launcher, command=command):
                     self.assertIs(expected, executes_delivery(command))
 
+    def test_delivery_execution_predicate_respects_shell_noexec_polarity(self):
+        executes_delivery = getattr(
+            git_intent, "executes_git_commit_or_push", lambda command: False)
+        cases = (
+            ("sh -o noexec -c 'git push origin HEAD'", False),
+            ("bash -o No_ExEc -c 'git push origin HEAD'", False),
+            ("zsh -o NO_EXEC -c 'git commit -m update'", False),
+            ("zsh -oNO_EXEC -c 'git push origin HEAD'", False),
+            ("sh +o noexec -c 'git push origin HEAD'", True),
+            ("bash +o No_ExEc -c 'git push origin HEAD'", True),
+            ("zsh +o NO_EXEC -c 'git commit -m update'", True),
+            ("zsh +oNO_EXEC -c 'git push origin HEAD'", True),
+        )
+        for command, expected in cases:
+            with self.subTest(command=command):
+                self.assertIs(expected, executes_delivery(command))
+
     def test_parse_normalizes_slashes_and_tokenizes_bash_paths(self):
         intent = parse_intent(
             "bash",

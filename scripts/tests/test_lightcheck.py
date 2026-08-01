@@ -330,6 +330,24 @@ class LightCheckTests(unittest.TestCase):
             [item["literal"] for item in self.magic_findings(result)],
             ["100"], result)
 
+    def test_constant_initializer_mask_stops_at_same_line_declaration_end(self):
+        source = "int f() { const int LIMIT = 5; return LIMIT * 100; }\n"
+        result = self.analyze("inline.cpp", source, changed={1})
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["100"], result)
+
+    def test_multiline_constant_initializer_masks_only_declaration_span(self):
+        source = (
+            "constexpr int LIMIT =\n"
+            "    BASE_LIMIT * 5 *\n"
+            "    100;\n"
+            "int f() { return LIMIT * 10; }\n")
+        result = self.analyze("multiline.cpp", source)
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["10"], result)
+
     def test_enum_members_are_extraction_not_magic_number_usage(self):
         fixtures = (
             ("state.cpp", "enum class State { Ready = 1, Done = 2 };\n"),
@@ -359,6 +377,32 @@ class LightCheckTests(unittest.TestCase):
         for path, source, line in fixtures:
             with self.subTest(path=path):
                 result = self.analyze(path, source, changed={line})
+                self.assertEqual(
+                    [item["literal"] for item in self.magic_findings(result)],
+                    ["100"], result)
+
+    def test_enum_return_type_function_is_not_an_enum_declaration(self):
+        source = "enum Mode make() { int code = 100; return READY; }\n"
+        result = self.analyze("factory.cpp", source, changed={1})
+        self.assertEqual(
+            [item["literal"] for item in self.magic_findings(result)],
+            ["100"], result)
+
+    def test_multiline_enum_member_values_are_masked_but_methods_are_scanned(self):
+        fixtures = (
+            ("Mode.java", (
+                "enum Mode {\n"
+                "  A(\n    1\n  );\n"
+                "  int code() { return 100; }\n"
+                "  Mode(int value) {}\n}\n")),
+            ("mode.cpp", (
+                "enum class Mode {\n"
+                "  A = (\n    1\n  ),\n};\n"
+                "int code() { return 100; }\n")),
+        )
+        for path, source in fixtures:
+            with self.subTest(path=path):
+                result = self.analyze(path, source)
                 self.assertEqual(
                     [item["literal"] for item in self.magic_findings(result)],
                     ["100"], result)

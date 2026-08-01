@@ -21,6 +21,7 @@ from mae_flow_core.orchestration.models import (  # noqa: E402
     Phase,
 )
 from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
+import lean_harness  # noqa: E402
 
 
 HARNESS = os.path.join(os.path.dirname(__file__), "lean_harness.py")
@@ -156,6 +157,22 @@ class LeanHarnessTests(unittest.TestCase):
             self.assertIn("error:", result.stderr)
             with open(path, "rb") as stream:
                 self.assertEqual(before, stream.read())
+
+    def test_encoding_failure_preserves_state_and_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "flow.json")
+            seeded = b'{"known":"recovery cursor"}\n'
+            with open(path, "wb") as stream:
+                stream.write(seeded)
+            state = state_for(Phase.CONSTRUCTION).with_decision(
+                "construction.note", "invalid surrogate: \ud800")
+
+            with self.assertRaises(UnicodeEncodeError):
+                lean_harness._save(path, state)
+
+            with open(path, "rb") as stream:
+                self.assertEqual(seeded, stream.read())
+            self.assertEqual(["flow.json"], os.listdir(root))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -62,11 +63,34 @@ def _save(path, state):
     parent = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(parent):
         raise ValueError("state parent directory does not exist")
-    with open(path, "w", encoding="utf-8") as stream:
-        json.dump(
-            encode_flow_state(state), stream, ensure_ascii=False,
-            indent=2, sort_keys=True)
-        stream.write("\n")
+    payload = (json.dumps(
+        encode_flow_state(state), ensure_ascii=False,
+        indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+    descriptor = None
+    temporary = None
+    try:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".%s." % os.path.basename(path),
+            suffix=".tmp",
+            dir=parent,
+        )
+        stream = os.fdopen(descriptor, "wb")
+        descriptor = None
+        with stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
 
 
 def _execute(args):

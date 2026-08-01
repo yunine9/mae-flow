@@ -21,6 +21,8 @@ _RESERVED_WINDOWS_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {"COM%d" % number for number in range(1, 10)}
     | {"LPT%d" % number for number in range(1, 10)}
+    | {"COM%s" % number for number in ("¹", "²", "³")}
+    | {"LPT%s" % number for number in ("¹", "²", "³")}
 )
 _DURABLE_KINDS = frozenset({"spec", "behavior", "behavior-baseline"})
 _CONDITIONAL_KINDS = frozenset({
@@ -47,7 +49,7 @@ def _ticket_text(ticket):
 
 
 def _ticket_digest(ticket):
-    return hashlib.sha256(ticket.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(ticket.encode("utf-8")).hexdigest()
 
 
 def _safe_ticket_segment(ticket):
@@ -69,28 +71,20 @@ def _safe_ticket_segment(ticket):
     if reserved:
         safe = "ticket-" + safe
 
-    # Keep familiar all-uppercase safe identifiers readable.  Every transform
-    # and every cased alias receives an exact-input digest, so NTFS cannot fold
-    # distinct business tickets into one directory.
-    changed = safe != original or normalized != candidate or reserved
-    case_alias_risk = safe != safe.upper()
-    if changed or case_alias_risk:
-        safe = "%s-%s" % (safe, _ticket_digest(original))
+    # Every accepted ticket carries its complete exact-input digest.  Applying
+    # this uniformly prevents an already-safe ticket from impersonating the
+    # encoded spelling of a ticket that needed sanitization, and prevents NTFS
+    # case folding or Unicode normalization from merging business identities.
+    suffix = "-" + _ticket_digest(original)
 
-    # A Windows component is limited to 255 UTF-16 code units.  Leave room for
-    # the digest and avoid cutting a surrogate pair by trimming Python code
-    # points until the encoded segment fits.
-    if len(safe.encode("utf-16-le")) // 2 > 255:
-        digest = _ticket_digest(original)
-        suffix = "-" + digest
-        prefix = safe
-        available = 255 - len(suffix.encode("utf-16-le")) // 2
-        while prefix and len(prefix.encode("utf-16-le")) // 2 > available:
-            prefix = prefix[:-1]
-        prefix = prefix.rstrip(" .-") or "ticket"
-        safe = prefix + suffix
-
-    return safe
+    # A Windows component is limited to 255 UTF-16 code units.  Trim only the
+    # readable prefix; the complete digest always survives.  Removing one
+    # Python code point at a time avoids splitting a surrogate pair.
+    available = 255 - len(suffix.encode("utf-16-le")) // 2
+    while safe and len(safe.encode("utf-16-le")) // 2 > available:
+        safe = safe[:-1]
+    safe = safe.rstrip(" .-") or "ticket"
+    return safe + suffix
 
 
 def _root_text(root):
@@ -119,15 +113,21 @@ class DocumentPaths:
     safe_ticket: str
     local_root: str
     local_story: str
+    local_decisions: str
+    local_engineering_notes: str
+    local_chain: str
     ut_handoff: str
-    review_notes: str
-    codecheck_ledger: str
-    delivery_notes: str
+    local_review_notes: str
+    local_codecheck_ledger: str
+    local_delivery_notes: str
     spec: str
     story: str
     decisions: str
     engineering_notes: str
     chain: str
+    review_ledger: str
+    codecheck_ledger: str
+    delivery_notes: str
     behavior_root: str
 
     @classmethod
@@ -143,15 +143,25 @@ class DocumentPaths:
             safe_ticket=safe,
             local_root=local_root,
             local_story=_path_join(local_root, "story.md"),
+            local_decisions=_path_join(local_root, "decisions.md"),
+            local_engineering_notes=_path_join(
+                local_root, "engineering-notes.md"),
+            local_chain=_path_join(local_root, "chain.md"),
             ut_handoff=_path_join(local_root, "ut-handoff.md"),
-            review_notes=_path_join(local_root, "review-notes.md"),
-            codecheck_ledger=_path_join(local_root, "codecheck-ledger.md"),
-            delivery_notes=_path_join(local_root, "delivery-notes.md"),
+            local_review_notes=_path_join(local_root, "review-notes.md"),
+            local_codecheck_ledger=_path_join(
+                local_root, "codecheck-ledger.md"),
+            local_delivery_notes=_path_join(
+                local_root, "delivery-notes.md"),
             spec=_path_join(requirement_root, "spec.md"),
             story=_path_join(requirement_root, "story.md"),
             decisions=_path_join(requirement_root, "decisions.md"),
             engineering_notes=_path_join(requirement_root, "engineering.md"),
             chain=_path_join(requirement_root, "chain.md"),
+            review_ledger=_path_join(requirement_root, "review-ledger.md"),
+            codecheck_ledger=_path_join(
+                requirement_root, "codecheck-ledger.md"),
+            delivery_notes=_path_join(requirement_root, "delivery-notes.md"),
             behavior_root=_path_join(root, "docs", "mae-flow", "behavior"),
         )
 

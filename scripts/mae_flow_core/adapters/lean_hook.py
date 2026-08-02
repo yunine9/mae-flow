@@ -38,7 +38,11 @@ from ..state_store import (
 )
 from .hook_capabilities import LeanCapabilityGate
 from .hook_tool_inputs import apply_patch_targets
-from .lean_exit import explicit_exit, is_exit_snapshot_name, valid_exit_pointer
+from .lean_exit import (
+    effective_exit_pointer,
+    explicit_exit,
+    release_flow_state,
+)
 
 
 SUMMARY_BUDGET = 1200
@@ -100,6 +104,11 @@ def _prompt_event(event):
         }
 
 
+def _session_event(event):
+    return isinstance(event, str) and re.sub(
+        r"[ _-]+", "", event).casefold() == "sessionstart"
+
+
 def _legacy_stop_event(event):
     return (
         isinstance(event, str)
@@ -144,31 +153,27 @@ class LeanHookAdapter:
         self.event_sink = event_sink or self._append_user_event
         self.clock_ns = clock_ns or time.time_ns
         self.move_state = move_state or _replace_with_retry
-        self.snapshot_writer = snapshot_writer or self._write_snapshot_bytes
+        self.snapshot_writer = snapshot_writer
         self.pointer_writer = pointer_writer or atomic_write_json
         self.capabilities = LeanCapabilityGate(
             self.root, lambda mutate: self._update_state(mutate))
 
     def _valid_pointer(self):
-        return valid_exit_pointer(
-            self.root, self.pointer_path, self.snapshot_dir)
+        return effective_exit_pointer(
+            self.root, self.pointer_path, self.snapshot_dir, self.state_path)
 
     def _runtime(self):
+        if self._valid_pointer() is not None:
+            return SimpleNamespace(mode="direct"), None
         if os.path.isfile(self.state_path):
             raw, error = safe_read_json(self.state_path)
             if error:
-                if self._valid_pointer() is not None:
-                    return SimpleNamespace(mode="inactive"), None
                 return SimpleNamespace(mode="corrupt"), None
             try:
                 state = FlowState.from_dict(raw)
             except (TypeError, ValueError):
-                if self._valid_pointer() is not None:
-                    return SimpleNamespace(mode="inactive"), None
                 return SimpleNamespace(mode="corrupt"), None
             return SimpleNamespace(mode="flow", flow=state), state
-        if self._valid_pointer() is not None:
-            return SimpleNamespace(mode="inactive"), None
         return SimpleNamespace(mode="inactive"), None
 
     def _claim_session_marker(self, root, identity):
@@ -356,108 +361,34 @@ class LeanHookAdapter:
             self.capabilities.complete,
         )
 
-    def _existing_snapshot(self):
-        pointer = self._valid_pointer()
-        if pointer is not None:
-            relative = pointer["snapshot"]
-            path = os.path.join(self.root, *relative.split("/"))
-            return relative, path, pointer
-        try:
-            names = sorted(
-                name for name in os.listdir(self.snapshot_dir)
-                if is_exit_snapshot_name(name))
-        except OSError:
-            names = []
-        if not names:
-            return "", "", None
-        path = os.path.join(self.snapshot_dir, names[-1])
-        return self._relative(path), path, None
+    def _inactive(self, runtime, event, state):
+        if event != "sessionstart":
+            return HookResponse()
+        if runtime.mode == "direct":
+            return HookResponse(stdout=(
+                "[mae-flow] Workflow exited; ordinary development is active.\n"))
+        if runtime.mode == "corrupt":
+            return HookResponse(stdout=(
+                "[mae-flow] Workflow state is corrupt; safety gates fail "
+                "open. Run current before recovery.\n"))
+        if state is not None and state.status in {"complete", "exited"}:
+            return HookResponse(stdout=(
+                "[mae-flow] Workflow %s for ticket %s; no active gates.\n"
+                % (state.status, state.ticket)))
+        return HookResponse()
 
-    def _relative(self, path):
-        return os.path.relpath(path, self.root).replace("\\", "/")
-
-    def _snapshot_path(self):
-        os.makedirs(self.snapshot_dir, exist_ok=True)
-        stamp = self.clock_ns()
-        snapshot = os.path.join(self.snapshot_dir, "flow-%s.json" % stamp)
-        suffix = 2
-        while os.path.exists(snapshot):
-            snapshot = os.path.join(
-                self.snapshot_dir, "flow-%s-%s.json" % (stamp, suffix))
-            suffix += 1
-        return snapshot, stamp
-
-    def _write_snapshot_bytes(self, path, data):
-        descriptor = None
-        try:
-            descriptor = os.open(
-                path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as stream:
-                descriptor = None
-                stream.write(data)
-                stream.flush()
-                try:
-                    os.fsync(stream.fileno())
-                except OSError:
-                    pass
-        except Exception:
-            if descriptor is not None:
-                os.close(descriptor)
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-            raise
-
-    def _write_pointer(self, snapshot, stamp):
-        data = {
-            "status": "exited",
-            "snapshot": self._relative(snapshot),
-            "exited_at_ns": stamp,
-        }
-        self.pointer_writer(self.pointer_path, data)
-        if self._valid_pointer() is None:
-            raise OSError("exit pointer validation failed")
-        return data
-
-    def _normal_release(self):
-        with ProjectStateLock(self.root, timeout=0):
-            pointer = self._valid_pointer()
-            if pointer is not None:
-                return pointer
-            if not os.path.exists(self.state_path):
-                relative, _path, pointer = self._existing_snapshot()
-                if pointer is not None:
-                    return pointer
-                if not relative:
-                    raise OSError("no active state or recoverable snapshot")
-                return self._write_pointer(_path, self.clock_ns())
-
-            snapshot, stamp = self._snapshot_path()
-            self.move_state(self.state_path, snapshot)
-            return self._write_pointer(snapshot, stamp)
-
-    def _fallback_release(self):
-        pointer = self._valid_pointer()
-        if pointer is not None:
-            return pointer
-        if os.path.isfile(self.state_path):
-            with open(self.state_path, "rb") as stream:
-                original = stream.read()
-            snapshot, stamp = self._snapshot_path()
-            self.snapshot_writer(snapshot, original)
-        else:
-            _relative, snapshot, _pointer = self._existing_snapshot()
-            if not snapshot:
-                raise OSError("no active state or recoverable snapshot")
-            stamp = self.clock_ns()
-        return self._write_pointer(snapshot, stamp)
-
-    def _release_takeover(self):
-        try:
-            return self._normal_release()
-        except (Exception, SystemExit):
-            return self._fallback_release()
+    def _release_takeover(self, reason=""):
+        return release_flow_state(
+            self.root,
+            self.state_path,
+            self.pointer_path,
+            self.snapshot_dir,
+            reason=reason,
+            clock_ns=self.clock_ns,
+            move_state=self.move_state,
+            snapshot_writer=self.snapshot_writer,
+            pointer_writer=self.pointer_writer,
+        )
 
     def handle(self, event, raw_input):
         """Handle one raw Hook invocation and return protocol output."""
@@ -471,7 +402,7 @@ class LeanHookAdapter:
 
         if _prompt_event(event) and explicit_exit(payload.get("prompt")):
             try:
-                self._release_takeover()
+                self._release_takeover(payload.get("prompt", ""))
             except (Exception, SystemExit) as exc:
                 return HookResponse(
                     exit_code=2,
@@ -487,12 +418,15 @@ class LeanHookAdapter:
             runtime, state = self._runtime()
             if _prompt_event(event) and runtime.mode in ("flow", "corrupt"):
                 self._record_event(event, payload)
+            if runtime.mode == "corrupt" and _session_event(event):
+                return self._inactive(runtime, "sessionstart", state)
             ports = LeanHookPorts(
                 resume=lambda value: self._resume(state, value),
                 prompt=lambda unused_value: HookResponse(),
                 pretool=lambda value: self._pretool(state, value),
                 posttool=self._posttool,
-                inactive=lambda unused_event, unused_payload: HookResponse(),
+                inactive=lambda routed_event, unused_payload: self._inactive(
+                    runtime, routed_event, state),
             )
             return handle_lean_hook_event(event, payload, runtime, ports)
         except (Exception, SystemExit):

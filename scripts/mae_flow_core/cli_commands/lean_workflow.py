@@ -6,7 +6,13 @@ import os
 import re
 import subprocess
 import sys
-import time
+
+from mae_flow_core.adapters.lean_exit import (
+    archive_file_exclusive,
+    effective_exit_pointer,
+    exclusive_backup_bytes,
+    release_flow_state,
+)
 
 from mae_flow_core.orchestration import (
     AdvanceRequest,
@@ -30,7 +36,6 @@ from mae_flow_core.orchestration.guidance import (
 from mae_flow_core.orchestration.moonlight_policy import apply_moonlight_policy
 from mae_flow_core.state_store import (
     ProjectStateLock,
-    _replace_with_retry,
     atomic_write_json,
     safe_read_json,
 )
@@ -57,6 +62,20 @@ def _state_path(root):
     return os.path.join(root, STATE_NAME)
 
 
+def _exit_paths(root):
+    path = _state_path(root)
+    return (
+        path + ".exited",
+        os.path.join(root, ".mae-flow-work", "exited"),
+    )
+
+
+def _exit_pointer(root):
+    pointer_path, snapshot_dir = _exit_paths(root)
+    return effective_exit_pointer(
+        root, pointer_path, snapshot_dir, _state_path(root))
+
+
 def _read_state(path):
     raw, error = safe_read_json(path)
     if error:
@@ -68,6 +87,9 @@ def _read_state(path):
 
 def _load_state(root):
     path = _state_path(root)
+    if _exit_pointer(root) is not None:
+        raise ValueError(
+            "流程已退出；仅 current、exit 或新的 start 可用")
     raw, error = safe_read_json(path)
     if error:
         raise ValueError("流程状态不可读: %s" % error)
@@ -174,25 +196,29 @@ def _start_state(root, args):
 
 
 def _terminal_backup(path, raw):
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = "%s.terminal-backup.%s.%s" % (path, stamp, os.getpid())
-    temporary = "%s.tmp.%s" % (target, time.time_ns())
+    return exclusive_backup_bytes(path, raw, "terminal-backup")
+
+
+def _snapshot_state(root, pointer):
+    path = os.path.join(root, *pointer["snapshot"].split("/"))
+    raw, error = safe_read_json(path)
+    if error or raw is None:
+        return None
     try:
-        with open(temporary, "xb") as stream:
-            stream.write(raw)
-            stream.flush()
-            try:
-                os.fsync(stream.fileno())
-            except OSError:
-                pass
-        _replace_with_retry(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            try:
-                os.remove(temporary)
-            except OSError:
-                pass
-    return target
+        return decode_flow_state(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_exited(root, pointer, reason):
+    state = _snapshot_state(root, pointer)
+    if state is not None:
+        _render(replace(state, status="exited"), reason)
+        return
+    if reason:
+        print("[mae-flow] " + reason)
+    print("状态: exited")
+    print("快照: %s" % pointer["snapshot"])
 
 
 def _render(state, reason):
@@ -247,26 +273,38 @@ def _run(command):
 def cmd_lean_start(root, args):
     def execute():
         path = _state_path(root)
+        pointer_path, unused_snapshot_dir = _exit_paths(root)
         with ProjectStateLock(root):
+            pointer = _exit_pointer(root)
             if os.path.exists(path):
-                raw, error = safe_read_json(path)
-                if error:
-                    raise ValueError(
-                        "旧流程状态损坏；拒绝覆盖，请先 current 查看恢复信息")
-                existing = decode_flow_state(raw)
-                if existing.status not in {"complete", "exited"}:
-                    raise ValueError("活动流程已存在；用 current 恢复，或先 exit")
-                with open(path, "rb") as stream:
-                    terminal_raw = stream.read()
-                _terminal_backup(path, terminal_raw)
+                if pointer is None:
+                    raw, error = safe_read_json(path)
+                    if error:
+                        raise ValueError(
+                            "旧流程状态损坏；拒绝覆盖，请先 current 查看恢复信息")
+                    existing = decode_flow_state(raw)
+                    if existing.status not in {"complete", "exited"}:
+                        raise ValueError(
+                            "活动流程已存在；用 current 恢复，或先 exit")
+                    with open(path, "rb") as stream:
+                        terminal_raw = stream.read()
+                    _terminal_backup(path, terminal_raw)
             state = _start_state(root, args)
             atomic_write_json(path, state.to_dict())
+            if os.path.isfile(pointer_path):
+                archive_file_exclusive(
+                    pointer_path, "exited-backup", backup_base=path)
         _render(state, "Lean workflow started.")
     return _run(execute)
 
 
 def cmd_lean_current(root, unused_args):
     def execute():
+        pointer = _exit_pointer(root)
+        if pointer is not None:
+            _render_exited(
+                root, pointer, "Current lean recovery context.")
+            return
         state = _load_state(root)
         _render(state, "Current lean recovery context.")
     return _run(execute)
@@ -379,36 +417,19 @@ def cmd_lean_manifest(root, args):
     return _run(execute)
 
 
-def _corrupt_exit_backup(path):
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = "%s.exited-backup.%s.%s" % (path, stamp, os.getpid())
-    _replace_with_retry(path, target)
-    return target
-
-
 def cmd_lean_exit(root, args):
     def execute():
         path = _state_path(root)
-        if not os.path.exists(path):
+        pointer_path, snapshot_dir = _exit_paths(root)
+        pointer = _exit_pointer(root)
+        if not os.path.exists(path) and pointer is None:
             print("[mae-flow] 当前没有在途流程，无需退出。")
             return
-        try:
-            state = _load_state(root)
-        except Exception:
-            with ProjectStateLock(root):
-                backup = _corrupt_exit_backup(path)
-            print("[mae-flow] 状态不可读，已保留到 %s 并立即退出。" % backup)
-            return
-
-        def operation(current):
-            decision = (args.reason or "用户选择退出 Mae-Flow").strip()
-            exited = advance_flow(current, AdvanceRequest(
-                "exit", "workflow.exit", decision)).state
-            return exited, "流程已立即退出；业务文件保持原样。"
-
-        updated, reason = _mutate(
-            root, operation, allow_inactive=True)
-        _render(updated, reason)
+        decision = (args.reason or "用户选择退出 Mae-Flow").strip()
+        pointer = release_flow_state(
+            root, path, pointer_path, snapshot_dir, reason=decision)
+        _render_exited(
+            root, pointer, "流程已立即退出；业务文件保持原样。")
     return _run(execute)
 
 

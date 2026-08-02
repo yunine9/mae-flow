@@ -8,15 +8,20 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CLI = os.path.join(ROOT, "scripts", "mae-flow.py")
+STATUSLINE = os.path.join(ROOT, "scripts", "statusline.py")
 SCRIPTS = os.path.join(ROOT, "scripts")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.adapters.lean_hook import LeanHookAdapter  # noqa: E402
+from mae_flow_core.adapters.lean_exit import (  # noqa: E402
+    exclusive_backup_bytes,
+)
 
 
 class LeanCliTests(unittest.TestCase):
@@ -37,6 +42,19 @@ class LeanCliTests(unittest.TestCase):
             [sys.executable, CLI] + list(arguments),
             cwd=self.root,
             env=self.env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=20,
+        )
+
+    def run_statusline(self):
+        return subprocess.run(
+            [sys.executable, STATUSLINE],
+            cwd=self.root,
+            env=self.env,
+            input=json.dumps({"cwd": self.root}),
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -83,6 +101,31 @@ class LeanCliTests(unittest.TestCase):
     def assert_success(self, result):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn("Traceback", result.stdout + result.stderr)
+
+    def test_exclusive_backups_never_replace_a_name_collision(self):
+        base = os.path.join(self.root, ".mae-flow.json")
+        patches = (
+            mock.patch(
+                "mae_flow_core.adapters.lean_exit.time.strftime",
+                return_value="20260802-010203"),
+            mock.patch(
+                "mae_flow_core.adapters.lean_exit.time.time_ns",
+                return_value=456),
+            mock.patch(
+                "mae_flow_core.adapters.lean_exit.os.getpid",
+                return_value=123),
+        )
+        with patches[0], patches[1], patches[2]:
+            first = exclusive_backup_bytes(
+                base, b"first", "terminal-backup")
+            second = exclusive_backup_bytes(
+                base, b"second", "terminal-backup")
+
+        self.assertNotEqual(first, second)
+        with open(first, "rb") as stream:
+            self.assertEqual(b"first", stream.read())
+        with open(second, "rb") as stream:
+            self.assertEqual(b"second", stream.read())
 
     def test_full_flow_surfaces_only_five_high_value_user_stops(self):
         started = self.run_cli(
@@ -399,13 +442,23 @@ class LeanCliTests(unittest.TestCase):
 
         exited = self.run_cli("exit", "--reason", "切换为直接开发")
         self.assert_success(exited)
-        self.assertEqual("exited", self.state()["status"])
+        state_path = os.path.join(self.root, ".mae-flow.json")
+        pointer_path = state_path + ".exited"
+        self.assertFalse(os.path.exists(state_path))
+        with open(pointer_path, encoding="utf-8") as stream:
+            pointer = json.load(stream)
+        self.assertEqual("exited", pointer["status"])
+        self.assertRegex(pointer["state_sha256"], r"^[0-9a-f]{64}$")
+        current = self.run_cli("current")
+        self.assert_success(current)
+        self.assertIn("状态: exited", current.stdout)
         blocked = self.run_cli("advance", "startup-confirmed")
         self.assertEqual(2, blocked.returncode)
-        self.assertIn("流程未激活", blocked.stderr)
+        self.assertIn("已退出", blocked.stderr)
         again = self.run_cli("exit", "--reason", "保持退出")
         self.assert_success(again)
-        self.assertEqual("exited", self.state()["status"])
+        with open(pointer_path, encoding="utf-8") as stream:
+            self.assertEqual(pointer, json.load(stream))
 
     def test_manifest_change_clears_prior_delivery_confirmation_and_result(self):
         self.assert_success(self.run_cli(
@@ -569,14 +622,15 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("未提供精确本次修改文件", result.stdout)
         self.assertEqual(before, self.state())
 
-    def test_terminal_state_is_rotated_byte_for_byte_before_a_new_ticket(self):
+    def test_new_start_rotates_old_exit_pointer_without_overwrite(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-OLD", "--path", "focused",
             "--pace", "continuous"))
         self.assert_success(self.run_cli("exit", "--reason", "旧单结束"))
         state_path = os.path.join(self.root, ".mae-flow.json")
-        with open(state_path, "rb") as stream:
-            old_bytes = stream.read()
+        pointer_path = state_path + ".exited"
+        with open(pointer_path, "rb") as stream:
+            old_pointer = stream.read()
 
         started = self.run_cli(
             "start", "--ticket", "REQ-NEW", "--path", "full",
@@ -584,11 +638,12 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(started)
         backups = [
             name for name in os.listdir(self.root)
-            if name.startswith(".mae-flow.json.terminal-backup.")
+            if name.startswith(".mae-flow.json.exited-backup.")
         ]
         self.assertEqual(1, len(backups))
         with open(os.path.join(self.root, backups[0]), "rb") as stream:
-            self.assertEqual(old_bytes, stream.read())
+            self.assertEqual(old_pointer, stream.read())
+        self.assertFalse(os.path.exists(pointer_path))
         self.assertEqual("REQ-NEW", self.state()["ticket"])
 
     def test_non_current_command_does_not_silently_migrate_legacy_state(self):
@@ -632,16 +687,48 @@ class LeanCliTests(unittest.TestCase):
 
         self.assert_success(exited)
         self.assertFalse(os.path.exists(state_path))
-        backups = [
-            name for name in os.listdir(self.root)
-            if name.startswith(".mae-flow.json.exited-backup.")
-        ]
-        self.assertEqual(1, len(backups))
-        with open(os.path.join(self.root, backups[0]), "rb") as stream:
+        with open(state_path + ".exited", encoding="utf-8") as stream:
+            pointer = json.load(stream)
+        snapshot = os.path.join(
+            self.root, *pointer["snapshot"].split("/"))
+        with open(snapshot, "rb") as stream:
             self.assertEqual(original, stream.read())
         self.assertFalse(any(
             name.startswith(".mae-flow.json.v2-backup.")
             for name in os.listdir(self.root)))
+
+    def test_statusline_distinguishes_active_complete_exited_and_corrupt_v3(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-STATUS", "--path", "focused",
+            "--pace", "continuous"))
+        active = self.run_statusline()
+        self.assertEqual(0, active.returncode, active.stderr)
+        self.assertIn("REQ-STATUS", active.stdout)
+        self.assertIn("startup", active.stdout.casefold())
+        self.assertIn("focused", active.stdout.casefold())
+
+        state = self.state()
+        state["status"] = "complete"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream)
+        complete = self.run_statusline()
+        self.assertIn("complete", complete.stdout.casefold())
+
+        state["status"] = "active"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream)
+        self.assert_success(self.run_cli("exit", "--reason", "状态栏退出"))
+        exited = self.run_statusline()
+        self.assertIn("已退出", exited.stdout)
+
+        os.remove(os.path.join(self.root, ".mae-flow.json.exited"))
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "wb") as stream:
+            stream.write(b"corrupt-v3-state")
+        corrupt = self.run_statusline()
+        self.assertIn("状态异常", corrupt.stdout)
 
     def test_every_conditional_document_in_manifest_needs_independent_selection(self):
         self.assert_success(self.run_cli(

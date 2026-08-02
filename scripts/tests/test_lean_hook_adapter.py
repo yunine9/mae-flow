@@ -299,6 +299,27 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertIn("Last capability: build-opaque-", response.stdout)
         self.assertIn("outcome=returned-opaque-", response.stdout)
 
+    def test_session_resume_distinguishes_complete_and_corrupt(self):
+        adapter = LeanHookAdapter(
+            self.root, marker_root=self.marker_root)
+        complete = FlowState(
+            ticket="REQ-COMPLETE",
+            path=DeliveryPath.FULL,
+            phase=Phase.DELIVERY,
+            commit_pace=CommitPace.CONTINUOUS,
+            status="complete",
+        )
+        self.write_state(complete)
+        completed = adapter.handle(
+            "SessionStart", {"session_id": "complete-session"})
+        self.assertIn("complete", completed.stdout.casefold())
+
+        with open(self.state_path, "wb") as stream:
+            stream.write(b"corrupt-v3-state")
+        corrupt = adapter.handle(
+            "SessionStart", {"session_id": "corrupt-session"})
+        self.assertIn("corrupt", corrupt.stdout.casefold())
+
     def test_prompt_is_recorded_raw_without_ack_or_choice_validation(self):
         self.write_state()
         payload = {
@@ -340,6 +361,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.state_path))
         with open(self.pointer_path, encoding="utf-8") as stream:
             pointer = json.load(stream)
+        self.assertRegex(pointer["state_sha256"], r"^[0-9a-f]{64}$")
         snapshot = os.path.join(self.root, *pointer["snapshot"].split("/"))
         with open(snapshot, "rb") as stream:
             self.assertEqual(corrupt, stream.read())
@@ -402,12 +424,22 @@ class LeanHookAdapterTests(unittest.TestCase):
             self.assertEqual(original, stream.read())
         resumed = adapter.handle(
             "SessionStart", {"session_id": "after-exit"})
-        self.assertEqual("", resumed.stdout)
+        self.assertIn("exited", resumed.stdout.casefold())
         with open(self.events_path, encoding="utf-8") as stream:
             captured_before = json.load(stream)
         adapter.handle("UserPromptSubmit", {"prompt": "普通开发继续"})
         with open(self.events_path, encoding="utf-8") as stream:
             self.assertEqual(captured_before, json.load(stream))
+
+        self.write_state(FlowState(
+            ticket="REQ-NEW",
+            path=DeliveryPath.FULL,
+            phase=Phase.CONSTRUCTION,
+            commit_pace=CommitPace.CONTINUOUS,
+        ))
+        runtime, state = adapter._runtime()
+        self.assertEqual("flow", runtime.mode)
+        self.assertEqual(Phase.CONSTRUCTION, state.phase)
 
     def test_exit_pointer_rejects_non_snapshot_and_lexical_escape_paths(self):
         self.write_state()
@@ -438,6 +470,26 @@ class LeanHookAdapterTests(unittest.TestCase):
                         "exited_at_ns": 1,
                     }, stream)
                 self.assertEqual("flow", adapter._runtime()[0].mode)
+
+    def test_exit_pointer_without_state_digest_never_controls_runtime(self):
+        snapshot_dir = os.path.join(
+            self.root, ".mae-flow-work", "exited")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        with open(os.path.join(snapshot_dir, "flow-1.json"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("{}\n")
+        with open(self.pointer_path, "w", encoding="utf-8") as stream:
+            json.dump({
+                "status": "exited",
+                "snapshot": ".mae-flow-work/exited/flow-1.json",
+                "exited_at_ns": 1,
+            }, stream)
+
+        runtime, state = LeanHookAdapter(
+            self.root, marker_root=self.marker_root)._runtime()
+
+        self.assertEqual("inactive", runtime.mode)
+        self.assertIsNone(state)
 
     def test_exit_pointer_rejects_pointer_and_snapshot_symlink_escape(self):
         self.write_state()
@@ -569,6 +621,9 @@ class LeanHookAdapterTests(unittest.TestCase):
                 os.path.join(self.root, *pointer["snapshot"].split("/")),
                 "rb") as stream:
             self.assertEqual(original, stream.read())
+        runtime, state = adapter._runtime()
+        self.assertEqual("direct", runtime.mode)
+        self.assertIsNone(state)
 
     def test_failed_snapshot_release_returns_two_without_audit(self):
         self.write_state()

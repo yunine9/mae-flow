@@ -369,7 +369,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
                 stream.write(b"corrupt-flow-state")
             corrupt = adapter.handle(
                 "SessionStart", {"session_id": "corrupt-resume"})
-            self.assertEqual("", corrupt.stdout)
+            self.assertIn("corrupt", corrupt.stdout.casefold())
 
             exited = adapter.handle(
                 "UserPromptSubmit",

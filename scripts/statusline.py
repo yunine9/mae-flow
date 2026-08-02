@@ -9,8 +9,11 @@
 """
 import json, os, sys, threading
 
+from mae_flow_core.adapters.lean_exit import effective_exit_pointer
 from mae_flow_core.file_io import load_json
+from mae_flow_core.orchestration import FlowState
 from mae_flow_core.runtime import RuntimeMode, find_project_root, resolve_runtime
+from mae_flow_core.state_store import safe_read_json
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -18,6 +21,33 @@ except Exception:
     pass
 
 _STDIN_THREAD = None
+
+
+def _lean_v3_status(root, base):
+    """Render schema-v3 lifecycle before the legacy runtime normalizer."""
+    state_path = os.path.join(root, ".mae-flow.json")
+    pointer_path = state_path + ".exited"
+    snapshot_dir = os.path.join(root, ".mae-flow-work", "exited")
+    if effective_exit_pointer(
+            root, pointer_path, snapshot_dir, state_path) is not None:
+        return f"📁 {base} · mae-flow 已退出 │ 普通开发"
+    if not os.path.isfile(state_path):
+        return None
+    raw, error = safe_read_json(state_path)
+    if error:
+        return f"📁 {base} · mae-flow 状态异常(doctor 排障)"
+    if not isinstance(raw, dict) or raw.get("schema_version") != 3:
+        return None
+    try:
+        state = FlowState.from_dict(raw)
+    except (TypeError, ValueError):
+        return f"📁 {base} · mae-flow 状态异常(doctor 排障)"
+    if state.status == "complete":
+        return "✅ %s │ complete │ %s" % (state.ticket, state.path.value)
+    if state.status == "exited":
+        return "📁 %s · mae-flow 已退出 │ %s" % (base, state.ticket)
+    return "🚦 %s │ %s │ %s" % (
+        state.ticket, state.phase.value, state.path.value)
 
 
 def _read_stdin(timeout=2.0):
@@ -59,6 +89,10 @@ def main():
     base = os.path.basename(os.path.abspath(cwd)) or cwd
 
     root = find_project_root(cwd)
+    lean_status = _lean_v3_status(root, base)
+    if lean_status is not None:
+        print(lean_status)
+        return
     runtime = resolve_runtime(root)
     if runtime.mode == RuntimeMode.INACTIVE:
         hint = " · mae-flow 空闲" if (os.path.isdir(os.path.join(cwd, "openspec"))

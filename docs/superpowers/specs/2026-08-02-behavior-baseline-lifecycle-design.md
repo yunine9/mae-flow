@@ -2,12 +2,12 @@
 
 ## Context
 
-Mae-Flow already stores each confirmed requirement under
-`docs/mae-flow/requirements/<ticket>/spec.md` and reserves
+Mae-Flow already produces a confirmed Spec for Full work and reserves
 `docs/mae-flow/behavior/` for durable behavior knowledge. The current workflow,
-however, only defines where these files can live. It does not tell a new flow
-which historical knowledge to read, how a delivered change updates current
-truth, or how an interrupted flow recovers that intent.
+however, treats the per-ticket Spec as a durable repository document while only
+defining where behavior files could live. It does not tell a new flow which
+historical knowledge to read, how a delivered change updates current truth, or
+how an interrupted flow recovers that intent.
 
 Reading every historical Spec would be slow and would fill the model context
 with superseded detail. Enforcing a machine-readable documentation schema would
@@ -18,7 +18,8 @@ human-readable domain behavior documents.
 ## Goals
 
 - Give future requirements a compact and current behavior baseline.
-- Keep per-ticket Specs as stable historical change context.
+- Keep Spec as the confirmed change contract during a Full workflow without
+  forcing every Spec into the repository.
 - Read only the few behavior documents relevant to the current request.
 - Reconcile delivered behavior without adding a new user confirmation stop.
 - Survive interruption without repeating expensive capabilities.
@@ -32,22 +33,28 @@ human-readable domain behavior documents.
 - Scanning every historical Spec or every behavior document for each request.
 - Proving document quality with Hooks, receipts, fixed ACK text, or retry loops.
 - Recording implementation history inside the current behavior baseline.
+- Treating a behavior document as exhaustive before its legacy domain has been
+  incrementally understood.
 - Adding a documentation maintenance command before real drift demonstrates a
   need for one.
 
 ## Truth Model
 
-The repository has two complementary durable records:
+The repository has one default durable documentation truth:
 
-- `docs/mae-flow/requirements/<ticket>/spec.md` records what one requirement
-  changed and why. It remains at a stable path as historical context.
 - `docs/mae-flow/behavior/<domain>.md` records the current observable truth for
   one business domain. New work consumes this layer instead of replaying old
   Specs.
 
-Git history, blame, and the ticket's delivery commit connect current behavior to
-past changes. No file is physically moved to an archive and no lifecycle status
-is required in each Spec.
+A Full workflow keeps its confirmed change contract at
+`.mae-flow-work/<ticket>/spec.md`. The Spec answers what this delivery intends to
+change before implementation exists. It guides Grill, Story, and Construction,
+but is local by default. The user may explicitly add it to the delivery manifest
+when audit or historical rationale is worth preserving.
+
+Git history, blame, the ticket identifier, and the delivery commit connect
+current behavior to past changes. No file is physically moved to an archive and
+no lifecycle status is required in a Spec.
 
 Behavior documents describe externally meaningful rules, boundaries, and
 exceptions. They are not software detailed designs and do not replace Story.
@@ -66,6 +73,21 @@ workflow does not parse it as a formal registry.
 A new flow reads the index, chooses zero or more relevant domains, then reads
 only those domain documents. A new domain adds one index entry during Delivery.
 
+### What counts as a domain
+
+A domain is a stable business-capability module such as order query, payment
+settlement, or account permissions. It is organized around shared business
+language and observable rules, not source directories, services, classes,
+database tables, programming languages, or ticket size. One domain may cross
+several technical modules, and one delivery may affect several domains.
+
+Start with a useful business boundary and split only when the work exposes a
+real semantic boundary: different vocabulary or rules, independently changing
+behavior, or a scope description that can no longer explain what belongs
+together. These are judgment cues, not line-count or file-count thresholds. A
+split is proposed in an existing confirmation card and is never performed only
+to satisfy formatting.
+
 ### Behavior template
 
 The plugin provides `skills/mae-flow/assets/BEHAVIOR-TEMPLATE.md`, following the
@@ -76,7 +98,11 @@ same guidance model as the Story template:
 
 ## 领域范围
 
-说明该领域负责什么、不负责什么。
+业务边界：说明该领域负责什么、不负责什么。
+
+当前已确认覆盖：列出已经由代码、测试或用户确认的行为范围。
+
+文档未提及的存量行为仍是未知，不表示该行为不存在。
 
 ## 当前行为
 
@@ -101,6 +127,25 @@ The headings are an editorial contract, not a delivery gate. No Hook, parser,
 or fixed wording verifies them. A separate document doctor is deliberately left
 out of the initial scope.
 
+### Incremental bootstrap for legacy domains
+
+The first requirement touching a complex legacy domain does not inventory the
+whole domain. The Agent reads only the code, tests, existing documentation, and
+user decisions relevant to the current request. At Delivery it creates the
+first baseline from behavior that is actually evidenced, including the relevant
+pre-existing behavior and the delivered change.
+
+Statements present in a behavior document are authoritative current truth;
+omissions are unknown until later work confirms them. The coverage note makes
+this explicit, so a future Agent cannot interpret silence as unsupported
+behavior. Later requirements extend or correct the same document in the area
+they touch.
+
+No first-use migration, whole-repository scan, or complete business explanation
+is required. When only one coherent capability is understood, the Agent creates
+a suitably scoped domain such as `order-query` instead of an omnibus
+`order-system` document.
+
 ## Lifecycle
 
 ### Intake
@@ -116,18 +161,23 @@ Both Full and Focused paths perform lightweight domain discovery:
 
 An empty or missing index is valid. Work proceeds and may propose a new domain
 at Delivery if the delivered change establishes durable observable behavior.
+For a complex legacy domain, the existing card identifies the first baseline's
+confirmed coverage without asking the user to inventory the whole business.
 
 ### Spec
 
-Full Spec describes the delta from the selected current baseline: existing
-behavior, intended change, retained behavior, and meaningful boundaries. The
-Spec confirmation remains the single place where the user decides a behavior
-change or resolves a relevant baseline contradiction.
+Full Spec is written under `.mae-flow-work/<ticket>/` and describes the delta
+from the selected current baseline: existing behavior, intended change, retained
+behavior, and meaningful boundaries. The Spec confirmation remains the single
+place where the user decides a behavior change or resolves a relevant baseline
+contradiction. The confirmed Spec remains available throughout the run but is
+not selected for commit unless the user explicitly asks to preserve it.
 
-Focused work still reads a relevant baseline when one exists. A bug fix that
-restores documented behavior remains Focused and later records `unchanged`. If
-investigation reveals a new product decision or observable behavior change, the
-workflow proposes upgrading to Full instead of silently changing the contract.
+Focused work does not require a Spec. It still reads a relevant baseline when
+one exists. A bug fix that restores documented behavior remains Focused and
+later records `unchanged`. If investigation reveals a new product decision or
+observable behavior change, the workflow proposes upgrading to Full and then
+creates a Spec instead of silently changing the contract.
 
 ### Story, Construction, and Quality
 
@@ -148,7 +198,8 @@ each selected domain once:
 The existing Delivery card shows the action and exact files for every affected
 domain. Faithful reconciliation adds no new confirmation stop. Behavior and
 index files are added to the exact Git manifest only when they actually change,
-and are committed with the Spec and source in the same approved delivery commit.
+and are committed with source and tests in the same approved delivery commit.
+Spec is added only when the user explicitly chooses to preserve it.
 
 ## Lightweight Recovery State
 
@@ -199,7 +250,7 @@ the exact-file manifest.
 This lifecycle reuses existing high-value stops:
 
 - Intake or Spec shows selected domains and any ambiguity.
-- Spec confirms behavior deltas and relevant contradictions.
+- Full Spec confirms behavior deltas and relevant contradictions.
 - Delivery shows final baseline actions and exact files.
 
 Normal domain selection, template use, and faithful reconciliation do not create
@@ -207,9 +258,10 @@ new pauses. All decisions accept natural language; no fixed ACK phrase is added.
 
 ## Git and Ownership
 
-- Per-ticket Spec and changed behavior baseline files are durable documents.
-- Story remains local by default and follows the existing conditional commit
-  policy.
+- Changed behavior baseline files are the default durable documentation.
+- Per-ticket Spec and Story remain local by default. Each follows the existing
+  conditional commit policy and enters the manifest only after the user
+  explicitly selects it.
 - Only exact files named in the approved manifest may be staged.
 - Existing user changes and unrelated dirty files remain outside the manifest.
 - The delivery commit keeps the repository's required
@@ -222,8 +274,13 @@ Tests cover workflow behavior, not the prose of a business document:
 
 - document paths are portable on Windows and POSIX;
 - the behavior template and index guidance are available;
+- domain guidance uses business capability boundaries and contains no mechanical
+  size threshold;
 - Full and Focused guidance select only relevant domains;
 - missing or empty indexes remain a valid first-use state;
+- a first legacy baseline records confirmed coverage and treats omissions as
+  unknown rather than absent behavior;
+- Full Spec stays local by default and can be explicitly selected for delivery;
 - selected domains and actions survive serialization and recovery;
 - `new`, `updated`, and `unchanged` drive the expected exact manifest behavior;
 - a new domain includes both its document and index update;
@@ -238,7 +295,11 @@ machine-readable sections.
 ## Success Criteria
 
 - A new request can find relevant current behavior without reading old Specs.
+- A confirmed Spec can guide Full implementation without becoming a default
+  repository artifact.
 - A delivered behavior change leaves the selected domain baseline current.
+- A complex legacy domain can begin with an honest partial baseline instead of a
+  blocking full-domain inventory.
 - A restoring bug fix creates no documentation churn.
 - New domains remain discoverable through a one-line index entry.
 - An interrupted flow resumes with its domain intent intact.

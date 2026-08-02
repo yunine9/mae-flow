@@ -293,6 +293,82 @@ class HookProtocolTests(unittest.TestCase):
                     ),
                 )
 
+    def test_prior_shell_context_and_remote_config_receive_no_root_facts(self):
+        commands = (
+            "cd /tmp/other && git push origin HEAD:refs/heads/main",
+            "export GIT_DIR=/tmp/other/.git; "
+            "git push origin HEAD:refs/heads/main",
+            "export GIT_WORK_TREE=/tmp/other; "
+            "git push origin HEAD:refs/heads/main",
+            "export GIT_CONFIG_COUNT=1; "
+            "export GIT_CONFIG_KEY_0=remote.origin.pushurl; "
+            "export GIT_CONFIG_VALUE_0=/tmp/other; "
+            "git push origin HEAD:refs/heads/main",
+            "GIT_DIR=/tmp/other/.git "
+            "git push origin HEAD:refs/heads/main",
+            "env GIT_DIR=/tmp/other/.git "
+            "git push origin HEAD:refs/heads/main",
+            "git -c remote.origin.pushurl=/tmp/other "
+            "push origin HEAD:refs/heads/main",
+            "git -c remote.pushDefault=other "
+            "push origin HEAD:refs/heads/main",
+            "git -c branch.main.remote=other "
+            "push origin HEAD:refs/heads/main",
+            "git -c branch.main.pushRemote=other "
+            "push origin HEAD:refs/heads/main",
+            "git -c branch.release.v2.pushRemote=other "
+            "push origin HEAD:refs/heads/main",
+            "git -c remote.release.mirror.pushurl=/tmp/other "
+            "push origin HEAD:refs/heads/main",
+            "git -c url./tmp/other.pushInsteadOf=origin "
+            "push origin HEAD:refs/heads/main",
+            "git -c url./tmp/other.insteadOf=origin "
+            "push origin HEAD:refs/heads/main",
+            "git -c include.path=/tmp/remote-config "
+            "push origin HEAD:refs/heads/main",
+            "git -c includeIf.gitdir:/tmp/.path=/tmp/remote-config "
+            "push origin HEAD:refs/heads/main",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=self._root_push_text,
+                        git_paths=lambda unused_root, unused_args: (
+                            "root-authorized.py",),
+                    ),
+                )
+
+    @staticmethod
+    def _root_push_text(unused_root, arguments):
+        values = {
+            ("rev-parse", "--verify", "HEAD^{commit}"): "root-head",
+            ("rev-parse", "--verify",
+             "refs/remotes/origin/main^{commit}"): "root-remote",
+        }
+        return values.get(tuple(arguments), "")
+
+    def test_benign_inline_git_config_keeps_root_push_facts(self):
+        self.assertEqual(
+            ("src/root.py",),
+            self.dispatch._push_commit_files(
+                ROOT,
+                {"tool_name": "Bash", "tool_input": {
+                    "command": (
+                        "git -c color.ui=false push origin "
+                        "HEAD:refs/heads/main"),
+                }},
+                git_text=self._root_push_text,
+                git_paths=lambda unused_root, unused_args: ("src/root.py",),
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

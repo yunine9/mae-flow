@@ -22,12 +22,8 @@ _PUSH_FLAGS = {
 _AMBIGUOUS_PUSH_FLAGS = {"--all", "--mirror", "--tags", "--delete"}
 _SAFE_REF = re.compile(r"[A-Za-z0-9._/-]+")
 _CONTEXT_OPTIONS = {
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace",
-    "--config-env",
+    "-C", "--git-dir", "--work-tree", "--namespace",
 }
-_CONTEXT_ENV_PREFIXES = (
-    "GIT_DIR=", "GIT_WORK_TREE=", "GIT_NAMESPACE=", "GIT_CONFIG_",
-)
 
 
 def _decode_paths(raw):
@@ -89,7 +85,106 @@ def staged_files(root):
     )
 
 
-def _changes_repository_context(command):
+def _context_environment_name(value):
+    name = str(value or "").split("=", 1)[0].upper()
+    return name if (
+        name in {"GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"}
+        or name.startswith("GIT_CONFIG_")
+    ) else ""
+
+
+def _remote_changing_config(value):
+    key = str(value or "").split("=", 1)[0].casefold()
+    return bool(
+        key == "remote.pushdefault"
+        or re.fullmatch(r"remote\..+\.(?:url|pushurl)", key)
+        or re.fullmatch(r"branch\..+\.(?:remote|pushremote)", key)
+        or re.fullmatch(r"url\..+\.(?:insteadof|pushinsteadof)", key)
+        or key == "include.path"
+        or re.fullmatch(r"includeif\..+\.path", key)
+    )
+
+
+def _inline_context_changed(tokens, git_index, push_index):
+    context = tokens[:git_index] + tokens[git_index + 1:push_index]
+    index = 0
+    while index < len(context):
+        value = context[index]
+        option = value.split("=", 1)[0]
+        if (
+                option in _CONTEXT_OPTIONS
+                or value.startswith("-C") and value != "-C"
+                or _context_environment_name(value)):
+            return True
+        if value == "-c":
+            index += 1
+            if index >= len(context) or _remote_changing_config(context[index]):
+                return True
+        elif value.startswith("-c") and value != "-c":
+            if _remote_changing_config(value[2:]):
+                return True
+        elif option == "--config-env":
+            configured = (
+                value.split("=", 1)[1]
+                if "=" in value else (
+                    context[index + 1] if index + 1 < len(context) else "")
+            )
+            if not configured or _remote_changing_config(configured):
+                return True
+            if "=" not in value:
+                index += 1
+        index += 1
+    return any(
+        value == "--repo" or value.startswith("--repo=")
+        for value in tokens[push_index + 1:])
+
+
+def _next_shell_cwd(current, tokens):
+    if not tokens or tokens[0].casefold() != "cd":
+        return current
+    arguments = list(tokens[1:])
+    if arguments[:1] == ["--"]:
+        arguments = arguments[1:]
+    if (
+            len(arguments) != 1
+            or arguments[0] == "-"
+            or any(marker in arguments[0] for marker in ("$", "`", "%"))):
+        return None
+    path = arguments[0]
+    if not os.path.isabs(path):
+        if current is None:
+            return None
+        path = os.path.join(current, path)
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _next_context_environment(active, tokens):
+    updated = set(active)
+    if not tokens:
+        return updated
+    operation = tokens[0].casefold()
+    if operation in {"export", "set"}:
+        for value in tokens[1:]:
+            name = _context_environment_name(value)
+            if name:
+                updated.add(name)
+    elif operation == "unset":
+        for value in tokens[1:]:
+            name = _context_environment_name(value)
+            if name:
+                updated.discard(name)
+    elif all("=" in value for value in tokens):
+        for value in tokens:
+            name = _context_environment_name(value)
+            if name:
+                updated.add(name)
+    return updated
+
+
+def _changes_repository_context(root, command):
+    expected_cwd = os.path.normcase(os.path.realpath(root))
+    effective_cwd = expected_cwd
+    context_environment = set()
     for tokens in shell_command_groups(command):
         for git_index, token in enumerate(tokens):
             executable = re.split(r"[\\/]", str(token or ""))[-1].casefold()
@@ -101,18 +196,14 @@ def _changes_repository_context(command):
             ), None)
             if push_index is None:
                 continue
-            context = tokens[:git_index] + tokens[git_index + 1:push_index]
-            for value in context:
-                option = value.split("=", 1)[0]
-                if (
-                        option in _CONTEXT_OPTIONS
-                        or value.startswith("-C") and value != "-C"
-                        or value.startswith(_CONTEXT_ENV_PREFIXES)):
-                    return True
-            if any(
-                    value == "--repo" or value.startswith("--repo=")
-                    for value in tokens[push_index + 1:]):
+            if (
+                    effective_cwd != expected_cwd
+                    or context_environment
+                    or _inline_context_changed(tokens, git_index, push_index)):
                 return True
+        effective_cwd = _next_shell_cwd(effective_cwd, tokens)
+        context_environment = _next_context_environment(
+            context_environment, tokens)
     return False
 
 
@@ -222,7 +313,7 @@ def push_commit_files(
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if payload.get("tool_name") != "Bash" or not isinstance(command, str):
         return ()
-    if _changes_repository_context(command):
+    if _changes_repository_context(root, command):
         return ()
     pushes = tuple(
         intent for intent in git_delivery_intents(command)

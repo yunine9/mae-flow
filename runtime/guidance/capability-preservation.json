@@ -38,6 +38,7 @@
         "scripts/tests/test_state_core.py",
         "scripts/tests/test_checkpoints.py",
         "scripts/tests/test_full_checkpoint_compile_recovery.py",
+        "scripts/tests/test_delivery_checkpoint_navigation.py",
         "scripts/tests/test_compile_wait_instructions.py",
         "scripts/tests/test_commit_ownership.py",
         "scripts/tests/test_codecheck_logging.py",
@@ -111,6 +112,12 @@
         "scripts/tests/test_hook_codecheck_contract.py",
         "scripts/tests/test_hook_unit_test_contract.py",
         "scripts/tests/test_hook_agent_completion.py",
+        "scripts/tests/test_compile_side_effects.py",
+        "scripts/tests/test_hook_block_diagnostics.py",
+        "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_registered_scenarios_have_complete_coverage_metadata",
+        "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_current_golden_covers_every_registered_scenario",
+        "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_coverage_rejects_unknown_domain_and_missing_scenario",
+        "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_coverage_rejects_invalid_schema_values_and_extra_fields",
         "scripts/tests/test_spec2code_prompt_resources.py:Spec2CodePromptResourceTests.test_craft_reviewer_is_read_only_and_bounded fixed report envelope assertion",
         "scripts/tests/test_spec2code_prompt_resources.py:Spec2CodePromptResourceTests.test_ut_generator_executes_blueprint_instead_of_redesigning_it evidence-hash assertion",
         "scripts/selftest.py:fixed ACK evidence token task-card report-parser assertions"
@@ -215,7 +222,14 @@
     {"source": "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests.test_codecheck_install_is_one_shot_and_does_not_mutate_npm_config", "classification": "intentionally removed friction", "reason": "Production no longer installs CodeCheck; the toolbox performs one exact advisory request only.", "replacement_semantic_tests": ["scripts/tests/test_lean_toolbox.py:LeanToolboxTests.test_codecheck_uses_the_exact_advisory_file_scope_once"]},
     {"source": "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests.test_windows_cmd_launch_uses_pathex_compatible_shell", "classification": "migration-only", "reason": "The retired host CLI launcher remains reference code and is unreachable from production entrypoints.", "replacement_semantic_tests": ["scripts/tests/test_architecture.py:ArchitectureTests.test_production_runtime_cannot_reach_retired_protocol_contracts"]},
     {"source": "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests.test_windows_runtime_discovers_git_bash_and_node_off_path", "classification": "migration-only", "reason": "Legacy runtime discovery remains diagnostic source material while production uses native guidance.", "replacement_semantic_tests": ["scripts/tests/test_capabilities.py:ReferenceCapabilitySourceTests.test_reference_manifest_declares_native_runtime_cutover"]},
-    {"source": "scripts/tests/test_file_io.py:ManagedFileIOTests.test_checkpoint_runtime_emits_no_resource_warnings", "classification": "thin replacement", "reason": "The obsolete checkpoint ResourceWarning cases are replaced by lean migration, Hook, and manifest paths.", "replacement_semantic_tests": ["scripts/tests/test_file_io.py:ManagedFileIOTests.test_lean_runtime_emits_no_resource_warnings"]}
+    {"source": "scripts/tests/test_file_io.py:ManagedFileIOTests.test_checkpoint_runtime_emits_no_resource_warnings", "classification": "thin replacement", "reason": "The obsolete checkpoint ResourceWarning cases are replaced by lean migration, Hook, and manifest paths.", "replacement_semantic_tests": ["scripts/tests/test_file_io.py:ManagedFileIOTests.test_lean_runtime_emits_no_resource_warnings"]},
+    {"source": "scripts/tests/test_compile_side_effects.py", "classification": "intentionally removed friction", "reason": "Compile-output attribution belonged to the retired compile-task protocol; lean Build records only the opaque attempt outcome.", "replacement_semantic_tests": ["scripts/tests/test_architecture.py:ArchitectureTests.test_production_runtime_cannot_reach_retired_protocol_contracts"]},
+    {"source": "scripts/tests/test_delivery_checkpoint_navigation.py", "classification": "thin replacement", "reason": "Legacy checkpoint navigation is replaced by a confirmation fact bound to each exact current checkpoint.", "replacement_semantic_tests": ["scripts/tests/test_lean_transitions.py:FullTransitionTests.test_each_checkpoint_has_its_own_current_confirmation"]},
+    {"source": "scripts/tests/test_hook_block_diagnostics.py", "classification": "intentionally removed friction", "reason": "The retired privacy-log diagnostic envelope is removed; destructive Git requests are decided directly from exact manifest facts.", "replacement_semantic_tests": ["scripts/tests/test_lean_safety_kernel.py:GitManifestSafetyTests.test_broad_staging_and_commit_options_block_before_manifest_checks"]},
+    {"source": "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_registered_scenarios_have_complete_coverage_metadata", "classification": "intentionally removed friction", "reason": "Phase-15 legacy golden coverage metadata belonged to the retired facade oracle and is not a lean release gate.", "replacement_semantic_tests": ["scripts/tests/test_refactor_completion.py:RefactorCompletionContractTests.test_declared_release_suites_exactly_match_runner_registry"]},
+    {"source": "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_current_golden_covers_every_registered_scenario", "classification": "intentionally removed friction", "reason": "The retired facade golden registry is replaced by the exact current release-suite registry contract.", "replacement_semantic_tests": ["scripts/tests/test_refactor_completion.py:RefactorCompletionContractTests.test_declared_release_suites_exactly_match_runner_registry"]},
+    {"source": "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_coverage_rejects_unknown_domain_and_missing_scenario", "classification": "intentionally removed friction", "reason": "Validation of the retired differential coverage schema is removed; every retired source is instead classified against a current semantic successor.", "replacement_semantic_tests": ["scripts/tests/test_capabilities.py:ReferenceCapabilitySourceTests.test_every_retired_suite_and_method_has_an_itemized_classification"]},
+    {"source": "scripts/tests/test_refactor_completion.py:DifferentialCoverageContractTests.test_coverage_rejects_invalid_schema_values_and_extra_fields", "classification": "intentionally removed friction", "reason": "Validation of the retired differential coverage schema is removed; the cutover inventory contract now owns completeness and successor checks.", "replacement_semantic_tests": ["scripts/tests/test_capabilities.py:ReferenceCapabilitySourceTests.test_every_retired_suite_and_method_has_an_itemized_classification"]}
   ],
   "capabilities": [
     {

@@ -86,6 +86,21 @@ EXPECTED_RETIRED_TEST_SOURCES = {
     "scripts/tests/test_hook_unit_test_contract.py",
     "scripts/tests/test_hook_agent_completion.py",
     "scripts/tests/test_hook_events.py",
+    "scripts/tests/test_compile_side_effects.py",
+    "scripts/tests/test_delivery_checkpoint_navigation.py",
+    "scripts/tests/test_hook_block_diagnostics.py",
+    "scripts/tests/test_refactor_completion.py:"
+    "DifferentialCoverageContractTests."
+    "test_registered_scenarios_have_complete_coverage_metadata",
+    "scripts/tests/test_refactor_completion.py:"
+    "DifferentialCoverageContractTests."
+    "test_current_golden_covers_every_registered_scenario",
+    "scripts/tests/test_refactor_completion.py:"
+    "DifferentialCoverageContractTests."
+    "test_coverage_rejects_unknown_domain_and_missing_scenario",
+    "scripts/tests/test_refactor_completion.py:"
+    "DifferentialCoverageContractTests."
+    "test_coverage_rejects_invalid_schema_values_and_extra_fields",
     "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests."
     "test_vendor_tree_hash_ignores_python_bytecode_cache",
     "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests."
@@ -254,6 +269,34 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
                 self.assertEqual([], sorted(
                     identifier for identifier in replacements
                     if identifier not in valid_ids))
+
+    def test_unittest_discovery_contains_only_current_release_tests(self):
+        from selftest_suites import REFACTOR_SAFETY_SUITES
+
+        registered = {
+            command[0]
+            for unused_label, command, unused_timeout, unused_limit
+            in REFACTOR_SAFETY_SUITES
+        }
+        raw_only_current = {
+            "scripts/tests/test_capability_observation.py",
+            "scripts/tests/test_codecheck_advisory.py",
+            "scripts/tests/test_quality_selection.py",
+            "scripts/tests/test_ut_handoff.py",
+        }
+        expected = registered | raw_only_current
+        actual = {
+            "scripts/tests/" + filename
+            for filename in os.listdir(os.path.join(ROOT, "scripts", "tests"))
+            if filename.startswith("test_") and filename.endswith(".py")
+        }
+
+        self.assertEqual(31, len(expected))
+        self.assertEqual(expected, actual)
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "scripts", "tests", "reference_specengine_diagnostic.py")))
+        self.assertFalse(os.path.exists(os.path.join(
+            ROOT, "scripts", "tests", "test_specengine.py")))
 
     def test_real_hook_protocol_is_classified_as_preserved_behavior(self):
         with open(

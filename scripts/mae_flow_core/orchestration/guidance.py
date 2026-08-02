@@ -61,6 +61,25 @@ def render_guidance(state):
     return "%s\n\n%s\n" % (context, phase_guidance)
 
 
+def _delivery_user_card(state):
+    decisions = {key: value for key, value in state.decisions}
+    lines = ["需要用户介入: 交付（精确文件、提交说明和是否推送）"]
+    if state.delivery_files:
+        lines.append("精确文件:")
+        lines.extend("- %s" % path for path in state.delivery_files)
+    else:
+        lines.append("精确文件: none")
+    lines.append(
+        "提交说明: %s" % decisions.get(
+            "delivery.commit_message", "尚未选择"))
+    lines.append(
+        "Moonlight 权限: allow_commit=%s, allow_push=%s" % (
+            decisions.get("moonlight.allow_commit", "false"),
+            decisions.get("moonlight.allow_push", "false"),
+        ))
+    return "\n".join(lines)
+
+
 def render_user_card(state):
     """Return the one high-value user intervention for the current cursor.
 
@@ -79,7 +98,7 @@ def render_user_card(state):
             "需要用户介入: 启动选择（路径、范围和提交节奏）")
     if state.path == DeliveryPath.FOCUSED:
         if state.phase == Phase.DELIVERY and "delivery.confirmation" not in confirmed:
-            return "需要用户介入: 交付（精确文件、提交说明和是否推送）"
+            return _delivery_user_card(state)
         return ""
     if state.phase == Phase.SPEC:
         return "" if moonlight else (
@@ -96,5 +115,5 @@ def render_user_card(state):
     if (
             state.phase == Phase.DELIVERY
             and "delivery.confirmation" not in confirmed):
-        return "需要用户介入: 交付（精确文件、提交说明和是否推送）"
+        return _delivery_user_card(state)
     return ""

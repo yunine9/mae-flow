@@ -4,6 +4,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from dataclasses import replace
 TESTS = os.path.abspath(os.path.dirname(__file__))
 ROOT = os.path.abspath(os.path.join(TESTS, "..", ".."))
 SCRIPTS = os.path.abspath(os.path.join(TESTS, ".."))
+CLI = os.path.join(SCRIPTS, "mae-flow.py")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
@@ -65,6 +67,21 @@ def full_at(phase, pace=CommitPace.CONTINUOUS, **changes):
         commit_pace=pace,
     )
     return replace(state, **changes)
+
+
+def run_cli(root, *arguments):
+    env = dict(os.environ)
+    env["PYTHONPYCACHEPREFIX"] = os.path.join(root, "pycache")
+    return subprocess.run(
+        [sys.executable, CLI] + list(arguments),
+        cwd=root,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        timeout=20,
+    )
 
 
 class FullWorkflowScenarioTests(unittest.TestCase):
@@ -213,7 +230,7 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         )
         self.assertEqual("returned", attempts[0].outcome)
 
-    def test_synchronous_build_records_success_failure_and_timeout_as_facts(self):
+    def test_capability_record_cli_synchronously_persists_three_host_outcomes(self):
         cases = (
             ("returned", "host returned opaque success data"),
             ("failed-to-start", "host could not start the capability"),
@@ -221,15 +238,34 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         )
         for index, (outcome, summary) in enumerate(cases):
             with self.subTest(outcome=outcome):
-                context = AttemptContext(
-                    CapabilityKind.BUILD,
-                    "build-source-%d" % index,
-                    "fake-host-v1",
-                )
-                attempts = record_attempt((), context, outcome, summary)
-                self.assertEqual(1, len(attempts))
-                self.assertEqual((outcome, summary), (
-                    attempts[0].outcome, attempts[0].summary))
+                with tempfile.TemporaryDirectory() as root:
+                    initialized = subprocess.run(
+                        ["git", "init", "-q"], cwd=root,
+                        capture_output=True, timeout=10)
+                    self.assertEqual(0, initialized.returncode)
+                    started = run_cli(
+                        root,
+                        "start", "--ticket", "REQ-BUILD-%d" % index,
+                        "--path", "focused", "--pace", "continuous",
+                    )
+                    self.assertEqual(0, started.returncode)
+
+                    recorded = run_cli(
+                        root,
+                        "capability-record", "build", outcome,
+                        "--source", "controlled-build-source-%d" % index,
+                        "--environment", "controlled-host-v1",
+                        "--summary", summary,
+                    )
+                    self.assertEqual(0, recorded.returncode)
+                    with open(os.path.join(root, ".mae-flow.json"),
+                              encoding="utf-8") as stream:
+                        persisted = json.load(stream)
+                    self.assertEqual(1, len(persisted["capabilities"]))
+                    attempt = persisted["capabilities"][0]
+                    self.assertEqual("build", attempt["kind"])
+                    self.assertEqual(outcome, attempt["outcome"])
+                    self.assertEqual(summary, attempt["summary"])
 
     def test_same_result_is_reused_and_never_automatically_retried(self):
         state = full_at(Phase.QUALITY)
@@ -361,6 +397,40 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         self.assertTrue(exact.authorization.allow_push)
         self.assertIn("交付", render_user_card(exact.state))
 
+    def test_current_renders_exact_moonlight_delivery_authorization(self):
+        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        message = "[REQ-42][feat]deliver the reviewed behavior"
+        state = full_at(
+            Phase.DELIVERY,
+            delivery_files=("src/a.cpp", story),
+            decisions=(
+                ("delivery.conditional_document", story),
+                ("delivery.commit_message", message),
+            ),
+        )
+        state = apply_moonlight_policy(
+            state,
+            MoonlightAuthorization(
+                True, state.delivery_files, True, False),
+        ).state
+
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, ".mae-flow.json"), "w",
+                      encoding="utf-8") as stream:
+                json.dump(state.to_dict(), stream, ensure_ascii=False)
+            current = run_cli(root, "current")
+
+        self.assertEqual(0, current.returncode, current.stderr)
+        expected_card = "\n".join((
+            "需要用户介入: 交付（精确文件、提交说明和是否推送）",
+            "精确文件:",
+            "- src/a.cpp",
+            "- %s" % story,
+            "提交说明: %s" % message,
+            "Moonlight 权限: allow_commit=true, allow_push=false",
+        ))
+        self.assertIn(expected_card, current.stdout)
+
 
 class ProductDocumentationContractTests(unittest.TestCase):
     CURRENT_DOCS = (
@@ -435,6 +505,23 @@ class ProductDocumentationContractTests(unittest.TestCase):
             self.HISTORY_MARKER, 1)[1]
         self.assertIn("过去式", history)
         self.assertIn("不构成当前操作说明", history)
+        self.assertEqual(
+            34,
+            sum(line.startswith("## ") for line in history.splitlines()),
+        )
+        self.assertGreaterEqual(len(history.splitlines()), 858)
+        self.assertIn(
+            "## 2026-07-31：长编译只做一次，修复分阶段风险出口",
+            history,
+        )
+        self.assertIn(
+            "## 2026-07-25：Windows 与确认流程修正",
+            history,
+        )
+        self.assertIn(
+            "固定内嵌 OpenSpec 1.6.0、Comet 0.3.9、Superpowers 和 Ponytail",
+            history,
+        )
 
 
 if __name__ == "__main__":

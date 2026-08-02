@@ -28,6 +28,12 @@ CP Construction does not write or run formal UT. Its one configured Build is
 the CP compile fact and is recorded as one opaque capability outcome; Mae-Flow
 does not parse its output.
 
+After Build, record the current CP exact manifest proposal and mark that same CP
+ready. Only then show the Full review card. A user revision revokes any pending
+receipt and returns this CP to editable work; confirmation freezes source until
+the exact Staged commit is observed. Open the next CP afterward without showing
+an empty review card.
+
 ## Next
 Proceed to Quality when construction and its cumulative UT handoff are complete.
 The next meaningful action is the current checkpoint.

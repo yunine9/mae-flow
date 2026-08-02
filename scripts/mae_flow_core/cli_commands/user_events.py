@@ -14,11 +14,12 @@ _LEDGER = os.path.join(".mae-flow-work", "lean-hook-user-events.json")
 _CONSUMED = "user.event.consumed"
 USER_OWNED_EVENTS = {
     "startup-confirmed", "spec-confirmed", "story-confirmed",
-    "cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
-    "risk-resolved", "upgrade-to-full", "quality-defect-repair",
+    "cp-confirmed", "cp-revise", "delivery-confirmed",
+    "reviewer-tradeoff-resolved", "risk-resolved", "upgrade-to-full",
+    "quality-defect-repair", "delivery-defect-repair",
 }
 _KEYED_SEMANTIC_EVENTS = {
-    "risk-resolved", "cp-ready", "cp-progress",
+    "risk-resolved", "cp-ready", "cp-opened", "cp-progress",
     "cp-brief", "cp-result", "cp-review", "cp-ut-intent",
     "domain-selected", "domain-new", "domain-updated", "domain-unchanged",
     "capability-returned", "capability-failed-to-start",

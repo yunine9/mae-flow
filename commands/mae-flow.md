@@ -19,6 +19,9 @@
 
 不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
 
+这些 CLI 是 Agent 内部协议，不要把它们展示成用户必须执行的操作。用户只需
+使用 `/mae-flow:mae-flow` 并自然语言表达确认、修改、返修或退出。
+
 ## 用户介入
 
 Full 固定展示 Startup、Spec、Story、CP、Delivery 五张短卡；Focused 固定展示 Startup、Delivery。普通 Reviewer CLEAR、能力正常返回和机械阶段切换不中断用户。真实歧义、设计偏离、不可逆风险、Reviewer 取舍和昂贵重试必须展示证据、影响与推荐答案。
@@ -31,9 +34,14 @@ Full 固定展示 Startup、Spec、Story、CP、Delivery 五张短卡；Focused 
 - 调用前先查看 `current` 的当前语义 slot 已有尝试；同一 slot 无用户重试决定就不再次调用，新的阶段/CP slot 首次调用正常执行。每次真实能力调用同步结束后立即记录一次：`advance capability-returned --key <kind> --decision "<简短不透明摘要>"`；启动失败、超时或无法观察返回时换用对应的 `capability-failed-to-start`、`capability-timed-out`、`capability-not-observed`。记录失败不触发能力重跑。
 - Delivery 前记录最终 Spec/Story/范围 ↔ 代码/覆盖自然语言结论；只有存在语义跨 CP 耦合时才追加一次集成 Reviewer。
 - Continuous 使用一个最终提交和 one final push。
-- Staged 用 `advance cp-ready --key <CP>` 打开新 CP，当前 CP 独立确认后才用 `manifest --checkpoint <CP> --file <exact files>... --commit-message "[单号][已确认类型]描述"` 记录本地提交计划；Delivery 用 `manifest --final --file <累计 union>...`，然后 one final push。同一文件可跨 CP 重复。
+- Staged 当前 CP 完成 Reviewer、Lightcheck 和 Build 后，先用 `manifest --checkpoint <当前CP> --file <exact files>... --commit-message "[单号][已确认类型]描述"` 形成只读提交计划，再用 `advance cp-ready --key <当前CP>` 展示完成卡。用户确认时执行 `decision cp-confirmed`，随后才做 exact add/commit；用户要求修改时执行 `decision cp-revise` 撤销未执行收据，修改并重新 Build/呈审。commit 被 Hook 观察后，用 `advance cp-opened --key <下一CP>` 进入下一批，该事件不打断用户。Delivery 用 `manifest --final --file <累计 union>...`，然后 one final push。同一文件可跨 CP 重复。
 - 启动时已脏文件进入 manifest 时，每个都传 `--adopt-dirty "<file>=<用户自然语言归属决定>"`。Moonlight refresh 只用于已启用流程，并带 `--decision "<当前 exact manifest 授权>"`。
 - 条件文档只有用户明确要求入库时才传 `--conditional-document <exact path>`。
 - Delivery 前用 `domain-new|domain-updated|domain-unchanged --key docs/specs/<domain>.md` 记录相关领域的最终当前真相动作；只有实际变化的领域文件进入 exact manifest。
 
 任何能力失败或超时都不自动重启、不等待、不轮询。能力事实由工作流命令写入，Hook 不解析 Agent/Skill 返回。Attempt slot 由阶段和 current CP 派生，改 caller 的 source/environment 不会绕过。同一 slot 只有 state 中已有本轮 `capability.retry.<kind>` 自然语言决定才再次尝试；新的计划 slot 不叫重试。
+
+Quality 发现源码问题时，用用户自然语言绑定 `quality-defect-repair`；Delivery
+检视发现问题时绑定 `delivery-defect-repair`。两者都打开新的 repair CP，保留已经
+完成的 Staged commit 历史，清除过期的最终质量/交付授权。流程已经 complete
+时，用同一 Slash Command 发起新的后续修复轮次，不尝试修改终态状态。

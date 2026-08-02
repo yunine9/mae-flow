@@ -258,6 +258,8 @@ def render_user_card(state):
             "需要用户介入: Design（Story 实现边界、设计和可测性）")
     if (
             state.phase == Phase.CONSTRUCTION
+            and decisions.get("construction.cp.%s.ready" % (
+                state.current_cp or "CP1")) == "true"
             and "construction.cp.%s.confirmation" % (
                 state.current_cp or "CP1") not in confirmed):
         if moonlight:
@@ -273,10 +275,23 @@ def render_user_card(state):
             "- Reviewer: %s" % (current.review or "未记录"),
             "- 累计 UT 增量: %s" % (current.ut_intent or "未记录"),
         ]
+        plan_prefix = "delivery.cp.%s." % checkpoint
+        planned_files = tuple(
+            value for key, value in state.decisions
+            if key == plan_prefix + "file")
+        planned_message = _latest_decision(
+            state, plan_prefix + "message")
+        if planned_files:
+            lines.append("本批精确提交计划:")
+            lines.extend("- %s" % path for path in planned_files)
+            lines.append("- 提交说明: %s" % (
+                planned_message or "未记录"))
         if following is not None:
             lines.append("- 下一 CP: %s — %s" % (
                 following.name, following.brief or "未记录"))
-        lines.append("请直接用自然语言确认或修改后续设计。")
+        lines.append(
+            "请直接用自然语言确认，或说明需要调整的代码/后续设计；"
+            "调整完成并重新检视前不会提交。")
         return "\n".join(lines)
     if (
             state.phase == Phase.DELIVERY

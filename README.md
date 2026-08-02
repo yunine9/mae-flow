@@ -13,9 +13,46 @@ Mae-Flow 是面向 CodeAgent 的交付工作流。它把人留在真正有决策
 交付 REQ-42：修复删除好友后会话缓存未清理的问题。
 ```
 
+开发同事只需要记住 `/mae-flow:mae-flow`，其余 `start`、`advance`、
+`decision`、`manifest` 等 CLI 都是 CodeAgent 与状态机之间的内部协议，
+不是要求用户学习或手工输入的命令。
+
 启动卡会一次展示工号、单号与 `feat/fix` 类型、需求来源、推荐路径、提交节奏、基线/工作分支、精确 Build 路由、UT 生成方式、UT 运行入口、质量组合和本轮已存在的工作区改动。C++ 可以配置 `build-fix` Skill，Java/Maven 配置准确 Maven 命令，其他语言使用仓库自己的 Skill 或命令；`build-fix` 不是通用 Build。用户可以直接用自然语言调整或确认；没有固定口令。确认后立即创建或切换工作分支。
 
 恢复时直接说“继续 REQ-42”。Mae-Flow 从项目里的最小恢复游标继续，不要求旧会话仍在。要退出时明确说“退出 Mae-Flow”；退出会保存现场并释放控制，不删除业务改动。
+
+## 常用自然语言
+
+CP 完成后，Full 会展示本批实际结果、Reviewer 结论、UT 增量、下一批设计，
+以及 Staged 模式的 exact files 和提交说明。此时直接说“确认”即可；需要修改时
+直接指出问题，例如“异常分支处理不对，改完再给我看”。CodeAgent 会撤销本批
+未执行的提交授权，修改、Build 并重新展示；用户再次确认后才 commit。
+
+Quality 或 Delivery 发现问题时直接说：
+
+```text
+先不要交付。发现问题：<现象>；复现：<步骤>；期望：<行为>。
+请回到 Construction 修复，完成后重新走受影响的质量项。
+```
+
+已经完成的需求要继续修复时，重新发起一轮即可：
+
+```text
+/mae-flow:mae-flow
+继续处理 REQ-42。原需求已经完成，现在发现缺陷：<现象>。
+复现：<步骤>；期望：<行为>。请读取原 Spec、Story 和当前代码发起后续修复；
+已定位且不改变业务语义时推荐 Focused，否则使用 Full。先展示完整配置卡，
+单号类型使用 fix，Story 默认不上库。
+```
+
+需要无人值守推进时，仍可使用 Moonlight：
+
+```text
+/mae-flow:mae-flow moonlight
+处理 REQ-42，只允许修改 <逐个业务文件>；允许 commit 和 push。
+```
+
+Moonlight 仍运行在 Full/Focused 上；没有点名的文件和副作用不会被默认授权。
 
 ## 只有两条路径
 
@@ -100,7 +137,17 @@ Mae-Flow 只对用户已审阅的逐文件 manifest 授权：
 - 启动前已有的脏文件只有被用户明确采用后才能进入 Delivery；未采用的脏文件可以留在工作区，但不能被自动交付；
 - 提交只允许发生在 Intake 已确认的工作分支；总体格式仍为 `[ticket][feat|fix]description`，本轮必须使用 Intake 已确认的 exact type；
 - Continuous 生成一个最终本地提交，Staged 按用户确认的 CP manifest 生成多个提交；两者最终都只推送一次；
+- Staged 的顺序固定为“形成提交计划 → CP 完成卡 → 用户确认 → exact commit”；
+  确认后到 commit 前源码冻结，用户要求调整会撤销未执行收据并重新检视；
 - manifest 在确认后变化时必须重新展示，不能沿用旧授权。
+
+## 命令兼容
+
+公开 Slash Command 只有 `/mae-flow:mae-flow`。过去按任务类型拆分的多个独立
+入口已合并：需要显式规格和逐 CP 检视时使用 Full，已定位修复、局部修改和
+评审意见通常进入 Focused；出现接口、兼容性、数据、安全、共享状态或并发
+风险时升级 Full。Moonlight、UT、CodeCheck、Grill、Story、Chain 仍可通过
+同一入口按自然语言选择。仓库中保留的旧步骤文件不代表生产入口仍支持旧命令。
 
 ## Moonlight
 

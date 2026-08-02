@@ -118,17 +118,17 @@ class FullWorkflowScenarioTests(unittest.TestCase):
         state = advance(
             state, "story-confirmed", value="用户确认 Story 实现设计。").state
         self.assertEqual(Phase.CONSTRUCTION, state.phase)
-        self.assertTrue(advance(state, "cp-ready").needs_user)
-        state = advance(
-            state, "cp-confirmed", value="用户确认 CP1 结果。").state
-        self.assertFalse(advance(state, "cp-progress").needs_user)
-
         state = record_flow_attempt(
             state,
             flow_attempt_context(state, CapabilityKind.BUILD),
             "returned",
             "opaque CP build return",
         )
+        self.assertTrue(advance(state, "cp-ready").needs_user)
+        state = advance(state, "cp-ready").state
+        state = advance(
+            state, "cp-confirmed", value="用户确认 CP1 结果。").state
+        self.assertFalse(advance(state, "cp-progress").needs_user)
         state = advance(state, "construction-complete").state
         self.assertEqual(Phase.QUALITY, state.phase)
         state = advance(
@@ -148,17 +148,21 @@ class FullWorkflowScenarioTests(unittest.TestCase):
 
         observed = []
         for checkpoint in ("CP1", "CP2", "CP3"):
-            ready = advance(state, "cp-ready", checkpoint)
-            observed.append((ready.state.current_cp, ready.needs_user))
-            state = advance(
-                ready.state, "cp-confirmed",
-                value="用户确认 %s 结果。" % checkpoint).state
             state = record_flow_attempt(
                 state,
                 flow_attempt_context(state, CapabilityKind.BUILD),
                 "returned",
                 "opaque %s build return" % checkpoint,
             )
+            ready = advance(state, "cp-ready", checkpoint)
+            observed.append((ready.state.current_cp, ready.needs_user))
+            state = advance(
+                ready.state, "cp-confirmed",
+                value="用户确认 %s 结果。" % checkpoint).state
+            if checkpoint != "CP3":
+                next_checkpoint = "CP%d" % (int(checkpoint[2:]) + 1)
+                state = advance(
+                    state, "cp-opened", next_checkpoint).state
 
         integration = advance(
             state,

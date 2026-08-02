@@ -145,6 +145,22 @@ class LeanCliTests(unittest.TestCase):
                   encoding="utf-8") as stream:
             return json.load(stream)
 
+    def observe_checkpoint_commit(self, checkpoint):
+        state = self.state()
+        receipt = next(
+            item["value"] for item in state["decisions"]
+            if item["key"] == "delivery.cp.%s.receipt" % checkpoint)
+        state["decisions"].append({
+            "key": "delivery.git.commit_observation",
+            "value": json.dumps({
+                "receipt_digest": json.loads(receipt)["digest"],
+                "sha": "c" * 40,
+            }, sort_keys=True, separators=(",", ":")),
+        })
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
     def test_user_owned_decision_consumes_one_current_codeagent_prompt(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-USER-EVENT", "--path", "focused",
@@ -365,6 +381,9 @@ class LeanCliTests(unittest.TestCase):
             self.assert_success(self.run_cli_raw(
                 "advance", event, "--key", checkpoint,
                 "--decision", text))
+        self.assert_success(self.run_capability("build"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP1"))
 
         current = self.run_cli_raw("current")
 
@@ -427,13 +446,24 @@ class LeanCliTests(unittest.TestCase):
         story = self.run_cli(
             "decision", "story-confirmed", "实现边界和可测性设计已确认。")
         self.assert_success(story)
-        self.assertIn("需要用户介入: CP", story.stdout)
+        self.assertNotIn("需要用户介入: CP", story.stdout)
+
+        for event, text in (
+                ("cp-brief", "完成缓存删除边界。"),
+                ("cp-result", "缓存删除逻辑已经实现。"),
+                ("cp-review", "CODE Reviewer 未发现阻塞问题。"),
+                ("cp-ut-intent", "覆盖删除成功和缓存不存在场景。")):
+            self.assert_success(self.run_cli_raw(
+                "advance", event, "--key", "CP1", "--decision", text))
+        self.assert_success(self.run_capability("build"))
+        ready = self.run_cli_raw("advance", "cp-ready", "--key", "CP1")
+        self.assert_success(ready)
+        self.assertIn("需要用户介入: CP", ready.stdout)
 
         cp = self.run_cli(
             "decision", "cp-confirmed", "本 CP 的结果和后续节奏已确认。")
         self.assert_success(cp)
         self.assertNotIn("需要用户介入", cp.stdout)
-        self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_cli("advance", "construction-complete"))
         self.assert_success(self.run_capability("codecheck"))
         self.assert_success(self.run_capability("ut"))
@@ -574,7 +604,7 @@ class LeanCliTests(unittest.TestCase):
             "decision", "startup-confirmed", "已定位局部修复。"))
         self.assert_success(self.run_capability("build"))
 
-        next_cp = self.run_cli("advance", "cp-ready", "--key", "CP2")
+        next_cp = self.run_cli("advance", "cp-opened", "--key", "CP2")
 
         self.assert_success(next_cp)
         self.assertIn(
@@ -1122,16 +1152,22 @@ class LeanCliTests(unittest.TestCase):
             "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
             "--commit-message", "[REQ-STAGE][feat]完成查询入口")
         self.assert_success(cp1)
+        self.assert_success(self.run_capability("build"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP1"))
         self.assert_success(self.run_cli(
             "decision", "cp-confirmed", "用户检视并确认 CP1。"))
-        self.assert_success(self.run_capability("build"))
+        self.observe_checkpoint_commit("CP1")
         self.assert_success(self.run_cli(
-            "advance", "cp-ready", "--key", "CP2"))
+            "advance", "cp-opened", "--key", "CP2"))
+        self.assert_success(self.run_capability("build"))
         cp2 = self.run_cli(
             "manifest", "--checkpoint", "CP2", "--file", "src/a.cpp",
             "--file", "src/b.cpp",
             "--commit-message", "[REQ-STAGE][feat]完成结果映射")
         self.assert_success(cp2)
+        self.assert_success(self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP2"))
         self.assert_success(self.run_cli(
             "decision", "cp-confirmed", "用户检视并确认 CP2。"))
         bad_final = self.run_cli(
@@ -1157,20 +1193,33 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
             "--commit-message", "[REQ-CP][feat]完成 CP1"))
+        self.assert_success(self.run_capability("build"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP1"))
         first = self.run_cli(
             "decision", "cp-confirmed", "CP1 已检视。")
         self.assert_success(first)
         self.assertNotIn("需要用户介入: CP", first.stdout)
-        self.assert_success(self.run_capability("build"))
+        self.observe_checkpoint_commit("CP1")
 
-        second_ready = self.run_cli("advance", "cp-ready", "--key", "CP2")
+        second_opened = self.run_cli(
+            "advance", "cp-opened", "--key", "CP2")
 
-        self.assert_success(second_ready)
-        self.assertIn("需要用户介入: CP", second_ready.stdout)
+        self.assert_success(second_opened)
+        self.assertNotIn("需要用户介入: CP", second_opened.stdout)
         self.assertEqual("CP2", self.state()["current_cp"])
+        self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_cli(
             "manifest", "--checkpoint", "CP2", "--file", "src/b.cpp",
             "--commit-message", "[REQ-CP][feat]完成 CP2"))
+        second_ready = self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP2")
+        self.assert_success(second_ready)
+        self.assertIn("需要用户介入: CP", second_ready.stdout)
+        self.assertIn("本批精确提交计划", second_ready.stdout)
+        self.assertIn("src/b.cpp", second_ready.stdout)
+        self.assertIn("[REQ-CP][feat]完成 CP2", second_ready.stdout)
+        self.assertEqual("CP2", self.state()["current_cp"])
         second = self.run_cli(
             "decision", "cp-confirmed", "CP2 已检视。")
         self.assert_success(second)
@@ -1201,6 +1250,9 @@ class LeanCliTests(unittest.TestCase):
 
         planned = self.run_cli(*arguments)
         self.assert_success(planned)
+        self.assert_success(self.run_capability("build"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "cp-ready", "--key", "CP1"))
         self.assert_success(self.run_cli(
             "decision", "cp-confirmed", "用户确认 CP1 结果。"))
         decisions = self.state()["decisions"]

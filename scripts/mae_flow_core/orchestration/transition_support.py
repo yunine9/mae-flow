@@ -172,6 +172,51 @@ def clear_downstream_authorization(state, include_construction=False):
     )
 
 
+def _repair_checkpoint_name(state):
+    current = state.current_cp or "CP1"
+    existing = {current}
+    for key, unused in state.decisions:
+        for prefix in ("construction.cp.", "delivery.cp."):
+            if key.startswith(prefix):
+                remainder = key[len(prefix):]
+                if "." in remainder:
+                    existing.add(remainder.rsplit(".", 1)[0])
+    candidate = current + "-repair"
+    index = 2
+    while candidate in existing:
+        candidate = "%s-repair-%d" % (current, index)
+        index += 1
+    return candidate
+
+
+def return_to_repair_checkpoint(state, detail):
+    """Clear only stale final authorization and open a fresh repair CP."""
+    retained_delivery = {
+        "delivery.git.commit_observation",
+        "delivery.adopted_dirty",
+        "delivery.adopted_dirty_reason",
+    }
+    decisions = tuple(
+        item for item in state.decisions
+        if item[0] == INTEGRATION_REQUIRED
+        or item[0].startswith("delivery.cp.")
+        or item[0] in retained_delivery
+        or not item[0].startswith(("quality.", "delivery."))
+    )
+    repair = _repair_checkpoint_name(state)
+    decisions += (
+        ("construction.repair", detail.strip()),
+        ("construction.cp.%s.brief" % repair, detail.strip()),
+    )
+    return replace(
+        state,
+        phase=Phase.CONSTRUCTION,
+        current_cp=repair,
+        delivery_files=(),
+        decisions=decisions,
+    )
+
+
 def latest_review_attempt(state):
     requirement = _REVIEW_ATTEMPT.get(state.phase)
     if requirement is None:

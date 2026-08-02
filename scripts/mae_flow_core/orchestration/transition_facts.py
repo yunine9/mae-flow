@@ -381,6 +381,10 @@ def checkpoint_confirmation_key(checkpoint):
     return "construction.cp.%s.confirmation" % checkpoint
 
 
+def checkpoint_ready_key(checkpoint):
+    return "construction.cp.%s.ready" % checkpoint
+
+
 def checkpoint_name(value):
     name = (value or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):

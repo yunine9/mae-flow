@@ -31,6 +31,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
+    checkpoint_receipt_key,
     issue_delivery_receipt,
 )
 
@@ -228,6 +229,32 @@ class SourceEditAuthorizationTests(unittest.TestCase):
             (False, "source_edit"),
             (approved_quality.allow, approved_quality.rule),
         )
+
+    def test_staged_checkpoint_confirmation_freezes_source_until_commit(self):
+        planned = _state(
+            phase=Phase.CONSTRUCTION,
+            decisions=(
+                ("construction.cp.CP1.ready", "true"),
+                ("construction.cp.CP1.confirmation", "用户确认 CP1。"),
+                ("delivery.cp.CP1.file", "src/main.py"),
+                ("delivery.cp.CP1.message", "[REQ-7][fix]完成 CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
+            ),
+        )
+        receipt = issue_delivery_receipt(
+            planned, "用户确认 CP1。", checkpoint="CP1")
+        confirmed = replace(
+            planned,
+            current_cp="CP1",
+            decisions=planned.decisions + ((
+                checkpoint_receipt_key("CP1"), receipt),),
+        )
+
+        decision = self.decision(confirmed, "src/main.py")
+
+        self.assertEqual(
+            (False, "source_edit"), (decision.allow, decision.rule))
+        self.assertIn("CP1", decision.message)
 
     def test_non_bash_command_text_is_never_treated_as_shell_execution(self):
         decision = decide_pretool(

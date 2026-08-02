@@ -2,13 +2,13 @@
 
 from dataclasses import dataclass, replace
 from .models import CommitPace, DeliveryPath, FlowState, Phase
+from .checkpoints import (
+    advance_checkpoint_event as _advance_checkpoint_event,
+)
 from .transition_facts import (
     DELIVERY_CONFIRMATION as _DELIVERY_CONFIRMATION,
     add_material_risk as _add_material_risk,
-    authorize_checkpoint as _authorize_checkpoint,
     authorize_exact_delivery as _authorize_exact_delivery,
-    checkpoint_confirmation_key as _checkpoint_confirmation_key,
-    checkpoint_name as _checkpoint_name,
     clear_downstream_authorization as _clear_downstream_authorization,
     current_delivery_receipt as _current_delivery_receipt,
     delivery_effects_observed as _delivery_effects_observed,
@@ -22,6 +22,7 @@ from .transition_support import (
     record_capability_observation as _record_capability_observation,
     record_quality_fact as _record_quality_fact,
     resolve_risk as _resolve_risk,
+    return_to_repair_checkpoint as _return_to_repair_checkpoint,
 )
 
 @dataclass(frozen=True)
@@ -115,8 +116,9 @@ _CAPABILITY_OUTCOMES = {
 }
 _USER_DECISION_EVENTS = frozenset(
     set(_CONFIRMATION_KEYS)
-    | {"cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
-       "upgrade-to-full", "quality-defect-repair"})
+    | {"cp-confirmed", "cp-revise", "delivery-confirmed",
+       "reviewer-tradeoff-resolved", "upgrade-to-full",
+       "quality-defect-repair", "delivery-defect-repair"})
 
 def _with_decision(state, request, default_key, default_value):
     value = request.decision_value or default_value
@@ -261,17 +263,22 @@ def advance_flow(state, request):
             "The Focused flow upgraded to Full specification.",
         )
 
-    if kind == "quality-defect-repair" and state.phase == Phase.QUALITY:
-        repaired = _clear_downstream_authorization(state)
-        repaired = replace(repaired, phase=Phase.CONSTRUCTION)
-        repaired = repaired.with_decision(
-            "construction.repair",
-            request.decision_value.strip(),
-        )
+    if kind in {"quality-defect-repair", "delivery-defect-repair"}:
+        expected = (
+            Phase.QUALITY if kind == "quality-defect-repair"
+            else Phase.DELIVERY)
+        if state.phase != expected:
+            return AdvanceResult(
+                state, False,
+                "%s applies only in the %s phase."
+                % (kind, expected.value.title()),
+            )
+        repaired = _return_to_repair_checkpoint(
+            state, request.decision_value)
         return AdvanceResult(
             repaired,
             False,
-            "The explicit Quality defect repair returned to Construction.",
+            "The explicit defect repair opened a fresh Construction CP.",
         )
 
     review = _REVIEW_DECISIONS.get((state.phase, kind))
@@ -315,67 +322,14 @@ def advance_flow(state, request):
     if kind in _NON_BLOCKING_EVENTS:
         return AdvanceResult(state, False, _NON_BLOCKING_EVENTS[kind])
 
-    if (kind == "cp-ready"
-            and state.phase == Phase.CONSTRUCTION):
-        current = state.current_cp or "CP1"
-        requested = request.decision_key.strip()
-        if requested:
-            requested = _checkpoint_name(requested)
-            if requested != current and _cp_build_attempt(
-                    state, current) is None:
-                return AdvanceResult(
-                    state, False,
-                    "The completed CP needs one configured Build attempt "
-                    "before the next CP opens.",
-                )
-            if state.path == DeliveryPath.FULL:
-                current_key = _checkpoint_confirmation_key(current)
-                if (requested != current and not any(
-                        key == current_key for key, unused in state.decisions)):
-                    return AdvanceResult(
-                        state,
-                        True,
-                        "The current checkpoint must be confirmed before the "
-                        "next checkpoint is opened.",
-                    )
-            current = requested
-        ready = replace(state, current_cp=current)
-        if state.path == DeliveryPath.FOCUSED:
-            return AdvanceResult(
-                ready,
-                False,
-                "Focused checkpoint progress updated the internal cursor.",
-            )
-        return AdvanceResult(
-            ready,
-            True,
-            "This checkpoint needs user confirmation before continuing.",
-        )
+    checkpoint_result = _advance_checkpoint_event(state, kind, request)
+    if checkpoint_result is not None:
+        return AdvanceResult(*checkpoint_result)
 
     if (state.phase, kind) in _user_stops(state.path):
         return AdvanceResult(
             state, True,
             "This high-value point needs user confirmation before continuing.",
-        )
-
-    if kind == "cp-confirmed" and state.phase == Phase.CONSTRUCTION:
-        checkpoint = state.current_cp or "CP1"
-        if state.path == DeliveryPath.FULL:
-            checkpoint = _checkpoint_name(checkpoint)
-        if state.commit_pace == CommitPace.STAGED:
-            try:
-                confirmed = _authorize_checkpoint(
-                    state, request, checkpoint)
-            except ValueError as exc:
-                return AdvanceResult(state, False, str(exc))
-        else:
-            key = _checkpoint_confirmation_key(checkpoint)
-            confirmed = _with_review_decision(
-                replace(state, current_cp=checkpoint), request, key,
-                request.decision_value.strip())
-        return AdvanceResult(
-            confirmed, False,
-            "The checkpoint and commit pace were confirmed.",
         )
 
     if kind == "delivery-confirmed" and state.phase == Phase.DELIVERY:

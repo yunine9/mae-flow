@@ -60,7 +60,7 @@ Story 严格沿用 `skills/mae-flow/assets/STORY-TEMPLATE.md`，把确认后的�
 
 Story 末尾承载全部轻量 CP 简报，不另建详细编码计划文件。每个 Full CP 保存简报、实际结果、一次 CODE Reviewer 结论和 UT 增量；同一确认卡展示本批实际结果及下一 CP，用户可直接修改后续设计。
 
-每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。Reviewer 提供的每条意见都由主 Agent给出去向：已修复、证据不足不采纳、设计取舍或超出范围；只写自然语言，不交验固定表格。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 单独触发编译或再次检查。随后同步调用开局确认的 Build 路由一次并记录该 CP 的不透明 Build 事实；禁止休眠等待、轮询、转后台或自动重试。Build 完成后才用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
+每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。Reviewer 提供的每条意见都由主 Agent给出去向：已修复、证据不足不采纳、设计取舍或超出范围；只写自然语言，不交验固定表格。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 单独触发编译或再次检查。随后同步调用开局确认的 Build 路由一次并记录该 CP 的不透明 Build 事实；禁止休眠等待、轮询、转后台或自动重试。Build 完成后先形成当前 CP 的 exact manifest 提案，再用 `advance cp-ready --key <当前CP>` 展示完成卡。用户要求修改时用自然语言绑定 `cp-revise`，撤销未执行提交收据并重新修改、Build、呈审；用户确认后才 exact commit。commit 被观察后用 `advance cp-opened --key <下一CP>` 进入下一批，不提前展示空 CP 卡。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
 
 ### Quality
 
@@ -80,7 +80,12 @@ Quality 收尾时记录一条自然语言的最终 Spec/Story/范围 ↔ 代码/
 交付清单包含启动时已脏文件时，对每个文件使用 `--adopt-dirty "<file>=<用户自然语言归属决定>"`。Delivery 确认会绑定当前 exact manifest；manifest 改变后必须重新向用户展示。
 
 - Continuous：最终一个 `[单号][feat|fix]描述` 提交，one final push。
-- Staged：每个用户已确认 CP 先记录该 CP exact manifest 和提交说明，再做一个本地提交；同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
+- Staged：每个 CP 在完成卡前记录 exact manifest 和提交说明；用户确认后才做该 CP 的本地提交。同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
+
+Quality 或 Delivery 发现问题时，分别绑定用户自然语言
+`quality-defect-repair` / `delivery-defect-repair`，打开新的 repair CP；不要覆写
+已经检视并提交的 CP。流程已 complete 时，通过 `/mae-flow:mae-flow` 启动一轮
+新的后续修复，复用原 Spec/Story 作为输入并重新确认配置卡。
 
 领域行为基线是长期当前真相源，路径为 `docs/specs/<domain>.md`，新领域同时轻量更新 `docs/specs/index.md`。Spec、Story、决策、Chain、Review/CodeCheck 台账和交付说明默认本地；只有用户明确点名该文件进入版本库，才通过 `--conditional-document <exact path>` 选择 `docs/specs/requirements/<ticket>/` 下对应的 durable copy。工作流生成的 Spec、Story 和领域 Markdown 水印只标识来源，不参与格式校验。
 

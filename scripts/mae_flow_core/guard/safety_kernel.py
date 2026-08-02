@@ -7,6 +7,7 @@ from ..foundation import git_intent
 from ..foundation.commit_message import valid_business_commit_message
 from ..foundation.source_paths import repository_path_identity
 from ..orchestration.models import DeliveryPath, FlowState, Phase
+from ..orchestration.checkpoints import checkpoint_commit_pending
 from .command_policy import (
     classify_command_mutation,
     dangerous_bash_result,
@@ -32,14 +33,11 @@ from .intent import (
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
 _FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
 
-
 def _allow(rule=""):
     return SafetyDecision(True, rule=rule)
 
-
 def _block(rule, message):
     return SafetyDecision(False, rule=rule, message=message)
-
 
 def _values(input_value, key):
     if not isinstance(input_value, Mapping):
@@ -52,7 +50,6 @@ def _values(input_value, key):
     except TypeError:
         return ()
 
-
 def _command(tool_input):
     if isinstance(tool_input, str):
         return tool_input
@@ -61,10 +58,8 @@ def _command(tool_input):
         return value if isinstance(value, str) else ""
     return ""
 
-
 def _has_decision(state, key):
     return any(existing == key for existing, unused in state.decisions)
-
 
 def _source_edit_allowed(state):
     if state.path == DeliveryPath.FOCUSED:
@@ -72,7 +67,6 @@ def _source_edit_allowed(state):
     if state.path != DeliveryPath.FULL:
         return False
     return state.phase == Phase.CONSTRUCTION
-
 
 def _relative_write_targets(context, tool, tool_input):
     targets = []
@@ -86,7 +80,6 @@ def _relative_write_targets(context, tool, tool_input):
             ambiguous = True
     return tuple(targets), ambiguous
 
-
 def _safe_write_identities(context):
     identities = set()
     for path in context.safe_write_targets:
@@ -97,7 +90,6 @@ def _safe_write_identities(context):
         if relative:
             identities.add(_write_identity(context, relative))
     return identities
-
 
 def _task_temp_identity(context):
     if not context.task_owned_temp_dir:
@@ -150,6 +142,14 @@ def _edit_decision(context, tool, tool_input, opaque_writer=False):
             "A recognized writer must name literal repository targets.",
         )
     controlled_targets = _controlled_write_targets(context, targets)
+    pending_checkpoint = checkpoint_commit_pending(context.state)
+    if controlled_targets and pending_checkpoint:
+        return _block(
+            "source_edit",
+            "Checkpoint %s is confirmed and waiting for its exact commit; "
+            "use the user-owned cp-revise decision before changing source."
+            % pending_checkpoint,
+        )
     if controlled_targets and not _source_edit_allowed(context.state):
         return _block(
             "source_edit",

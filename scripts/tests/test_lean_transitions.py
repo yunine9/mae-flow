@@ -3,6 +3,7 @@
 """Pure transition contract for Full and Focused lean workflows."""
 
 import os
+import json
 import sys
 import unittest
 from dataclasses import replace
@@ -60,7 +61,135 @@ def with_cp_build(state, checkpoint="CP1"):
     )
 
 
+def with_cp_commit_observed(state, checkpoint="CP1"):
+    receipt = next(
+        value for key, value in state.decisions
+        if key == "delivery.cp.%s.receipt" % checkpoint)
+    observation = json.dumps({
+        "receipt_digest": json.loads(receipt)["digest"],
+        "sha": "c" * 40,
+    }, sort_keys=True, separators=(",", ":"))
+    return replace(
+        state,
+        decisions=state.decisions + ((
+            "delivery.git.commit_observation", observation),),
+    )
+
+
 class FullTransitionTests(unittest.TestCase):
+    def test_staged_checkpoint_ready_requires_exact_manifest_plan(self):
+        state = with_cp_build(replace(
+            flow(phase=Phase.CONSTRUCTION),
+            current_cp="CP1",
+        ))
+
+        missing = advance_flow(
+            state, AdvanceRequest("cp-ready", decision_key="CP1"))
+        planned = replace(
+            state,
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
+            ),
+        )
+        ready = advance_flow(
+            planned, AdvanceRequest("cp-ready", decision_key="CP1"))
+
+        self.assertFalse(missing.needs_user)
+        self.assertNotIn(
+            ("construction.cp.CP1.ready", "true"),
+            missing.state.decisions,
+        )
+        self.assertIn("exact manifest", missing.reason)
+        self.assertTrue(ready.needs_user)
+        self.assertIn(
+            ("construction.cp.CP1.ready", "true"),
+            ready.state.decisions,
+        )
+
+    def test_checkpoint_confirmation_requires_a_completed_ready_checkpoint(self):
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            commit_pace=CommitPace.CONTINUOUS,
+            current_cp="CP1",
+        )
+
+        premature = advance_flow(state, AdvanceRequest(
+            "cp-confirmed", decision_value="用户确认 CP1。"))
+        ready = advance_flow(
+            with_cp_build(state), AdvanceRequest("cp-ready", "CP1"))
+        confirmed = advance_flow(ready.state, AdvanceRequest(
+            "cp-confirmed", decision_value="用户确认 CP1。"))
+
+        self.assertTrue(premature.needs_user)
+        self.assertNotIn(
+            ("construction.cp.CP1.confirmation", "用户确认 CP1。"),
+            premature.state.decisions,
+        )
+        self.assertIn(
+            ("construction.cp.CP1.ready", "true"),
+            ready.state.decisions,
+        )
+        self.assertIn(
+            ("construction.cp.CP1.confirmation", "用户确认 CP1。"),
+            confirmed.state.decisions,
+        )
+
+    def test_checkpoint_revise_revokes_uncommitted_confirmation_and_receipt(self):
+        planned = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            current_cp="CP1",
+            delivery_files=("src/a.cpp",),
+            decisions=(
+                ("construction.cp.CP1.ready", "true"),
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
+            ),
+        )
+        confirmed = advance_flow(planned, AdvanceRequest(
+            "cp-confirmed", decision_value="用户确认 CP1。"))
+
+        revised = advance_flow(confirmed.state, AdvanceRequest(
+            "cp-revise", decision_value="用户要求调整 CP1 的异常分支。"))
+
+        keys = {key for key, unused in revised.state.decisions}
+        self.assertNotIn("construction.cp.CP1.ready", keys)
+        self.assertNotIn("construction.cp.CP1.confirmation", keys)
+        self.assertNotIn("delivery.cp.CP1.receipt", keys)
+        self.assertNotIn("delivery.cp.CP1.file", keys)
+        self.assertNotIn("delivery.cp.CP1.message", keys)
+        self.assertNotIn("delivery.cp.CP1.source_sha", keys)
+        self.assertFalse(revised.state.delivery_files)
+        self.assertIn(
+            ("construction.cp.CP1.revision",
+             "用户要求调整 CP1 的异常分支。"),
+            revised.state.decisions,
+        )
+
+    def test_delivery_defect_repair_returns_to_construction(self):
+        state = replace(
+            flow(phase=Phase.DELIVERY),
+            delivery_files=("src/a.cpp",),
+            decisions=(
+                ("quality.final_conformance", "旧结论"),
+                ("delivery.commit_message", "[REQ-42][fix]complete repair"),
+            ),
+        )
+
+        repaired = advance_flow(state, AdvanceRequest(
+            "delivery-defect-repair",
+            decision_value="交付检视发现异常分支仍需修复。",
+        ))
+
+        self.assertEqual(Phase.CONSTRUCTION, repaired.state.phase)
+        self.assertFalse(repaired.state.delivery_files)
+        self.assertIn(
+            ("construction.repair", "交付检视发现异常分支仍需修复。"),
+            repaired.state.decisions,
+        )
+
     def test_construction_requires_one_build_attempt_for_the_current_cp(self):
         state = replace(
             flow(phase=Phase.CONSTRUCTION),
@@ -471,6 +600,16 @@ class FullTransitionTests(unittest.TestCase):
         for phase, event in cases:
             with self.subTest(phase=phase, event=event):
                 state = flow(phase=phase)
+                if phase == Phase.CONSTRUCTION:
+                    state = replace(
+                        with_cp_build(state),
+                        decisions=(
+                            ("delivery.cp.CP1.file", "src/a.cpp"),
+                            ("delivery.cp.CP1.message",
+                             "[REQ-42][fix]complete CP1"),
+                            ("delivery.cp.CP1.source_sha", "a" * 40),
+                        ),
+                    )
                 result = advance_flow(state, AdvanceRequest(event))
                 self.assertTrue(result.needs_user)
                 self.assertEqual(state.phase, result.state.phase)
@@ -479,6 +618,7 @@ class FullTransitionTests(unittest.TestCase):
         state = replace(
             flow(phase=Phase.CONSTRUCTION),
             decisions=(
+                ("construction.cp.CP1.ready", "true"),
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
                 ("delivery.cp.CP1.source_sha", "a" * 40),
@@ -501,6 +641,7 @@ class FullTransitionTests(unittest.TestCase):
             flow(phase=Phase.CONSTRUCTION),
             current_cp="CP1",
             decisions=(
+                ("construction.cp.CP1.ready", "true"),
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
                 ("delivery.cp.CP1.source_sha", "a" * 40),
@@ -514,10 +655,12 @@ class FullTransitionTests(unittest.TestCase):
             AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
         ).state
         cp1 = with_cp_build(cp1, "CP1")
+        cp1 = with_cp_commit_observed(cp1, "CP1")
+        cp2_opened = advance_flow(
+            cp1, AdvanceRequest("cp-opened", decision_key="CP2"))
+        cp2_built = with_cp_build(cp2_opened.state, "CP2")
         cp2_ready = advance_flow(
-            cp1,
-            AdvanceRequest("cp-ready", decision_key="CP2"),
-        )
+            cp2_built, AdvanceRequest("cp-ready", decision_key="CP2"))
         cp2 = advance_flow(
             cp2_ready.state,
             AdvanceRequest("cp-confirmed", decision_value="CP2 reviewed."),
@@ -540,6 +683,7 @@ class FullTransitionTests(unittest.TestCase):
             commit_pace=CommitPace.STAGED,
             current_cp="CP1",
             decisions=(
+                ("construction.cp.CP1.ready", "true"),
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
                 ("delivery.cp.CP1.source_sha", "a" * 40),
@@ -550,8 +694,9 @@ class FullTransitionTests(unittest.TestCase):
             AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
         ).state
         cp1 = with_cp_build(cp1, "CP1")
+        cp1 = with_cp_commit_observed(cp1, "CP1")
         cp2 = advance_flow(
-            cp1, AdvanceRequest("cp-ready", decision_key="CP2"))
+            cp1, AdvanceRequest("cp-opened", decision_key="CP2"))
 
         result = advance_flow(cp2.state, AdvanceRequest("construction-complete"))
 
@@ -831,7 +976,7 @@ class FocusedTransitionTests(unittest.TestCase):
         state = with_cp_build(state, "CP1")
 
         result = advance_flow(
-            state, AdvanceRequest("cp-ready", decision_key="CP2"))
+            state, AdvanceRequest("cp-opened", decision_key="CP2"))
 
         self.assertEqual("CP2", result.state.current_cp)
         self.assertFalse(result.needs_user)

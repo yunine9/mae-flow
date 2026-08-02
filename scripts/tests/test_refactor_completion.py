@@ -35,6 +35,10 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertEqual(
             0, contract["final_targets"]["private_monolith_test_imports"])
         self.assertEqual(
+            66,
+            contract["final_targets"]["production_reachable_python_files"],
+        )
+        self.assertEqual(
             {
                 "architecture": [
                     "python scripts/tests/test_architecture.py",

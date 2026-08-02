@@ -57,16 +57,14 @@ class ManagedFileIOTests(unittest.TestCase):
             ],
         )
 
-    def test_checkpoint_runtime_emits_no_resource_warnings(self):
+    def test_lean_runtime_emits_no_resource_warnings(self):
         cases = (
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_new_staged_plan_reviews_uncommitted_diff_then_"
-            "commits_exact_snapshot",
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_dirty_final_delta_is_reviewed_then_exactly_"
-            "committed_and_rechecked",
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_new_state_skips_legacy_review_while_old_state_keeps_it",
+            "scripts.tests.test_lean_migration_cli.LeanMigrationCliTests."
+            "test_existing_schema_v3_current_is_read_only",
+            "scripts.tests.test_lean_hook_adapter.LeanHookAdapterTests."
+            "test_exact_manifest_facts_allow_commit_and_push",
+            "scripts.tests.test_delivery_manifest.DeliveryAuthorizationTests."
+            "test_authorization_returns_new_state_with_exact_delivery_files",
         )
         result = subprocess.run(
             [

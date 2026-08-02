@@ -17,7 +17,7 @@ from mae_flow_core.state_store import (
     remove_with_retry,
 )
 
-from .shared import STATE_PATH
+STATE_PATH = ".mae-flow.json"
 
 
 _DELIVERY_AUTHORIZATION_KEYS = {

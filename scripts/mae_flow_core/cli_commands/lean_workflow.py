@@ -37,6 +37,7 @@ from mae_flow_core.state_store import (
     safe_read_json,
 )
 from .lean_manifest import prepare_manifest_state
+from .lean_lightcheck import run_exact_lightcheck
 
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
@@ -454,5 +455,4 @@ def cmd_lean_lightcheck(unused_root, args):
     if not args.file:
         print("[mae-flow] 轻量编码预检未提供精确本次修改文件，已自动放行。")
         return 0
-    from .lightcheck import cmd_lightcheck
-    return cmd_lightcheck({}, args)
+    return run_exact_lightcheck(args.file, quiet=args.quiet)

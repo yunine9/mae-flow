@@ -1,5 +1,146 @@
 {
   "schema": 1,
+  "retirement_test_classification": [
+    {
+      "classification": "preserved behavior",
+      "test_sources": [
+        "scripts/tests/test_lean_state.py",
+        "scripts/tests/test_lean_transitions.py",
+        "scripts/tests/test_lean_guidance.py",
+        "scripts/tests/test_native_guidance.py",
+        "scripts/tests/test_lean_composition.py",
+        "scripts/tests/test_delivery_manifest.py",
+        "scripts/tests/test_lean_safety_kernel.py",
+        "scripts/tests/test_lean_hook_events.py",
+        "scripts/tests/test_lean_hook_adapter.py",
+        "scripts/tests/test_lean_cli.py",
+        "scripts/tests/test_lean_capabilities.py",
+        "scripts/tests/test_lightcheck.py",
+        "scripts/tests/test_file_io.py",
+        "scripts/tests/test_architecture.py",
+        "scripts/tests/test_refactor_completion.py",
+        "scripts/tests/test_fault_injection.py",
+        "scripts/selftest.py:syntax-json-integrity runner"
+      ],
+      "replacement_semantic_tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_full_flow_surfaces_only_five_high_value_user_stops",
+        "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_full_confirmation_sequence_visits_every_phase",
+        "scripts/tests/test_lean_safety_kernel.py:GitManifestSafetyTests.test_push_requires_exact_recorded_commit_manifest",
+        "scripts/tests/test_lean_hook_adapter.py:LeanHookAdapterTests.test_posttool_records_only_reserved_opaque_capability_return",
+        "scripts/tests/test_lightcheck.py:LightCheckTests.test_cli_reports_findings_but_returns_success",
+        "scripts/tests/test_architecture.py:ArchitectureTests.test_production_runtime_cannot_reach_retired_protocol_contracts"
+      ]
+    },
+    {
+      "classification": "thin replacement",
+      "test_sources": [
+        "scripts/tests/test_state_core.py",
+        "scripts/tests/test_checkpoints.py",
+        "scripts/tests/test_full_checkpoint_compile_recovery.py",
+        "scripts/tests/test_compile_wait_instructions.py",
+        "scripts/tests/test_commit_ownership.py",
+        "scripts/tests/test_codecheck_logging.py",
+        "scripts/tests/test_task_scope.py",
+        "scripts/tests/test_workflow_definition.py",
+        "scripts/tests/test_workflow_advancement.py",
+        "scripts/tests/test_workflow_completion.py",
+        "scripts/tests/test_guard_intent.py",
+        "scripts/tests/test_guard_gate.py",
+        "scripts/tests/test_guard_permits.py",
+        "scripts/tests/test_guard_ownership.py",
+        "scripts/tests/test_guard_bash.py",
+        "scripts/tests/test_guard_permit_integration.py",
+        "scripts/tests/test_quality_codecheck.py",
+        "scripts/tests/test_quality_codecheck_use_cases.py",
+        "scripts/tests/test_quality_codecheck_state.py",
+        "scripts/tests/test_delivery_policies.py",
+        "scripts/tests/test_delivery_models.py",
+        "scripts/tests/test_delivery_checkpoint_use_cases.py",
+        "scripts/tests/test_delivery_checkpoint_decisions.py",
+        "scripts/tests/test_delivery_checkpoint_final.py",
+        "scripts/tests/test_delivery_checkpoint_status.py",
+        "scripts/tests/test_delivery_checkpoint_recovery.py",
+        "scripts/tests/test_delivery_standalone_use_cases.py",
+        "scripts/tests/test_delivery_moonlight_use_cases.py",
+        "scripts/tests/test_command_dispatch.py",
+        "scripts/tests/test_cli_runtime_facade.py",
+        "scripts/tests/test_differential_harness.py",
+        "scripts/tests/differential/runner.py",
+        "scripts/tests/test_hook_events.py",
+        "scripts/tests/test_hook_protocol.py",
+        "scripts/tests/test_file_io.py:ManagedFileIOTests.test_checkpoint_runtime_emits_no_resource_warnings",
+        "scripts/selftest.py:legacy workflow-gate-delivery assertions"
+      ],
+      "replacement_semantic_tests": [
+        "scripts/tests/test_lean_state.py:LeanStateContractTests.test_round_trip_keeps_recovery_facts",
+        "scripts/tests/test_lean_transitions.py:SemanticGuardTests.test_only_material_exception_categories_stop_for_the_user",
+        "scripts/tests/test_delivery_manifest.py:DeliveryAuthorizationTests.test_authorization_returns_new_state_with_exact_delivery_files",
+        "scripts/tests/test_lean_safety_kernel.py:LeanSafetyKernelFixtureTests.test_every_versioned_fixture_case_runs_through_the_public_api",
+        "scripts/tests/test_lean_hook_events.py:LeanHookEventTests.test_normalized_public_events_route_to_the_four_ports",
+        "scripts/tests/test_lean_hook_adapter.py:LeanHookAdapterTests.test_exact_manifest_facts_allow_commit_and_push",
+        "scripts/tests/test_file_io.py:ManagedFileIOTests.test_lean_runtime_emits_no_resource_warnings",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_quality_is_opaque_one_shot_and_behavior_driven"
+      ]
+    },
+    {
+      "classification": "intentionally removed friction",
+      "test_sources": [
+        "scripts/tests/test_confirmation_receipts.py",
+        "scripts/tests/test_spec2code_artifacts.py",
+        "scripts/tests/test_spec2code_artifact_use_cases.py",
+        "scripts/tests/test_quality_artifact_cli.py",
+        "scripts/tests/test_spec2code_workflow.py",
+        "scripts/tests/test_role_task_documents.py",
+        "scripts/tests/test_role_task_cli.py",
+        "scripts/tests/test_checkpoint_quality.py",
+        "scripts/tests/test_spec2code_recovery.py",
+        "scripts/tests/test_spec2code_quality_flow.py",
+        "scripts/tests/test_quality_task_cards.py",
+        "scripts/tests/test_quality_task_card_use_cases.py",
+        "scripts/tests/test_evidence.py",
+        "scripts/tests/test_evidence_rules.py",
+        "scripts/tests/test_agent_evidence.py",
+        "scripts/tests/test_delivery_evidence.py",
+        "scripts/tests/test_quality_evidence.py",
+        "scripts/tests/test_hook_tool_transcript.py",
+        "scripts/tests/test_hook_agent_reports.py",
+        "scripts/tests/test_hook_task_card_contracts.py",
+        "scripts/tests/test_hook_receipts.py",
+        "scripts/tests/test_hook_compile_contract.py",
+        "scripts/tests/test_hook_grill_contract.py",
+        "scripts/tests/test_hook_codecheck_contract.py",
+        "scripts/tests/test_hook_unit_test_contract.py",
+        "scripts/tests/test_hook_agent_completion.py",
+        "scripts/tests/test_spec2code_prompt_resources.py:Spec2CodePromptResourceTests.test_craft_reviewer_is_read_only_and_bounded fixed report envelope assertion",
+        "scripts/tests/test_spec2code_prompt_resources.py:Spec2CodePromptResourceTests.test_ut_generator_executes_blueprint_instead_of_redesigning_it evidence-hash assertion",
+        "scripts/selftest.py:fixed ACK evidence token task-card report-parser assertions"
+      ],
+      "replacement_semantic_tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_duplicate_capability_needs_and_consumes_natural_language_retry",
+        "scripts/tests/test_lean_capabilities.py:LeanCapabilityTests.test_returned_output_is_opaque_and_does_not_become_a_verdict",
+        "scripts/tests/test_lean_hook_adapter.py:LeanHookAdapterTests.test_prompt_is_recorded_raw_without_ack_or_choice_validation",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_thin_role_prompts_have_no_report_or_delivery_protocol",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_native_guidance_removes_upstream_runtime_rituals"
+      ]
+    },
+    {
+      "classification": "migration-only",
+      "test_sources": [
+        "scripts/tests/test_lean_migration.py",
+        "scripts/tests/test_lean_migration_cli.py",
+        "scripts/tests/test_capabilities.py",
+        "scripts/tests/test_specengine.py",
+        "scripts/tests/test_spec2code_prompt_resources.py:remaining retained reference prompt assertions",
+        "scripts/selftest.py:vendored source license and legacy-state diagnostics"
+      ],
+      "replacement_semantic_tests": [
+        "scripts/tests/test_lean_migration.py:LeanMigrationTests.test_scrubs_known_legacy_evidence_aliases_by_exact_name",
+        "scripts/tests/test_lean_migration_cli.py:LeanMigrationCliTests.test_corrupt_json_is_backed_up_and_never_overwritten",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceManifestTests.test_manifest_keeps_vendor_sources_hashes_and_licenses_for_diagnostics",
+        "scripts/tests/test_capabilities.py:ReferenceCapabilitySourceTests.test_vendored_sources_match_pinned_integrity_manifest"
+      ]
+    }
+  ],
   "capabilities": [
     {
       "source": "comet",

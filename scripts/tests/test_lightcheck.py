@@ -18,6 +18,10 @@ from mae_flow_core.lightcheck import (
 )
 from mae_flow_core.lightcheck_nesting import annotate_control_nesting
 from mae_flow_core.lightcheck_source import _load_lizard
+from mae_flow_core.cli_commands.lean_lightcheck import (
+    _changed_lines,
+    _repository_file,
+)
 
 
 def _write(root, path, text):
@@ -794,6 +798,75 @@ class LightCheckTests(unittest.TestCase):
         )
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertIn("MF-MAGIC-NUMBER", run.stderr)
+
+    def test_cli_absolute_path_stays_changed_line_scoped(self):
+        repo = os.path.join(self.root, "absolute-repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "lightcheck@test.invalid"],
+            cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Light Check"],
+            cwd=repo, check=True)
+        path = "logic.cpp"
+        _write(
+            repo, path,
+            "int legacy(int a, int b, int c, int d, int e, int f) {\n"
+            "  return 100;\n"
+            "}\n"
+            "int changed(int value) { return value; }\n")
+        subprocess.run(["git", "add", path], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "base"], cwd=repo, check=True)
+        _write(
+            repo, path,
+            "int legacy(int a, int b, int c, int d, int e, int f) {\n"
+            "  return 100;\n"
+            "}\n"
+            "int changed(int value) { return value + 42; }\n")
+        absolute = os.path.join(repo, path)
+        self.assertEqual(_repository_file(absolute, repo), path)
+        previous = os.getcwd()
+        try:
+            os.chdir(repo)
+            changed, tracked = _changed_lines((path,))
+        finally:
+            os.chdir(previous)
+        self.assertEqual(changed[path], {4})
+        self.assertEqual(tracked, {path})
+        environment = dict(os.environ)
+        environment["PYTHONPYCACHEPREFIX"] = os.path.join(
+            self.root, "absolute-pycache")
+        run = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+             "lightcheck", "--file", absolute, "--quiet"],
+            cwd=repo, text=True, capture_output=True, env=environment,
+            timeout=20,
+        )
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        report = os.path.join(
+            repo, ".mae-flow-work", "lightcheck", "latest.md")
+        with open(report, encoding="utf-8") as stream:
+            content = stream.read()
+        self.assertIn("检查文件：1", content)
+        self.assertIn("MF-MAGIC-NUMBER", content)
+        self.assertNotIn("MF-PARAM-5", content)
+
+        outside = os.path.join(self.root, "outside.cpp")
+        _write(self.root, "outside.cpp", "int outside() { return 42; }\n")
+        self.assertEqual(_repository_file(outside, repo), "")
+        rejected = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+             "lightcheck", "--file", outside, "--quiet"],
+            cwd=repo, text=True, capture_output=True, env=environment,
+            timeout=20,
+        )
+        self.assertEqual(
+            rejected.returncode, 0, rejected.stdout + rejected.stderr)
+        with open(report, encoding="utf-8") as stream:
+            rejected_content = stream.read()
+        self.assertIn("检查文件：0", rejected_content)
+        self.assertNotIn("MF-MAGIC-NUMBER", rejected_content)
 
     def test_deletion_anchor_touches_function_without_scanning_adjacent_magic(self):
         repo = os.path.join(self.root, "deletion-repo")

@@ -1,4 +1,4 @@
-"""Evidence registration and ordered step evaluation."""
+"""Retired schema-v2 Evidence reference implementation; not production wired."""
 
 from collections.abc import Mapping
 from types import MappingProxyType

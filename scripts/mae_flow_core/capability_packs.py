@@ -1,4 +1,4 @@
-"""Capability-pack rendering and embedded methodology adaptation."""
+"""Reference-only rendering for retained upstream methodology sources."""
 
 from .capability_shared import CAPABILITY_PACKS, PLUGIN_ROOT, VENDOR_ROOT, os, re
 

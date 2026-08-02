@@ -5,6 +5,7 @@
 import ast
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -32,7 +33,10 @@ from architecture_rules import (  # noqa: E402
     new_module_size_violations,
     private_cli_import_violations,
     private_hook_import_violations,
+    production_reachability_violations,
+    production_reachable_python_files,
     quality_complexity_violations,
+    retired_guidance_violations,
     unmanaged_runtime_open_violations,
     workflow_complexity_violations,
 )
@@ -75,6 +79,38 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_runtime_entrypoints_have_no_unmanaged_open_calls(self):
         self.assertEqual([], unmanaged_runtime_open_violations(ROOT))
+
+    def test_statusline_starts_without_legacy_package_facade(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = subprocess.run(
+                [sys.executable, os.path.join(
+                    ROOT, "scripts", "statusline.py")],
+                cwd=temporary,
+                input="{}",
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                timeout=10,
+            )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("📁", result.stdout)
+
+    def test_production_runtime_cannot_reach_retired_protocol_contracts(self):
+        self.assertEqual([], production_reachability_violations(ROOT))
+
+    def test_native_phase_guidance_cannot_reference_retired_protocols(self):
+        self.assertEqual([], retired_guidance_violations(ROOT))
+
+    def test_production_reachability_matches_final_budget(self):
+        baseline_path = os.path.join(
+            ROOT, "scripts", "tests", "architecture_baseline.json")
+        with open(baseline_path, encoding="utf-8") as stream:
+            baseline = json.load(stream)
+        self.assertEqual(
+            baseline["production_reachable_python_files"],
+            list(production_reachable_python_files(ROOT)),
+        )
 
     def test_foundation_rejects_relative_reverse_imports(self):
         root = self._write_foundation_fixture(
@@ -410,16 +446,18 @@ class ArchitectureTests(unittest.TestCase):
             in REFACTOR_SAFETY_SUITES
         }
         expected = {
-            ("scripts/tests/test_differential_harness.py",),
-            ("scripts/tests/differential/runner.py",
-             "--implementation-root", "."),
+            ("scripts/tests/test_lean_state.py",),
+            ("scripts/tests/test_lean_migration.py",),
+            ("scripts/tests/test_lean_migration_cli.py",),
+            ("scripts/tests/test_lean_transitions.py",),
+            ("scripts/tests/test_native_guidance.py",),
+            ("scripts/tests/test_lean_cli.py",),
+            ("scripts/tests/test_lean_capabilities.py",),
+            ("scripts/tests/test_lean_hook_adapter.py",),
+            ("scripts/tests/test_delivery_manifest.py",),
+            ("scripts/tests/test_capabilities.py",),
+            ("scripts/tests/test_lightcheck.py",),
             ("scripts/tests/test_architecture.py",),
-            ("scripts/tests/test_workflow_advancement.py",),
-            ("scripts/tests/test_workflow_completion.py",),
-            ("scripts/tests/test_guard_intent.py",),
-            ("scripts/tests/test_quality_task_cards.py",),
-            ("scripts/tests/test_delivery_policies.py",),
-            ("scripts/tests/test_command_dispatch.py",),
             ("scripts/tests/test_file_io.py",),
             ("scripts/tests/test_refactor_completion.py",),
             ("scripts/tests/test_fault_injection.py",),

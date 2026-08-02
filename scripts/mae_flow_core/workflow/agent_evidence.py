@@ -1,4 +1,4 @@
-"""Agent-token and review-snapshot Evidence rules."""
+"""Retired agent-token Evidence reference rules; not production wired."""
 
 import os
 from dataclasses import dataclass

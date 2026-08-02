@@ -1,8 +1,8 @@
-"""Self-contained capability runtime for Mae-Flow.
+"""Retained capability reference metadata and integrity helpers.
 
-All workflow methodology and deterministic helpers live under ``runtime/vendor``.
-The host only needs the same Python, Git and Node runtimes already required to run
-CodeAgent itself.  No project-local Skill installation or reload is involved.
+Production phase guidance is native and never imports this module.  The pinned
+vendor paths and pack matrix remain available to migration diagnostics and
+reference-source integrity tests without deleting upstream sources or licenses.
 """
 
 from __future__ import annotations

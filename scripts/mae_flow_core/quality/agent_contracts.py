@@ -1,4 +1,4 @@
-"""Immutable values and shared helpers for pure Agent contracts."""
+"""Retired report-contract reference values; not production wired."""
 
 from dataclasses import dataclass, field
 import re

@@ -18,7 +18,9 @@ from mae_flow_core.orchestration import (  # noqa: E402
     advance_flow,
     decode_flow_state,
     encode_flow_state,
+    flow_attempt_context,
     migrate_legacy_flow,
+    record_flow_attempt,
 )
 from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
 
@@ -60,6 +62,12 @@ class LeanCompositionTests(unittest.TestCase):
                 guidance = render_guidance(recovered)
                 advanced = recovered
                 for event in events:
+                    if event == "grill-clear":
+                        advanced = record_flow_attempt(
+                            advanced,
+                            flow_attempt_context(advanced, "grill"),
+                            "returned",
+                        )
                     advanced = advance_flow(
                         advanced, AdvanceRequest(event)).state
 

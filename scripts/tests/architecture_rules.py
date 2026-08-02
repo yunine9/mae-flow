@@ -2,6 +2,7 @@
 
 import ast
 import os
+import re
 from pathlib import Path
 
 
@@ -27,6 +28,58 @@ RUNTIME_ENTRYPOINTS = (
     "scripts/statusline.py",
 )
 
+PRODUCTION_PYTHON_ROOTS = RUNTIME_ENTRYPOINTS
+
+RETIRED_PRODUCTION_IMPORTS = (
+    "mae_flow_core.capability_packs",
+    "mae_flow_core.capability_shared",
+    "mae_flow_core.cli_commands.evidence_registry",
+    "mae_flow_core.workflow.agent_evidence",
+    "mae_flow_core.workflow.evidence",
+    "mae_flow_core.workflow.evidence_rules",
+    "mae_flow_core.quality.agent_contracts",
+    "mae_flow_core.quality.compile_contract",
+    "mae_flow_core.quality.grill_contract",
+    "mae_flow_core.quality.task_cards",
+    "mae_flow_core.quality.unit_test_contract",
+    "mae_flow_core.application.hooks.task_cards",
+    "mae_flow_core.application.quality.task_cards",
+    "mae_flow_core.application.quality.task_card_documents",
+)
+
+RETIRED_PRODUCTION_NAMES = {
+    "CAPABILITY_PACKS",
+    "EvidenceRegistry",
+    "AgentEvidenceRules",
+    "AgentContractContext",
+    "build_evidence_registry",
+}
+
+RETIRED_PRODUCTION_TEXT = (
+    ("accept-risk", "accept-risk token"),
+    ("task_card", "task-card contract"),
+    ("task-card", "task-card contract"),
+    ("_RESULT:", "agent report token"),
+    ("parse_agent_report", "agent report parser"),
+)
+
+MIGRATION_ONLY_TEXT = {
+    "scripts/mae_flow_core/orchestration/migration.py": {
+        "task-card contract",
+    },
+}
+
+RETIRED_GUIDANCE_PATTERNS = (
+    (r"\bCAPABILITY_PACKS\b", "CAPABILITY_PACKS"),
+    (r"\baccept-risk\b", "accept-risk token"),
+    (r"\btask[_ -]?card\b", "task-card contract"),
+    (r"\b(?:COMPILE|UT|CODECHECK|GRILL|STORY)_RESULT:\b",
+     "agent report token"),
+    (r"\bopenspec\s+(?:new|status|instructions|validate|archive|show|list|schemas)\b",
+     "OpenSpec lifecycle command"),
+    (r"/(?:opsx|comet)(?::|-)\w+", "old lifecycle command"),
+)
+
 
 def line_count(path):
     with open(path, encoding="utf-8") as stream:
@@ -42,6 +95,142 @@ def module_imports(path):
     return {
         name for name, _line in _import_nodes(_parse(path))
     }
+
+
+def _module_file(root_path, module):
+    if not module or not module.startswith("mae_flow_core"):
+        return ""
+    relative = module.replace(".", "/")
+    candidates = (
+        root_path / "scripts" / (relative + ".py"),
+        root_path / "scripts" / relative / "__init__.py",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.relative_to(root_path).as_posix()
+    return ""
+
+
+def _module_name(relative):
+    if not relative.startswith("scripts/mae_flow_core/"):
+        return ""
+    value = relative[len("scripts/"):-3].replace("/", ".")
+    return value[:-9] if value.endswith(".__init__") else value
+
+
+def _resolved_import_modules(relative, tree):
+    current = _module_name(relative)
+    package = (
+        current if relative.endswith("/__init__.py")
+        else current.rpartition(".")[0]
+    )
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level:
+            parts = package.split(".") if package else []
+            keep = max(0, len(parts) - node.level + 1)
+            prefix = parts[:keep]
+            if node.module:
+                prefix.extend(node.module.split("."))
+            module = ".".join(prefix)
+        else:
+            module = node.module or ""
+        if module:
+            modules.add(module)
+        for alias in node.names:
+            if alias.name != "*":
+                modules.add(".".join(
+                    part for part in (module, alias.name) if part))
+    return modules
+
+
+def production_reachable_python_files(root):
+    """Return local Python files imported from the production adapters."""
+    root_path = Path(root)
+    pending = list(PRODUCTION_PYTHON_ROOTS)
+    reachable = set()
+    while pending:
+        relative = pending.pop()
+        if relative in reachable:
+            continue
+        path = root_path / relative
+        if not path.is_file():
+            continue
+        reachable.add(relative)
+        tree = _parse(os.fspath(path))
+        for module in _resolved_import_modules(relative, tree):
+            imported = _module_file(root_path, module)
+            if imported and imported not in reachable:
+                pending.append(imported)
+            parts = module.split(".")
+            for index in range(1, len(parts)):
+                package = _module_file(root_path, ".".join(parts[:index]))
+                if package and package not in reachable:
+                    pending.append(package)
+    return tuple(sorted(reachable))
+
+
+def production_reachability_violations(root):
+    """Reject retired protocol contracts anywhere in the production graph."""
+    root_path = Path(root)
+    violations = []
+    for relative in production_reachable_python_files(root):
+        path = root_path / relative
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=os.fspath(path))
+        for module, line in _import_nodes(tree):
+            if any(
+                    module == retired or module.startswith(retired + ".")
+                    for retired in RETIRED_PRODUCTION_IMPORTS):
+                violations.append(
+                    "%s:%d: retired import %s" % (relative, line, module))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in RETIRED_PRODUCTION_NAMES:
+                violations.append(
+                    "%s:%d: retired name %s" % (
+                        relative, node.lineno, node.id))
+            elif isinstance(node, ast.Attribute) and node.attr in RETIRED_PRODUCTION_NAMES:
+                violations.append(
+                    "%s:%d: retired name %s" % (
+                        relative, node.lineno, node.attr))
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for token, label in RETIRED_PRODUCTION_TEXT:
+                    if (token in node.value and label not in
+                            MIGRATION_ONLY_TEXT.get(relative, set())):
+                        violations.append(
+                            "%s:%d: retired %s" % (
+                                relative, node.lineno, label))
+                if re.search(
+                        r"\bopenspec\s+(?:new|status|instructions|validate|"
+                        r"archive|show|list|schemas)\b",
+                        node.value,
+                        flags=re.I):
+                    violations.append(
+                        "%s:%d: retired OpenSpec lifecycle command" % (
+                            relative, node.lineno))
+    return sorted(set(violations))
+
+
+def retired_guidance_violations(root):
+    """Reject legacy machine protocols in native phase guidance."""
+    root_path = Path(root)
+    violations = []
+    guidance = root_path / "runtime" / "guidance"
+    for path in sorted(guidance.glob("*.md")):
+        relative = path.relative_to(root_path).as_posix()
+        for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            for pattern, label in RETIRED_GUIDANCE_PATTERNS:
+                if re.search(pattern, line, flags=re.I):
+                    violations.append(
+                        "%s:%d: retired %s" % (
+                            relative, line_number, label))
+    return violations
 
 
 def unmanaged_runtime_open_violations(root):

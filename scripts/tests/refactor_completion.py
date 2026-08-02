@@ -12,6 +12,7 @@ APPROVED_FINAL_TARGETS = {
     "max_business_module_lines": 500,
     "max_policy_complexity": 15,
     "private_monolith_test_imports": 0,
+    "production_reachable_python_files": 66,
 }
 
 APPROVED_REQUIRED_VERIFICATIONS = {

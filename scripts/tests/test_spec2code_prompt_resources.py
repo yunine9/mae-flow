@@ -35,10 +35,11 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
 
     def test_craft_reviewer_is_read_only_and_bounded(self):
         text = read("agents/craft-reviewer-agent.md")
-        self.assertIn("CRAFT_REVIEW_RESULT:", text)
-        self.assertIn("每轮最多五条", text)
-        self.assertIn("禁止修改源码", text)
-        for field in ("位置", "依据", "证据", "实际影响", "最小改法"):
+        self.assertNotIn("CRAFT_REVIEW_RESULT:", text)
+        self.assertIn("at most once per CP", text)
+        self.assertIn("Never edit files", text)
+        self.assertIn("fixed response envelope", text)
+        for field in ("location", "evidence", "impact", "smallest safe correction"):
             self.assertIn(field, text)
 
     def test_cp_implementer_stops_at_checkpoint_boundary(self):
@@ -49,9 +50,12 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
 
     def test_ut_generator_executes_blueprint_instead_of_redesigning_it(self):
         text = read("agents/ut-generator-agent.md")
-        self.assertIn("BLUEPRINT_SHA256:", text)
-        self.assertIn("BLUEPRINT_MAPPING:", text)
-        self.assertIn("禁止重新发明测试场景", text)
+        self.assertNotIn("BLUEPRINT_SHA256:", text)
+        self.assertNotIn("BLUEPRINT_MAPPING:", text)
+        self.assertIn("one invocation", text)
+        self.assertIn("current diff", text)
+        self.assertIn("cumulative Construction hints", text)
+        self.assertIn("Do not invent framework counts", text)
 
     def test_build_prompts_use_registered_plan_and_role_loops(self):
         blueprint = read("flow/steps/test_blueprint.md")

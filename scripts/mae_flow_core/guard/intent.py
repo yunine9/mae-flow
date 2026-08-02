@@ -1,10 +1,18 @@
 """Pure parsing for Mae-Flow Gate requests."""
 
 from dataclasses import dataclass
+from collections.abc import Mapping
+import ntpath
+import os
+import posixpath
 import re
 
 from ..foundation.git_execution import actual_command_records
-from ..foundation.source_paths import normalize_path
+from ..foundation.source_paths import (
+    DOCUMENT_EXTENSIONS,
+    normalize_path,
+    repository_path_identity,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +28,110 @@ class GateIntent:
     tokens: tuple
     branch: object = None
     execution_subject: str = ""
+
+
+def write_targets(tool, tool_input):
+    if isinstance(tool_input, Mapping):
+        value = tool_input.get("targets", ())
+        if isinstance(value, str):
+            targets = (value,)
+        else:
+            try:
+                targets = tuple(value)
+            except TypeError:
+                targets = ()
+        if targets:
+            return targets
+    if not isinstance(tool_input, Mapping):
+        return ()
+    if str(tool or "").lower() not in {
+            "applypatch", "apply_patch", "edit", "multiedit", "write"}:
+        return ()
+    for key in ("file_path", "path"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return (value,)
+    return ()
+
+
+def _uses_windows_paths(repository_root):
+    normalized = normalize_path(repository_root).strip().strip("\"'")
+    drive, _unused = ntpath.splitdrive(normalized)
+    return os.name == "nt" or bool(drive)
+
+
+def _canonical_repository_root(repository_root):
+    normalized = normalize_path(repository_root).strip().strip("\"'")
+    if not normalized:
+        raise ValueError("repository root is required")
+    return posixpath.normpath(normalized)
+
+
+def relative_target(context, path):
+    if not isinstance(path, str):
+        return ""
+    normalized = normalize_path(path).strip().strip("\"'")
+    if not normalized:
+        return ""
+    root = _canonical_repository_root(context.repository_root)
+    root_drive, _unused = ntpath.splitdrive(root)
+    target_drive, target_tail = ntpath.splitdrive(normalized)
+    if target_drive and not target_tail.startswith("/"):
+        raise ValueError("drive-relative write targets are ambiguous")
+    if target_drive:
+        canonical = posixpath.normpath(normalized)
+    elif normalized.startswith("/"):
+        if root_drive and not normalized.startswith("//"):
+            canonical = posixpath.normpath(root_drive + normalized)
+        else:
+            canonical = posixpath.normpath(normalized)
+    else:
+        canonical = posixpath.normpath(posixpath.join(root, normalized))
+
+    case_insensitive = _uses_windows_paths(context.repository_root)
+    root_identity = repository_path_identity(
+        root, case_insensitive=case_insensitive)
+    canonical_identity = repository_path_identity(
+        canonical, case_insensitive=case_insensitive)
+    if canonical_identity == root_identity:
+        return "."
+    root_prefix = root_identity.rstrip("/") + "/"
+    if canonical_identity.startswith(root_prefix):
+        return canonical[len(root.rstrip("/")) + 1:]
+    return canonical
+
+
+def write_identity(context, path):
+    return repository_path_identity(
+        path,
+        case_insensitive=_uses_windows_paths(context.repository_root),
+    )
+
+
+def is_protected_control(path):
+    lowered = repository_path_identity(
+        path, case_insensitive=True).casefold()
+    first = lowered.split("/", 1)[0]
+    if first == ".mae-flow-work":
+        return lowered == ".mae-flow-work/moonlight-report.md"
+    return (
+        first == ".mae-flow"
+        or first.startswith(".mae-flow.")
+        or first.startswith(".mae-flow-")
+        or first == ".codecheckcli"
+    )
+
+
+def is_local_work_package(path):
+    identity = repository_path_identity(path, case_insensitive=True)
+    return (
+        identity == ".mae-flow-work"
+        or identity.startswith(".mae-flow-work/")
+    )
+
+
+def is_documentation(path):
+    return path.casefold().endswith(DOCUMENT_EXTENSIONS)
 
 
 def _tokens(command):

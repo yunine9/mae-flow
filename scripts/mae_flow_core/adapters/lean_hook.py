@@ -149,18 +149,22 @@ class LeanHookAdapter:
             self.root, self.pointer_path, self.snapshot_dir)
 
     def _runtime(self):
+        if os.path.isfile(self.state_path):
+            raw, error = safe_read_json(self.state_path)
+            if error:
+                if self._valid_pointer() is not None:
+                    return SimpleNamespace(mode="inactive"), None
+                return SimpleNamespace(mode="corrupt"), None
+            try:
+                state = FlowState.from_dict(raw)
+            except (TypeError, ValueError):
+                if self._valid_pointer() is not None:
+                    return SimpleNamespace(mode="inactive"), None
+                return SimpleNamespace(mode="corrupt"), None
+            return SimpleNamespace(mode="flow", flow=state), state
         if self._valid_pointer() is not None:
             return SimpleNamespace(mode="inactive"), None
-        if not os.path.isfile(self.state_path):
-            return SimpleNamespace(mode="inactive"), None
-        raw, error = safe_read_json(self.state_path)
-        if error:
-            return SimpleNamespace(mode="corrupt"), None
-        try:
-            state = FlowState.from_dict(raw)
-        except (TypeError, ValueError):
-            return SimpleNamespace(mode="corrupt"), None
-        return SimpleNamespace(mode="flow", flow=state), state
+        return SimpleNamespace(mode="inactive"), None
 
     def _claim_session_marker(self, root, identity):
         marker = os.path.join(root, identity + ".seen")

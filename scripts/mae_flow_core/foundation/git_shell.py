@@ -190,8 +190,16 @@ def _record_tokens(command):
                 or not target
                 or any(marker in target for marker in ("$", "`"))):
             return None
-        if operator in _FD_REDIRECTIONS and not re.fullmatch(r"[0-9]+|-", target):
+        if (
+                operator == "<&"
+                and not re.fullmatch(r"[0-9]+|-", target)):
             return None
+        if (
+                operator == ">&"
+                and not re.fullmatch(r"[0-9]+|-", target)):
+            # Bash legacy spelling: ``>&file`` redirects both output streams.
+            # It is a bounded file redirect, not an opaque descriptor copy.
+            operator = "&>"
         if operator not in _FILE_REDIRECTIONS | _FD_REDIRECTIONS:
             return None
         result.append(_REDIRECTION_MARKER)

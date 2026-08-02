@@ -20,6 +20,12 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.application.hooks.models import HookResponse  # noqa: E402
+from mae_flow_core.orchestration import (  # noqa: E402
+    CommitPace,
+    DeliveryPath,
+    FlowState,
+    Phase,
+)
 
 
 def load_dispatch():
@@ -55,10 +61,85 @@ class HookProtocolTests(unittest.TestCase):
         pretool = set(config["PreToolUse"][0]["matcher"].split("|"))
         posttool = set(config["PostToolUse"][0]["matcher"].split("|"))
         self.assertEqual(
-            {"Edit", "Write", "MultiEdit", "Bash", "Agent", "Task", "Skill"},
+            {
+                "Edit", "Write", "MultiEdit", "Bash", "WriteStdin",
+                "Agent", "Task", "Skill",
+            },
             pretool,
         )
         self.assertEqual({"Agent", "Task", "Skill"}, posttool)
+
+    def test_real_registration_dispatch_blocks_cross_platform_writers(self):
+        with open(HOOKS_CONFIG, encoding="utf-8") as stream:
+            config = json.load(stream)["hooks"]
+        matcher = set(config["PreToolUse"][0]["matcher"].split("|"))
+        self.assertIn("Bash", matcher)
+        self.assertIn("Edit", matcher)
+
+        with tempfile.TemporaryDirectory() as root:
+            os.mkdir(os.path.join(root, ".git"))
+            state = FlowState(
+                ticket="REQ-HOOK",
+                path=DeliveryPath.FULL,
+                phase=Phase.STORY,
+                commit_pace=CommitPace.CONTINUOUS,
+            )
+            with open(
+                    os.path.join(root, ".mae-flow.json"),
+                    "w", encoding="utf-8") as stream:
+                json.dump(state.to_dict(), stream, ensure_ascii=False)
+            payloads = (
+                {
+                    "cwd": root,
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "printf x > src/main.py"},
+                },
+                {
+                    "cwd": root,
+                    "tool_name": "Bash",
+                    "tool_input": {"command": (
+                        "pwsh -Command Set-Content -Path src/main.py -Value x"
+                    )},
+                },
+                {
+                    "cwd": root,
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": (
+                        "*** Begin Patch\n"
+                        "*** Add File: src/main.py\n"
+                        "+value = 1\n"
+                        "*** End Patch\n"
+                    )},
+                },
+                {
+                    "cwd": root,
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "bash"},
+                },
+                {
+                    "cwd": root,
+                    "tool_name": "WriteStdin",
+                    "tool_input": {"session_id": "active-shell", "chars": "x"},
+                },
+            )
+
+            previous = os.getcwd()
+            try:
+                for payload in payloads:
+                    with self.subTest(payload=payload):
+                        with mock.patch.object(
+                                self.dispatch, "read_input",
+                                return_value=payload):
+                            with mock.patch.object(
+                                    self.dispatch, "_arm_watchdog"):
+                                stderr = StringIO()
+                                with redirect_stderr(stderr):
+                                    with self.assertRaises(SystemExit) as caught:
+                                        self.dispatch.main(
+                                            ["dispatch.py", "PreToolUse"])
+                        self.assertEqual(2, caught.exception.code, stderr.getvalue())
+            finally:
+                os.chdir(previous)
 
     def test_decodes_utf8_bom_and_gb18030_without_replacement(self):
         payload = {"prompt": "中文确认", "tool_name": "Edit"}
@@ -635,6 +716,7 @@ class HookProtocolTests(unittest.TestCase):
             "git push origin HEAD:refs/heads/main >/dev/null",
             "git push origin HEAD:refs/heads/main 2>&1",
             "git push origin HEAD:refs/heads/main &>/dev/null",
+            "git push origin HEAD:refs/heads/main >&push.log",
             "</dev/null git push origin HEAD:refs/heads/main 2>/dev/null",
         )
 

@@ -2,20 +2,25 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-import ntpath
-import os
-import posixpath
 
 from ..foundation import git_intent
 from ..foundation.commit_message import valid_business_commit_message
-from ..foundation.source_paths import (
-    DOCUMENT_EXTENSIONS,
-    normalize_path,
-    repository_path_identity,
-)
+from ..foundation.source_paths import repository_path_identity
 from ..orchestration import DeliveryPath, FlowState, Phase
-from .command_policy import dangerous_bash_result, recursive_delete_facts
+from .command_policy import (
+    classify_command_mutation,
+    dangerous_bash_result,
+    recursive_delete_facts,
+)
 from .manifest import DeliveryManifest, authorize_delivery, compare_staged
+from .intent import (
+    is_documentation as _is_documentation,
+    is_local_work_package as _is_local_work_package,
+    is_protected_control as _is_protected_control,
+    relative_target as _relative_target,
+    write_identity as _write_identity,
+    write_targets as _write_targets,
+)
 
 
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
@@ -69,101 +74,6 @@ def _command(tool_input):
     return ""
 
 
-def _write_targets(tool, tool_input):
-    targets = _values(tool_input, "targets")
-    if targets:
-        return targets
-    if not isinstance(tool_input, Mapping):
-        return ()
-    if str(tool or "").lower() not in {
-            "applypatch", "apply_patch", "edit", "multiedit", "write"}:
-        return ()
-    for key in ("file_path", "path"):
-        value = tool_input.get(key)
-        if isinstance(value, str) and value:
-            return (value,)
-    return ()
-
-
-def _uses_windows_paths(repository_root):
-    normalized = normalize_path(repository_root).strip().strip("\"'")
-    drive, _ = ntpath.splitdrive(normalized)
-    return os.name == "nt" or bool(drive)
-
-
-def _canonical_repository_root(repository_root):
-    normalized = normalize_path(repository_root).strip().strip("\"'")
-    if not normalized:
-        raise ValueError("repository root is required")
-    return posixpath.normpath(normalized)
-
-
-def _relative_target(context, path):
-    if not isinstance(path, str):
-        return ""
-    normalized = normalize_path(path).strip().strip("\"'")
-    if not normalized:
-        return ""
-    root = _canonical_repository_root(context.repository_root)
-    root_drive, _ = ntpath.splitdrive(root)
-    target_drive, target_tail = ntpath.splitdrive(normalized)
-    if target_drive and not target_tail.startswith("/"):
-        raise ValueError("drive-relative write targets are ambiguous")
-    if target_drive:
-        canonical = posixpath.normpath(normalized)
-    elif normalized.startswith("/"):
-        if root_drive and not normalized.startswith("//"):
-            canonical = posixpath.normpath(root_drive + normalized)
-        else:
-            canonical = posixpath.normpath(normalized)
-    else:
-        canonical = posixpath.normpath(posixpath.join(root, normalized))
-
-    case_insensitive = _uses_windows_paths(context.repository_root)
-    root_identity = repository_path_identity(
-        root, case_insensitive=case_insensitive)
-    canonical_identity = repository_path_identity(
-        canonical, case_insensitive=case_insensitive)
-    if canonical_identity == root_identity:
-        return "."
-    root_prefix = root_identity.rstrip("/") + "/"
-    if canonical_identity.startswith(root_prefix):
-        return canonical[len(root.rstrip("/")) + 1:]
-    return canonical
-
-
-def _write_identity(context, path):
-    return repository_path_identity(
-        path,
-        case_insensitive=_uses_windows_paths(context.repository_root),
-    )
-
-
-def _is_protected_control(path):
-    lowered = repository_path_identity(
-        path, case_insensitive=True).casefold()
-    first = lowered.split("/", 1)[0]
-    if first == ".mae-flow-work":
-        return lowered == ".mae-flow-work/moonlight-report.md"
-    return (
-        first == ".mae-flow"
-        or first.startswith(".mae-flow.")
-        or first.startswith(".mae-flow-")
-    )
-
-
-def _is_local_work_package(path):
-    identity = repository_path_identity(path, case_insensitive=True)
-    return (
-        identity == ".mae-flow-work"
-        or identity.startswith(".mae-flow-work/")
-    )
-
-
-def _is_documentation(path):
-    return path.casefold().endswith(DOCUMENT_EXTENSIONS)
-
-
 def _has_decision(state, key):
     return any(existing == key for existing, unused in state.decisions)
 
@@ -181,39 +91,82 @@ def _source_edit_allowed(state):
     )
 
 
-def _edit_decision(context, tool, tool_input):
+def _relative_write_targets(context, tool, tool_input):
     targets = []
-    try:
-        for path in _write_targets(tool, tool_input):
+    ambiguous = False
+    for path in _write_targets(tool, tool_input):
+        try:
             relative = _relative_target(context, path)
             if relative:
                 targets.append(relative)
-    except ValueError:
-        return _block(
-            "source_edit",
-            "Write targets must be unambiguous repository paths.",
-        )
-    if any(_is_protected_control(path) for path in targets):
-        return _block(
-            "protected_control",
-            "Mae-Flow control files cannot be edited by workflow tools.",
-        )
-    safe_targets = set()
+        except ValueError:
+            ambiguous = True
+    return tuple(targets), ambiguous
+
+
+def _safe_write_identities(context):
+    identities = set()
     for path in context.safe_write_targets:
         try:
             relative = _relative_target(context, path)
         except ValueError:
             continue
         if relative:
-            safe_targets.add(_write_identity(context, relative))
-    controlled_targets = tuple(
-        path for path in targets
-        if (
-            not _is_documentation(path)
-            and not _is_local_work_package(path)
-            and _write_identity(context, path) not in safe_targets
-        )
+            identities.add(_write_identity(context, relative))
+    return identities
+
+
+def _task_temp_identity(context):
+    if not context.task_owned_temp_dir:
+        return ""
+    try:
+        task_temp = _relative_target(context, context.task_owned_temp_dir)
+        return _write_identity(context, task_temp).rstrip("/")
+    except ValueError:
+        return ""
+
+
+def _inside_task_temp(identity, task_temp):
+    return bool(
+        task_temp
+        and (identity.rstrip("/") == task_temp
+             or identity.startswith(task_temp + "/"))
     )
+
+
+def _controlled_write_targets(context, targets):
+    safe = _safe_write_identities(context)
+    task_temp = _task_temp_identity(context)
+    controlled = []
+    for path in targets:
+        identity = _write_identity(context, path)
+        if (
+                not _is_documentation(path)
+                and not _is_local_work_package(path)
+                and identity not in safe
+                and not _inside_task_temp(identity, task_temp)):
+            controlled.append(path)
+    return tuple(controlled)
+
+
+def _edit_decision(context, tool, tool_input, opaque_writer=False):
+    targets, ambiguous = _relative_write_targets(context, tool, tool_input)
+    if any(_is_protected_control(path) for path in targets):
+        return _block(
+            "protected_control",
+            "Mae-Flow control files cannot be edited by workflow tools.",
+        )
+    if ambiguous:
+        return _block(
+            "source_edit",
+            "Write targets must be unambiguous repository paths.",
+        )
+    if opaque_writer:
+        return _block(
+            "source_edit",
+            "A recognized writer must name literal repository targets.",
+        )
+    controlled_targets = _controlled_write_targets(context, targets)
     if controlled_targets and not _source_edit_allowed(context.state):
         return _block(
             "source_edit",
@@ -250,6 +203,25 @@ def _dangerous_bash_decision(context, command, tool_input):
     rule, message = dangerous_bash_result(
         command, _unsafe_delete_targets(context, delete_targets))
     return _block(rule, message) if rule else None
+
+
+def _interactive_shell_decision(tool, tool_input, command):
+    normalized = str(tool or "").casefold().replace("-", "_")
+    if normalized in {"write_stdin", "writestdin"}:
+        return _block(
+            "interactive_shell",
+            "Reused interactive shells bypass per-command PreToolUse safety.",
+        )
+    if normalized != "bash":
+        return None
+    mutation = classify_command_mutation(command, tool_input)
+    if mutation.interactive:
+        return _block(
+            "interactive_shell",
+            "Interactive, TTY, background, and reused shells are disabled "
+            "while Mae-Flow is active.",
+        )
+    return None
 
 
 def _adopted_paths(state):
@@ -424,6 +396,47 @@ def _push_decision(context, intent):
         context, context.commit_files, "git_publish")
 
 
+def _mutation_precheck(context, tool, tool_input, command):
+    interactive = _interactive_shell_decision(tool, tool_input, command)
+    if interactive is not None:
+        return interactive, None
+    mutation = classify_command_mutation(command, tool_input) if command else None
+    if not command:
+        return None, mutation
+    dangerous = _dangerous_bash_decision(context, command, tool_input)
+    if dangerous is not None:
+        return dangerous, mutation
+    if mutation.destructive:
+        return _block(
+            "filesystem",
+            "Recursive or destructive filesystem mutation requires "
+            "explicit user handling.",
+        ), mutation
+    return None, mutation
+
+
+def _classified_write_input(tool_input, mutation):
+    if mutation is None or not mutation.targets:
+        return tool_input
+    classified = dict(tool_input) if isinstance(tool_input, Mapping) else {}
+    classified["targets"] = _values(
+        classified, "targets") + mutation.targets
+    return classified
+
+
+def _git_delivery_decision(context, command):
+    for intent in git_intent.git_delivery_intents(command):
+        if intent.operation == "add":
+            decision = _stage_decision(context, intent)
+        elif intent.operation == "commit":
+            decision = _commit_decision(context, intent)
+        else:
+            decision = _push_decision(context, intent)
+        if not decision.allow:
+            return decision
+    return None
+
+
 def decide_pretool(context, tool, tool_input):
     """Return the first narrow safety rule for one already-factored tool call."""
     if not isinstance(context, SafetyContext):
@@ -436,25 +449,24 @@ def decide_pretool(context, tool, tool_input):
         if str(tool or "").casefold() == "bash"
         else ""
     )
-    if command:
-        dangerous = _dangerous_bash_decision(context, command, tool_input)
-        if dangerous is not None:
-            return dangerous
-
-    edit = _edit_decision(context, tool, tool_input)
+    precheck, mutation = _mutation_precheck(
+        context, tool, tool_input, command)
+    if precheck is not None:
+        return precheck
+    classified_input = _classified_write_input(tool_input, mutation)
+    edit = _edit_decision(
+        context,
+        tool,
+        classified_input,
+        opaque_writer=bool(mutation and mutation.opaque_writer),
+    )
     if edit is not None:
         return edit
 
     if command:
-        for intent in git_intent.git_delivery_intents(command):
-            if intent.operation == "add":
-                decision = _stage_decision(context, intent)
-            elif intent.operation == "commit":
-                decision = _commit_decision(context, intent)
-            else:
-                decision = _push_decision(context, intent)
-            if not decision.allow:
-                return decision
+        delivery = _git_delivery_decision(context, command)
+        if delivery is not None:
+            return delivery
     return _allow()
 
 

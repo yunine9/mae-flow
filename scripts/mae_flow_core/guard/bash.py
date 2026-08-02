@@ -217,12 +217,15 @@ def _post_repository(context):
     return None
 
 
-def _git_clean_ignored(git_commands):
+def _git_clean_destructive(git_commands):
     return any(
         operation == "clean" and any(
-            argument.startswith("-")
-            and not argument.startswith("--")
-            and "x" in argument[1:].casefold()
+            argument in {"--force", "--directories", "--ignored"}
+            or (
+                argument.startswith("-")
+                and not argument.startswith("--")
+                and bool(set(argument[1:].casefold()) & {"d", "f", "x"})
+            )
             for argument in arguments)
         for operation, arguments in git_commands
     )
@@ -236,6 +239,15 @@ def _git_wipes_worktree(git_commands):
         or any(
             operation in ("checkout", "restore")
             and any(argument in (".", ":/") for argument in arguments)
+            for operation, arguments in git_commands)
+        or any(
+            operation == "checkout"
+            and any(
+                argument == "--force"
+                or argument.startswith("-")
+                and not argument.startswith("--")
+                and "f" in argument[1:]
+                for argument in arguments)
             for operation, arguments in git_commands)
     )
 
@@ -264,10 +276,10 @@ def _post_dangerous(context):
             "bash-remote-script-pipe",
             "危险命令拦截:管道执行远程脚本(供应链风险)。确需执行请用户手动运行。")
     git_commands = executed_git_invocations(command)
-    if _git_clean_ignored(git_commands):
+    if _git_clean_destructive(git_commands):
         return _absolute(
             "bash-git-clean-ignored",
-            "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。")
+            "危险命令拦截:git clean 的 force/directory/ignored 形式会删除工作区文件。")
     if context.state_active and _git_wipes_worktree(git_commands):
         return _block(
             "bash-wipe-worktree",

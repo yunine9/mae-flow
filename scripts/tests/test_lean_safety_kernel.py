@@ -388,6 +388,114 @@ class SourceEditAuthorizationTests(unittest.TestCase):
             (drive_relative.allow, drive_relative.rule),
         )
 
+    def test_shell_writers_use_the_same_phase_source_authorization(self):
+        before = _state(phase=Phase.STORY)
+        during = _state(phase=Phase.CONSTRUCTION)
+        commands = (
+            "sed -i 's/old/new/' src/main.py",
+            "printf changed > src/main.py",
+            "printf changed | tee src/main.py",
+            "cp generated/main.py src/main.py",
+            "mv generated/main.py src/main.py",
+            "touch src/main.py",
+            "rm src/main.py",
+            (
+                "python -c \"open('src/main.py', 'w').write('changed')\""
+            ),
+            "pwsh -NoProfile -Command Set-Content -Path src/main.py -Value x",
+            r"cmd.exe /d /c echo changed ^> src\main.py",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                blocked = decide_pretool(
+                    _context(before), "Bash", {"command": command})
+                allowed = decide_pretool(
+                    _context(during), "Bash", {"command": command})
+                self.assertEqual(
+                    (False, "source_edit"),
+                    (blocked.allow, blocked.rule),
+                )
+                self.assertTrue(allowed.allow, command)
+
+    def test_shell_writers_never_mutate_flow_control_aliases(self):
+        state = _state(phase=Phase.CONSTRUCTION)
+        cases = (
+            ("printf x > .MAE-FLOW.JSON", "/repo"),
+            ("tee .CODECHECKCLI/result.json", "/repo"),
+            (
+                r"pwsh -Command Set-Content -Path C:\REPO\.Mae-Flow.Json -Value x",
+                r"c:\repo",
+            ),
+            (
+                r"cmd.exe /d /c copy source C:\REPO\.CODECHECKCLI\state.json",
+                r"c:\repo",
+            ),
+            (
+                "python -c \"open('.mae-flow.json.tokens', 'w').write('x')\"",
+                "/repo",
+            ),
+        )
+
+        for command, root in cases:
+            with self.subTest(command=command):
+                decision = decide_pretool(
+                    _context(state, repository_root=root),
+                    "Bash",
+                    {"command": command},
+                )
+                self.assertEqual(
+                    (False, "protected_control"),
+                    (decision.allow, decision.rule),
+                )
+
+    def test_active_flow_rejects_interactive_background_and_reused_shells(self):
+        state = _state(phase=Phase.CONSTRUCTION)
+        calls = (
+            ("Bash", {"command": "bash"}),
+            ("Bash", {"command": "pwsh -NoProfile"}),
+            ("Bash", {"command": "cmd.exe /k"}),
+            ("Bash", {"command": "build-wrapper", "run_in_background": True}),
+            ("Bash", {"command": "build-wrapper", "tty": True}),
+            ("write_stdin", {"session_id": "shell-1", "chars": "rm src/a.py"}),
+        )
+
+        for tool, tool_input in calls:
+            with self.subTest(tool=tool, tool_input=tool_input):
+                decision = decide_pretool(
+                    _context(state), tool, tool_input)
+                self.assertEqual(
+                    (False, "interactive_shell"),
+                    (decision.allow, decision.rule),
+                )
+
+    def test_ordinary_private_build_wrappers_still_fail_open(self):
+        state = _state(phase=Phase.STORY)
+
+        decision = decide_pretool(
+            _context(state),
+            "Bash",
+            {"command": "private-build-wrapper --configuration Debug"},
+        )
+
+        self.assertTrue(decision.allow)
+
+    def test_recognized_writers_with_dynamic_targets_fail_closed(self):
+        state = _state(phase=Phase.CONSTRUCTION)
+        commands = (
+            "printf changed > \"$TARGET\"",
+            "python -c \"open(target, 'w').write('changed')\"",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                decision = decide_pretool(
+                    _context(state), "Bash", {"command": command})
+                self.assertEqual(
+                    (False, "source_edit"),
+                    (decision.allow, decision.rule),
+                )
+
 
 class GitManifestSafetyTests(unittest.TestCase):
     def manifest_state(self, **overrides):
@@ -675,6 +783,8 @@ class GitManifestSafetyTests(unittest.TestCase):
             ("sudo -u root git reset --hard HEAD", False),
             ("pwsh -NoProfile -Command git reset --hard HEAD", False),
             ("cmd.exe /d /c git reset --hard HEAD", False),
+            ("git clean -fd", False),
+            ("git checkout -f main", False),
             ("echo git reset --hard HEAD", True),
             ("printf 'git reset --hard HEAD'", True),
             ("git status && echo git reset --hard HEAD", True),
@@ -687,6 +797,17 @@ class GitManifestSafetyTests(unittest.TestCase):
                 self.assertIs(expected_allow, decision.allow)
                 if not expected_allow:
                     self.assertEqual("git_destructive", decision.rule)
+
+    def test_powershell_recursive_delete_is_a_filesystem_risk(self):
+        decision = self.bash(
+            self.manifest_state(),
+            "pwsh -Command Remove-Item -Recurse src",
+        )
+
+        self.assertEqual(
+            (False, "filesystem"),
+            (decision.allow, decision.rule),
+        )
 
     def test_actual_substitution_positions_drive_destructive_git_gate(self):
         state = self.manifest_state()

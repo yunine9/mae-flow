@@ -448,7 +448,7 @@ class LeanHookAdapterTests(unittest.TestCase):
             json.dump(pointer_data, stream)
         self.assertEqual("flow", adapter._runtime()[0].mode)
 
-    def test_exit_pointer_accepts_dedicated_windows_separator_snapshot(self):
+    def test_active_state_wins_over_stale_windows_separator_exit_pointer(self):
         self.write_state()
         snapshot_dir = os.path.join(
             self.root, ".mae-flow-work", "exited")
@@ -466,8 +466,8 @@ class LeanHookAdapterTests(unittest.TestCase):
         runtime, state = LeanHookAdapter(
             self.root, marker_root=self.marker_root)._runtime()
 
-        self.assertEqual("inactive", runtime.mode)
-        self.assertIsNone(state)
+        self.assertEqual("flow", runtime.mode)
+        self.assertIsNotNone(state)
 
     def test_exit_pointer_rejects_symlinked_snapshot_directory_components(self):
         pointer = {

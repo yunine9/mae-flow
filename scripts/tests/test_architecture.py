@@ -164,6 +164,56 @@ class ArchitectureTests(unittest.TestCase):
                     production_reachability_violations(root),
                 )
 
+    def test_retired_codecheck_role_and_recovery_matrix_is_forbidden_transitively(self):
+        matrix = (
+            (
+                "mae_flow_core.application.quality.codecheck",
+                ("CodeCheckRunPorts", "CodeCheckRunResult"),
+            ),
+            (
+                "mae_flow_core.application.quality.codecheck_state",
+                ("CompletedScan", "ManualRecords"),
+            ),
+            (
+                "mae_flow_core.codecheck_log",
+                ("codecheck_log_path", "append_codecheck_event"),
+            ),
+            (
+                "mae_flow_core.quality.codecheck",
+                ("CodeCheckWarning", "CodeCheckScan", "CodeCheckScope"),
+            ),
+            (
+                "mae_flow_core.quality.compile_side_effects",
+                ("compile_side_effect_paths",),
+            ),
+            (
+                "mae_flow_core.quality.role_tasks",
+                ("ROLE_STEPS", "role_allowed"),
+            ),
+            (
+                "mae_flow_core.quality.spec2code_recovery",
+                ("recovery_guidance",),
+            ),
+        )
+        bridge = (
+            "scripts/mae_flow_core/orchestration/"
+            "retirement_bridge.py")
+        for module, symbols in matrix:
+            with self.subTest(module=module):
+                root = self._write_production_import_fixture(module)
+                self.assertIn(
+                    bridge + ":1: retired import " + module,
+                    production_reachability_violations(root),
+                )
+            for symbol in symbols:
+                with self.subTest(module=module, symbol=symbol):
+                    root = self._write_production_import_fixture(
+                        module, symbol)
+                    self.assertIn(
+                        bridge + ":2: retired name " + symbol,
+                        production_reachability_violations(root),
+                    )
+
     def test_native_phase_guidance_cannot_reference_retired_protocols(self):
         self.assertEqual([], retired_guidance_violations(ROOT))
 

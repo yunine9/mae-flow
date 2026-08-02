@@ -57,6 +57,104 @@ def legacy(current="build", workflow="full", **extra):
 
 
 class LeanMigrationTests(unittest.TestCase):
+    def test_consumes_real_legacy_token_and_task_as_one_opaque_return(self):
+        raw = legacy(
+            current="build",
+            agent_tasks={
+                "COMPILE": {
+                    "step": "build",
+                    "head": "a" * 40,
+                    "sha256": "task-card-digest",
+                    "issuance_id": "compile-issuance-7",
+                },
+            },
+        )
+        tokens = {
+            "COMPILE": {
+                "step": "build",
+                "head": "b" * 40,
+                "status": "OK",
+                "task_sha256": "task-card-digest",
+                "task_issuance_id": "compile-issuance-7",
+            },
+        }
+
+        result = migrate_legacy_flow(raw, capability_tokens=tokens)
+
+        self.assertEqual((CapabilityAttempt(
+            "build",
+            "b" * 40,
+            "legacy-task:compile-issuance-7",
+            "returned",
+            "Legacy COMPILE returned with opaque status OK at build.",
+        ),), result.state.capabilities)
+        self.assertNotIn("agent_tasks", repr(result.state.to_dict()))
+        self.assertNotIn("task-card-digest", repr(result.state.to_dict()))
+
+    def test_stale_legacy_token_task_binding_is_not_migrated_as_truth(self):
+        raw = legacy(
+            agent_tasks={
+                "UT": {
+                    "step": "verify_ut",
+                    "sha256": "current-task",
+                    "issuance_id": "current-issuance",
+                },
+            },
+        )
+        tokens = {
+            "UT": {
+                "step": "verify_ut",
+                "status": "PASS",
+                "task_sha256": "stale-task",
+                "task_issuance_id": "stale-issuance",
+            },
+        }
+
+        result = migrate_legacy_flow(raw, capability_tokens=tokens)
+
+        self.assertEqual((), result.state.capabilities)
+        self.assertTrue(any(
+            "stale legacy capability token" in warning.lower()
+            for warning in result.warnings))
+
+    def test_maps_each_task_bound_legacy_capability_as_an_opaque_return(self):
+        kinds = {
+            "COMPILE": "build",
+            "UT": "ut",
+            "CODECHECK": "codecheck",
+            "GRILL": "grill",
+            "STORY": "story",
+        }
+        tasks = {}
+        tokens = {}
+        for index, legacy_kind in enumerate(kinds):
+            digest = "digest-%s" % index
+            issuance = "issuance-%s" % index
+            tasks[legacy_kind] = {
+                "step": "step-%s" % index,
+                "sha256": digest,
+                "issuance_id": issuance,
+            }
+            tokens[legacy_kind] = {
+                "step": "step-%s" % index,
+                "head": "%x" % index * 40,
+                "status": "OPAQUE-%s" % index,
+                "task_sha256": digest,
+                "task_issuance_id": issuance,
+            }
+
+        result = migrate_legacy_flow(
+            legacy(agent_tasks=tasks), capability_tokens=tokens)
+
+        self.assertEqual(tuple(kinds.values()), tuple(
+            attempt.kind for attempt in result.state.capabilities))
+        self.assertTrue(all(
+            attempt.outcome == "returned"
+            for attempt in result.state.capabilities))
+        encoded = repr(result.state.to_dict())
+        self.assertNotIn("digest-", encoded)
+        self.assertNotIn("agent_tasks", encoded)
+
     def test_maps_each_legacy_step_family_to_lean_phase(self):
         for current, expected in CASES.items():
             with self.subTest(current=current):

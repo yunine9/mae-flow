@@ -3,18 +3,16 @@
 import json
 import os
 import sys
-import time
 from dataclasses import dataclass, replace
 
+from mae_flow_core.adapters.lean_exit import exclusive_backup_bytes
 from mae_flow_core.orchestration import (
     decode_flow_state,
     migrate_legacy_flow,
 )
 from mae_flow_core.state_store import (
     ProjectStateLock,
-    _replace_with_retry,
     atomic_write_json,
-    remove_with_retry,
 )
 
 STATE_PATH = ".mae-flow.json"
@@ -47,38 +45,26 @@ def _read_bytes(path):
         return stream.read()
 
 
-def _backup_name(path):
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    unique = "%s.%s" % (os.getpid(), time.time_ns())
-    base = "%s.v2-backup.%s.%s" % (path, stamp, unique)
-    candidate = base
-    suffix = 2
-    while os.path.exists(candidate):
-        candidate = "%s.%s" % (base, suffix)
-        suffix += 1
-    return candidate
-
-
 def _write_raw_backup(path, raw):
-    """Publish an exact backup through the Windows-safe replace primitive."""
-    target = _backup_name(path)
-    temporary = "%s.tmp.%s.%s" % (target, os.getpid(), time.time_ns())
+    """Publish an exact immutable backup without replacing prior bytes."""
+    return exclusive_backup_bytes(path, raw, "v2-backup")
+
+
+def _capability_tokens(path):
+    sidecar = path + ".tokens"
+    if not os.path.isfile(sidecar):
+        return {}, ()
     try:
-        with open(temporary, "xb") as stream:
-            stream.write(raw)
-            stream.flush()
-            try:
-                os.fsync(stream.fileno())
-            except OSError:
-                pass
-        _replace_with_retry(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            try:
-                remove_with_retry(temporary)
-            except OSError:
-                pass
-    return target
+        tokens = _parse_json(_read_bytes(sidecar))
+        if not isinstance(tokens, dict):
+            raise ValueError("token sidecar must be a JSON object")
+        return tokens, ()
+    except Exception as exc:
+        return {}, (
+            "Legacy capability token sidecar is unreadable; no sidecar "
+            "execution facts were migrated (%s: %s)."
+            % (type(exc).__name__, exc),
+        )
 
 
 def _parse_json(raw):
@@ -175,8 +161,11 @@ def migrate_state_file(path=STATE_PATH, project_root=None):
                 "不支持的流程状态版本 %r；状态文件保持不变" % version)
 
         backup = _write_raw_backup(state_path, raw)
-        migration = migrate_legacy_flow(document)
-        state = _safe_warning_state(migration.state, migration.warnings)
+        capability_tokens, sidecar_warnings = _capability_tokens(state_path)
+        migration = migrate_legacy_flow(
+            document, capability_tokens=capability_tokens)
+        warnings = migration.warnings + sidecar_warnings
+        state = _safe_warning_state(migration.state, warnings)
         encoded = state.to_dict()
         atomic_write_json(state_path, encoded)
         return StateMigrationResult(
@@ -207,6 +196,15 @@ def _summary_lines(state, legacy_position=""):
     lines.append("风险:")
     if state.risks:
         lines.extend("- %s" % risk for risk in state.risks)
+    else:
+        lines.append("- (无)")
+    lines.append("能力尝试:")
+    if state.capabilities:
+        lines.extend("- %s | %s | %s" % (
+            attempt.kind,
+            attempt.outcome,
+            attempt.summary or "(无摘要)",
+        ) for attempt in state.capabilities)
     else:
         lines.append("- (无)")
     return lines

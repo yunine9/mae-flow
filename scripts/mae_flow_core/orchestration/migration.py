@@ -66,6 +66,9 @@ _STEP_PHASES = {
 }
 
 _FOCUSED_WORKFLOWS = {"hotfix", "tweak", "review"}
+_LEGACY_CAPABILITY_KINDS = dict(
+    COMPILE="build", UT="ut", CODECHECK="codecheck",
+    GRILL="grill", STORY="story")
 _ARTIFACT_ALIASES = {
     "request": ("需求文档", "request_path", "requirement_path"),
     "spec": ("SPEC路径", "spec_path", "spec"),
@@ -385,6 +388,51 @@ def _capabilities(raw):
     return tuple(attempts)
 
 
+def _legacy_binding(task, token):
+    task_step = _string(task.get("step"))
+    digest = _string(task.get("sha256"))
+    issuance = _string(task.get("issuance_id"))
+    if (
+            not task_step
+            or _string(token.get("step")) != task_step
+            or not (digest or issuance)
+            or digest and _string(token.get("task_sha256")) != digest
+            or issuance and _string(
+                token.get("task_issuance_id")) != issuance):
+        return ""
+    return issuance or "bound"
+
+
+def _real_legacy_capabilities(raw, capability_tokens):
+    if not isinstance(capability_tokens, dict):
+        return (), ()
+    tasks = _mapping(raw.get("agent_tasks"))
+    attempts = []
+    warnings = []
+    for legacy_kind, lean_kind in _LEGACY_CAPABILITY_KINDS.items():
+        token = _mapping(capability_tokens.get(legacy_kind))
+        if not token:
+            continue
+        task = _mapping(tasks.get(legacy_kind))
+        binding = _legacy_binding(task, token)
+        status = _string(token.get("status"))
+        if not binding or not status:
+            warnings.append(
+                "Stale legacy capability token for %s did not match its "
+                "task card; its execution fact was not migrated." % legacy_kind)
+            continue
+        step = _string(token.get("step"))
+        attempts.append(CapabilityAttempt(
+            kind=lean_kind,
+            source_revision=_string(token.get("head")),
+            environment_revision="legacy-task:" + binding,
+            outcome="returned",
+            summary="Legacy %s returned with opaque status %s at %s." % (
+                legacy_kind, status, step),
+        ))
+    return tuple(attempts), tuple(warnings)
+
+
 def _delivery_files(raw):
     files = raw.get("delivery_files")
     if files is None:
@@ -409,7 +457,7 @@ def _risks(raw):
     return tuple(risks)
 
 
-def migrate_legacy_flow(raw):
+def migrate_legacy_flow(raw, capability_tokens=None):
     """Return a lean cursor without carrying forward evidence machinery."""
     if isinstance(raw, FlowState):
         return MigrationResult(raw, ())
@@ -426,6 +474,8 @@ def migrate_legacy_flow(raw):
     ticket = _string(config.get("单号") or raw.get("ticket"))
     workflow = _legacy_workflow(raw)
     phase, warnings = _phase(raw)
+    real_capabilities, capability_warnings = _real_legacy_capabilities(
+        raw, capability_tokens)
     status = "complete" if current == "end" else "active"
     state = FlowState(
         ticket=ticket,
@@ -438,8 +488,9 @@ def migrate_legacy_flow(raw):
         artifacts=_artifacts(raw, ticket, workflow),
         decisions=_decisions(raw),
         risks=_risks(raw),
-        capabilities=_capabilities(raw),
+        capabilities=tuple(dict.fromkeys(
+            _capabilities(raw) + real_capabilities)),
         delivery_files=_delivery_files(raw),
         initial_dirty=_strings(raw.get("initial_dirty")),
     )
-    return MigrationResult(state, warnings)
+    return MigrationResult(state, warnings + capability_warnings)

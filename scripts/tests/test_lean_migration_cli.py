@@ -39,6 +39,7 @@ class LeanMigrationCliTests(unittest.TestCase):
         self.root = self.temp.name
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
         self.state_path = os.path.join(self.root, ".mae-flow.json")
+        self.tokens_path = self.state_path + ".tokens"
         self.env = dict(os.environ)
         self.env["PYTHONPYCACHEPREFIX"] = os.path.join(
             self.root, "pycache")
@@ -118,6 +119,62 @@ class LeanMigrationCliTests(unittest.TestCase):
         self.assertIn("config.基线分支: main", result.stdout)
         self.assertIn("风险:", result.stdout)
         self.assertNotIn("当前步骤 build", result.stdout)
+        self.assert_backup(original)
+
+    def test_current_consumes_real_token_sidecar_without_persisting_ledgers(self):
+        original = self.write_state(legacy(
+            current="build",
+            agent_tasks={
+                "COMPILE": {
+                    "step": "build",
+                    "head": "a" * 40,
+                    "sha256": "task-digest",
+                    "issuance_id": "build-issuance-1",
+                },
+            },
+        ))
+        tokens = {
+            "COMPILE": {
+                "step": "build",
+                "head": "b" * 40,
+                "status": "OK",
+                "task_sha256": "task-digest",
+                "task_issuance_id": "build-issuance-1",
+            },
+        }
+        with open(self.tokens_path, "w", encoding="utf-8") as stream:
+            json.dump(tokens, stream)
+
+        result = self.run_cli()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        state = self.read_state()
+        self.assertEqual(1, len(state["capabilities"]))
+        self.assertEqual("build", state["capabilities"][0]["kind"])
+        self.assertEqual("returned", state["capabilities"][0]["outcome"])
+        self.assertNotIn("agent_tasks", state)
+        self.assertNotIn("tokens", state)
+        self.assertIn("build | returned", result.stdout)
+        with open(self.tokens_path, encoding="utf-8") as stream:
+            self.assertEqual(tokens, json.load(stream))
+        self.assert_backup(original)
+
+    def test_corrupt_token_sidecar_is_preserved_and_becomes_a_recovery_risk(self):
+        original = self.write_state(legacy(current="verify_ut"))
+        sidecar = b'{"UT": broken-token-sidecar'
+        with open(self.tokens_path, "wb") as stream:
+            stream.write(sidecar)
+
+        result = self.run_cli()
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        state = self.read_state()
+        self.assertEqual([], state["capabilities"])
+        self.assertTrue(any(
+            "token sidecar is unreadable" in risk
+            for risk in state["risks"]))
+        with open(self.tokens_path, "rb") as stream:
+            self.assertEqual(sidecar, stream.read())
         self.assert_backup(original)
 
     def test_internal_command_maps_each_focused_legacy_family(self):

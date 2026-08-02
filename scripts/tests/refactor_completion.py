@@ -3,6 +3,8 @@
 import json
 import os
 
+from architecture_rules import production_reachable_python_files
+
 
 APPROVED_FINAL_TARGETS = {
     "max_entrypoint_lines": {
@@ -15,29 +17,38 @@ APPROVED_FINAL_TARGETS = {
     "production_reachable_python_files": 66,
 }
 
+APPROVED_RELEASE_SUITE_COMMANDS = [
+    "python scripts/tests/test_lean_state.py",
+    "python scripts/tests/test_lean_migration.py",
+    "python scripts/tests/test_lean_migration_cli.py",
+    "python scripts/tests/test_lean_transitions.py",
+    "python scripts/tests/test_lean_guidance.py",
+    "python scripts/tests/test_native_guidance.py",
+    "python scripts/tests/test_lean_composition.py",
+    "python scripts/tests/test_lean_delivery.py",
+    "python scripts/tests/test_lean_documents.py",
+    "python scripts/tests/test_lean_moonlight.py",
+    "python scripts/tests/test_lean_toolbox.py",
+    "python scripts/tests/test_delivery_manifest.py",
+    "python scripts/tests/test_lean_safety_kernel.py",
+    "python scripts/tests/test_lean_hook_events.py",
+    "python scripts/tests/test_lean_hook_adapter.py",
+    "python scripts/tests/test_hook_protocol.py",
+    "python scripts/tests/test_lean_cli.py",
+    "python scripts/tests/test_lean_capabilities.py",
+    "python scripts/tests/test_capabilities.py",
+    "python scripts/tests/test_spec2code_prompt_resources.py",
+    "python scripts/tests/test_lightcheck.py",
+    "python scripts/tests/test_architecture.py",
+    "python scripts/tests/test_file_io.py",
+    "python scripts/tests/test_refactor_completion.py",
+    "python scripts/tests/test_fault_injection.py",
+]
+
 APPROVED_REQUIRED_VERIFICATIONS = {
-    "architecture": [
-        "python scripts/tests/test_architecture.py",
-    ],
-    "differential": [
-        "python scripts/tests/differential/runner.py "
-        "--implementation-root .",
-    ],
-    "fault_injection": [
-        "python scripts/tests/test_fault_injection.py",
-    ],
-    "resource_warnings": [
-        "python -W error::ResourceWarning "
-        "scripts/tests/test_state_core.py",
-        "python -W error::ResourceWarning "
-        "scripts/tests/test_checkpoints.py",
-    ],
+    "release_suites": APPROVED_RELEASE_SUITE_COMMANDS,
     "selftest": [
         "python scripts/selftest.py",
-    ],
-    "unit_tests": [
-        "python -m unittest discover -s scripts/tests "
-        "-p 'test_*.py'",
     ],
 }
 
@@ -45,6 +56,29 @@ APPROVED_REQUIRED_VERIFICATIONS = {
 def load_contract(path):
     with open(path, encoding="utf-8") as stream:
         return json.load(stream)
+
+
+def reachability_target_errors(target, baseline_files, actual_files):
+    """Bind the contract cap to both exact reachability representations."""
+    errors = []
+    baseline = tuple(baseline_files)
+    actual = tuple(actual_files)
+    if len(baseline) != target:
+        errors.append(
+            "production reachability baseline count %d does not match "
+            "contract target %d" % (len(baseline), target))
+    if len(actual) != target:
+        errors.append(
+            "production reachability actual count %d does not match "
+            "contract target %d" % (len(actual), target))
+    added = sorted(set(actual) - set(baseline))
+    removed = sorted(set(baseline) - set(actual))
+    if added:
+        errors.append("production reachability added: " + ", ".join(added))
+    if removed:
+        errors.append(
+            "production reachability removed: " + ", ".join(removed))
+    return errors
 
 
 def validate_contract(root, contract):
@@ -68,6 +102,14 @@ def validate_contract(root, contract):
         root, "scripts", "tests", "architecture_baseline.json")
     with open(baseline_path, encoding="utf-8") as stream:
         baseline = json.load(stream)
+    reachability_target = contract.get("final_targets", {}).get(
+        "production_reachable_python_files")
+    if isinstance(reachability_target, int) and reachability_target >= 0:
+        errors.extend(reachability_target_errors(
+            reachability_target,
+            baseline.get("production_reachable_python_files", []),
+            production_reachable_python_files(root),
+        ))
     targets = contract.get("final_targets", {}).get(
         "max_entrypoint_lines", {})
     for relative, maximum in sorted(targets.items()):

@@ -64,6 +64,32 @@ class ArchitectureTests(unittest.TestCase):
     def _write_foundation_fixture(self, source):
         return self._write_core_fixture("foundation", source)
 
+    def _write_production_import_fixture(self, module, symbol=""):
+        temporary = tempfile.TemporaryDirectory()
+        entrypoint = os.path.join(temporary.name, "scripts", "mae-flow.py")
+        bridge = os.path.join(
+            temporary.name, "scripts", "mae_flow_core", "orchestration",
+            "retirement_bridge.py")
+        module_path = os.path.join(
+            temporary.name, "scripts", *module.split(".")) + ".py"
+        os.makedirs(os.path.dirname(entrypoint), exist_ok=True)
+        os.makedirs(os.path.dirname(bridge), exist_ok=True)
+        os.makedirs(os.path.dirname(module_path), exist_ok=True)
+        if symbol:
+            source = "from %s import %s\n%s()\n" % (
+                module, symbol, symbol)
+        else:
+            source = "import %s\n" % module
+        with open(entrypoint, "w", encoding="utf-8") as stream:
+            stream.write(
+                "import mae_flow_core.orchestration.retirement_bridge\n")
+        with open(bridge, "w", encoding="utf-8") as stream:
+            stream.write(source)
+        with open(module_path, "w", encoding="utf-8") as stream:
+            stream.write("REFERENCE_ONLY = True\n")
+        self.addCleanup(temporary.cleanup)
+        return temporary.name
+
     def test_existing_monoliths_do_not_grow(self):
         baseline_path = os.path.join(
             ROOT, "scripts", "tests", "architecture_baseline.json")
@@ -99,6 +125,45 @@ class ArchitectureTests(unittest.TestCase):
     def test_production_runtime_cannot_reach_retired_protocol_contracts(self):
         self.assertEqual([], production_reachability_violations(ROOT))
 
+    def test_every_retired_protocol_family_is_forbidden_when_bfs_reachable(self):
+        modules = {
+            "agent report parser": "mae_flow_core.quality.agent_reports",
+            "tool transcript parser": "mae_flow_core.quality.tool_transcript",
+            "receipt contract": "mae_flow_core.application.hooks.receipts",
+            "evidence rules": "mae_flow_core.delivery.evidence",
+            "task document": (
+                "mae_flow_core.application.quality.role_task_documents"),
+            "result contract": "mae_flow_core.quality.codecheck_contract",
+        }
+        for family, module in modules.items():
+            with self.subTest(family=family):
+                root = self._write_production_import_fixture(module)
+                self.assertIn(
+                    "scripts/mae_flow_core/orchestration/"
+                    "retirement_bridge.py:1: retired import " + module,
+                    production_reachability_violations(root),
+                )
+
+    def test_every_retired_protocol_family_symbol_is_forbidden(self):
+        symbols = (
+            "report_field",
+            "parse_transcript",
+            "ReceiptContext",
+            "DeliveryEvidenceRules",
+            "TaskCardDocument",
+            "evaluate_codecheck_contract",
+        )
+        allowed_module = "mae_flow_core.orchestration.models"
+        for symbol in symbols:
+            with self.subTest(symbol=symbol):
+                root = self._write_production_import_fixture(
+                    allowed_module, symbol)
+                self.assertIn(
+                    "scripts/mae_flow_core/orchestration/"
+                    "retirement_bridge.py:2: retired name " + symbol,
+                    production_reachability_violations(root),
+                )
+
     def test_native_phase_guidance_cannot_reference_retired_protocols(self):
         self.assertEqual([], retired_guidance_violations(ROOT))
 
@@ -107,9 +172,29 @@ class ArchitectureTests(unittest.TestCase):
             ROOT, "scripts", "tests", "architecture_baseline.json")
         with open(baseline_path, encoding="utf-8") as stream:
             baseline = json.load(stream)
+        contract_path = os.path.join(
+            ROOT, "scripts", "tests", "refactor_completion_contract.json")
+        with open(contract_path, encoding="utf-8") as stream:
+            contract = json.load(stream)
+        expected = baseline["production_reachable_python_files"]
+        actual = list(production_reachable_python_files(ROOT))
+        target = contract["final_targets"][
+            "production_reachable_python_files"]
         self.assertEqual(
-            baseline["production_reachable_python_files"],
-            list(production_reachable_python_files(ROOT)),
+            target, len(expected),
+            "baseline reachability count does not match contract target")
+        self.assertEqual(
+            target, len(actual),
+            "actual reachability count does not match contract target")
+        self.assertEqual(
+            [], sorted(set(actual) - set(expected)),
+            "production reachability added files")
+        self.assertEqual(
+            [], sorted(set(expected) - set(actual)),
+            "production reachability removed files")
+        self.assertEqual(
+            expected, actual,
+            "production reachability order differs from exact baseline",
         )
 
     def test_foundation_rejects_relative_reverse_imports(self):

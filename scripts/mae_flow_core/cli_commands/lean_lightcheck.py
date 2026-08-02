@@ -24,15 +24,19 @@ def _normal(path):
     return value
 
 
+def _inside_repository(repository, absolute, path_module=os.path):
+    try:
+        return path_module.normcase(path_module.commonpath(
+            [repository, absolute])) == path_module.normcase(repository)
+    except ValueError:
+        return False
+
+
 def _repository_file(path, root):
     repository = os.path.realpath(root)
     absolute = os.path.realpath(path)
-    try:
-        inside = os.path.normcase(os.path.commonpath(
-            [repository, absolute])) == os.path.normcase(repository)
-    except ValueError:
-        inside = False
-    if not inside or not os.path.isfile(absolute):
+    if (not _inside_repository(repository, absolute)
+            or not os.path.isfile(absolute)):
         return ""
     return _normal(os.path.relpath(absolute, repository))
 
@@ -111,6 +115,12 @@ def _tool_error(reason):
     }
 
 
+def _skipped(reason):
+    result = _tool_error(reason)
+    result["status"] = "SKIPPED"
+    return result
+
+
 def _save(result):
     try:
         atomic_write_text(
@@ -159,6 +169,11 @@ def run_exact_lightcheck(files, quiet=False):
             _repository_file(path, root) for path in files)
         if relative.lower().endswith(SUPPORTED_EXTENSIONS)
     ))
+    if not candidates:
+        result = _skipped("没有可安全检查的精确仓库内代码文件")
+        result["report_path"] = _save(result)
+        _print(result, quiet)
+        return 0
     try:
         changed, tracked = _changed_lines(candidates)
         magic_changed, unused_tracked = _changed_lines(

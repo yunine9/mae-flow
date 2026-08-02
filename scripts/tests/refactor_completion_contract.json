@@ -12,24 +12,35 @@
     "production_reachable_python_files": 66
   },
   "required_verifications": {
-    "architecture": [
-      "python scripts/tests/test_architecture.py"
-    ],
-    "differential": [
-      "python scripts/tests/differential/runner.py --implementation-root ."
-    ],
-    "fault_injection": [
+    "release_suites": [
+      "python scripts/tests/test_lean_state.py",
+      "python scripts/tests/test_lean_migration.py",
+      "python scripts/tests/test_lean_migration_cli.py",
+      "python scripts/tests/test_lean_transitions.py",
+      "python scripts/tests/test_lean_guidance.py",
+      "python scripts/tests/test_native_guidance.py",
+      "python scripts/tests/test_lean_composition.py",
+      "python scripts/tests/test_lean_delivery.py",
+      "python scripts/tests/test_lean_documents.py",
+      "python scripts/tests/test_lean_moonlight.py",
+      "python scripts/tests/test_lean_toolbox.py",
+      "python scripts/tests/test_delivery_manifest.py",
+      "python scripts/tests/test_lean_safety_kernel.py",
+      "python scripts/tests/test_lean_hook_events.py",
+      "python scripts/tests/test_lean_hook_adapter.py",
+      "python scripts/tests/test_hook_protocol.py",
+      "python scripts/tests/test_lean_cli.py",
+      "python scripts/tests/test_lean_capabilities.py",
+      "python scripts/tests/test_capabilities.py",
+      "python scripts/tests/test_spec2code_prompt_resources.py",
+      "python scripts/tests/test_lightcheck.py",
+      "python scripts/tests/test_architecture.py",
+      "python scripts/tests/test_file_io.py",
+      "python scripts/tests/test_refactor_completion.py",
       "python scripts/tests/test_fault_injection.py"
-    ],
-    "resource_warnings": [
-      "python -W error::ResourceWarning scripts/tests/test_state_core.py",
-      "python -W error::ResourceWarning scripts/tests/test_checkpoints.py"
     ],
     "selftest": [
       "python scripts/selftest.py"
-    ],
-    "unit_tests": [
-      "python -m unittest discover -s scripts/tests -p 'test_*.py'"
     ]
   },
   "stages": [

@@ -1,9 +1,11 @@
+import ntpath
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -22,6 +24,7 @@ from mae_flow_core.cli_commands.lean_lightcheck import (
     _changed_lines,
     _repository_file,
 )
+from mae_flow_core.cli_commands import lean_lightcheck
 
 
 def _write(root, path, text):
@@ -867,6 +870,51 @@ class LightCheckTests(unittest.TestCase):
             rejected_content = stream.read()
         self.assertIn("检查文件：0", rejected_content)
         self.assertNotIn("MF-MAGIC-NUMBER", rejected_content)
+
+    def test_empty_exact_scope_skips_before_any_git_call(self):
+        repo = os.path.join(self.root, "empty-scope-repo")
+        os.makedirs(repo)
+        _write(repo, "README.txt", "unsupported\n")
+        _write(self.root, "outside.py", "value = 42\n")
+        previous = os.getcwd()
+        try:
+            os.chdir(repo)
+            with mock.patch.object(
+                    lean_lightcheck, "_git", return_value="") as git:
+                result = lean_lightcheck.run_exact_lightcheck((
+                    os.path.join(repo, "README.txt"),
+                    os.path.join(repo, "missing.py"),
+                    os.path.join(self.root, "outside.py"),
+                ), quiet=True)
+            report = os.path.join(
+                repo, ".mae-flow-work", "lightcheck", "latest.md")
+            with open(report, encoding="utf-8") as stream:
+                content = stream.read()
+        finally:
+            os.chdir(previous)
+        self.assertEqual(0, result)
+        git.assert_not_called()
+        self.assertIn("结果：SKIPPED", content)
+        self.assertIn("没有可安全检查的精确仓库内代码文件", content)
+
+    def test_path_scope_handles_windows_drive_and_unc_aliases(self):
+        inside_repository = getattr(
+            lean_lightcheck, "_inside_repository", None)
+        self.assertTrue(callable(inside_repository))
+        self.assertTrue(inside_repository(
+            r"C:\Repo", r"c:\repo\src\logic.py", ntpath))
+        self.assertFalse(inside_repository(
+            r"C:\Repo", r"D:\repo\src\logic.py", ntpath))
+        self.assertTrue(inside_repository(
+            r"\\Server\Share\Repo",
+            r"\\server\share\repo\src\logic.py",
+            ntpath,
+        ))
+        self.assertFalse(inside_repository(
+            r"\\Server\Share\Repo",
+            r"\\server\other\repo\src\logic.py",
+            ntpath,
+        ))
 
     def test_deletion_anchor_touches_function_without_scanning_adjacent_magic(self):
         repo = os.path.join(self.root, "deletion-repo")

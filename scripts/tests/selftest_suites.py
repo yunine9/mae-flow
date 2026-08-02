@@ -20,6 +20,7 @@ REFACTOR_SAFETY_SUITES = (
     ("Lean safety kernel", ("scripts/tests/test_lean_safety_kernel.py",), 90, 5000),
     ("Lean Hook event router", ("scripts/tests/test_lean_hook_events.py",), 90, 4000),
     ("Lean Hook protocol adapter", ("scripts/tests/test_lean_hook_adapter.py",), 90, 5000),
+    ("Real Hook registration protocol", ("scripts/tests/test_hook_protocol.py",), 90, 5000),
     ("Lean production CLI", ("scripts/tests/test_lean_cli.py",), 90, 5000),
     ("Opaque capability policy", ("scripts/tests/test_lean_capabilities.py",), 90, 4000),
     ("Reference source integrity", ("scripts/tests/test_capabilities.py",), 90, 4000),

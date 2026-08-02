@@ -18,6 +18,7 @@ TESTS = os.path.abspath(os.path.dirname(__file__))
 ROOT = os.path.abspath(os.path.join(TESTS, "..", ".."))
 SCRIPTS = os.path.abspath(os.path.join(TESTS, ".."))
 HOOK_HARNESS = os.path.join(TESTS, "lean_hook_harness.py")
+HOOKS_CONFIG = os.path.join(ROOT, "hooks", "hooks.json")
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
@@ -211,6 +212,42 @@ class WindowsProcessBoundaryTests(unittest.TestCase):
 
             self.assertIsNotNone(discovered)
             self.assertEqual(name.casefold(), os.path.basename(discovered).casefold())
+
+    def test_hook_launchers_have_no_posix_shell_dependency(self):
+        with open(HOOKS_CONFIG, encoding="utf-8") as stream:
+            hooks = json.load(stream)["hooks"]
+        commands = tuple(
+            hook["command"]
+            for registrations in hooks.values()
+            for registration in registrations
+            for hook in registration["hooks"]
+        )
+        self.assertEqual(4, len(commands))
+
+        with tempfile.TemporaryDirectory() as root:
+            environment = dict(os.environ)
+            environment["CODEAGENT3_PLUGIN_ROOT"] = ROOT
+            for command in commands:
+                with self.subTest(command=command):
+                    self.assertNotIn("${", command)
+                    self.assertNotIn("if [", command)
+                    self.assertTrue(command.startswith("python -c "))
+                    executable_command = command.replace(
+                        "python -c ",
+                        '"%s" -c ' % sys.executable,
+                        1,
+                    )
+                    result = subprocess.run(
+                        executable_command,
+                        shell=True,
+                        cwd=root,
+                        env=environment,
+                        input=b"{}\n",
+                        capture_output=True,
+                        check=False,
+                        timeout=5,
+                    )
+                    self.assertEqual(0, result.returncode, result.stderr)
 
     def test_fake_host_capability_return_is_synchronous_and_opaque(self):
         with tempfile.TemporaryDirectory() as root:

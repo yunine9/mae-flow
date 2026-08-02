@@ -431,6 +431,51 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         ))
         self.assertIn(expected_card, current.stdout)
 
+    def test_current_renders_staged_cp_messages_in_state_order(self):
+        first_message = "[REQ-42][feat]deliver CP1 query entry"
+        second_message = "[REQ-42][feat]deliver CP2 result mapping"
+        state = full_at(
+            Phase.DELIVERY,
+            pace=CommitPace.STAGED,
+            current_cp="CP2",
+            delivery_files=("src/a.cpp", "src/b.cpp"),
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", first_message),
+                ("delivery.cp.CP1.confirmation", "CP1 reviewed."),
+                ("delivery.cp.CP2.file", "src/b.cpp"),
+                ("delivery.cp.CP2.message", second_message),
+                ("delivery.cp.CP2.confirmation", "CP2 reviewed."),
+                ("delivery.staged_final_file", "src/a.cpp"),
+                ("delivery.staged_final_file", "src/b.cpp"),
+            ),
+        )
+        state = apply_moonlight_policy(
+            state,
+            MoonlightAuthorization(
+                True, state.delivery_files, True, True),
+        ).state
+
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, ".mae-flow.json"), "w",
+                      encoding="utf-8") as stream:
+                json.dump(state.to_dict(), stream, ensure_ascii=False)
+            current = run_cli(root, "current")
+
+        self.assertEqual(0, current.returncode, current.stderr)
+        expected_card = "\n".join((
+            "需要用户介入: 交付（精确文件、提交说明和是否推送）",
+            "精确文件:",
+            "- src/a.cpp",
+            "- src/b.cpp",
+            "提交说明（按 CP 顺序）:",
+            "- CP1: %s" % first_message,
+            "- CP2: %s" % second_message,
+            "Moonlight 权限: allow_commit=true, allow_push=true",
+        ))
+        self.assertIn(expected_card, current.stdout)
+        self.assertNotIn("尚未选择", current.stdout)
+
 
 class ProductDocumentationContractTests(unittest.TestCase):
     CURRENT_DOCS = (

@@ -2,7 +2,7 @@
 
 import os
 
-from .models import DeliveryPath, FlowState, Phase
+from .models import CommitPace, DeliveryPath, FlowState, Phase
 
 
 _PHASE_ROOT = os.path.abspath(os.path.join(
@@ -61,6 +61,24 @@ def render_guidance(state):
     return "%s\n\n%s\n" % (context, phase_guidance)
 
 
+def _delivery_message_lines(state, decisions):
+    if state.commit_pace == CommitPace.CONTINUOUS:
+        return ("提交说明: %s" % decisions.get(
+            "delivery.commit_message", "尚未选择"),)
+
+    prefix = "delivery.cp."
+    suffix = ".message"
+    messages = tuple(
+        (key[len(prefix):-len(suffix)], value)
+        for key, value in state.decisions
+        if key.startswith(prefix) and key.endswith(suffix)
+    )
+    if not messages:
+        return ("提交说明（按 CP 顺序）: 尚未选择",)
+    return ("提交说明（按 CP 顺序）:",) + tuple(
+        "- %s: %s" % item for item in messages)
+
+
 def _delivery_user_card(state):
     decisions = {key: value for key, value in state.decisions}
     lines = ["需要用户介入: 交付（精确文件、提交说明和是否推送）"]
@@ -69,9 +87,7 @@ def _delivery_user_card(state):
         lines.extend("- %s" % path for path in state.delivery_files)
     else:
         lines.append("精确文件: none")
-    lines.append(
-        "提交说明: %s" % decisions.get(
-            "delivery.commit_message", "尚未选择"))
+    lines.extend(_delivery_message_lines(state, decisions))
     lines.append(
         "Moonlight 权限: allow_commit=%s, allow_push=%s" % (
             decisions.get("moonlight.allow_commit", "false"),

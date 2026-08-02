@@ -1,9 +1,11 @@
+<!-- generated-by: mae-flow -->
+
 # Behavior Baseline Lifecycle Design
 
 ## Context
 
 Mae-Flow already produces a confirmed Spec for Full work and reserves
-`docs/mae-flow/behavior/` for durable behavior knowledge. The current workflow,
+`docs/specs/` for durable behavior knowledge. The current workflow,
 however, treats the per-ticket Spec as a durable repository document while only
 defining where behavior files could live. It does not tell a new flow which
 historical knowledge to read, how a delivered change updates current truth, or
@@ -44,7 +46,7 @@ human-readable domain behavior documents.
 
 The repository has one default durable documentation truth:
 
-- `docs/mae-flow/behavior/<domain>.md` records the current observable truth for
+- `docs/specs/<domain>.md` records the current observable truth for
   one business domain. New work consumes this layer instead of replaying old
   Specs.
 
@@ -70,7 +72,7 @@ truth consumed by future workflows.
 
 ### Domain index
 
-`docs/mae-flow/behavior/index.md` is a lightweight routing page. Each domain has
+`docs/specs/index.md` is a lightweight routing page. Each domain has
 one Markdown entry containing a stable domain name, a link to its behavior
 document, and a one-line scope description. Agents read it semantically; the
 workflow does not parse it as a formal registry.
@@ -99,6 +101,8 @@ The plugin provides `skills/mae-flow/assets/BEHAVIOR-TEMPLATE.md`, following the
 same guidance model as the Story template:
 
 ```markdown
+<!-- generated-by: mae-flow -->
+
 # <领域名称>
 
 ## 领域范围
@@ -157,7 +161,7 @@ a suitably scoped domain such as `order-query` instead of an omnibus
 
 Both Full and Focused paths perform lightweight domain discovery:
 
-1. Read `behavior/index.md` when it exists.
+1. Read `docs/specs/index.md` when it exists.
 2. Infer the relevant domains from the request, nearby code, and index scopes.
 3. Read only the selected behavior documents.
 4. Show the selected existing domains, or a proposed new domain, in the existing

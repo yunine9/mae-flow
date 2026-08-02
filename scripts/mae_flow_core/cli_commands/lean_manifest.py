@@ -7,8 +7,9 @@ import subprocess
 from mae_flow_core.foundation.commit_message import valid_business_commit_message
 from mae_flow_core.foundation.source_paths import is_flow_control_path
 from mae_flow_core.guard.manifest import DeliveryManifest, authorize_delivery
+from mae_flow_core.adapters.hook_git_facts import git_text
 from mae_flow_core.orchestration.documents import conditional_document_kind
-from mae_flow_core.orchestration.models import CommitPace, Phase
+from mae_flow_core.orchestration.models import CommitPace, Phase, StartupConfig
 
 
 _CONDITIONAL_DECISION = "delivery.conditional_document"
@@ -27,6 +28,55 @@ _TARGET_FACTS = {
     "delivery.plan.new_branch",
     "delivery.plan.source_sha",
 }
+
+
+def _git(root, arguments):
+    try:
+        return subprocess.run(
+            ["git"] + list(arguments), cwd=root, shell=False,
+            capture_output=True, timeout=15, check=False,
+            text=True, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError("无法执行 Git 工作分支操作: %s" % exc) from exc
+
+
+def place_working_branch(root, config):
+    """Create or switch to the exact branch confirmed at Intake."""
+    if not isinstance(config, StartupConfig):
+        raise TypeError("startup configuration is required")
+    target = config.working_branch.strip()
+    base = config.base_branch.strip()
+    if not target:
+        return ""
+    checked = _git(root, ("check-ref-format", "--branch", target))
+    if checked.returncode != 0:
+        raise ValueError("确认的工作分支名无效: %s" % target)
+    current_name = git_text(root, ("branch", "--show-current"))
+    if not current_name:
+        current_name = git_text(root, ("symbolic-ref", "--short", "HEAD"))
+    if current_name == target:
+        return target
+    exists = _git(root, ("show-ref", "--verify", "refs/heads/" + target))
+    if exists.returncode == 0:
+        command = ("switch", target)
+    elif current_name == base and git_head_revision(root) == "unborn":
+        command = ("switch", "-c", target)
+    elif base:
+        command = ("switch", "-c", target, base)
+    else:
+        raise ValueError("创建工作分支需要已确认的基线分支")
+    switched = _git(root, command)
+    if switched.returncode != 0:
+        raise ValueError(
+            "无法切换到确认的工作分支 %s: %s" %
+            (target, switched.stderr.strip() or "git switch failed"))
+    return target
+
+
+def place_startup_branch(root, state):
+    """Place the confirmed branch and retain one transparent startup fact."""
+    branch = place_working_branch(root, state.startup_config)
+    return state.with_decision("startup.branch_ready", branch) if branch else state
 
 
 def git_head_revision(root):

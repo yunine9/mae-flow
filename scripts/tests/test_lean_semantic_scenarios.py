@@ -123,8 +123,18 @@ class FullWorkflowScenarioTests(unittest.TestCase):
             state, "cp-confirmed", value="用户确认 CP1 结果。").state
         self.assertFalse(advance(state, "cp-progress").needs_user)
 
+        state = record_flow_attempt(
+            state,
+            flow_attempt_context(state, CapabilityKind.BUILD),
+            "returned",
+            "opaque CP build return",
+        )
         state = advance(state, "construction-complete").state
         self.assertEqual(Phase.QUALITY, state.phase)
+        state = advance(
+            state, "final-conformance",
+            value="最终实现和覆盖符合确认的 Spec 与 Story。",
+        ).state
         state = advance(state, "quality-complete").state
         self.assertEqual(Phase.DELIVERY, state.phase)
         self.assertTrue(advance(state, "delivery-ready").needs_user)
@@ -143,6 +153,12 @@ class FullWorkflowScenarioTests(unittest.TestCase):
             state = advance(
                 ready.state, "cp-confirmed",
                 value="用户确认 %s 结果。" % checkpoint).state
+            state = record_flow_attempt(
+                state,
+                flow_attempt_context(state, CapabilityKind.BUILD),
+                "returned",
+                "opaque %s build return" % checkpoint,
+            )
 
         integration = advance(
             state,
@@ -180,7 +196,17 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         )
         state = record_flow_attempt(
             state, changed, "returned", "opaque return after the user fix")
+        state = record_flow_attempt(
+            state,
+            flow_attempt_context(state, CapabilityKind.BUILD),
+            "returned",
+            "opaque focused CP build return",
+        )
         state = advance(state, "construction-complete").state
+        state = advance(
+            state, "final-conformance",
+            value="最终实现和覆盖符合确认的局部范围。",
+        ).state
         state = advance(state, "quality-complete").state
         self.assertEqual(Phase.DELIVERY, state.phase)
         self.assertTrue(advance(state, "delivery-ready").needs_user)
@@ -316,7 +342,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         self.assertNotIn("notes/private.txt", delivery.commits[0].manifest.files)
 
     def test_story_is_local_unless_explicitly_selected_for_exact_manifest(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        story = "docs/specs/requirements/REQ-42/story.md"
         decisions = ((
             "delivery.commit_message",
             "[REQ-42][feat]deliver the reviewed behavior",
@@ -377,7 +403,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
                 root, pointer_path, snapshot_dir))
 
     def test_moonlight_exact_authorization_never_hides_delivery_card(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        story = "docs/specs/requirements/REQ-42/story.md"
         state = full_at(
             Phase.DELIVERY,
             delivery_files=("src/a.cpp", story),
@@ -402,7 +428,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         self.assertIn("交付", render_user_card(exact.state))
 
     def test_current_renders_exact_moonlight_delivery_authorization(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        story = "docs/specs/requirements/REQ-42/story.md"
         message = "[REQ-42][feat]deliver the reviewed behavior"
         state = full_at(
             Phase.DELIVERY,
@@ -427,6 +453,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         self.assertEqual(0, current.returncode, current.stderr)
         expected_card = "\n".join((
             "需要用户介入: 交付（精确文件、提交说明和是否推送）",
+            "最终 Spec/Story/代码对照: 未记录",
             "精确文件:",
             "- src/a.cpp",
             "- %s" % story,
@@ -473,6 +500,7 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
         self.assertEqual(0, current.returncode, current.stderr)
         expected_card = "\n".join((
             "需要用户介入: 交付（精确文件、提交说明和是否推送）",
+            "最终 Spec/Story/代码对照: 未记录",
             "精确文件:",
             "- src/a.cpp",
             "- src/b.cpp",
@@ -545,11 +573,8 @@ class ProductDocumentationContractTests(unittest.TestCase):
         for path, text in guides.items():
             with self.subTest(path=path):
                 self.assertIn(public_sequence, text)
-                self.assertIn(
-                    "首次调用后，任何再次调用都需要当前用户决定；源码、阶段、"
-                    "CP 或环境变化只改变授权键，不自动授权。",
-                    text,
-                )
+                self.assertIn("同一语义 slot", text)
+                self.assertIn("新的阶段", text)
         cli_source = self.read(
             "scripts/mae_flow_core/orchestration/guidance.py")
         self.assertIn("需要用户介入: Intake（启动选择", cli_source)

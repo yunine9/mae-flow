@@ -25,6 +25,65 @@ from mae_flow_core.adapters.lean_exit import (  # noqa: E402
 
 
 class LeanCliTests(unittest.TestCase):
+    def test_confirmed_start_places_the_exact_working_branch_and_quality_plan(self):
+        base = subprocess.run(
+            ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        working = base + "_alice_REQ-BRANCH"
+        started = self.run_cli(
+            "start", "--ticket", "REQ-BRANCH", "--ticket-type", "feat",
+            "--worker", "alice", "--base-branch", base,
+            "--working-branch", working,
+            "--build-method", "mvn compile -q",
+            "--ut-method", "java-autout", "--ut-command", "mvn test",
+            "--quality-plan",
+            "每个 CP 用 Maven 编译一次；正式 CodeCheck 一次；UT 一次。",
+            "--path", "focused", "--pace", "continuous",
+            "--decision", "用户确认完整配置。",
+        )
+
+        self.assert_success(started)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        self.assertEqual(working, branch)
+        self.assertIn("mvn compile -q", started.stdout)
+        self.assertIn("每个 CP 用 Maven 编译一次", started.stdout)
+
+    def test_confirmed_start_switches_to_an_existing_working_branch(self):
+        subprocess.run(
+            ["git", "config", "user.email", "mae-flow@example.invalid"],
+            cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Mae Flow Test"],
+            cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "initial"],
+            cwd=self.root, check=True, capture_output=True)
+        base = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        working = base + "_alice_REQ-EXISTING"
+        subprocess.run(["git", "branch", working], cwd=self.root, check=True)
+
+        started = self.run_cli(
+            "start", "--ticket", "REQ-EXISTING", "--ticket-type", "feat",
+            "--worker", "alice", "--base-branch", base,
+            "--working-branch", working, "--build-method", "mvn compile -q",
+            "--path", "focused", "--pace", "continuous",
+            "--decision", "用户确认使用已有工作分支。",
+        )
+
+        self.assert_success(started)
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        self.assertEqual(working, branch)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = self.temporary.name
@@ -257,7 +316,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-DOMAIN", "--path", "focused",
             "--pace", "continuous"))
-        domain = "docs/mae-flow/behavior/order-query.md"
+        domain = "docs/specs/order-query.md"
 
         self.assert_success(self.run_cli_raw(
             "advance", "domain-selected", "--key", domain,
@@ -374,10 +433,13 @@ class LeanCliTests(unittest.TestCase):
             "decision", "cp-confirmed", "本 CP 的结果和后续节奏已确认。")
         self.assert_success(cp)
         self.assertNotIn("需要用户介入", cp.stdout)
+        self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_cli("advance", "construction-complete"))
         self.assert_success(self.run_capability("codecheck"))
-        self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_capability("ut"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "final-conformance", "--decision",
+            "最终代码、覆盖与确认的 Spec/Story 一致。"))
         delivery = self.run_cli("advance", "quality-complete")
         self.assert_success(delivery)
         self.assertIn("需要用户介入: 交付", delivery.stdout)
@@ -504,6 +566,24 @@ class LeanCliTests(unittest.TestCase):
             "用户确认构建环境恢复，再试一次。"))
         self.assert_success(self.run_capability("build"))
 
+    def test_new_cp_is_shown_as_planned_work_not_an_authorized_retry(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-NEW-SLOT", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "已定位局部修复。"))
+        self.assert_success(self.run_capability("build"))
+
+        next_cp = self.run_cli("advance", "cp-ready", "--key", "CP2")
+
+        self.assert_success(next_cp)
+        self.assertIn(
+            "build: 当前新语义 slot 尚未调用；仅按阶段计划调用",
+            next_cp.stdout,
+        )
+        self.assertNotIn(
+            "build: 已授权一次重试（尚未消费）", next_cp.stdout)
+
     def test_public_cli_cannot_forge_a_capability_record(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-NO-FORGE", "--path", "focused",
@@ -589,6 +669,9 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
+        self.assert_success(self.run_cli_raw(
+            "advance", "final-conformance", "--decision",
+            "最终实现与确认范围一致。"))
         quality = self.run_cli("advance", "quality-complete")
         self.assert_success(quality)
         self.assertEqual("delivery", self.state()["phase"])
@@ -977,7 +1060,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-DOC", "--path", "focused",
             "--pace", "continuous"))
-        story = "docs/mae-flow/requirements/REQ-DOC/story.md"
+        story = "docs/specs/requirements/REQ-DOC/story.md"
         rejected = self.run_cli(
             "manifest", "--file", "src/a.cpp", "--file", story)
         self.assertEqual(2, rejected.returncode)
@@ -1041,6 +1124,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(cp1)
         self.assert_success(self.run_cli(
             "decision", "cp-confirmed", "用户检视并确认 CP1。"))
+        self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_cli(
             "advance", "cp-ready", "--key", "CP2"))
         cp2 = self.run_cli(
@@ -1077,6 +1161,7 @@ class LeanCliTests(unittest.TestCase):
             "decision", "cp-confirmed", "CP1 已检视。")
         self.assert_success(first)
         self.assertNotIn("需要用户介入: CP", first.stdout)
+        self.assert_success(self.run_capability("build"))
 
         second_ready = self.run_cli("advance", "cp-ready", "--key", "CP2")
 

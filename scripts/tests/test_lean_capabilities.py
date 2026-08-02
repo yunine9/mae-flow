@@ -119,6 +119,20 @@ class LeanCapabilityTests(unittest.TestCase):
             "ut", "production-1", "environment-1", "returned"),)
         self.assertTrue(automatic_attempt_allowed(attempts, self.build))
 
+    def test_each_new_cp_build_slot_gets_one_automatic_attempt(self):
+        cp1 = AttemptContext(
+            "build", "build:construction:CP1", "lean-workflow-v1",
+            new_slot_automatic=True,
+        )
+        cp2 = AttemptContext(
+            "build", "build:construction:CP2", "lean-workflow-v1",
+            new_slot_automatic=True,
+        )
+        attempts = record_attempt((), cp1, "returned")
+
+        self.assertTrue(automatic_attempt_allowed(attempts, cp2))
+        self.assertFalse(automatic_attempt_allowed(attempts, cp1))
+
     def test_documentation_only_change_does_not_invalidate_build(self):
         attempts = (CapabilityAttempt(
             "build", "production-1", "environment-1", "returned"),)

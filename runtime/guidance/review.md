@@ -6,6 +6,7 @@ Review is advisory evidence. Read the relevant Spec or Story, current code, and 
 - Trace a confirmed defect to its root cause. Prefer the smallest correction that restores the approved behavior without unrelated cleanup.
 - Review correctness, boundary behavior, dependency direction, reuse, naming, ownership, error handling, lifetime, concurrency, compatibility, and the planned test seam.
 - Separate objective defects from valid design tradeoffs. Only a real unresolved tradeoff needs user judgment.
+- Give every supplied review item an explicit disposition: fixed, unsupported with evidence, design tradeoff, or out of scope. Natural language is sufficient; no fixed ledger schema is required.
 
 For final conformance, compare the final implementation and final diff with the confirmed Spec and confirmed Story:
 

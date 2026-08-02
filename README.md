@@ -13,7 +13,7 @@ Mae-Flow 是面向 CodeAgent 的交付工作流。它把人留在真正有决策
 交付 REQ-42：修复删除好友后会话缓存未清理的问题。
 ```
 
-启动卡会一次展示工号、单号与 `feat/fix` 类型、需求来源、推荐路径、提交节奏、基线/工作分支、Build 方式、UT 生成方式、UT 运行入口和本轮已存在的工作区改动。用户可以直接用自然语言调整或确认；没有固定口令。
+启动卡会一次展示工号、单号与 `feat/fix` 类型、需求来源、推荐路径、提交节奏、基线/工作分支、精确 Build 路由、UT 生成方式、UT 运行入口、质量组合和本轮已存在的工作区改动。C++ 可以配置 `build-fix` Skill，Java/Maven 配置准确 Maven 命令，其他语言使用仓库自己的 Skill 或命令；`build-fix` 不是通用 Build。用户可以直接用自然语言调整或确认；没有固定口令。确认后立即创建或切换工作分支。
 
 恢复时直接说“继续 REQ-42”。Mae-Flow 从项目里的最小恢复游标继续，不要求旧会话仍在。要退出时明确说“退出 Mae-Flow”；退出会保存现场并释放控制，不删除业务改动。
 
@@ -39,8 +39,8 @@ Intake → Spec → Design → Construction → Quality → Delivery
 | **Intake** | 确认完整运行配置、相关业务领域、路径、提交节奏和初始脏文件归属 | 启动决定与恢复游标 |
 | **Spec** | 固定 WHAT：可观察行为、边界、非目标和风险 | 默认本地的变更契约 |
 | **Design** | 形成可独立交付的软件详细设计与测试交接 | 默认本地的 Story |
-| **Construction** | 按 CP 实现；Full 在每个 CP 给用户检视，Focused 连续推进 | 业务改动与本批事实 |
-| **Quality** | 对最终相关输入各调用一次需要的质量能力 | 不透明能力结果与未决风险 |
+| **Construction** | 按 CP 实现、检视，并按启动配置同步 Build 一次；Full 在每个 CP 给用户检视，Focused 连续推进 | 业务改动与本批事实 |
+| **Quality** | 做 CodeCheck/UT 和最终一致性对照，按语义风险决定是否做一次集成走读 | 不透明能力结果与未决风险 |
 | **Delivery** | 展示精确文件清单、提交说明和推送选择 | 精确提交与一次推送 |
 
 内部恢复游标沿用 `startup` 和 `story` 两个稳定值，分别对应面向用户的 Intake 和 Design；它们不是额外阶段。
@@ -52,7 +52,7 @@ Intake → Spec → Design → Construction → Quality → Delivery
 - 需求或现有行为存在真实歧义；
 - 实现发现有意义的设计偏差；
 - Reviewer 揭示必须由用户取舍的问题；
-- 同一输入需要再次调用昂贵能力；
+- 同一语义 slot 需要再次调用昂贵能力；
 - 即将执行不可逆动作；
 - Delivery 的精确文件清单发生变化；
 - Moonlight 遇到未授权、失败或不确定事实，需要安全停下。
@@ -66,10 +66,12 @@ Build、UT、CodeCheck、Grill、Story、Reviewer 都是一次性、不透明的
 - 每个语义阶段/CP slot 默认至多调用一次。
 - Host 的同步返回就是完成边界。Mae-Flow 不解析内部输出格式，不把 `PASS`、`CLEAN`、计数或任意私有字段推断成质量结论。
 - 记录的结果只有 `returned`、`failed-to-start`、`timed-out` 或 `not-observed` 以及一段有界摘要。
-- 没有后台轮询、等待循环或自动重试。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。
+- 没有后台轮询、等待循环或自动重试。同一语义 slot 再次调用需要当前用户决定；新的阶段/CP slot 的首次计划调用正常执行，不让用户重复授权。
 - 独立调用不会创建活动工作流，不会提交或推送。输出文件默认保留在本地。
 
 UT capability 自己负责写测试、编译测试和运行测试；弱 C++/gtest 环境无法证明执行数量时，只如实保留不透明返回。CodeCheck 输出未知时同样只记录事实，不臆造 verdict。
+
+每个 CP 在 Lightcheck 和一次 Reviewer 意见处置后，按 Intake 确认的 Build 路由同步编译一次。Reviewer 的每条意见都有自然语言去向，但没有固定报告。Quality 不机械重复仍覆盖最终源码的最后一次 CP Build；CodeCheck 与 UT 仍各自只调用一次。只有跨 CP 耦合、共享状态、接口变化或晚期设计漂移才增加一次集成走读。Delivery 前保留一条 Spec/Story/范围与最终代码、覆盖的简短一致性结论。
 
 ## 文档与文件归属
 
@@ -79,12 +81,11 @@ UT capability 自己负责写测试、编译测试和运行测试；弱 C++/gtes
 .mae-flow-work/<ticket>/spec.md
 .mae-flow-work/<ticket>/story.md
 .mae-flow-work/<ticket>/decisions.md
-.mae-flow-work/<ticket>/engineering-notes.md
 ```
 
-领域行为基线是默认上库的当前真相源：`docs/mae-flow/behavior/<domain>.md` 按稳定业务能力划分，`index.md` 只做轻量路由。复杂存量领域第一次只记录本次有证据的覆盖，未写到的行为仍是未知，不要求一次补全。
+领域行为基线是默认上库的当前真相源：`docs/specs/<domain>.md` 按稳定业务能力划分，`docs/specs/index.md` 只做轻量路由。复杂存量领域第一次只记录本次有证据的覆盖，未写到的行为仍是未知，不要求一次补全。
 
-Spec 是本轮确认的 WHAT 变更契约；Story 按模板合并客户场景、业务规格、功能验收标准、软件详细设计和测试交接。二者以及决策、工程笔记、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择某一份条件文档入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。
+Spec 是本轮确认的 WHAT 变更契约；Story 按模板合并客户场景、业务规格、功能验收标准、软件详细设计和测试交接。二者以及决策、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择 `docs/specs/requirements/<ticket>/` 下某一份 durable copy 入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。工作流生成的 Spec、Story 和领域 Markdown 使用 `<!-- generated-by: mae-flow -->` 标记来源，但 Hook 和 parser 不校验该水印。
 
 Delivery 将每个相关领域对账为 `new`、`updated` 或 `unchanged`。只有真实变化的领域文档以及新领域需要的 `index.md` 更新进入精确 manifest；不扫描、不暂存无关领域，也不物理归档历史 Spec。
 

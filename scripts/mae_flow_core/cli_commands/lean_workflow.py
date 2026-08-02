@@ -44,25 +44,20 @@ from mae_flow_core.state_store import (
     atomic_write_json,
     safe_read_json,
 )
-from .lean_manifest import git_head_revision, prepare_manifest_state
+from .lean_manifest import (
+    git_head_revision, place_startup_branch, prepare_manifest_state)
 from .lean_lightcheck import run_exact_lightcheck
 from .user_events import (
     USER_OWNED_EVENTS as _USER_OWNED_EVENTS,
     bind_user_event as _bind_user_event,
     matching_user_event as _matching_user_event,
     requires_user_event as _requires_user_event,
+    semantic_request as _semantic_request,
 )
 
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
-_KEYED_SEMANTIC_EVENTS = {
-    "risk-resolved", "cp-ready", "cp-progress",
-    "cp-brief", "cp-result", "cp-review", "cp-ut-intent",
-    "domain-selected", "domain-new", "domain-updated", "domain-unchanged",
-    "capability-returned", "capability-failed-to-start",
-    "capability-timed-out", "capability-not-observed",
-}
 def _die(message):
     print("[mae-flow] " + message, file=sys.stderr)
     raise SystemExit(2)
@@ -194,6 +189,9 @@ def _start_state(root, args):
             "Git startup facts unavailable: %s" % error
             for error in git_errors),
     )
+    quality_plan = (args.quality_plan or "").strip() or (
+        "每个 CP 按确认的 Build 路由同步编译一次；其余质量能力按语义选择。")
+    state = state.with_decision("startup.quality_plan", quality_plan)
     if defaults_error:
         state = state.with_decision(
             "startup.defaults_warning", defaults_error)
@@ -305,6 +303,7 @@ def cmd_lean_start(root, args):
                     _terminal_backup(path, terminal_raw)
             state = _start_state(root, args)
             if args.decision.strip():
+                state = place_startup_branch(root, state)
                 state = advance_flow(state, AdvanceRequest(
                     "startup-confirmed",
                     decision_value=args.decision.strip(),
@@ -356,13 +355,6 @@ def _advance_state(root, state, request):
     return advanced, result.reason
 
 
-def _semantic_request(event, key, decision):
-    normalized = event.strip().lower()
-    if key.strip() and normalized not in _KEYED_SEMANTIC_EVENTS:
-        raise ValueError("语义事件 %s 不接受 --key" % normalized)
-    return AdvanceRequest(event, key, decision)
-
-
 def cmd_lean_advance(root, args):
     def operation(current):
         if args.event.strip().lower() in _USER_OWNED_EVENTS:
@@ -410,6 +402,8 @@ def cmd_lean_decision(root, args):
             updated = state.with_decision(key, text)
             reason = "已记录自然语言决定。"
         else:
+            if args.event.strip().lower() == "startup-confirmed":
+                state = place_startup_branch(root, state)
             request = _semantic_request(args.event, args.key, text)
             updated, reason = _advance_state(root, state, request)
         if event_id and updated != state:

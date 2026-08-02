@@ -156,7 +156,7 @@ class LeanHookAdapterTests(unittest.TestCase):
             commit_pace=CommitPace.STAGED,
             current_cp="CP-2",
             artifacts=(
-                ("spec", "docs/mae-flow/requirements/REQ-5/spec.md"),
+                ("spec", "docs/specs/requirements/REQ-5/spec.md"),
                 ("story", ".mae-flow-work/REQ-5/story.md"),
             ),
             decisions=(
@@ -182,7 +182,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         for fact in (
                 "Ticket: REQ-5", "Request: 修复订单查询边界，并保持旧接口兼容。",
                 "Mode: full", "Phase: quality", "CP: CP-2",
-                "spec=docs/mae-flow/requirements/REQ-5/spec.md",
+                "spec=docs/specs/requirements/REQ-5/spec.md",
                 "database compatibility", "build", "opaque-return",
                 "latest"):
             self.assertIn(fact, text)

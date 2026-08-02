@@ -57,6 +57,7 @@ class AttemptContext:
     source_revision: str
     environment_revision: str
     user_authorized: bool = False
+    new_slot_automatic: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "kind", _kind(self.kind))
@@ -64,6 +65,8 @@ class AttemptContext:
         _revision(self.environment_revision, "environment_revision")
         if type(self.user_authorized) is not bool:
             raise ValueError("user_authorized must be a bool")
+        if type(self.new_slot_automatic) is not bool:
+            raise ValueError("new_slot_automatic must be a bool")
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,12 @@ def retry_options(attempts, context):
             "An attempt already exists for unchanged inputs.",
         )
     if _same_capability_seen(attempts, context):
+        if context.new_slot_automatic:
+            return RetryOption(
+                True,
+                False,
+                "This semantic slot has not attempted the capability.",
+            )
         if context.user_authorized:
             return RetryOption(
                 True,
@@ -186,6 +195,7 @@ def record_flow_attempt(state, context, outcome, summary=""):
         context.source_revision,
         context.environment_revision,
         user_authorized=available,
+        new_slot_automatic=context.new_slot_automatic,
     )
     option = retry_options(state.capabilities, effective)
     if not option.allowed:
@@ -221,6 +231,7 @@ def flow_attempt_context(state, kind):
         kind,
         capability_slot(state, kind),
         "lean-workflow-v1",
+        new_slot_automatic=True,
     )
 
 
@@ -238,5 +249,6 @@ def flow_retry_options(state, kind):
         context.source_revision,
         context.environment_revision,
         user_authorized=authorized > consumed,
+        new_slot_automatic=context.new_slot_automatic,
     )
     return retry_options(state.capabilities, effective)

@@ -15,8 +15,10 @@ Stop for a real reviewer tradeoff. CLEAR or approval continues without a user st
 ## Outputs
 Produce the reviewed standalone Story with confirmed business context, software
 detailed design, coherent checkpoints, verification intent, and known risks.
-Keep it local unless the user explicitly selects its exact durable copy. Record
-reviewer failure without automatic retry.
+Keep it local unless the user explicitly selects its exact durable copy under
+`docs/specs/requirements/<ticket>/`. Generated Markdown starts with
+`<!-- generated-by: mae-flow -->`; this is provenance, not a format gate.
+Record reviewer failure without automatic retry.
 
 ## Next
 Proceed to Construction. The next meaningful action is to confirm the reviewed HOW.

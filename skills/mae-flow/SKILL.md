@@ -42,17 +42,17 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 ### Intake
 
-先读取 `.mae-flow-defaults.json` 的稳定预设、需求来源、仓库事实、当前分支和初始脏文件。读取 `docs/mae-flow/behavior/index.md`（不存在也可继续），按业务能力选择并只读取相关领域文档；领域不按目录、类、服务、行数或文件数划分。复杂存量领域只建立本次证据覆盖的增量基线，未记载行为视为未知。
+先读取 `.mae-flow-defaults.json` 的稳定预设、需求来源、仓库事实、当前分支和初始脏文件。读取 `docs/specs/index.md`（不存在也可继续），按业务能力选择并只读取相关领域文档；领域不按目录、类、服务、行数或文件数划分。复杂存量领域只建立本次证据覆盖的增量基线，未记载行为视为未知。
 
-向用户展示一张完整配置卡：工号、单号及 `feat/fix` 类型、需求来源、Full/Focused、Continuous/Staged、基线分支、按 `{基线分支}_{工号}_{单号}` 派生的工作分支、Build 方式、UT 生成方式和 UT 运行入口。用户一次确认并可自然语言修改；不要求固定话术。启动命令必须带上确认后的配置和 `--decision`，原子记录 Startup 确认并进入下一阶段；不要再调用一次 `startup-confirmed`。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`，兼容不带 `--decision` 的既有调用。
+向用户展示一张完整配置卡：工号、单号及 `feat/fix` 类型、需求来源、Full/Focused、Continuous/Staged、基线分支、按 `{基线分支}_{工号}_{单号}` 派生的工作分支、精确 Build 路由、UT 生成方式、UT 运行入口和自然语言质量组合。Build 路由按项目确认：C++ 可选择配置好的 `build-fix` Skill；Java/Maven 使用确认的 Maven 命令（通常为 `mvn compile -q`）；其他语言使用仓库的准确 Skill 或命令，禁止把 `build-fix` 当通用方案。用户一次确认并可自然语言修改；不要求固定话术。启动命令必须带上确认后的配置、`--quality-plan` 和 `--decision`，原子记录 Startup 确认并进入下一阶段；不要再调用一次 `startup-confirmed`。确认后立即创建或切换到精确工作分支，不拖到提交阶段。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`，兼容不带 `--decision` 的既有调用。
 
 ### Spec
 
-Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。主 Agent 先形成候选 Spec，再在呈审前调用 `grill-critic-agent` 做 one read-only pass；它只找歧义、遗漏和隐藏取舍，不编辑 Spec、不替用户决定。主 Agent直接吸收明确修正，CLEAR 直接继续，只有真实待决分支交用户。Spec 默认位于 `.mae-flow-work/<ticket>/spec.md`，用户明确要求保留审计材料时才生成并选择对应的 durable copy。
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。主 Agent 先形成候选 Spec，再在呈审前调用 `grill-critic-agent` 做 one read-only pass；它只找歧义、遗漏和隐藏取舍，不编辑 Spec、不替用户决定。主 Agent直接吸收明确修正，CLEAR 直接继续，只有真实待决分支交用户。Spec 默认位于 `.mae-flow-work/<ticket>/spec.md`，用户明确要求保留审计材料时才生成并选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
 
 ### Design
 
-Story 严格沿用 `skills/mae-flow/assets/STORY-TEMPLATE.md`，把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 durable 路径。
+Story 严格沿用 `skills/mae-flow/assets/STORY-TEMPLATE.md`，把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
 
 ### Construction
 
@@ -60,17 +60,18 @@ Story 严格沿用 `skills/mae-flow/assets/STORY-TEMPLATE.md`，把确认后的�
 
 Story 末尾承载全部轻量 CP 简报，不另建详细编码计划文件。每个 Full CP 保存简报、实际结果、一次 CODE Reviewer 结论和 UT 增量；同一确认卡展示本批实际结果及下一 CP，用户可直接修改后续设计。
 
-每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
+每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。Reviewer 提供的每条意见都由主 Agent给出去向：已修复、证据不足不采纳、设计取舍或超出范围；只写自然语言，不交验固定表格。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 单独触发编译或再次检查。随后同步调用开局确认的 Build 路由一次并记录该 CP 的不透明 Build 事实；禁止休眠等待、轮询、转后台或自动重试。Build 完成后才用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
 
 ### Quality
 
-根据语义影响和用户选择决定质量能力。Full 的通常建议顺序是 CodeCheck → Build → UT，但用户可删减、改序或承担明确风险。
+根据语义影响和用户选择决定质量能力。Full 的通常建议顺序是 CodeCheck → UT；每个 CP 已完成一次配置的 Build。若最后一次 CP Build 之后源码没有再变化，Quality 不重复 Build；若后续修复使它失效，只展示事实并让用户决定是否重跑配置的 Build 路由。
 
 - CodeCheck：调用 `codecheck-advisor-agent` 一次，只给 exact changed production files/functions。它只请求一次正式 fullcheck。主 Agent修安全项；每条结构化意见都要有去向，raw-only 结果原样保留，不自动复验。
-- Build：直接调用配置的 `build-fix` Skill 一次。该 Skill 对自己的编译负责；Mae-Flow 不再另派编译角色，也不猜内部 Maven/g++ 封装的输出。
 - UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
 
-调用能力前先看 `current` 中该 kind 的已有尝试；已有记录且没有本轮用户重试决定就不要调用。该规则由主 Agent 遵守，Hook 不拦截或证明能力调用。真实能力调用同步结束后，主 Agent 只记录一次轻量恢复事实：正常返回执行 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"`；启动失败、超时或无法观察返回时分别使用 `capability-failed-to-start`、`capability-timed-out`、`capability-not-observed`。这条事实不是质量报告，不解析返回值，也不要求固定格式；记录失败时不得为了补状态而重跑昂贵能力。Design Reviewer 和每个 CP Reviewer 是不同 slot。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
+调用能力前先看 `current` 中当前语义 slot 的已有尝试；同一语义 slot 已有记录且没有本轮用户重试决定就不要调用。新的阶段或新的 CP 是新的计划 slot，其首次调用正常执行，不让用户重复授权。该规则由主 Agent 遵守，Hook 不拦截或证明能力调用。真实能力调用同步结束后，主 Agent 只记录一次轻量恢复事实：正常返回执行 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"`；启动失败、超时或无法观察返回时分别使用 `capability-failed-to-start`、`capability-timed-out`、`capability-not-observed`。这条事实不是质量报告，不解析返回值，也不要求固定格式；记录失败时不得为了补状态而重跑昂贵能力。确需重试同一 slot，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
+
+Quality 收尾时记录一条自然语言的最终 Spec/Story/范围 ↔ 代码/覆盖对照结论。只有 Construction 记录了跨 CP 耦合、共享状态、接口变化或晚期设计漂移，才调用 `craft-reviewer-agent` 一次做集成边界走读并记录自然语言结论；没有触发就不增加检视。
 
 ### Delivery
 
@@ -81,7 +82,7 @@ Story 末尾承载全部轻量 CP 简报，不另建详细编码计划文件。�
 - Continuous：最终一个 `[单号][feat|fix]描述` 提交，one final push。
 - Staged：每个用户已确认 CP 先记录该 CP exact manifest 和提交说明，再做一个本地提交；同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
 
-领域行为基线是长期当前真相源。Spec、Story、决策、工程笔记、Chain、Review/CodeCheck 台账和交付说明默认本地；只有用户明确点名该文件进入版本库，才通过 `--conditional-document <exact path>` 选择对应的 durable copy。
+领域行为基线是长期当前真相源，路径为 `docs/specs/<domain>.md`，新领域同时轻量更新 `docs/specs/index.md`。Spec、Story、决策、Chain、Review/CodeCheck 台账和交付说明默认本地；只有用户明确点名该文件进入版本库，才通过 `--conditional-document <exact path>` 选择 `docs/specs/requirements/<ticket>/` 下对应的 durable copy。工作流生成的 Spec、Story 和领域 Markdown 水印只标识来源，不参与格式校验。
 
 Git Hook 只在提交这一低成本确定性边界校验确认的工作分支、单号和类型；失败只修正当前 Git 命令，不回退阶段，也不触发 Build、UT 或 CodeCheck。
 
@@ -102,4 +103,4 @@ manifest 确定后，只有已启用 Moonlight 的流程可用 `--moonlight-refr
 - Agent 只修改任务相关业务文件；用户已有脏文件保持可见，纳入交付前必须自然语言确认归属。
 - 任何提交都使用 exact files 和原有 `[单号][feat|fix]描述` 格式；不提交 Mae-Flow 状态、本地过程目录或未点名条件文档。
 - Reviewer 提供证据，不制造无休止反工；接受修复后不自动再派同一 Reviewer。
-- Build、UT、CodeCheck 是工作流质量能力；独立 CLI 工具箱只暴露 UT、CodeCheck、Grill、Story 和 Chain。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。
+- Build、UT、CodeCheck 是工作流按需调用的工具能力；独立 CLI 工具箱只暴露 UT、CodeCheck、Grill、Story 和 Chain。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。

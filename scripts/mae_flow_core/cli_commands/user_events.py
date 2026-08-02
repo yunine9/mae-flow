@@ -7,6 +7,7 @@ import os
 import re
 
 from mae_flow_core.state_store import safe_read_json
+from mae_flow_core.orchestration.transitions import AdvanceRequest
 
 
 _LEDGER = os.path.join(".mae-flow-work", "lean-hook-user-events.json")
@@ -15,6 +16,13 @@ USER_OWNED_EVENTS = {
     "startup-confirmed", "spec-confirmed", "story-confirmed",
     "cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
     "risk-resolved", "upgrade-to-full", "quality-defect-repair",
+}
+_KEYED_SEMANTIC_EVENTS = {
+    "risk-resolved", "cp-ready", "cp-progress",
+    "cp-brief", "cp-result", "cp-review", "cp-ut-intent",
+    "domain-selected", "domain-new", "domain-updated", "domain-unchanged",
+    "capability-returned", "capability-failed-to-start",
+    "capability-timed-out", "capability-not-observed",
 }
 
 
@@ -80,3 +88,10 @@ def requires_user_event(event):
     return (
         normalized in USER_OWNED_EVENTS
         or normalized.startswith("capability.retry."))
+
+
+def semantic_request(event, key, decision):
+    normalized = event.strip().lower()
+    if key.strip() and normalized not in _KEYED_SEMANTIC_EVENTS:
+        raise ValueError("语义事件 %s 不接受 --key" % normalized)
+    return AdvanceRequest(event, key, decision)

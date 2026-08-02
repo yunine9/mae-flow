@@ -402,14 +402,13 @@ class DeliveryManifestBoundaryTests(unittest.TestCase):
         documents = (
             "story.md",
             "decisions.md",
-            "engineering.md",
             "chain.md",
             "review-ledger.md",
             "codecheck-ledger.md",
             "delivery-notes.md",
         )
         for filename in documents:
-            path = "docs/mae-flow/requirements/REQ-42/%s" % filename
+            path = "docs/specs/requirements/REQ-42/%s" % filename
             state = self.continuous(("src/a.cpp", path))
             with self.subTest(filename=filename, selection="missing"):
                 with self.assertRaisesRegex(ValueError, "conditional document"):
@@ -428,14 +427,14 @@ class DeliveryManifestBoundaryTests(unittest.TestCase):
                     ("src/a.cpp", path), plan.commits[0].manifest.files)
 
     def test_conditional_selection_is_not_satisfied_by_a_different_path(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        story = "docs/specs/requirements/REQ-42/story.md"
         state = flow(
             files=("src/a.cpp", story),
             decisions=(
                 (MESSAGE_KEY, "[REQ-42][feat]change"),
                 (
                     CONDITIONAL_DOCUMENT_KEY,
-                    "docs/mae-flow/requirements/REQ-42/decisions.md",
+                    "docs/specs/requirements/REQ-42/decisions.md",
                 ),
             ),
         )
@@ -444,7 +443,7 @@ class DeliveryManifestBoundaryTests(unittest.TestCase):
             plan_delivery(state)
 
     def test_staged_conditional_document_uses_the_same_selection_fact(self):
-        story = "docs/mae-flow/requirements/REQ-42/story.md"
+        story = "docs/specs/requirements/REQ-42/story.md"
         item = checkpoint(
             "CP1", "[REQ-42][feat]ship story", ("src/a.cpp", story))
         state = flow(

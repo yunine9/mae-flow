@@ -8,11 +8,11 @@
 
 1. **语义决定路径。** Full 与 Focused 的选择和升级只看接口、兼容性、数据、安全、共享状态、并发等语义风险，不看文件数、改动行数或目录数量。
 2. **只在高价值点找人。** Full 停在 Intake、Spec、Design、每个 CP、Delivery；Focused 停在 Intake、Delivery。真实歧义、设计偏差、用户级 Reviewer 取舍、昂贵能力再次调用、不可逆动作和 manifest 变化可以增加条件停点。
-3. **能力一次调用。** Build、UT、CodeCheck、Grill、Story、Reviewer 是一次性 opaque capabilities。Host 同步返回后记录事实，不解析私有输出，不后台等待，不自动重试。
+3. **能力按语义 slot 一次调用。** Build、UT、CodeCheck、Grill、Story、Reviewer 是 opaque capabilities。每个 CP 使用启动时确认的 Build 路由同步编译一次；同一 slot 不后台等待、不自动重试，新 CP 的首次计划调用无需重复授权。
 4. **状态是最小恢复游标。** 只保留已确认启动配置、当前路径/阶段/CP、产物路径、相关业务领域、CP 自然语言事实、风险、能力尝试、Delivery 文件和初始脏文件；不把过程报告扩成第二套工作流。
 5. **写入边界单一。** 工作流命令是 capability 事实的唯一写者；Hooks 只写用户事件和 Git 副作用观察。所有读改写走项目锁和原子替换，专业 Skill/Agent 与文档渲染器不直接写活动状态。
 6. **Git 精确授权。** 每次提交只使用用户审阅的逐文件 manifest，并匹配已确认的工作分支；提交总体格式是 `[ticket][feat|fix]description`，本轮 type 必须与 Intake 确认值完全一致；最终只推送一次。
-7. **条件文档默认本地。** Spec、Story、决策、工程笔记、链路、走读、CodeCheck 和 Delivery 笔记默认保留在本地，用户明确选择后才能加入精确 manifest。
+7. **条件文档默认本地。** Spec、Story、决策、链路、走读、CodeCheck 和 Delivery 笔记默认保留在本地，用户明确选择后才能加入精确 manifest。
 8. **安装不是授权。** 没有活动状态时 Hooks fail-open；明确退出在任何阶段生效，保留现场并释放控制。
 
 ## 领域模型
@@ -46,7 +46,7 @@ scripts/tests/                         发布场景、平台边界与回归套�
 
 ## 路径与停点
 
-Intake 从仓库预设和用户修改中一次确认工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、Build、UT 生成与 UT 运行入口。恢复上下文始终显示这份已确认配置；后续阶段不重新猜测。领域选择按业务能力语义完成，不按目录、类、文件数或行数划分。
+Intake 从仓库预设和用户修改中一次确认工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、精确 Build 路由、UT 生成、UT 运行入口和质量组合。C++ 可选配置的 `build-fix` Skill，Java/Maven 用确认的 Maven 命令，其他语言用仓库准确 Skill/命令。确认后立即创建或切换工作分支。恢复上下文始终显示这份已确认配置；后续阶段不重新猜测。领域选择按业务能力语义完成，不按目录、类、文件数或行数划分。
 
 Full 的常规推进：
 
@@ -79,18 +79,18 @@ Focused 中的普通走读修复不创建新模式，也不预声明 Spec、Stor
 - `timed-out`
 - `not-observed`
 
-首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。决定绑定 kind、语义 phase/CP slot 和 environment；旧 slot 的决定不能被新 slot 消费。不要从 summary 中寻找 `PASS`、`CLEAN`、数字、测试框架字段或未来工具格式。
+同一语义 slot 首次调用后，再次调用需要当前用户决定；新的阶段或 CP 是新的计划 slot，其首次调用正常执行。决定绑定 kind、语义 phase/CP slot 和 environment；旧 slot 的决定不能被新 slot 消费。不要从 summary 中寻找 `PASS`、`CLEAN`、数字、测试框架字段或未来工具格式。
 
-Build 和其他 capability 必须由 Host 同步调用。调用前，主 Agent 先读当前尝试；同 kind 已有记录而没有当前用户重试决定时不得再次调用。这是 Agent 行为合同，不增加能力 Hook 门禁。调用真实返回后，主 Agent 立即通过 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"` 记录一条轻量恢复事实；启动失败、超时或返回不可观察时使用对应的 `capability-failed-to-start`、`capability-timed-out` 或 `capability-not-observed`。这不是质量凭证，不解析专业工具输出，也不要求固定报告。若事实写入失败，不得为补写状态而重新执行昂贵能力。没有后台 worker、进度文件探测或自动再次执行。
+Build 和其他 capability 必须由 Host 同步调用。每个 CP 在 Reviewer 意见逐条给出去向后调用配置的 Build 路由一次；`build-fix` 只在配置为 C++ 路由时使用。调用前，主 Agent 先读当前 slot 尝试；同一 slot 已有记录而没有当前用户重试决定时不得再次调用。这是 Agent 行为合同，不增加能力 Hook 门禁。调用真实返回后，主 Agent 立即通过 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"` 记录一条轻量恢复事实；启动失败、超时或返回不可观察时使用对应的 `capability-failed-to-start`、`capability-timed-out` 或 `capability-not-observed`。这不是质量凭证，不解析专业工具输出，也不要求固定报告。若事实写入失败，不得为补写状态而重新执行昂贵能力。没有后台 worker、进度文件探测或自动再次执行。Quality 不重复仍覆盖最终源码的 CP Build；只在语义跨 CP 风险出现时做一次集成走读，并在 Delivery 前记录最终一致性自然语言结论。
 
 ## 文档模型
 
 `DocumentPaths.for_ticket()` 把每个需求分为两组：
 
-- 默认持久组：`docs/mae-flow/behavior/<domain>.md` 当前行为基线，以及新领域需要的轻量 `index.md` 路由更新；
-- 本地组：`.mae-flow-work/<safe-ticket>/` 下的 Spec、Story、决定、工程笔记、UT handoff、走读、CodeCheck 与 Delivery 笔记。
+- 默认持久组：`docs/specs/<domain>.md` 当前行为基线，以及新领域需要的轻量 `docs/specs/index.md` 路由更新；
+- 本地组：`.mae-flow-work/<safe-ticket>/` 下的 Spec、Story、决定、UT handoff、走读、CodeCheck 与 Delivery 笔记。
 
-Spec 是工作流内确认的变更契约，Story 是按模板生成的独立软件详细设计和测试交接；两者都不是长期当前真相，也不把逐行编码计划落盘。条件文档的 durable copy 即使存在于 `docs/mae-flow/requirements/<safe-ticket>/`，也必须有 `delivery.conditional_document` 的精确选择才能交付。未知 document kind 维持本地策略，肯定布尔值不能把拼写错误升级为提交权限。
+Spec 是工作流内确认的变更契约，Story 是按模板生成的独立软件详细设计和测试交接；两者都不是长期当前真相，也不把逐行编码计划落盘。条件文档的 durable copy 即使存在于 `docs/specs/requirements/<safe-ticket>/`，也必须有 `delivery.conditional_document` 的精确选择才能交付。未知 document kind 维持本地策略，肯定布尔值不能把拼写错误升级为提交权限。生成的 Spec、Story 和领域 Markdown 中，`<!-- generated-by: mae-flow -->` 只作来源水印，不得成为格式、Hook 或 parser 门禁。
 
 领域行为基线按稳定业务能力划分。复杂存量领域第一次只建立本次证据覆盖的增量基线，遗漏保持未知。Delivery 对每个已选领域记录 `new`、`updated` 或 `unchanged`；只有变化文件进入 exact manifest，新领域同时更新 index，普通对账不增加用户停点。
 

@@ -222,7 +222,9 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         combined = readme + "\n" + maintainers
 
         self.assertIn(".mae-flow-work/<ticket>/spec.md", combined)
-        self.assertIn("docs/mae-flow/behavior/<domain>.md", combined)
+        self.assertIn("docs/specs/<domain>.md", combined)
+        self.assertNotIn("docs/mae-flow/behavior", combined)
+        self.assertNotIn("engineering-notes", combined)
         self.assertIn("new", combined)
         self.assertIn("updated", combined)
         self.assertIn("unchanged", combined)
@@ -277,9 +279,10 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("`craft-reviewer-agent`", phases["story"])
         self.assertIn("`craft-reviewer-agent`", phases["construction"])
         for capability in (
-                "`codecheck-advisor-agent`", "`build-fix`",
-                "`ut-generator-agent`"):
+                "`codecheck-advisor-agent`", "`ut-generator-agent`"):
             self.assertIn(capability, phases["quality"])
+        self.assertIn("confirmed build", phases["construction"].lower())
+        self.assertIn("maven", phases["construction"].lower())
         self.assertGreaterEqual(skill.count("`craft-reviewer-agent`"), 2)
 
     def test_thin_role_prompts_have_no_report_or_delivery_protocol(self):
@@ -446,14 +449,13 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
                 "late design change"):
             self.assertIn(risk, text)
         self.assertIn("not file or line count", text)
+        self.assertIn("every supplied review item", text)
 
     def test_quality_is_opaque_one_shot_and_behavior_driven(self):
         text = guidance(self, "quality").lower()
-        self.assertLess(
-            text.index("formal codecheck"),
-            text.index("build"),
-        )
-        self.assertLess(text.index("build"), text.index("unit test"))
+        self.assertLess(text.index("formal codecheck"), text.index("unit test"))
+        self.assertIn("last cp build", text)
+        self.assertIn("do not repeat build", text)
         self.assertIn("opaque", text)
         self.assertIn("do not parse", text)
         self.assertIn("at most once", text)
@@ -462,6 +464,17 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("observable behavior", text)
         self.assertIn("must not happen", text)
         self.assertIn("real boundary", text)
+
+    def test_generated_markdown_templates_use_a_nonblocking_watermark(self):
+        for relative in (
+                "skills/mae-flow/assets/STORY-TEMPLATE.md",
+                "skills/mae-flow/assets/BEHAVIOR-TEMPLATE.md"):
+            with self.subTest(relative=relative):
+                text = read_text(os.path.join(ROOT, relative))
+                self.assertTrue(text.startswith("<!-- generated-by: mae-flow -->"))
+        combined = "\n".join(
+            guidance(self, name) for name in GUIDANCE_NAMES)
+        self.assertNotIn("watermark required", combined.lower())
 
     def test_native_guidance_removes_upstream_runtime_rituals(self):
         forbidden = (

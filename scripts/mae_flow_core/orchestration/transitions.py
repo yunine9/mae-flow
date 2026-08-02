@@ -16,8 +16,11 @@ from .transition_facts import (
     staged_checkpoint_receipts_valid as _staged_checkpoint_receipts_valid,
 )
 from .transition_support import (
+    cp_build_attempt as _cp_build_attempt,
+    quality_completion_gap as _quality_completion_gap,
     record_context_fact as _record_context_fact,
     record_capability_observation as _record_capability_observation,
+    record_quality_fact as _record_quality_fact,
     resolve_risk as _resolve_risk,
 )
 
@@ -99,12 +102,6 @@ _FULL_REQUIRED_REVIEWS = {
     (Phase.SPEC, "spec-confirmed"): "review.grill",
     (Phase.STORY, "story-confirmed"): "review.design",
 }
-_CROSS_CP_CAUSES = {
-    "checkpoint.coupling": "coupling",
-    "checkpoint.shared_state": "shared state",
-    "checkpoint.interface_change": "interface change",
-    "checkpoint.late_design_drift": "late design drift",
-}
 _NON_BLOCKING_EVENTS = {
     "capability-success": "The capability completed successfully.",
     "cp-progress": "Ordinary checkpoint progress continues.",
@@ -130,10 +127,6 @@ def _with_review_decision(state, request, key, default_value):
     if any(existing_key == key for existing_key, unused in state.decisions):
         return state
     return state.with_decision(key, request.decision_value or default_value)
-
-
-def _cross_cp_cause(request):
-    return _CROSS_CP_CAUSES.get(request.decision_key.strip().lower())
 
 
 def _transition_table(path):
@@ -241,6 +234,11 @@ def advance_flow(state, request):
             "Recorded one opaque CodeAgent capability call fact.",
         )
 
+    quality_fact = _record_quality_fact(
+        state, kind, request.decision_key, request.decision_value)
+    if quality_fact is not None:
+        return AdvanceResult(*quality_fact)
+
     stop_reason = _CONDITIONAL_USER_STOPS.get(kind)
     if stop_reason is not None:
         stopped = _add_material_risk(
@@ -314,16 +312,6 @@ def advance_flow(state, request):
             "The reviewer completed without creating another user stop.",
         )
 
-    cross_cp_cause = _cross_cp_cause(request)
-    if (kind == "cp-progress"
-            and state.phase == Phase.CONSTRUCTION
-            and cross_cp_cause is not None):
-        return AdvanceResult(
-            state, False,
-            "A cross-CP integration review is requested for %s." %
-            cross_cp_cause,
-        )
-
     if kind in _NON_BLOCKING_EVENTS:
         return AdvanceResult(state, False, _NON_BLOCKING_EVENTS[kind])
 
@@ -333,6 +321,13 @@ def advance_flow(state, request):
         requested = request.decision_key.strip()
         if requested:
             requested = _checkpoint_name(requested)
+            if requested != current and _cp_build_attempt(
+                    state, current) is None:
+                return AdvanceResult(
+                    state, False,
+                    "The completed CP needs one configured Build attempt "
+                    "before the next CP opens.",
+                )
             if state.path == DeliveryPath.FULL:
                 current_key = _checkpoint_confirmation_key(current)
                 if (requested != current and not any(
@@ -421,12 +416,27 @@ def advance_flow(state, request):
             "unresolved.",
         )
 
+    if state.phase == Phase.QUALITY and kind == "quality-complete":
+        gap = _quality_completion_gap(state)
+        if gap:
+            return AdvanceResult(state, False, gap)
+
     if state.risks and kind in {
             "spec-confirmed", "story-confirmed", "construction-complete"}:
         return AdvanceResult(
             state,
             True,
             "The phase cannot advance while workflow risks remain unresolved.",
+        )
+
+    if (state.phase == Phase.CONSTRUCTION
+            and kind == "construction-complete"
+            and _cp_build_attempt(
+                state, state.current_cp or "CP1") is None):
+        return AdvanceResult(
+            state, False,
+            "Construction completion requires one configured Build attempt "
+            "for the current CP.",
         )
 
     if (state.path == DeliveryPath.FULL

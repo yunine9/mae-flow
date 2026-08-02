@@ -24,17 +24,24 @@ def normalize_domain_path(path):
         raise ValueError("domain path must be text")
     normalized = path.strip().replace("\\", "/")
     parts = normalized.split("/")
-    if (len(parts) != 4
-            or [part.casefold() for part in parts[:3]]
-            != ["docs", "mae-flow", "behavior"]
-            or not parts[3].casefold().endswith(".md")
-            or parts[3].casefold() == "index.md"
-            or parts[3] in {".md", "..md"}
-            or ".." in parts[3]):
+    folded = [part.casefold() for part in parts]
+    current = len(parts) == 3 and folded[:2] == ["docs", "specs"]
+    legacy = (
+        len(parts) == 4
+        and folded[:3] == ["docs", "mae-flow", "behavior"]
+    )
+    filename = parts[-1] if parts else ""
+    if ((not current and not legacy)
+            or not filename.casefold().endswith(".md")
+            or filename.casefold() == "index.md"
+            or filename in {".md", "..md"}
+            or ".." in filename):
         raise ValueError(
-            "domain path must be one exact docs/mae-flow/behavior/<domain>.md")
-    domain = _behavior_segment(parts[3])
-    return "docs/mae-flow/behavior/%s.md" % domain
+            "domain path must be one exact docs/specs/<domain>.md")
+    domain = _behavior_segment(filename)
+    if legacy:
+        return "docs/mae-flow/behavior/%s.md" % domain
+    return "docs/specs/%s.md" % domain
 
 
 def selected_domains(state):

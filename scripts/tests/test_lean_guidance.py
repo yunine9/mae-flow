@@ -79,7 +79,7 @@ class LeanGuidanceTests(unittest.TestCase):
         story = render_guidance(state_for(Phase.STORY))
         delivery = render_guidance(state_for(Phase.DELIVERY))
 
-        self.assertIn("behavior/index.md", startup)
+        self.assertIn("docs/specs/index.md", startup)
         self.assertIn("business capability", startup)
         self.assertIn("selected behavior baseline", spec)
         self.assertIn(".mae-flow-work", spec)
@@ -131,8 +131,8 @@ class LeanGuidanceTests(unittest.TestCase):
         self.assertIn("cumulative UT handoff", construction)
         self.assertIn("at most once", quality)
         self.assertIn("current user decision", quality)
-        self.assertIn("Changed source, phase, CP, or environment", quality)
-        self.assertIn("never auto-authorizes", quality)
+        self.assertIn("same semantic slot", quality)
+        self.assertIn("new CP or phase slot", quality)
 
     def test_empty_artifacts_render_as_none(self):
         text = render_guidance(FlowState.new(
@@ -152,9 +152,8 @@ class LeanGuidanceTests(unittest.TestCase):
         expected = {
             Phase.SPEC: ("grill-critic-agent",),
             Phase.STORY: ("story-generator-agent", "craft-reviewer-agent"),
-            Phase.CONSTRUCTION: ("craft-reviewer-agent",),
-            Phase.QUALITY: (
-                "codecheck-advisor-agent", "build-fix", "ut-generator-agent"),
+            Phase.CONSTRUCTION: ("craft-reviewer-agent", "build-fix"),
+            Phase.QUALITY: ("codecheck-advisor-agent", "ut-generator-agent"),
         }
         for phase, names in expected.items():
             with self.subTest(phase=phase):
@@ -166,7 +165,8 @@ class LeanGuidanceTests(unittest.TestCase):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
         self.assertIn("testability seams early", construction)
         self.assertIn("cumulative UT handoff", construction)
-        self.assertIn("does not write, compile, or run formal UT", construction)
+        self.assertIn("does not write or run formal UT", construction)
+        self.assertIn("configured Build", construction)
         self.assertNotIn("tests leading each behavior change", construction)
 
     def test_focused_recovery_from_full_only_phases_never_demands_full_reviews(self):

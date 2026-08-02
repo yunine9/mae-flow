@@ -602,7 +602,7 @@
     {
       "source": "role:compile-agent",
       "capability": "compile agent",
-      "new_home": "configured opaque Build capability after production cutover",
+      "new_home": "runtime/guidance/construction.md configured opaque Build route per CP",
       "semantic_tests": [],
       "status": "migration-only"
     },

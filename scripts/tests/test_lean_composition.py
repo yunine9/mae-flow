@@ -35,6 +35,22 @@ def legacy(current, workflow):
     }
 
 
+def satisfy_new_completion_facts(state, event):
+    if event == "construction-complete":
+        return record_flow_attempt(
+            state,
+            flow_attempt_context(state, "build"),
+            "returned",
+            "opaque migrated CP build return",
+        )
+    if event == "quality-complete":
+        return advance_flow(state, AdvanceRequest(
+            "final-conformance", "",
+            "迁移后的最终实现与已确认范围一致。",
+        )).state
+    return state
+
+
 class LeanCompositionTests(unittest.TestCase):
     def test_representative_families_compose_through_recovery_boundaries(self):
         cases = (
@@ -68,6 +84,7 @@ class LeanCompositionTests(unittest.TestCase):
                             flow_attempt_context(advanced, "grill"),
                             "returned",
                         )
+                    advanced = satisfy_new_completion_facts(advanced, event)
                     advanced = advance_flow(
                         advanced, AdvanceRequest(
                             event, "", "用户确认迁移后的语义恢复步骤。"),
@@ -97,6 +114,7 @@ class LeanCompositionTests(unittest.TestCase):
                 migrated = migrate_legacy_flow(
                     legacy(current, "review")).state
                 recovered = decode_flow_state(encode_flow_state(migrated))
+                recovered = satisfy_new_completion_facts(recovered, event)
                 result = advance_flow(
                     recovered,
                     AdvanceRequest(

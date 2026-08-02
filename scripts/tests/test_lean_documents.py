@@ -25,13 +25,13 @@ class LeanDocumentPathTests(unittest.TestCase):
         paths = DocumentPaths.for_ticket(r"C:\Repo", "REQ-DOMAIN")
 
         self.assertEqual(
-            r"C:\Repo\docs\mae-flow\behavior\index.md",
+            r"C:\Repo\docs\specs\index.md",
             getattr(paths, "behavior_index", None),
         )
         behavior_document = getattr(paths, "behavior_document", None)
         self.assertIsNotNone(behavior_document)
         self.assertEqual(
-            r"C:\Repo\docs\mae-flow\behavior\order-query.md",
+            r"C:\Repo\docs\specs\order-query.md",
             behavior_document("order-query"),
         )
         for unsafe in ("../order", r"sales\order", "CON", "order/query"):
@@ -59,13 +59,13 @@ class LeanDocumentPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 os.path.join(
-                    root, "docs", "mae-flow", "requirements", safe,
+                    root, "docs", "specs", "requirements", safe,
                     "spec.md",
                 ),
                 paths.spec,
             )
             self.assertEqual(
-                os.path.join(root, "docs", "mae-flow", "behavior"),
+                os.path.join(root, "docs", "specs"),
                 paths.behavior_root,
             )
             self.assertEqual(
@@ -94,34 +94,27 @@ class LeanDocumentPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 os.path.join(
-                    root, "docs", "mae-flow", "requirements", safe,
+                    root, "docs", "specs", "requirements", safe,
                     "story.md",
                 ),
                 paths.story,
             )
             self.assertEqual(
                 os.path.join(
-                    root, "docs", "mae-flow", "requirements", safe,
+                    root, "docs", "specs", "requirements", safe,
                     "decisions.md",
                 ),
                 paths.decisions,
             )
             self.assertEqual(
                 os.path.join(
-                    root, "docs", "mae-flow", "requirements", safe,
-                    "engineering.md",
-                ),
-                paths.engineering_notes,
-            )
-            self.assertEqual(
-                os.path.join(
-                    root, "docs", "mae-flow", "requirements", safe,
+                    root, "docs", "specs", "requirements", safe,
                     "chain.md",
                 ),
                 paths.chain,
             )
             requirement_root = os.path.join(
-                root, "docs", "mae-flow", "requirements", safe)
+                root, "docs", "specs", "requirements", safe)
             expected_mappings = {
                 "story": (
                     paths.local_story, paths.story, "story.md", "story.md"),
@@ -130,12 +123,6 @@ class LeanDocumentPathTests(unittest.TestCase):
                     paths.decisions,
                     "decisions.md",
                     "decisions.md",
-                ),
-                "engineering-notes": (
-                    paths.local_engineering_notes,
-                    paths.engineering_notes,
-                    "engineering-notes.md",
-                    "engineering.md",
                 ),
                 "chain": (
                     paths.local_chain, paths.chain, "chain.md", "chain.md"),
@@ -170,6 +157,8 @@ class LeanDocumentPathTests(unittest.TestCase):
             self.assertEqual((), tuple(os.listdir(root)))
             self.assertFalse(hasattr(paths, "archive_root"))
             self.assertFalse(hasattr(paths, "openspec_root"))
+            self.assertFalse(hasattr(paths, "engineering_notes"))
+            self.assertFalse(hasattr(paths, "local_engineering_notes"))
 
     def test_windows_root_uses_windows_separators(self):
         paths = DocumentPaths.for_ticket(r"C:\repo", "REQ-42")
@@ -181,11 +170,11 @@ class LeanDocumentPathTests(unittest.TestCase):
         self.assertEqual(
             "C:\\repo\\.mae-flow-work\\" + safe, paths.local_root)
         self.assertEqual(
-            "C:\\repo\\docs\\mae-flow\\requirements\\%s\\spec.md" % safe,
+            "C:\\repo\\docs\\specs\\requirements\\%s\\spec.md" % safe,
             paths.spec,
         )
         self.assertEqual(
-            r"C:\repo\docs\mae-flow\behavior", paths.behavior_root)
+            r"C:\repo\docs\specs", paths.behavior_root)
 
     def test_empty_traversal_and_drive_tickets_are_rejected(self):
         rejected = (
@@ -341,14 +330,13 @@ class LeanDocumentCommitPolicyTests(unittest.TestCase):
             "spec.md": "spec",
             "story.md": "story",
             "decisions.md": "decisions",
-            "engineering.md": "engineering-notes",
             "chain.md": "chain",
             "review-ledger.md": "review-ledger",
             "codecheck-ledger.md": "codecheck-ledger",
             "delivery-notes.md": "delivery-notes",
         }
         for filename, kind in expected.items():
-            path = "docs/mae-flow/requirements/REQ-42/%s" % filename
+            path = "docs/specs/requirements/REQ-42/%s" % filename
             with self.subTest(path=path):
                 self.assertEqual(kind, conditional_document_kind(path))
                 self.assertTrue(commit_policy(kind, True))
@@ -357,12 +345,17 @@ class LeanDocumentCommitPolicyTests(unittest.TestCase):
         self.assertEqual(
             "story",
             conditional_document_kind(
-                r"DOCS\MAE-FLOW\REQUIREMENTS\REQ-42\STORY.MD"),
+                r"DOCS\SPECS\REQUIREMENTS\REQ-42\STORY.MD"),
+        )
+        self.assertEqual(
+            "story",
+            conditional_document_kind(
+                "docs/mae-flow/requirements/REQ-42/story.md"),
         )
 
     def test_nonconditional_or_local_paths_have_no_conditional_kind(self):
         paths = (
-            "docs/mae-flow/behavior/query.md",
+            "docs/specs/query.md",
             ".mae-flow-work/REQ-42/spec.md",
             ".mae-flow-work/REQ-42/story.md",
             "docs/mae-flow/requirements/REQ-42/nested/story.md",
@@ -384,7 +377,6 @@ class LeanDocumentCommitPolicyTests(unittest.TestCase):
         conditional = (
             "spec", "story",
             "decisions",
-            "engineering-notes",
             "chain",
             "review-ledger",
             "codecheck-ledger",

@@ -1,3 +1,5 @@
+<!-- generated-by: mae-flow -->
+
 # <领域名称>
 
 ## 领域范围

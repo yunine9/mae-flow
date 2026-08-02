@@ -1,3 +1,5 @@
+<!-- generated-by: mae-flow -->
+
 | 产品名称 Product name | 密级 Confidentiality level | 产品版本 Product version |
 |--|--|--|
 | | 内部公开 | |

@@ -295,8 +295,12 @@ class LeanMigrationCliTests(unittest.TestCase):
             decision_key=migration_risk,
             decision_value="用户确认该旧步骤属于质量阶段，可以进入交付。",
         ))
+        conformance = advance_flow(resolved.state, AdvanceRequest(
+            "final-conformance",
+            decision_value="迁移后的最终实现与确认范围一致。",
+        ))
         advanced = advance_flow(
-            resolved.state, AdvanceRequest("quality-complete"))
+            conformance.state, AdvanceRequest("quality-complete"))
 
         self.assertIs(state, blocked.state)
         self.assertEqual(Phase.QUALITY, blocked.state.phase)

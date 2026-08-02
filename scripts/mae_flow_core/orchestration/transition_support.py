@@ -20,6 +20,15 @@ _CP_FACT_EVENTS = {
     "cp-ut-intent": "ut-intent",
 }
 _RISK_RESOLUTION = "risk.resolution"
+FINAL_CONFORMANCE = "quality.final_conformance"
+INTEGRATION_REQUIRED = "quality.integration.required"
+INTEGRATION_REVIEW = "quality.integration.review"
+_CROSS_CP_CAUSES = {
+    "checkpoint.coupling": "coupling",
+    "checkpoint.shared_state": "shared state",
+    "checkpoint.interface_change": "interface change",
+    "checkpoint.late_design_drift": "late design drift",
+}
 
 
 def record_context_fact(state, kind, key, value):
@@ -76,16 +85,85 @@ def add_material_risk(state, kind, detail, default_detail):
     return replace(state, risks=state.risks + (risk,))
 
 
+def decision_exists(state, key):
+    return any(existing == key for existing, unused in state.decisions)
+
+
+def replace_decision(state, key, value):
+    decisions = tuple(item for item in state.decisions if item[0] != key)
+    return replace(state, decisions=decisions + ((key, value),))
+
+
+def cp_build_attempt(state, checkpoint):
+    slot = "build:construction:%s" % (checkpoint or "CP1")
+    return next((
+        attempt for attempt in reversed(state.capabilities)
+        if attempt.kind == "build" and attempt.source_revision == slot
+    ), None)
+
+
+def record_quality_fact(state, kind, key, value):
+    """Record thin Quality facts and semantic cross-CP review triggers."""
+    text = value.strip() if isinstance(value, str) else ""
+    if kind == "final-conformance":
+        if state.phase != Phase.QUALITY:
+            return state, False, "Final conformance applies only in Quality."
+        if not text:
+            return state, False, (
+                "Final conformance needs one natural-language conclusion.")
+        return replace_decision(state, FINAL_CONFORMANCE, text), False, (
+            "Recorded final behavior, design, and coverage conformance.")
+    if kind == "integration-review-complete":
+        if (state.phase != Phase.QUALITY
+                or not decision_exists(state, INTEGRATION_REQUIRED)):
+            return state, False, (
+                "Integration review completion requires a semantic trigger.")
+        slot = "reviewer:quality:%s" % (state.current_cp or "CP1")
+        if not any(
+                attempt.kind == "reviewer"
+                and attempt.source_revision == slot
+                for attempt in reversed(state.capabilities)):
+            return state, False, (
+                "Integration review completion requires one reviewer attempt.")
+        if not text:
+            return state, False, (
+                "Integration review needs one natural-language conclusion.")
+        return replace_decision(state, INTEGRATION_REVIEW, text), False, (
+            "Recorded the one conditional integration review conclusion.")
+    cause = _CROSS_CP_CAUSES.get(key.strip().lower())
+    if kind != "cp-progress" or state.phase != Phase.CONSTRUCTION or not cause:
+        return None
+    detail = text or "semantic coupling detected"
+    return replace_decision(
+        state, INTEGRATION_REQUIRED, "%s: %s" % (cause, detail)), False, (
+        "A cross-CP integration review is requested for %s." % cause)
+
+
+def quality_completion_gap(state):
+    if not decision_exists(state, FINAL_CONFORMANCE):
+        return "Quality completion requires one final conformance conclusion."
+    if (decision_exists(state, INTEGRATION_REQUIRED)
+            and not decision_exists(state, INTEGRATION_REVIEW)):
+        return "The semantic risk requires one integration review conclusion."
+    return ""
+
+
 def clear_downstream_authorization(state, include_construction=False):
     prefixes = ["quality.", "delivery."]
     exact = {"review.design"}
+    retained = {INTEGRATION_REQUIRED}
     if include_construction:
         prefixes += ["focused.", "construction.", "review."]
         exact = set()
+        retained = set()
     decisions = tuple(
         item for item in state.decisions
-        if item[0] not in exact
-        and not item[0].startswith(tuple(prefixes)))
+        if item[0] in retained
+        or (
+            item[0] not in exact
+            and not item[0].startswith(tuple(prefixes))
+        )
+    )
     return replace(
         state,
         decisions=decisions,

@@ -39,7 +39,7 @@ class WindowsPathAndEncodingTests(unittest.TestCase):
     def test_nt_paths_preserve_display_and_fold_backslash_case_identity(self):
         paths = DocumentPaths.for_ticket(r"C:\Repo", "REQ-WIN")
         self.assertEqual(r"C:\Repo", ntpath.splitdrive(paths.spec)[0] + "\\Repo")
-        self.assertTrue(paths.spec.startswith(r"C:\Repo\docs\mae-flow"))
+        self.assertTrue(paths.spec.startswith(r"C:\Repo\docs\specs"))
 
         drive = DeliveryManifest.from_paths(
             [r"C:\Repo\Src\Feature.cpp"],

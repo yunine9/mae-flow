@@ -2,7 +2,7 @@
 
 import os
 
-from .capabilities import flow_retry_options
+from .capabilities import flow_attempt_context, flow_retry_options
 from .behavior_baseline import domain_actions, selected_domains
 from .checkpoints import (
     checkpoint_context,
@@ -74,6 +74,9 @@ def render_guidance(state):
         "Build: %s" % (config.build_method or "not configured"),
         "UT generation: %s" % (config.ut_method or "not configured"),
         "UT run entry: %s" % (config.ut_command or "not configured"),
+        "Quality plan: %s" % (
+            _latest_decision(state, "startup.quality_plan")
+            or "not configured"),
     ) + (("repository defaults warning: %s" % defaults_warning,)
          if defaults_warning else ())
     domains = selected_domains(state)
@@ -130,12 +133,21 @@ def render_capability_facts(state):
         seen.add(attempt.kind)
         try:
             option = flow_retry_options(state, attempt.kind)
+            context = flow_attempt_context(state, attempt.kind)
         except (TypeError, ValueError):
             label = "状态未知；不要猜测或自动重试"
         else:
-            label = (
-                "已授权一次重试（尚未消费）"
-                if option.allowed else "再次调用前需要用户决定")
+            current_attempted = any(
+                item.kind == context.kind.value
+                and item.source_revision == context.source_revision
+                and item.environment_revision == context.environment_revision
+                for item in state.capabilities)
+            if option.allowed and current_attempted:
+                label = "已授权一次重试（尚未消费）"
+            elif option.allowed:
+                label = "当前新语义 slot 尚未调用；仅按阶段计划调用"
+            else:
+                label = "再次调用前需要用户决定"
         lines.append("- %s: %s" % (attempt.kind, label))
     return "\n".join(lines) + "\n"
 
@@ -162,6 +174,11 @@ def _delivery_user_card(state):
     decisions = {key: value for key, value in state.decisions}
     moonlight = moonlight_authorization_view(state)
     lines = ["需要用户介入: 交付（精确文件、提交说明和是否推送）"]
+    conformance = decisions.get("quality.final_conformance", "未记录")
+    lines.append("最终 Spec/Story/代码对照: " + conformance)
+    if decisions.get("quality.integration.required"):
+        lines.append("集成边界走读: " + decisions.get(
+            "quality.integration.review", "尚未完成"))
     actions = domain_actions(state)
     if actions:
         lines.append("领域行为基线:")
@@ -223,6 +240,8 @@ def render_user_card(state):
             "- Build: %s" % (config.build_method or "未配置"),
             "- UT 生成: %s" % (config.ut_method or "未配置"),
             "- UT 运行入口: %s" % (config.ut_command or "未配置"),
+            "- 质量组合: %s" % (
+                decisions.get("startup.quality_plan", "未配置")),
         ) + (("- 预设读取提示: %s" % defaults_warning,)
              if defaults_warning else ()) + (
             "请直接用自然语言确认或修改以上任意项。",)

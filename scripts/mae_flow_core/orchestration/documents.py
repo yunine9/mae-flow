@@ -29,8 +29,6 @@ _CONDITIONAL_KINDS = frozenset({
     "spec",
     "story",
     "decisions",
-    "engineering",
-    "engineering-notes",
     "chain",
     "review",
     "review-ledger",
@@ -43,7 +41,6 @@ _CONDITIONAL_FILENAMES = {
     "spec.md": "spec",
     "story.md": "story",
     "decisions.md": "decisions",
-    "engineering.md": "engineering-notes",
     "chain.md": "chain",
     "review-ledger.md": "review-ledger",
     "codecheck-ledger.md": "codecheck-ledger",
@@ -152,7 +149,6 @@ class DocumentPaths:
     local_spec: str
     local_story: str
     local_decisions: str
-    local_engineering_notes: str
     local_chain: str
     ut_handoff: str
     local_review_notes: str
@@ -161,7 +157,6 @@ class DocumentPaths:
     spec: str
     story: str
     decisions: str
-    engineering_notes: str
     chain: str
     review_ledger: str
     codecheck_ledger: str
@@ -180,8 +175,8 @@ class DocumentPaths:
         safe = _safe_ticket_segment(original)
         local_root = _path_join(root, ".mae-flow-work", safe)
         requirement_root = _path_join(
-            root, "docs", "mae-flow", "requirements", safe)
-        behavior_root = _path_join(root, "docs", "mae-flow", "behavior")
+            root, "docs", "specs", "requirements", safe)
+        behavior_root = _path_join(root, "docs", "specs")
         return cls(
             ticket=original,
             safe_ticket=safe,
@@ -189,8 +184,6 @@ class DocumentPaths:
             local_spec=_path_join(local_root, "spec.md"),
             local_story=_path_join(local_root, "story.md"),
             local_decisions=_path_join(local_root, "decisions.md"),
-            local_engineering_notes=_path_join(
-                local_root, "engineering-notes.md"),
             local_chain=_path_join(local_root, "chain.md"),
             ut_handoff=_path_join(local_root, "ut-handoff.md"),
             local_review_notes=_path_join(local_root, "review-notes.md"),
@@ -201,7 +194,6 @@ class DocumentPaths:
             spec=_path_join(requirement_root, "spec.md"),
             story=_path_join(requirement_root, "story.md"),
             decisions=_path_join(requirement_root, "decisions.md"),
-            engineering_notes=_path_join(requirement_root, "engineering.md"),
             chain=_path_join(requirement_root, "chain.md"),
             review_ledger=_path_join(requirement_root, "review-ledger.md"),
             codecheck_ledger=_path_join(
@@ -239,10 +231,11 @@ def conditional_document_kind(path):
         raise TypeError("document path must be text")
     normalized = path.replace("\\", "/")
     parts = normalized.casefold().split("/")
-    if (
-            len(parts) != 5
-            or parts[:3] != ["docs", "mae-flow", "requirements"]
-            or not parts[3]):
+    prefixes = (
+        ["docs", "specs", "requirements"],
+        ["docs", "mae-flow", "requirements"],
+    )
+    if len(parts) != 5 or parts[:3] not in prefixes or not parts[3]:
         return ""
     kind = _CONDITIONAL_FILENAMES.get(parts[4], "")
     if (

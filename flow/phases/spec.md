@@ -17,7 +17,10 @@ Stop for a real reviewer tradeoff. CLEAR continues without a user stop.
 Produce the reviewed specification and record remaining risks or decisions in
 natural language. Keep the confirmed change contract under the ticket's local
 `.mae-flow-work` directory unless the user explicitly selects its exact durable
-copy for commit. Record critic failure without automatic retry.
+copy under `docs/specs/requirements/<ticket>/` for commit. Put
+`<!-- generated-by: mae-flow -->` at the start of generated Markdown as a
+provenance mark only; never validate it in a Hook or parser. Record critic
+failure without automatic retry.
 
 ## Next
 Proceed to Design (the stable recovery value is `story`). The next meaningful

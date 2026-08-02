@@ -41,6 +41,7 @@ def parse_args(argv=None):
     start.add_argument("--build-method")
     start.add_argument("--ut-method")
     start.add_argument("--ut-command")
+    start.add_argument("--quality-plan")
     start.add_argument("--path", choices=["full", "focused"], required=True)
     start.add_argument(
         "--pace", choices=["continuous", "staged"], required=True)

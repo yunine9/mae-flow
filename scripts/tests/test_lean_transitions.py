@@ -49,7 +49,88 @@ def with_returned_review(state):
     return replace(state, capabilities=state.capabilities + (attempt,))
 
 
+def with_cp_build(state, checkpoint="CP1"):
+    attempt = CapabilityAttempt(
+        "build", "build:construction:%s" % checkpoint,
+        "lean-workflow-v1", "returned")
+    return replace(
+        state,
+        current_cp=checkpoint,
+        capabilities=state.capabilities + (attempt,),
+    )
+
+
 class FullTransitionTests(unittest.TestCase):
+    def test_construction_requires_one_build_attempt_for_the_current_cp(self):
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            commit_pace=CommitPace.CONTINUOUS,
+            current_cp="CP1",
+        )
+
+        missing = advance_flow(
+            state, AdvanceRequest("construction-complete"))
+        compiled = advance_flow(
+            with_cp_build(state), AdvanceRequest("construction-complete"))
+
+        self.assertEqual(Phase.CONSTRUCTION, missing.state.phase)
+        self.assertIn("build", missing.reason.lower())
+        self.assertEqual(Phase.QUALITY, compiled.state.phase)
+
+    def test_quality_requires_one_final_conformance_conclusion(self):
+        state = flow(phase=Phase.QUALITY)
+
+        missing = advance_flow(state, AdvanceRequest("quality-complete"))
+        conformance = advance_flow(state, AdvanceRequest(
+            "final-conformance",
+            decision_value=(
+                "最终代码完整实现已确认范围；设计偏差已展示；关键行为有覆盖。"),
+        ))
+        complete = advance_flow(
+            conformance.state, AdvanceRequest("quality-complete"))
+
+        self.assertEqual(Phase.QUALITY, missing.state.phase)
+        self.assertIn("conformance", missing.reason.lower())
+        self.assertIn(
+            ("quality.final_conformance",
+             "最终代码完整实现已确认范围；设计偏差已展示；关键行为有覆盖。"),
+            conformance.state.decisions,
+        )
+        self.assertEqual(Phase.DELIVERY, complete.state.phase)
+
+    def test_semantic_integration_risk_requires_one_review_conclusion(self):
+        state = flow(phase=Phase.CONSTRUCTION)
+        required = advance_flow(state, AdvanceRequest(
+            "cp-progress", "checkpoint.shared_state",
+            "CP1 与 CP2 修改同一缓存状态。"))
+        quality = replace(required.state, phase=Phase.QUALITY)
+        quality = advance_flow(quality, AdvanceRequest(
+            "final-conformance",
+            decision_value="最终实现与已确认设计一致。",
+        )).state
+
+        missing = advance_flow(
+            quality, AdvanceRequest("quality-complete"))
+        attempted = replace(quality, capabilities=quality.capabilities + (
+            CapabilityAttempt(
+                "reviewer", "reviewer:quality:CP1",
+                "lean-workflow-v1", "returned"),
+        ))
+        reviewed = advance_flow(attempted, AdvanceRequest(
+            "integration-review-complete",
+            decision_value="共享状态集成边界已走读，无新增待决风险。",
+        ))
+        complete = advance_flow(
+            reviewed.state, AdvanceRequest("quality-complete"))
+
+        self.assertIn(
+            ("quality.integration.required",
+             "shared state: CP1 与 CP2 修改同一缓存状态。"),
+            required.state.decisions,
+        )
+        self.assertEqual(Phase.QUALITY, missing.state.phase)
+        self.assertIn("integration review", missing.reason.lower())
+        self.assertEqual(Phase.DELIVERY, complete.state.phase)
     def test_checkpoint_brief_result_review_and_ut_intent_are_recovery_facts(self):
         state = flow(phase=Phase.CONSTRUCTION)
         events = (
@@ -75,7 +156,7 @@ class FullTransitionTests(unittest.TestCase):
 
     def test_domain_selection_and_delivery_action_survive_as_lightweight_facts(self):
         state = flow(phase=Phase.STARTUP)
-        path = "docs/mae-flow/behavior/order-query.md"
+        path = "docs/specs/order-query.md"
 
         selected = advance_flow(state, AdvanceRequest(
             "domain-selected", path,
@@ -99,9 +180,9 @@ class FullTransitionTests(unittest.TestCase):
     def test_domain_selection_rejects_nonportable_windows_names(self):
         state = flow(phase=Phase.STARTUP)
         for path in (
-                "docs/mae-flow/behavior/CON.md",
-                "docs/mae-flow/behavior/order?.md",
-                "docs/mae-flow/behavior/order .md"):
+                "docs/specs/CON.md",
+                "docs/specs/order?.md",
+                "docs/specs/order .md"):
             with self.subTest(path=path):
                 result = advance_flow(
                     state,
@@ -165,6 +246,34 @@ class FullTransitionTests(unittest.TestCase):
         self.assertFalse(any(
             key.startswith(("quality.", "delivery."))
             for key, unused in result.state.decisions))
+
+    def test_quality_repair_keeps_the_semantic_integration_trigger(self):
+        state = replace(
+            flow(phase=Phase.QUALITY),
+            decisions=(
+                ("quality.integration.required", "shared state: cache"),
+                ("quality.integration.review", "stale conclusion"),
+                ("quality.final_conformance", "stale conclusion"),
+            ),
+        )
+
+        result = advance_flow(state, AdvanceRequest(
+            "quality-defect-repair",
+            decision_value="修正 Quality 发现的缓存缺陷。",
+        ))
+
+        self.assertIn(
+            ("quality.integration.required", "shared state: cache"),
+            result.state.decisions,
+        )
+        self.assertNotIn(
+            ("quality.integration.review", "stale conclusion"),
+            result.state.decisions,
+        )
+        self.assertNotIn(
+            ("quality.final_conformance", "stale conclusion"),
+            result.state.decisions,
+        )
 
     def test_review_fact_requires_matching_returned_capability_attempt(self):
         cases = (
@@ -247,6 +356,12 @@ class FullTransitionTests(unittest.TestCase):
                 if phase == Phase.CONSTRUCTION:
                     original = replace(
                         original, commit_pace=CommitPace.CONTINUOUS)
+                    original = with_cp_build(original)
+                elif phase == Phase.QUALITY:
+                    original = original.with_decision(
+                        "quality.final_conformance",
+                        "Final code and coverage match the confirmed scope.",
+                    )
                 if phase == Phase.SPEC:
                     original = with_returned_review(original)
                     original = advance_flow(
@@ -398,6 +513,7 @@ class FullTransitionTests(unittest.TestCase):
             state,
             AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
         ).state
+        cp1 = with_cp_build(cp1, "CP1")
         cp2_ready = advance_flow(
             cp1,
             AdvanceRequest("cp-ready", decision_key="CP2"),
@@ -433,6 +549,7 @@ class FullTransitionTests(unittest.TestCase):
             state,
             AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
         ).state
+        cp1 = with_cp_build(cp1, "CP1")
         cp2 = advance_flow(
             cp1, AdvanceRequest("cp-ready", decision_key="CP2"))
 
@@ -711,6 +828,7 @@ class FocusedTransitionTests(unittest.TestCase):
             commit_pace=CommitPace.STAGED,
             current_cp="CP1",
         )
+        state = with_cp_build(state, "CP1")
 
         result = advance_flow(
             state, AdvanceRequest("cp-ready", decision_key="CP2"))

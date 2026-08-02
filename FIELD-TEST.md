@@ -17,17 +17,17 @@
 ### 1.1 small Full
 
 - [ ] 一个只改少量业务行为的需求可以由用户选择 Full；界面没有用文件数或行数劝退。
-- [ ] Intake 一卡展示工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、Build、UT 生成/运行入口和初始脏文件归属，普通自然语言即可修改或确认。
+- [ ] Intake 一卡展示工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、语言对应的精确 Build 路由、UT 生成/运行入口、质量组合和初始脏文件归属，普通自然语言即可修改或确认；确认后立即位于工作分支。
 - [ ] Intake 读取行为 index 后只选择相关业务能力领域；index 缺失或复杂存量领域未完整建模均不阻断。
 - [ ] Spec 只固定 WHAT；Grill fake 只调用一次，不透明返回后停在 Spec 用户卡。
 - [ ] Design 的 Story 按模板同时承载客户场景、业务规格、功能验收、软件详细设计和测试交接；它不是逐行编码计划。Story/Reviewer fake 各只调用一次，不透明返回后停在 Design 用户卡。
-- [ ] 每个 CP 的同一张卡展示原简报、实际结果、Reviewer、累计 UT 增量和下一 CP，用户可自然语言修改后续设计；普通进度不会增加停点。
-- [ ] Quality 不重复先前能力，Delivery 展示精确文件、提交说明和推送选择。
+- [ ] 每个 CP 的同一张卡展示原简报、实际结果、Reviewer、累计 UT 增量和下一 CP，用户可自然语言修改后续设计；Reviewer 每条意见有去向，并按开局配置同步 Build 一次，无 sleep/轮询/自动重试。
+- [ ] Quality 不重复仍覆盖最终源码的 CP Build；CodeCheck/UT 各一次，最终一致性有短结论，只有语义跨 CP 风险才增加一次集成走读。Delivery 展示精确文件、提交说明和推送选择。
 
 ### 1.2 complex Full
 
 - [ ] 至少三个 CP 依次可见，CP1 未确认时不能静默打开 CP2。
-- [ ] 跨 CP 接口/共享状态集成会记录原因，但已明确的工作不会额外找人签字。
+- [ ] 跨 CP 接口/共享状态集成会记录原因，并在 Quality 触发恰好一次集成边界走读；已明确的普通工作不会额外找人签字。
 - [ ] 真实歧义或有意义的设计偏差会停下，并保留可恢复风险事实。
 - [ ] 会话重启后 `current` 保留已确认启动配置、相关领域和 CP 事实；`SessionStart` 只注入有界摘要，不回放长历史或重跑 capability。
 
@@ -35,12 +35,12 @@
 
 - [ ] Focused 只有 Intake 与 Delivery 两个固定停点，启动时不声明 Spec、Story 或 UT handoff。
 - [ ] Reviewer/CodeCheck 的未知输出原样作为 opaque summary 保存，不解析成 clean/fail。
-- [ ] 首次调用后，源码 revision、阶段、CP 或环境变化都不自动产生新调用；当前用户决定绑定新 slot 后才能再次调用。
+- [ ] 同一语义 slot 不会自动重试；新阶段/新 CP 的首次计划调用正常执行，当前用户决定只用于同一 slot 再试。
 - [ ] 若评审揭示接口、兼容性、数据、安全、共享状态或并发风险，记录自然语言原因并升级 Full/Spec。
 
 ## 3. Capability 边界
 
-- [ ] Build fake 的同步 success、failure、timeout 各产生一条事实；Host 返回后没有后台任务。
+- [ ] C++、Java/Maven 与其他语言分别采用 Intake 确认的准确 Build 路由；每 CP 的 fake 同步 success、failure、timeout 各产生一条事实，Host 返回后没有后台任务。
 - [ ] 同一 Build context 的第二次调用被阻止并要求用户选择；没有自动重试。
 - [ ] 弱 C++/gtest UT fake 无法证明执行数量时，系统只报告观察到的返回，不编造通过。
 - [ ] unknown CodeCheck payload 含未来字段、数字和 `PASS` 文本时，系统不推断 verdict。
@@ -48,9 +48,10 @@
 
 ## 4. 文档与工作区
 
-- [ ] Spec、Story、决策和工程说明位于同一 `.mae-flow-work/<ticket>/` 本地目录。
+- [ ] Spec、Story 和决策位于同一 `.mae-flow-work/<ticket>/` 本地目录；不生成工程经验/工程说明文档。
 - [ ] Spec、Story 和其他条件文档默认保留在本地；仅当用户明确选择入库时加入 manifest。
-- [ ] 领域行为文档按业务能力划分；Delivery 对每个相关领域记录 `new`、`updated` 或 `unchanged`，只将真实变化的领域文件和必要 index 更新加入 manifest。
+- [ ] 领域行为文档按业务能力划分在 `docs/specs/<domain>.md`；Delivery 对每个相关领域记录 `new`、`updated` 或 `unchanged`，只将真实变化的领域文件和必要 index 更新加入 manifest。
+- [ ] 工作流生成的 Markdown 带来源水印，但删除或修改水印不会触发 Hook/parser 拦截。
 - [ ] 未采用的初始脏文件可以留在工作区，但不会进入自动 Delivery。
 - [ ] 用户采用的初始脏文件同时出现在 adoption facts 和 exact manifest。
 - [ ] 损坏恢复状态不会被覆盖；普通开发 fail-open，明确退出仍保存坏现场并释放控制。

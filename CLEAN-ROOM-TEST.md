@@ -29,18 +29,19 @@ python --version
 
 ## 2. 模型烟测
 
-- [ ] 启动卡只提供 Full 与 Focused，并一次展示工号、单号类型、需求来源、提交节奏、基线/工作分支、Build、UT 生成方式和 UT 运行入口。
+- [ ] 启动卡只提供 Full 与 Focused，并一次展示工号、单号类型、需求来源、提交节奏、基线/工作分支、语言对应的精确 Build 路由、UT 生成方式、UT 运行入口和质量组合；确认后立即创建或切换工作分支。
 - [ ] Full 用户卡只出现在 Intake、Spec、Design、每个 CP、Delivery 和真实条件风险。
 - [ ] Focused 用户卡只出现在 Intake、Delivery；启动时无 Full 产物，语义风险可以升级 Full/Spec 并补入产物路径。
 - [ ] 文档和 UI 都显示唯一六阶段序列 Intake → Spec → Design → Construction → Quality → Delivery。
-- [ ] Build、UT、CodeCheck、Grill、Story、Reviewer 被描述为一次性 opaque capabilities。
+- [ ] 每个 CP 用已确认路由同步 Build 一次；UT、CodeCheck、Grill、Story、Reviewer 被描述为按语义 slot 一次的 opaque capabilities。
 - [ ] 工作流命令是 capability 事实的唯一写者；Hook 不解析 Agent/Skill 返回。
 - [ ] `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse` 承担当前职责；兼容注册的 `SubagentStop`、`Stop` 直接放行。
 
 ## 3. 文件与交付烟测
 
 - [ ] Spec、Story 与过程文档按单号放在 `.mae-flow-work/<ticket>/`，默认不上库；用户明确选择 exact durable copy 才加入 manifest。
-- [ ] 领域行为当前真相按业务能力维护在 `docs/mae-flow/behavior/<domain>.md`，缺失 index 和增量存量基线不阻断第一次使用。
+- [ ] 领域行为当前真相按业务能力维护在 `docs/specs/<domain>.md`，缺失 index 和增量存量基线不阻断第一次使用。
+- [ ] 不生成工程经验文档；生成 Markdown 的来源水印不是格式或 Hook 门禁。
 - [ ] Delivery 的领域动作只允许 `new`、`updated`、`unchanged`，无变化领域不会制造文档提交。
 - [ ] 初始脏文件不被默认采用。
 - [ ] manifest 只包含逐文件路径，Windows alias 不重复。
@@ -53,7 +54,7 @@ python --version
 - [ ] drive、UNC、反斜杠与大小写 identity 通过。
 - [ ] locked replace/delete 在固定 attempt 内成功或明确失败；验收过程不实际等待。
 - [ ] fake Host capability 同步返回后只写一条轻量事实；timeout 使用短 subprocess 边界，不依赖 POSIX signal。
-- [ ] 首次调用后任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化不自动授权，也不后台轮询。
+- [ ] 同一语义 slot 再次调用需要当前用户决定；新阶段/新 CP 的首次计划调用正常执行，任何 slot 都不后台轮询或自动重试。
 
 ## 5. 发布门
 

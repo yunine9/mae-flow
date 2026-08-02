@@ -343,7 +343,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(returned)
         self.assertEqual([], self.state()["risks"])
 
-    def test_successful_review_retry_clears_both_old_failure_risks(self):
+    def test_successful_review_retry_clears_capability_risk_without_duplicate(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-REVIEW-RETRY", "--path", "full",
             "--pace", "continuous"))
@@ -353,12 +353,9 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
         risks = self.state()["risks"]
-        self.assertEqual(2, len(risks))
+        self.assertEqual(1, len(risks))
         self.assertTrue(any(
             risk.startswith("Capability grill did not return in slot")
-            for risk in risks))
-        self.assertTrue(any(
-            risk.startswith("Review capability grill did not return in slot")
             for risk in risks))
 
         self.assert_success(self.run_cli(

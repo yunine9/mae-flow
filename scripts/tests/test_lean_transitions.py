@@ -132,7 +132,7 @@ class FullTransitionTests(unittest.TestCase):
                     key == review_key
                     for key, unused in recorded.state.decisions))
 
-    def test_failed_review_attempt_becomes_risk_not_required_review_fact(self):
+    def test_failed_review_attempt_is_visible_without_blocking_confirmation(self):
         state = replace(
             flow(phase=Phase.SPEC),
             capabilities=(CapabilityAttempt(
@@ -142,13 +142,21 @@ class FullTransitionTests(unittest.TestCase):
 
         failed = advance_flow(state, AdvanceRequest("grill-failed"))
         confirmation = advance_flow(
-            failed.state, AdvanceRequest("spec-confirmed"))
+            failed.state,
+            AdvanceRequest(
+                "spec-confirmed",
+                decision_value="用户看到 Grill 超时事实后确认 Spec。",
+            ),
+        )
 
-        self.assertTrue(failed.state.risks)
+        self.assertFalse(failed.state.risks)
         self.assertFalse(any(
             key == "review.grill"
             for key, unused in failed.state.decisions))
-        self.assertEqual(Phase.SPEC, confirmation.state.phase)
+        self.assertTrue(any(
+            key == "review.grill.attempted"
+            for key, unused in failed.state.decisions))
+        self.assertEqual(Phase.STORY, confirmation.state.phase)
 
     def test_confirmation_fact_key_cannot_be_overridden_by_request(self):
         result = advance_flow(flow(), AdvanceRequest(
@@ -347,6 +355,29 @@ class FullTransitionTests(unittest.TestCase):
             cp2.decisions,
         )
 
+    def test_full_staged_cannot_finish_with_unplanned_current_checkpoint(self):
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            commit_pace=CommitPace.STAGED,
+            current_cp="CP1",
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+            ),
+        )
+        cp1 = advance_flow(
+            state,
+            AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
+        ).state
+        cp2 = advance_flow(
+            cp1, AdvanceRequest("cp-ready", decision_key="CP2"))
+
+        result = advance_flow(cp2.state, AdvanceRequest("construction-complete"))
+
+        self.assertEqual("CP2", result.state.current_cp)
+        self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
+        self.assertIn("current CP", result.reason)
+
     def test_delivery_confirmation_authorizes_without_completing_full_flow(self):
         state = replace(
             flow(phase=Phase.DELIVERY),
@@ -520,7 +551,7 @@ class FullTransitionTests(unittest.TestCase):
             sum(key == "review.design" for key, unused in second.state.decisions),
         )
 
-    def test_review_failure_never_satisfies_required_review(self):
+    def test_review_failure_records_attempt_without_blocking_user_confirmation(self):
         cases = (
             (
                 Phase.SPEC,
@@ -549,15 +580,25 @@ class FullTransitionTests(unittest.TestCase):
                 failed = advance_flow(
                     state, AdvanceRequest(failure))
                 advanced = advance_flow(
-                    failed.state, AdvanceRequest(confirmation))
-                self.assertTrue(failed.needs_user)
-                self.assertTrue(failed.state.risks)
+                    failed.state,
+                    AdvanceRequest(
+                        confirmation,
+                        decision_value="用户看过审查失败事实并决定继续。",
+                    ),
+                )
+                self.assertFalse(failed.needs_user)
+                self.assertFalse(failed.state.risks)
                 self.assertEqual(
                     0,
                     sum(existing == key
                         for existing, unused in failed.state.decisions),
                 )
-                self.assertEqual(phase, advanced.state.phase)
+                self.assertIn(
+                    (key + ".attempted",
+                     "The required reviewer was attempted once and did not return."),
+                    failed.state.decisions,
+                )
+                self.assertNotEqual(phase, advanced.state.phase)
 
 
 class FocusedTransitionTests(unittest.TestCase):
@@ -597,6 +638,19 @@ class FocusedTransitionTests(unittest.TestCase):
         self.assertFalse(construction.needs_user)
         self.assertFalse(cp.needs_user)
         self.assertTrue(delivery.needs_user)
+
+    def test_focused_staged_cp_progress_updates_internal_cursor_without_stop(self):
+        state = replace(
+            flow(path=DeliveryPath.FOCUSED, phase=Phase.CONSTRUCTION),
+            commit_pace=CommitPace.STAGED,
+            current_cp="CP1",
+        )
+
+        result = advance_flow(
+            state, AdvanceRequest("cp-ready", decision_key="CP2"))
+
+        self.assertEqual("CP2", result.state.current_cp)
+        self.assertFalse(result.needs_user)
 
     def test_migrated_focused_spec_and_story_resume_without_mandatory_reviews(self):
         cases = (

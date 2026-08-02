@@ -394,6 +394,8 @@ def staged_checkpoint_receipts_valid(state):
             checkpoints.append(match.group(1))
     if not checkpoints:
         return False
+    if not state.current_cp or state.current_cp not in checkpoints:
+        return False
     return all(
         len(decision_values(state, checkpoint_receipt_key(checkpoint))) == 1
         and valid_delivery_receipt(

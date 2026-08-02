@@ -13,7 +13,6 @@ from .transition_facts import (
     current_delivery_receipt as _current_delivery_receipt,
     delivery_effects_observed as _delivery_effects_observed,
     latest_review_attempt as _latest_review_attempt,
-    review_attempt_risk as _review_attempt_risk,
     staged_checkpoint_receipts_valid as _staged_checkpoint_receipts_valid,
 )
 
@@ -299,19 +298,18 @@ def advance_flow(state, request):
                 "recorded for this phase.",
             )
         if attempt.outcome != "returned" or kind.endswith("-failed"):
-            failed = _review_attempt_risk(state, attempt)
             review_key, unused = review
-            failed = _with_review_decision(
-                failed,
+            attempted = _with_review_decision(
+                state,
                 request,
                 review_key + ".attempted",
                 "The required reviewer was attempted once and did not return.",
             )
             return AdvanceResult(
-                failed,
-                True,
-                "The review capability did not return normally; no required "
-                "review fact was recorded.",
+                attempted,
+                False,
+                "The review capability did not return normally; the attempt "
+                "was recorded without retrying or blocking user confirmation.",
             )
         key, value = review
         reviewed = _with_review_decision(state, request, key, value)
@@ -341,23 +339,29 @@ def advance_flow(state, request):
         return AdvanceResult(state, False, _NON_BLOCKING_EVENTS[kind])
 
     if (kind == "cp-ready"
-            and state.phase == Phase.CONSTRUCTION
-            and state.path == DeliveryPath.FULL):
+            and state.phase == Phase.CONSTRUCTION):
         current = state.current_cp or "CP1"
         requested = request.decision_key.strip()
         if requested:
             requested = _checkpoint_name(requested)
-            current_key = _checkpoint_confirmation_key(current)
-            if (requested != current and not any(
-                    key == current_key for key, unused in state.decisions)):
-                return AdvanceResult(
-                    state,
-                    True,
-                    "The current checkpoint must be confirmed before the "
-                    "next checkpoint is opened.",
-                )
+            if state.path == DeliveryPath.FULL:
+                current_key = _checkpoint_confirmation_key(current)
+                if (requested != current and not any(
+                        key == current_key for key, unused in state.decisions)):
+                    return AdvanceResult(
+                        state,
+                        True,
+                        "The current checkpoint must be confirmed before the "
+                        "next checkpoint is opened.",
+                    )
             current = requested
         ready = replace(state, current_cp=current)
+        if state.path == DeliveryPath.FOCUSED:
+            return AdvanceResult(
+                ready,
+                False,
+                "Focused checkpoint progress updated the internal cursor.",
+            )
         return AdvanceResult(
             ready,
             True,
@@ -444,7 +448,8 @@ def advance_flow(state, request):
         return AdvanceResult(
             state,
             False,
-            "Full Staged Construction requires every planned CP receipt.",
+            "Full Staged Construction requires a valid receipt for the "
+            "current CP and every planned CP.",
         )
 
     target = _transition_table(state.path).get((state.phase, kind))

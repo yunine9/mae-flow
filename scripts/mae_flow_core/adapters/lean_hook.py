@@ -220,11 +220,20 @@ class LeanHookAdapter:
         )
         risks = _brief_list(
             state.risks, 2, lambda risk: _clip(risk, 100))
-        lines = [
+        request = next((
+            _clip(value, 240)
+            for key, value in reversed(state.decisions)
+            if key == "request.summary"
+        ), "none")
+        core_lines = [
             "[mae-flow] Recovery context",
+            "Ticket: %s" % _clip(state.ticket, 100),
+            "Request: %s" % request,
             "Mode: %s" % state.path.value,
             "Phase: %s" % state.phase.value,
             "CP: %s" % (_clip(state.current_cp, 100) or "none"),
+        ]
+        lines = core_lines + [
             "Artifacts: %s" % artifacts,
             "Unresolved risks: %s" % risks,
         ]
@@ -243,7 +252,7 @@ class LeanHookAdapter:
             lines.append("Last capability: none")
         summary = "\n".join(lines) + "\n"
         if len(summary) > SUMMARY_BUDGET:
-            summary = "\n".join(lines[:4] + lines[-1:]) + "\n"
+            summary = "\n".join(core_lines + lines[-1:]) + "\n"
         return HookResponse(stdout=summary)
 
     def _append_user_event(self, event, payload):

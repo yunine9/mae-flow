@@ -155,7 +155,10 @@ class LeanHookAdapterTests(unittest.TestCase):
                 ("spec", "docs/mae-flow/requirements/REQ-5/spec.md"),
                 ("story", ".mae-flow-work/REQ-5/story.md"),
             ),
-            decisions=(("private.long.history", "MUST-NOT-BE-INJECTED"),),
+            decisions=(
+                ("request.summary", "修复订单查询边界，并保持旧接口兼容。"),
+                ("private.long.history", "MUST-NOT-BE-INJECTED"),
+            ),
             risks=("database compatibility",),
             capabilities=(
                 CapabilityAttempt(
@@ -173,6 +176,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(0, first.returncode, first.stderr.decode("utf-8"))
         text = first.stdout.decode("utf-8")
         for fact in (
+                "Ticket: REQ-5", "Request: 修复订单查询边界，并保持旧接口兼容。",
                 "Mode: full", "Phase: quality", "CP: CP-2",
                 "spec=docs/mae-flow/requirements/REQ-5/spec.md",
                 "database compatibility", "build", "opaque-return",

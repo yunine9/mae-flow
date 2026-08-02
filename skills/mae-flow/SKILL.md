@@ -66,13 +66,7 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 - Build：直接调用配置的 `build-fix` Skill 一次。该 Skill 对自己的编译负责；Mae-Flow 不再另派编译角色，也不猜内部 Maven/g++ 封装的输出。
 - UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
 
-能力返回只记录 `returned | failed-to-start | timed-out | not-observed`：
-
-```text
-python "<插件目录>/scripts/mae-flow.py" capability-record <kind> <outcome> --source <语义上下文> --environment <环境上下文> --summary "<观察摘要>"
-```
-
-真正的 attempt slot 由 Mae-Flow 按当前阶段和 exact CP 派生；`--source/--environment` 是兼容性调用参数，改它们不会创建新 slot。Design Reviewer 和每个 CP Reviewer 是不同 slot。同 slot 不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用消费一次授权。
+生产 Host Hook 是正常能力调用的单一写入者：PreToolUse 自动预留由当前阶段和 exact CP 派生的 `not-observed` attempt slot，匹配同一 `tool_use_id` 和真实返回的 PostToolUse 自动完成 `returned` 观察及不透明摘要。主 Agent 返回后不再手工记录第二次；未观察到返回时保留 `not-observed`，兼容 CLI 只留给没有 Host Hook 的诊断入口，不用于正常 Host 流程。Design Reviewer 和每个 CP Reviewer 是不同 slot。同 slot 不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用消费一次授权。
 
 ### Delivery
 

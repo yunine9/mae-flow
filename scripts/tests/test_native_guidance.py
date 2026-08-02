@@ -232,6 +232,16 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
                 "codecheck-fix-agent"):
             self.assertNotIn(forbidden, combined)
 
+    def test_production_skill_leaves_capability_accounting_to_host_hooks(self):
+        skill = read_text(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
+        quality = skill.split("### Quality", 1)[1].split(
+            "### Delivery", 1)[0]
+
+        self.assertIn("Host Hook", quality)
+        self.assertIn("自动预留", quality)
+        self.assertIn("自动完成", quality)
+        self.assertNotIn("capability-record", quality)
+
     def test_thin_role_prompts_have_no_report_or_delivery_protocol(self):
         prompts = {
             name: read_text(os.path.join(ROOT, "agents", name))

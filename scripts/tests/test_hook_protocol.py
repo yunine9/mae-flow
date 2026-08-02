@@ -259,6 +259,40 @@ class HookProtocolTests(unittest.TestCase):
                     ),
                 )
 
+    def test_repository_context_changing_pushes_receive_no_root_facts(self):
+        commands = (
+            "git push --repo=/tmp/other origin HEAD:refs/heads/main",
+            "git -C /tmp/other push origin HEAD:refs/heads/main",
+            "git --git-dir=/tmp/other/.git push origin HEAD:refs/heads/main",
+            "git --work-tree=/tmp/other push origin HEAD:refs/heads/main",
+            "git -c remote.origin.url=/tmp/other push origin "
+            "HEAD:refs/heads/main",
+            "GIT_DIR=/tmp/other/.git git push origin HEAD:refs/heads/main",
+        )
+
+        def git_text(unused_root, arguments):
+            values = {
+                ("rev-parse", "--verify", "HEAD^{commit}"): "root-head",
+                ("rev-parse", "--verify",
+                 "refs/remotes/origin/main^{commit}"): "root-remote",
+            }
+            return values.get(tuple(arguments), "")
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=git_text,
+                        git_paths=lambda unused_root, unused_args: (
+                            "root-authorized.py",),
+                    ),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

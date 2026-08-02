@@ -344,6 +344,36 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         self.assertEqual(("returned", raw), (
             attempts[-1].outcome, attempts[-1].summary))
 
+    def test_normal_host_hook_sequence_records_exactly_one_attempt(self):
+        adapter = LeanHookAdapter(
+            self.root, marker_root=os.path.join(self.root, "markers"),
+        )
+        payload = {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-normal-build",
+            "tool_input": {"skill": "build-fix"},
+        }
+
+        pre = adapter.handle("PreToolUse", payload)
+        post = adapter.handle("PostToolUse", dict(
+            payload, tool_response="opaque build return"))
+
+        self.assertEqual(0, pre.exit_code)
+        self.assertEqual(0, post.exit_code)
+        state = self.read_state()
+        self.assertEqual(1, len(state.capabilities))
+        self.assertEqual(
+            ("build", "returned", "opaque build return"),
+            (
+                state.capabilities[0].kind,
+                state.capabilities[0].outcome,
+                state.capabilities[0].summary,
+            ),
+        )
+        self.assertFalse(any(
+            key.startswith("capability.pending.")
+            for key, unused_value in state.decisions))
+
     def test_fictional_capability_fields_do_not_create_attempts(self):
         response = LeanHookAdapter(
             self.root, marker_root=os.path.join(self.root, "markers"),

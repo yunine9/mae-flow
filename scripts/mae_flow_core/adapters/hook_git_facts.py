@@ -6,6 +6,7 @@ import re
 import subprocess
 
 from ..foundation.git_intent import git_delivery_intents
+from ..foundation.git_shell import shell_command_groups
 
 
 GIT_SECS = 5
@@ -20,6 +21,13 @@ _PUSH_FLAGS = {
 }
 _AMBIGUOUS_PUSH_FLAGS = {"--all", "--mirror", "--tags", "--delete"}
 _SAFE_REF = re.compile(r"[A-Za-z0-9._/-]+")
+_CONTEXT_OPTIONS = {
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace",
+    "--config-env",
+}
+_CONTEXT_ENV_PREFIXES = (
+    "GIT_DIR=", "GIT_WORK_TREE=", "GIT_NAMESPACE=", "GIT_CONFIG_",
+)
 
 
 def _decode_paths(raw):
@@ -79,6 +87,33 @@ def staged_files(root):
         ("diff", "--cached", "--name-only", "--diff-filter=ACDMRTUXB",
          "-z", "--"),
     )
+
+
+def _changes_repository_context(command):
+    for tokens in shell_command_groups(command):
+        for git_index, token in enumerate(tokens):
+            executable = re.split(r"[\\/]", str(token or ""))[-1].casefold()
+            if executable not in {"git", "git.exe"}:
+                continue
+            push_index = next((
+                index for index in range(git_index + 1, len(tokens))
+                if tokens[index].casefold() == "push"
+            ), None)
+            if push_index is None:
+                continue
+            context = tokens[:git_index] + tokens[git_index + 1:push_index]
+            for value in context:
+                option = value.split("=", 1)[0]
+                if (
+                        option in _CONTEXT_OPTIONS
+                        or value.startswith("-C") and value != "-C"
+                        or value.startswith(_CONTEXT_ENV_PREFIXES)):
+                    return True
+            if any(
+                    value == "--repo" or value.startswith("--repo=")
+                    for value in tokens[push_index + 1:]):
+                return True
+    return False
 
 
 def _push_positionals(arguments):
@@ -186,6 +221,8 @@ def push_commit_files(
     tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if payload.get("tool_name") != "Bash" or not isinstance(command, str):
+        return ()
+    if _changes_repository_context(command):
         return ()
     pushes = tuple(
         intent for intent in git_delivery_intents(command)

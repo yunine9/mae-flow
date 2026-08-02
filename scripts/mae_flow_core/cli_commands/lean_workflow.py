@@ -1,10 +1,8 @@
 """Thin production CLI adapter for the schema-v3 lean workflow."""
 
 from dataclasses import replace
-import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -40,23 +38,19 @@ from mae_flow_core.state_store import (
     atomic_write_json,
     safe_read_json,
 )
-from .lean_manifest import prepare_manifest_state
+from .lean_manifest import git_head_revision, prepare_manifest_state
 from .lean_lightcheck import run_exact_lightcheck
+from .user_events import (
+    USER_OWNED_EVENTS as _USER_OWNED_EVENTS,
+    bind_user_event as _bind_user_event,
+    matching_user_event as _matching_user_event,
+    requires_user_event as _requires_user_event,
+)
 
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
 _KEYED_SEMANTIC_EVENTS = {"risk-resolved", "cp-ready", "cp-progress"}
-_USER_OWNED_EVENTS = {
-    "startup-confirmed", "spec-confirmed", "story-confirmed",
-    "cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
-    "risk-resolved", "upgrade-to-full", "quality-defect-repair",
-}
-_USER_EVENT_LEDGER = os.path.join(
-    ".mae-flow-work", "lean-hook-user-events.json")
-_USER_EVENT_CONSUMED = "user.event.consumed"
-
-
 def _die(message):
     print("[mae-flow] " + message, file=sys.stderr)
     raise SystemExit(2)
@@ -120,71 +114,6 @@ def _mutate(root, operation, allow_inactive=False):
     return updated, reason
 
 
-def _state_sha256(root):
-    try:
-        with open(_state_path(root), "rb") as stream:
-            return hashlib.sha256(stream.read()).hexdigest()
-    except OSError as exc:
-        raise ValueError("无法绑定当前流程状态与用户事件") from exc
-
-
-def _consumed_user_event_ids(state):
-    consumed = set()
-    for key, raw in state.decisions:
-        if key != _USER_EVENT_CONSUMED:
-            continue
-        try:
-            value = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(value, dict) and isinstance(value.get("event_id"), str):
-            consumed.add(value["event_id"])
-    return consumed
-
-
-def _matching_user_event(root, state):
-    path = os.path.join(root, _USER_EVENT_LEDGER)
-    rows, error = safe_read_json(path)
-    if error or not isinstance(rows, list):
-        raise ValueError(
-            "未捕获到本轮 CodeAgent UserPromptSubmit 自然语言输入")
-    state_sha256 = _state_sha256(root)
-    consumed = _consumed_user_event_ids(state)
-    for row in reversed(rows):
-        if not isinstance(row, dict):
-            continue
-        event_id = row.get("event_id")
-        payload = row.get("payload")
-        prompt = payload.get("prompt") if isinstance(payload, dict) else None
-        if (isinstance(event_id, str)
-                and re.fullmatch(r"[0-9a-f]{64}", event_id)
-                and event_id not in consumed
-                and row.get("state_sha256") == state_sha256
-                and isinstance(prompt, str)
-                and bool(prompt.strip())):
-            return event_id
-    raise ValueError(
-        "当前流程状态没有尚未消费的 CodeAgent UserPromptSubmit 自然语言输入")
-
-
-def _bind_user_event(state, event_id, semantic_event):
-    value = json.dumps(
-        {"event_id": event_id, "semantic_event": semantic_event},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return replace(
-        state, decisions=state.decisions + ((_USER_EVENT_CONSUMED, value),))
-
-
-def _requires_user_event(event):
-    normalized = event.strip().lower()
-    return (
-        normalized in _USER_OWNED_EVENTS
-        or normalized.startswith("capability.retry."))
-
-
 def _git_names(root, arguments):
     try:
         result = subprocess.run(
@@ -221,29 +150,6 @@ def _initial_dirty(root):
             if not normalized.startswith(".mae-flow") and normalized not in paths:
                 paths.append(normalized)
     return tuple(paths), tuple(errors)
-
-
-def _git_head_revision(root):
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=15,
-            check=False,
-            text=True,
-            encoding="ascii",
-            errors="strict",
-        )
-    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
-        raise ValueError("无法读取当前 Git HEAD") from exc
-    value = result.stdout.strip().casefold()
-    if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value):
-        return value
-    if result.returncode != 0:
-        return "unborn"
-    raise ValueError("当前 Git HEAD 不是可绑定的 commit")
 
 
 def _relative(root, path):
@@ -506,7 +412,7 @@ def cmd_lean_manifest(root, args):
         if args.moonlight_refresh and authorization_decision:
             event_id = _matching_user_event(root, state)
         updated, manifest = prepare_manifest_state(
-            state, args, root, _git_head_revision(root))
+            state, args, root, git_head_revision(root))
         if args.moonlight_refresh:
             if not _moonlight_enabled(updated):
                 raise ValueError("当前流程未启用 Moonlight，不能刷新不可逆权限")

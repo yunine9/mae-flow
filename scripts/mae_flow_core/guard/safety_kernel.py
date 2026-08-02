@@ -1,7 +1,7 @@
 """Pure, fail-open safety policy for lean workflow tool calls."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import os
 
 from ..foundation import git_intent
@@ -19,6 +19,7 @@ from .manifest import (
     git_receipt_error,
     unknown_git_alias,
 )
+from .safety_models import SafetyContext, SafetyDecision
 from .intent import (
     is_documentation as _is_documentation,
     is_local_work_package as _is_local_work_package,
@@ -31,23 +32,6 @@ from .intent import (
 
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
 _FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
-@dataclass(frozen=True)
-class SafetyDecision:
-    allow: bool
-    rule: str = ""
-    message: str = ""
-
-
-@dataclass(frozen=True)
-class SafetyContext:
-    state: FlowState
-    repository_root: str
-    staged_files: tuple = ()
-    commit_files: tuple = ()
-    initial_dirty: tuple = ()
-    current_dirty_fingerprints: tuple = ()
-    safe_write_targets: tuple = ()
-    task_owned_temp_dir: str = ""
 
 
 def _allow(rule=""):

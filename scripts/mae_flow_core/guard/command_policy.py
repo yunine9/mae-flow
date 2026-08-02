@@ -231,9 +231,7 @@ def _in_place_script_targets(arguments):
     return _literal_targets(targets)
 
 
-def _record_mutation(record):
-    executable = _name(record.executable)
-    arguments = tuple(record.arguments)
+def _direct_writer_record(executable, arguments):
     if executable == "sed":
         return _sed_targets(arguments), False, False
     if executable == "truncate":
@@ -262,6 +260,15 @@ def _record_mutation(record):
                for token in arguments[1:]):
             return (), False, False
         return (), True, False
+    return None
+
+
+def _record_mutation(record):
+    executable = _name(record.executable)
+    arguments = tuple(record.arguments)
+    direct = _direct_writer_record(executable, arguments)
+    if direct is not None:
+        return direct
     if executable == "tee":
         return _non_options(arguments, {"--output-error"}), False, False
     if executable in {"cp", "copy", "copy.exe"}:

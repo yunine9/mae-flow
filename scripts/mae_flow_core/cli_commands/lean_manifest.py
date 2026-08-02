@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import re
+import subprocess
 
 from mae_flow_core.foundation.commit_message import valid_business_commit_message
 from mae_flow_core.foundation.source_paths import is_flow_control_path
@@ -26,6 +27,29 @@ _TARGET_FACTS = {
     "delivery.plan.new_branch",
     "delivery.plan.source_sha",
 }
+
+
+def git_head_revision(root):
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+            text=True,
+            encoding="ascii",
+            errors="strict",
+        )
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
+        raise ValueError("无法读取当前 Git HEAD") from exc
+    value = result.stdout.strip().casefold()
+    if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value):
+        return value
+    if result.returncode != 0:
+        return "unborn"
+    raise ValueError("当前 Git HEAD 不是可绑定的 commit")
 
 
 def _identity(files):

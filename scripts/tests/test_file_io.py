@@ -62,7 +62,7 @@ class ManagedFileIOTests(unittest.TestCase):
             "scripts.tests.test_lean_migration_cli.LeanMigrationCliTests."
             "test_existing_schema_v3_current_is_read_only",
             "scripts.tests.test_lean_hook_adapter.LeanHookAdapterTests."
-            "test_exact_manifest_facts_allow_commit_and_push",
+            "test_git_reservation_and_post_facts_complete_the_exact_receipt",
             "scripts.tests.test_delivery_manifest.DeliveryAuthorizationTests."
             "test_authorization_returns_new_state_with_exact_delivery_files",
         )

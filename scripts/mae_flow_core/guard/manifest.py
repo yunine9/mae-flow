@@ -379,6 +379,39 @@ def _canonical_push_arguments(receipt):
     )
 
 
+def _commit_receipt_error(
+        state, receipt, observed, operation, actual_files, message):
+    if operation not in receipt.requested_actions:
+        return "The current receipt does not request this Git effect."
+    if observed >= len(receipt.commits):
+        return "Every commit requested by the receipt is already observed."
+    unused_checkpoint, files, expected_message = receipt.commits[observed]
+    if not _same_git_files(files, actual_files):
+        return "Git files must equal the next exact receipt commit."
+    if operation == "commit" and message != expected_message:
+        return "Commit message must equal the current receipt message."
+    if not _current_receipt_chain_head(state, receipt):
+        return "Git commit observations do not extend the receipt source base."
+    return ""
+
+
+def _push_receipt_error(state, receipt, observed, actual_files, arguments):
+    if "push" not in receipt.requested_actions:
+        return "The current receipt does not request a push."
+    if observed < receipt.requested_actions.count("commit"):
+        return "Push requires every receipt commit to be observed first."
+    if not _all_receipt_commits_observed(state, receipt):
+        return "Push requires repository observation of every receipt commit."
+    if tuple(arguments) != _canonical_push_arguments(receipt):
+        return (
+            "Push must use the receipt's canonical explicit remote, "
+            "destination ref, and force-with-lease SHA.")
+    if (not receipt.new_branch
+            and not _same_git_files(receipt.files, actual_files)):
+        return "Published files must equal the exact receipt manifest."
+    return ""
+
+
 def git_receipt_error(
         state, operation, actual_files=(), arguments=(), message=""):
     """Return why one Git effect is outside the current user receipt."""
@@ -387,35 +420,12 @@ def git_receipt_error(
         return "Git delivery requires one current exact user receipt."
     observed = _observed_commit_count(state, receipt.digest)
     if operation in {"add", "commit"}:
-        if operation not in receipt.requested_actions:
-            return "The current receipt does not request this Git effect."
-        if observed >= len(receipt.commits):
-            return "Every commit requested by the receipt is already observed."
-        unused_checkpoint, files, expected_message = receipt.commits[observed]
-        if not _same_git_files(files, actual_files):
-            return "Git files must equal the next exact receipt commit."
-        if operation == "commit" and message != expected_message:
-            return "Commit message must equal the current receipt message."
-        if not _current_receipt_chain_head(state, receipt):
-            return "Git commit observations do not extend the receipt source base."
-    elif operation == "push":
-        if "push" not in receipt.requested_actions:
-            return "The current receipt does not request a push."
-        required_commits = receipt.requested_actions.count("commit")
-        if observed < required_commits:
-            return "Push requires every receipt commit to be observed first."
-        if not _all_receipt_commits_observed(state, receipt):
-            return "Push requires repository observation of every receipt commit."
-        if tuple(arguments) != _canonical_push_arguments(receipt):
-            return (
-                "Push must use the receipt's canonical explicit remote, "
-                "destination ref, and force-with-lease SHA.")
-        if (not receipt.new_branch
-                and not _same_git_files(receipt.files, actual_files)):
-            return "Published files must equal the exact receipt manifest."
-    else:
-        return "Unsupported Git delivery operation."
-    return ""
+        return _commit_receipt_error(
+            state, receipt, observed, operation, actual_files, message)
+    if operation == "push":
+        return _push_receipt_error(
+            state, receipt, observed, actual_files, arguments)
+    return "Unsupported Git delivery operation."
 
 
 def git_receipt_reservation(

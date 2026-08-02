@@ -7,6 +7,11 @@ import re
 
 from ..foundation.commit_message import valid_business_commit_message
 from .models import CommitPace, DeliveryPath, FlowState, Phase
+from .transition_support import (
+    add_material_risk,
+    clear_downstream_authorization,
+    latest_review_attempt,
+)
 
 
 DELIVERY_CONFIRMATION = "delivery.confirmation"
@@ -25,11 +30,6 @@ _TARGET_KEYS = {
 }
 GIT_COMMIT_OBSERVATION = "delivery.git.commit_observation"
 GIT_PUSH_OBSERVATION = "delivery.git.push_observation"
-_REVIEW_ATTEMPT = {
-    Phase.SPEC: ("grill", "grill:spec:-"),
-    Phase.STORY: ("reviewer", "reviewer:design"),
-}
-
 @dataclass(frozen=True)
 class DeliveryReceipt:
     """Strict typed view of one persisted schema-v3 receipt JSON value."""
@@ -475,51 +475,3 @@ def delivery_effects_observed(state, receipt):
         matching(commits) >= commit_count
         and ("push" not in receipt.requested_actions or matching(pushes) == 1)
     )
-
-
-def add_material_risk(state, kind, detail, default_detail):
-    text = detail.strip() if isinstance(detail, str) else ""
-    risk = "%s: %s" % (kind, text or default_detail)
-    if risk in state.risks:
-        return state
-    return replace(state, risks=state.risks + (risk,))
-
-
-def clear_downstream_authorization(state, include_construction=False):
-    prefixes = ["quality.", "delivery."]
-    exact = {"review.design"}
-    if include_construction:
-        prefixes += ["focused.", "construction.", "review."]
-        exact = set()
-    decisions = tuple(
-        item for item in state.decisions
-        if item[0] not in exact
-        and not item[0].startswith(tuple(prefixes)))
-    return replace(
-        state,
-        decisions=decisions,
-        delivery_files=(),
-        current_cp="" if include_construction else state.current_cp,
-    )
-
-
-def latest_review_attempt(state):
-    requirement = _REVIEW_ATTEMPT.get(state.phase)
-    if requirement is None:
-        return None
-    kind, slot = requirement
-    matches = tuple(
-        attempt for attempt in state.capabilities
-        if attempt.kind == kind and attempt.source_revision == slot)
-    return matches[-1] if matches else None
-
-
-def review_attempt_risk(state, attempt):
-    risk = "Review capability %s did not return in slot %s: %s." % (
-        attempt.kind,
-        attempt.source_revision,
-        attempt.outcome,
-    )
-    if risk in state.risks:
-        return state
-    return replace(state, risks=state.risks + (risk,))

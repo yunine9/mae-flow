@@ -57,20 +57,16 @@ class HookEventTests(unittest.TestCase):
             inactive=handler("inactive"),
             pretool=handler("pretool"),
             inject=handler("inject"),
-            subagentstop=handler("subagentstop"),
             posttool=handler("posttool"),
-            stop=handler("stop"),
             log=handler("log"),
         ), calls
 
-    def test_active_routes_every_public_event(self):
+    def test_active_routes_only_the_four_production_events(self):
         expected = {
             "pretooluse": "pretool",
             "userprompt": "inject",
             "sessionstart": "inject",
-            "subagentstop": "subagentstop",
             "posttooluse": "posttool",
-            "stop": "stop",
         }
         for event, target in expected.items():
             with self.subTest(event=event):
@@ -85,7 +81,7 @@ class HookEventTests(unittest.TestCase):
             (RuntimeMode.FLOW, True, "pretooluse", "terminal"),
             (RuntimeMode.CORRUPT, False, "pretooluse", "corrupt"),
             (RuntimeMode.DIRECT, False, "posttooluse", "direct"),
-            (RuntimeMode.INACTIVE, False, "stop", "inactive"),
+            (RuntimeMode.INACTIVE, False, "posttooluse", "inactive"),
         )
         for mode, terminal, event, target in cases:
             with self.subTest(mode=mode, event=event):
@@ -101,11 +97,9 @@ class HookEventTests(unittest.TestCase):
     def test_standalone_owns_answer_capture_and_active_events(self):
         expected = {
             "pretooluse": "standalone_pretool",
-            "subagentstop": "subagentstop",
             "userprompt": "standalone_inject",
             "sessionstart": "standalone_inject",
             "posttooluse": "posttool",
-            "stop": "inactive",
         }
         for event, target in expected.items():
             with self.subTest(event=event):
@@ -113,6 +107,19 @@ class HookEventTests(unittest.TestCase):
                 response = handle_hook_event(
                     event, {}, self.runtime(RuntimeMode.STANDALONE), ports)
                 self.assertEqual(target + "\n", response.stdout)
+
+    def test_legacy_stop_events_fail_open_before_runtime_or_ports(self):
+        class Explosive:
+            def __getattribute__(self, name):
+                raise AssertionError("touched " + name)
+
+        explosive = Explosive()
+        for event in ("stop", "subagentstop"):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    HookResponse(),
+                    handle_hook_event(event, explosive, explosive, explosive),
+                )
 
     def test_runtime_conflict_notice_is_prepended_without_changing_route(self):
         ports, calls = self.ports()

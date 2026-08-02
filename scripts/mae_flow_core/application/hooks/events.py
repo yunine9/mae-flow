@@ -18,9 +18,7 @@ class HookEventPorts:
     inactive: Callable
     pretool: Callable
     inject: Callable
-    subagentstop: Callable
     posttool: Callable
-    stop: Callable
     log: Callable
 
 
@@ -39,20 +37,14 @@ def _active_event(event, payload, ports):
         return ports.inject(payload, False)
     if event == "sessionstart":
         return ports.inject(payload, True)
-    if event == "subagentstop":
-        return ports.subagentstop(payload)
     if event == "posttooluse":
         return ports.posttool(payload)
-    if event == "stop":
-        return ports.stop(payload)
     return HookResponse()
 
 
 def _standalone_event(event, payload, ports):
     if event == "pretooluse":
         return ports.standalone_pretool(payload)
-    if event == "subagentstop":
-        return ports.subagentstop(payload)
     if event == "userprompt":
         return ports.standalone_inject(payload, False)
     if event == "sessionstart":
@@ -64,6 +56,8 @@ def _standalone_event(event, payload, ports):
 
 def handle_hook_event(event, payload, runtime, ports):
     """Route one decoded Hook event and return its observable response."""
+    if event in ("stop", "subagentstop"):
+        return HookResponse()
     prefix = HookResponse()
     if runtime.has_conflict:
         prefix = ports.conflict(event, payload, runtime)
@@ -80,8 +74,6 @@ def handle_hook_event(event, payload, runtime, ports):
             and event in (
                 "pretooluse",
                 "posttooluse",
-                "subagentstop",
-                "stop",
             )):
         result = ports.inactive(event, payload)
     else:

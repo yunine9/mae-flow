@@ -17,7 +17,7 @@ class HookEventAdapter:
     def __init__(
             self, *, state, action_state, runtime_adapter, log,
             session_notice_due, pretool, standalone_pretool, inject,
-            subagentstop, posttool, stop):
+            posttool):
         self.state = state
         self.action_state = action_state
         self.runtime = runtime_adapter
@@ -26,9 +26,7 @@ class HookEventAdapter:
         self.pretool_handler = pretool
         self.standalone_pretool_handler = standalone_pretool
         self.inject_handler = inject
-        self.subagentstop_handler = subagentstop
         self.posttool_handler = posttool
-        self.stop_handler = stop
 
     def _invoke(self, handler, *args, **kwargs):
         try:
@@ -139,14 +137,8 @@ class HookEventAdapter:
     def standalone_inject(self, payload, session_start):
         return self.inject(payload, session_start)
 
-    def subagentstop(self, payload):
-        return self._invoke(self.subagentstop_handler, payload)
-
     def posttool(self, payload):
         return self._invoke(self.posttool_handler, payload)
-
-    def stop(self, payload):
-        return self._invoke(self.stop_handler, payload)
 
     def _log_port(self, message):
         self.log(message)
@@ -163,8 +155,6 @@ class HookEventAdapter:
             inactive=self.inactive,
             pretool=self.pretool,
             inject=self.inject,
-            subagentstop=self.subagentstop,
             posttool=self.posttool,
-            stop=self.stop,
             log=self._log_port,
         )

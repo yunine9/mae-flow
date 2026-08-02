@@ -454,9 +454,11 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", first_message),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
                 ("delivery.cp.CP1.confirmation", "CP1 reviewed."),
                 ("delivery.cp.CP2.file", "src/b.cpp"),
                 ("delivery.cp.CP2.message", second_message),
+                ("delivery.cp.CP2.source_sha", "b" * 40),
                 ("delivery.cp.CP2.confirmation", "CP2 reviewed."),
                 ("delivery.staged_final_file", "src/a.cpp"),
                 ("delivery.staged_final_file", "src/b.cpp"),

@@ -306,6 +306,7 @@ class FullTransitionTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
             ),
         )
         result = advance_flow(state, AdvanceRequest(
@@ -327,8 +328,10 @@ class FullTransitionTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
                 ("delivery.cp.CP2.file", "src/b.cpp"),
                 ("delivery.cp.CP2.message", "[REQ-42][fix]complete CP2"),
+                ("delivery.cp.CP2.source_sha", "b" * 40),
             ),
         )
         cp1 = advance_flow(
@@ -363,6 +366,7 @@ class FullTransitionTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
             ),
         )
         cp1 = advance_flow(
@@ -455,8 +459,10 @@ class FullTransitionTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "a" * 40),
                 ("delivery.cp.CP2.file", "src/b.cpp"),
                 ("delivery.cp.CP2.message", "[REQ-42][fix]complete CP2"),
+                ("delivery.cp.CP2.source_sha", "b" * 40),
             ),
         )
         missing_final = advance_flow(

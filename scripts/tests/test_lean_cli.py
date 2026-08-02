@@ -537,6 +537,19 @@ class LeanCliTests(unittest.TestCase):
         self.assertNotIn("delivery.result", keys)
 
     def test_manifest_binds_commit_and_explicit_push_target_before_confirmation(self):
+        with open(os.path.join(self.root, "baseline.txt"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("baseline\n")
+        subprocess.run(["git", "add", "baseline.txt"],
+                       cwd=self.root, check=True)
+        subprocess.run([
+            "git", "-c", "user.name=Mae Flow Test",
+            "-c", "user.email=mae-flow@example.invalid",
+            "commit", "-q", "-m", "baseline",
+        ], cwd=self.root, check=True)
+        source_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=self.root,
+            text=True).strip()
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-RECEIPT", "--path", "focused",
             "--pace", "continuous"))
@@ -552,7 +565,7 @@ class LeanCliTests(unittest.TestCase):
             "manifest", "--file", "src/a.cpp", "--commit-message",
             "[REQ-RECEIPT][fix]绑定交付票据", "--remote", "origin",
             "--destination-ref", "refs/heads/fix/receipt",
-            "--expected-destination-sha", "a" * 40)
+            "--expected-destination-sha", source_sha)
         self.assert_success(planned)
         confirmed = self.run_cli(
             "decision", "delivery-confirmed",

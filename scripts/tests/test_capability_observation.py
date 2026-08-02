@@ -473,6 +473,7 @@ class LeanCapabilityObservationTests(unittest.TestCase):
             "kind", "source_revision", "environment_revision", "outcome",
             "summary",
         }, set(persisted["capabilities"][-1]))
+        audit = self.read_audit()[0]
         self.assertEqual({
             "event": "CapabilityObservation",
             "captured_at_ns": 123,
@@ -484,7 +485,11 @@ class LeanCapabilityObservationTests(unittest.TestCase):
                 "return_present": True,
                 "summary": raw,
             },
-        }, self.read_audit()[0])
+        }, {key: audit[key] for key in (
+            "event", "captured_at_ns", "payload")})
+        self.assertEqual(0, audit["ordinal"])
+        self.assertRegex(audit["event_id"], r"^[0-9a-f]{64}$")
+        self.assertRegex(audit["state_sha256"], r"^[0-9a-f]{64}$")
 
     def test_missing_context_is_audited_without_fabricating_attempt(self):
         response = LeanHookAdapter(

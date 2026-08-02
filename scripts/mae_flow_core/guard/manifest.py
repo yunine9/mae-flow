@@ -317,6 +317,7 @@ def _all_receipt_commits_observed(state, receipt):
     )
 
     observations = _commit_observations(state)
+    head = receipt.source_base_sha
     for checkpoint, files, unused_message in receipt.commits:
         digest = receipt.digest
         if checkpoint and state.path.value == "full":
@@ -330,11 +331,34 @@ def _all_receipt_commits_observed(state, receipt):
             value for value in observations
             if value.get("receipt_digest") == digest
             and _same_git_files(files, value.get("files", ()))
+            and value.get("pre_head") == head
+            and isinstance(value.get("sha"), str)
+            and re.fullmatch(r"[0-9a-f]{40}", value["sha"])
         ), None)
         if match is None:
-            return False
+            return ""
         observations.remove(match)
-    return True
+        head = match["sha"]
+    return head
+
+
+def _current_receipt_chain_head(state, receipt):
+    observations = tuple(
+        value for value in _commit_observations(state)
+        if value.get("receipt_digest") == receipt.digest)
+    if len(observations) > len(receipt.commits):
+        return ""
+    head = receipt.source_base_sha
+    for observation, commit in zip(observations, receipt.commits):
+        unused_checkpoint, files, unused_message = commit
+        if (not _same_git_files(files, observation.get("files", ()))
+                or observation.get("pre_head") != head
+                or not isinstance(observation.get("sha"), str)
+                or not re.fullmatch(
+                    r"[0-9a-f]{40}", observation["sha"])):
+            return ""
+        head = observation["sha"]
+    return head
 
 
 def _same_git_files(expected, actual):
@@ -372,6 +396,8 @@ def git_receipt_error(
             return "Git files must equal the next exact receipt commit."
         if operation == "commit" and message != expected_message:
             return "Commit message must equal the current receipt message."
+        if not _current_receipt_chain_head(state, receipt):
+            return "Git commit observations do not extend the receipt source base."
     elif operation == "push":
         if "push" not in receipt.requested_actions:
             return "The current receipt does not request a push."
@@ -405,6 +431,9 @@ def git_receipt_reservation(
     expected_message = ""
     if operation in {"add", "commit"}:
         unused_checkpoint, files, expected_message = receipt.commits[observed]
+        expected_source_sha = _current_receipt_chain_head(state, receipt)
+    else:
+        expected_source_sha = _all_receipt_commits_observed(state, receipt)
     return {
         "receipt_digest": receipt.digest,
         "files": list(files),
@@ -413,6 +442,8 @@ def git_receipt_reservation(
         "destination_ref": receipt.destination_ref,
         "expected_destination_sha": receipt.expected_destination_sha,
         "new_branch": receipt.new_branch,
+        "source_base_sha": receipt.source_base_sha,
+        "expected_source_sha": expected_source_sha,
     }
 
 

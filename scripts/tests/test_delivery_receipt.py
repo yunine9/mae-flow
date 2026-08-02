@@ -24,6 +24,10 @@ from mae_flow_core.orchestration.delivery import (  # noqa: E402
     load_delivery_receipt,
     valid_delivery_receipt,
 )
+from mae_flow_core.guard.manifest import (  # noqa: E402
+    git_receipt_error,
+    git_receipt_reservation,
+)
 
 
 def continuous_state():
@@ -37,8 +41,9 @@ def continuous_state():
             ("delivery.commit_message", "[REQ-42][fix]bind delivery"),
             ("delivery.plan.remote", "origin"),
             ("delivery.plan.destination_ref", "refs/heads/fix/receipt"),
-            ("delivery.plan.expected_destination_sha", "a" * 40),
+            ("delivery.plan.expected_destination_sha", "b" * 40),
             ("delivery.plan.new_branch", "false"),
+            ("delivery.plan.source_sha", "b" * 40),
         ),
     )
 
@@ -52,7 +57,7 @@ class DeliveryReceiptTests(unittest.TestCase):
         decoded = json.loads(receipt)
         loaded = load_delivery_receipt(receipt)
 
-        self.assertEqual(1, decoded["version"])
+        self.assertEqual(2, decoded["version"])
         self.assertEqual("delivery", decoded["scope"])
         self.assertEqual(
             ["add", "commit", "push"], decoded["requested_actions"])
@@ -87,10 +92,14 @@ class DeliveryReceiptTests(unittest.TestCase):
                     if key == "delivery.plan.destination_ref"
                     else (key, value) for key, value in state.decisions)),
                 replace(state, decisions=tuple(
-                    (key, "b" * 40)
+                    (key, "c" * 40)
                     if key == "delivery.plan.expected_destination_sha"
                     else (key, value) for key, value in state.decisions)),
                 replace(state, commit_pace=CommitPace.STAGED),
+                replace(state, decisions=tuple(
+                    (key, "c" * 40)
+                    if key == "delivery.plan.source_sha" else (key, value)
+                    for key, value in state.decisions)),
         ):
             with self.subTest(changed=changed):
                 self.assertFalse(valid_delivery_receipt(changed, receipt))
@@ -105,6 +114,7 @@ class DeliveryReceiptTests(unittest.TestCase):
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
                 ("delivery.cp.CP1.message", "[REQ-42][feat]complete CP1"),
+                ("delivery.cp.CP1.source_sha", "b" * 40),
             ),
         )
 
@@ -129,6 +139,67 @@ class DeliveryReceiptTests(unittest.TestCase):
             for key, value in state.decisions))
         with self.assertRaisesRegex(ValueError, "refs/heads"):
             issue_delivery_receipt(bad_ref, "Ship after review.")
+
+    def test_new_branch_push_is_bound_to_the_observed_source_chain(self):
+        state = replace(
+            continuous_state(),
+            decisions=tuple(
+                (key, "" if key == "delivery.plan.expected_destination_sha"
+                 else "true" if key == "delivery.plan.new_branch"
+                 else value)
+                for key, value in continuous_state().decisions
+            ),
+        )
+        receipt_raw = issue_delivery_receipt(
+            state, "Publish this exact new-branch chain.")
+        receipt = load_delivery_receipt(receipt_raw)
+        observation = json.dumps({
+            "files": list(receipt.files),
+            "pre_head": "b" * 40,
+            "receipt_digest": receipt.digest,
+            "sha": "c" * 40,
+            "tool_use_id": "commit-1",
+        }, sort_keys=True, separators=(",", ":"))
+        authorized = replace(
+            state,
+            decisions=state.decisions + (
+                ("delivery.receipt", receipt_raw),
+                ("delivery.git.commit_observation", observation),
+            ),
+        )
+        arguments = (
+            "--force-with-lease=refs/heads/fix/receipt:",
+            "origin",
+            "HEAD:refs/heads/fix/receipt",
+        )
+
+        self.assertEqual("b" * 40, receipt.source_base_sha)
+        self.assertEqual(
+            "",
+            git_receipt_error(
+                authorized, "push", (), arguments),
+        )
+        self.assertEqual(
+            "c" * 40,
+            git_receipt_reservation(
+                authorized, "push", (), arguments)["expected_source_sha"],
+        )
+
+        broken_observation = json.loads(observation)
+        broken_observation["pre_head"] = "d" * 40
+        broken = replace(
+            authorized,
+            decisions=tuple(
+                (key, json.dumps(
+                    broken_observation, sort_keys=True, separators=(",", ":")))
+                if key == "delivery.git.commit_observation" else (key, value)
+                for key, value in authorized.decisions
+            ),
+        )
+        self.assertNotEqual(
+            "",
+            git_receipt_error(broken, "push", (), arguments),
+        )
 
 
 if __name__ == "__main__":

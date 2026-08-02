@@ -89,6 +89,7 @@ def _with_final_receipt(state):
         ("delivery.plan.destination_ref", "refs/heads/main"),
         ("delivery.plan.expected_destination_sha", "a" * 40),
         ("delivery.plan.new_branch", "false"),
+        ("delivery.plan.source_sha", "a" * 40),
     )
     planned = replace(
         state,

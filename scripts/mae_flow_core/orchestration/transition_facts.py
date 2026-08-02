@@ -14,8 +14,9 @@ DELIVERY_CONFIRMED_FILE = "delivery.confirmed_file"
 DELIVERY_RESULT = "delivery.result"
 STAGED_FINAL_FILE = "delivery.staged_final_file"
 DELIVERY_RECEIPT_KEY = "delivery.receipt"
-_RECEIPT_VERSION = 1
+_RECEIPT_VERSION = 2
 _COMMIT_MESSAGE_DECISION = "delivery.commit_message"
+_SOURCE_SHA_DECISION = "delivery.plan.source_sha"
 _TARGET_KEYS = {
     "remote": "delivery.plan.remote",
     "destination_ref": "delivery.plan.destination_ref",
@@ -43,6 +44,7 @@ class DeliveryReceipt:
     destination_ref: str
     expected_destination_sha: str
     new_branch: bool
+    source_base_sha: str
     requested_actions: tuple
     user_decision: str
     digest: str
@@ -65,6 +67,7 @@ class DeliveryReceipt:
             "remote": self.remote,
             "requested_actions": list(self.requested_actions),
             "scope": self.scope,
+            "source_base_sha": self.source_base_sha,
             "user_decision": self.user_decision,
             "version": self.version,
         }
@@ -128,6 +131,16 @@ def _target_plan(state):
     return remote, destination, expected.casefold(), new_branch
 
 
+def _source_sha(state, key, required=False):
+    value = _single_decision(state, key, required=required)
+    if not value:
+        return ""
+    normalized = value.casefold()
+    if normalized == "unborn" or re.fullmatch(r"[0-9a-f]{40}", normalized):
+        return normalized
+    raise ValueError("delivery source SHA must be 40-hex or unborn")
+
+
 def _checkpoint_plan(state, checkpoint):
     prefix = "delivery.cp.%s." % checkpoint
     files = _decision_values(state, prefix + "file")
@@ -166,7 +179,9 @@ def _receipt_plan(state, checkpoint=""):
         if state.commit_pace != CommitPace.STAGED:
             raise ValueError("Only Staged checkpoints have Git receipts")
         commit = _checkpoint_plan(state, checkpoint)
-        return "checkpoint", commit[1], (commit,), "", "", "", False, (
+        source = _source_sha(
+            state, "delivery.cp.%s.source_sha" % checkpoint, required=True)
+        return "checkpoint", commit[1], (commit,), "", "", "", False, source, (
             "add", "commit")
 
     files = _validated_manifest(state.delivery_files).files
@@ -178,6 +193,8 @@ def _receipt_plan(state, checkpoint=""):
         commits = () if not message else ((
             "", files, _validate_message(state.ticket, message)),)
         actions = ("add", "commit", "push") if has_git else ()
+        source = _source_sha(
+            state, _SOURCE_SHA_DECISION, required=has_git)
     else:
         final_files = decision_values(state, STAGED_FINAL_FILE)
         if not same_exact_files(final_files, state.delivery_files):
@@ -192,9 +209,26 @@ def _receipt_plan(state, checkpoint=""):
             actions = tuple(
                 action for unused in commits for action in ("add", "commit")
             ) + ("push",)
+        source = ""
+        if has_git and state.path.value == "full":
+            first_checkpoint = commits[0][0]
+            values = _decision_values(
+                state, checkpoint_receipt_key(first_checkpoint))
+            if len(values) != 1 or not valid_delivery_receipt(
+                    state, values[0], first_checkpoint):
+                raise ValueError(
+                    "Full staged delivery requires the first CP receipt base")
+            source = load_delivery_receipt(values[0]).source_base_sha
+        elif has_git:
+            source = _source_sha(
+                state, _SOURCE_SHA_DECISION, required=True)
+    if has_git and not new_branch and source != expected:
+        raise ValueError(
+            "existing-branch delivery requires local source base to equal "
+            "the confirmed destination SHA")
     return (
         "delivery", files, commits, remote, destination, expected,
-        new_branch, actions,
+        new_branch, source, actions,
     )
 
 
@@ -205,11 +239,11 @@ def issue_delivery_receipt(state, user_decision, checkpoint=""):
     decision = user_decision.strip() if isinstance(user_decision, str) else ""
     if not decision:
         raise ValueError("receipt requires a natural-language user decision")
-    (scope, files, commits, remote, destination, expected, new_branch,
+    (scope, files, commits, remote, destination, expected, new_branch, source,
      actions) = _receipt_plan(state, checkpoint)
     receipt = DeliveryReceipt(
         scope, checkpoint, state.path.value, state.commit_pace.value, files,
-        commits, remote, destination, expected, new_branch, actions, decision,
+        commits, remote, destination, expected, new_branch, source, actions, decision,
         "",
     )
     digest = _receipt_digest(receipt.to_dict(include_digest=False))
@@ -228,7 +262,8 @@ def load_delivery_receipt(raw):
     expected_keys = {
         "checkpoint", "commits", "destination_ref", "digest",
         "expected_destination_sha", "files", "new_branch", "pace", "path",
-        "remote", "requested_actions", "scope", "user_decision", "version",
+        "remote", "requested_actions", "scope", "source_base_sha",
+        "user_decision", "version",
     }
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise ValueError("delivery receipt does not match the strict schema")
@@ -239,7 +274,7 @@ def load_delivery_receipt(raw):
     }
     if any(not isinstance(value[key], str) for key in scalar_text):
         raise ValueError("delivery receipt scalar types are invalid")
-    if type(value["version"]) is not int or value["version"] != 1:
+    if type(value["version"]) is not int or value["version"] != 2:
         raise ValueError("delivery receipt version is invalid")
     if type(value["new_branch"]) is not bool:
         raise ValueError("delivery receipt new_branch is invalid")
@@ -272,7 +307,8 @@ def load_delivery_receipt(raw):
         value["scope"], value["checkpoint"], value["path"], value["pace"],
         tuple(value["files"]), tuple(commits), value["remote"],
         value["destination_ref"], value["expected_destination_sha"],
-        value["new_branch"], tuple(value["requested_actions"]),
+        value["new_branch"], value["source_base_sha"],
+        tuple(value["requested_actions"]),
         value["user_decision"], supplied_digest, value["version"],
     )
 

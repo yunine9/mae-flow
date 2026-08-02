@@ -224,6 +224,29 @@ def _initial_dirty(root):
     return tuple(paths), tuple(errors)
 
 
+def _git_head_revision(root):
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+            text=True,
+            encoding="ascii",
+            errors="strict",
+        )
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
+        raise ValueError("无法读取当前 Git HEAD") from exc
+    value = result.stdout.strip().casefold()
+    if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value):
+        return value
+    if result.returncode != 0:
+        return "unborn"
+    raise ValueError("当前 Git HEAD 不是可绑定的 commit")
+
+
 def _relative(root, path):
     return os.path.relpath(path, root).replace("\\", "/")
 
@@ -484,7 +507,8 @@ def cmd_lean_manifest(root, args):
         if args.moonlight_refresh and authorization_decision:
             event_id = _matching_user_event(
                 root, state, authorization_decision)
-        updated, manifest = prepare_manifest_state(state, args, root)
+        updated, manifest = prepare_manifest_state(
+            state, args, root, _git_head_revision(root))
         if args.moonlight_refresh:
             if not _moonlight_enabled(updated):
                 raise ValueError("当前流程未启用 Moonlight，不能刷新不可逆权限")

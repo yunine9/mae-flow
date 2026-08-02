@@ -156,13 +156,16 @@ def reserve_git_pretool(payload, state, facts, update_state):
     try:
         grant = git_receipt_reservation(
             state, operation, files, intent.arguments, message)
-        pre_head = facts.get("head_sha", "")
+        pre_head = facts.get("head_sha", "") or "unborn"
         pre_destination = facts.get("destination_sha", "")
         if operation == "push":
-            if not pre_head or pre_destination != grant[
+            if pre_destination != grant[
                     "expected_destination_sha"]:
                 raise ValueError(
                     "push destination no longer equals the receipt lease SHA")
+        if pre_head != grant["expected_source_sha"]:
+            raise ValueError(
+                "repository HEAD no longer equals the receipt source chain")
         pending = dict(
             grant,
             version=1,
@@ -230,6 +233,7 @@ def _observed_git_effect(pending, facts, tool_use_id):
                 pending.get("files", ()), facts.get("head_commit_files", ())))
         return success, ({
             "files": pending["files"],
+            "pre_head": pending.get("pre_head", ""),
             "receipt_digest": pending["receipt_digest"],
             "sha": head,
             "tool_use_id": tool_use_id,

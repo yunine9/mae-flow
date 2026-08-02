@@ -24,6 +24,7 @@ _TARGET_FACTS = {
     "delivery.plan.destination_ref",
     "delivery.plan.expected_destination_sha",
     "delivery.plan.new_branch",
+    "delivery.plan.source_sha",
 }
 
 
@@ -100,7 +101,14 @@ def _checkpoint_prefix(checkpoint):
     return "delivery.cp.%s." % checkpoint
 
 
-def _record_checkpoint(state, manifest, args):
+def _source_sha(value):
+    normalized = (value or "").strip().casefold()
+    if normalized == "unborn" or re.fullmatch(r"[0-9a-f]{40}", normalized):
+        return normalized
+    raise ValueError("无法读取当前 Git HEAD，不能绑定交付源码基线")
+
+
+def _record_checkpoint(state, manifest, args, source_sha):
     prefix = _checkpoint_prefix(args.checkpoint)
     if state.phase != Phase.CONSTRUCTION or state.current_cp != args.checkpoint:
         raise ValueError("Staged manifest 只能记录当前 CP 的精确文件")
@@ -113,7 +121,10 @@ def _record_checkpoint(state, manifest, args):
         item for item in state.decisions
         if not item[0].startswith(prefix) and item[0] != _STAGED_FINAL_FILE)
     decisions += tuple((prefix + "file", path) for path in manifest.files)
-    decisions += ((prefix + "message", message),)
+    decisions += (
+        (prefix + "message", message),
+        (prefix + "source_sha", _source_sha(source_sha)),
+    )
     return replace(state, decisions=decisions, current_cp=args.checkpoint)
 
 
@@ -129,7 +140,7 @@ def _checkpoint_union(state):
     return tuple(files)
 
 
-def _staged_state(state, manifest, args, root):
+def _staged_state(state, manifest, args, root, source_sha):
     checkpoint = bool(args.checkpoint)
     final = bool(args.final)
     if checkpoint == final:
@@ -139,7 +150,7 @@ def _staged_state(state, manifest, args, root):
         if any((args.remote, args.destination_ref,
                 args.expected_destination_sha, args.new_branch)):
             raise ValueError("CP 本地提交不能声明最终 push 目标")
-        return _record_checkpoint(state, manifest, args)
+        return _record_checkpoint(state, manifest, args, source_sha)
     expected = DeliveryManifest.from_paths(
         _checkpoint_union(state), repository_root=root).files
     if not expected or _identity(expected) != _identity(manifest.files):
@@ -176,7 +187,7 @@ def _record_continuous_message(state, args, has_target):
     return replace(state, decisions=decisions)
 
 
-def _record_target(state, args):
+def _record_target(state, args, source_sha):
     supplied = any((
         args.remote, args.destination_ref, args.expected_destination_sha,
         args.new_branch,
@@ -204,11 +215,12 @@ def _record_target(state, args):
         ("delivery.plan.destination_ref", destination),
         ("delivery.plan.expected_destination_sha", expected),
         ("delivery.plan.new_branch", "true" if args.new_branch else "false"),
+        ("delivery.plan.source_sha", _source_sha(source_sha)),
     )
     return replace(state, decisions=decisions), True
 
 
-def prepare_manifest_state(state, args, root):
+def prepare_manifest_state(state, args, root, source_sha):
     """Validate and store one exact manifest without irreversible effects."""
     adopted_dirty, adoption_reasons = _adoption_requests(
         args.adopt_dirty, root)
@@ -218,11 +230,11 @@ def prepare_manifest_state(state, args, root):
     _require_initial_dirty_ownership(state, manifest)
     state = _invalidate_delivery_binding(state, manifest)
     if state.commit_pace == CommitPace.STAGED:
-        state = _staged_state(state, manifest, args, root)
+        state = _staged_state(state, manifest, args, root, source_sha)
     elif (args.checkpoint or args.final
           or (args.decision and not args.moonlight_refresh)):
         raise ValueError("Continuous 只记录一次最终精确 manifest")
-    state, has_target = _record_target(state, args)
+    state, has_target = _record_target(state, args, source_sha)
     if state.commit_pace == CommitPace.CONTINUOUS:
         state = _record_continuous_message(state, args, has_target)
     updated = authorize_delivery(state, manifest)

@@ -98,6 +98,7 @@ class LeanHookAdapterTests(unittest.TestCase):
                 ("delivery.plan.destination_ref", "refs/heads/main"),
                 ("delivery.plan.expected_destination_sha", "a" * 40),
                 ("delivery.plan.new_branch", "false"),
+                ("delivery.plan.source_sha", "a" * 40),
             ),
         )
         receipt = issue_delivery_receipt(
@@ -851,7 +852,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.write_state(self.receipt_state())
         repository = {
             "staged": (),
-            "head": "1" * 40,
+            "head": "a" * 40,
             "destination": "a" * 40,
             "head_files": (),
         }

@@ -86,10 +86,11 @@ class LeanCliTests(unittest.TestCase):
                   encoding="utf-8") as stream:
             return json.load(stream)
 
-    def test_user_owned_decision_consumes_one_exact_codeagent_prompt(self):
+    def test_user_owned_decision_consumes_one_current_codeagent_prompt(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-USER-EVENT", "--path", "focused",
             "--pace", "continuous"))
+        prompt = "可以，按刚才展示的解析边界继续。"
         decision = "用户确认只修改已展示的解析边界。"
 
         fabricated = self.run_cli_raw(
@@ -98,7 +99,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(2, fabricated.returncode)
         self.assertEqual("startup", self.state()["phase"])
 
-        self.submit_user_prompt(decision)
+        self.submit_user_prompt(prompt)
         accepted = self.run_cli_raw(
             "decision", "startup-confirmed", decision)
         reused = self.run_cli_raw(
@@ -112,6 +113,20 @@ class LeanCliTests(unittest.TestCase):
             if item["key"] == "user.event.consumed"
         ]
         self.assertEqual(1, len(consumed))
+
+    def test_user_owned_decision_rejects_an_event_from_an_older_state(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-STALE-EVENT", "--path", "focused",
+            "--pace", "continuous"))
+        self.submit_user_prompt("按当前范围继续。")
+        self.assert_success(self.run_cli_raw(
+            "decision", "notes.context", "补充一条机器已查证的上下文。"))
+
+        stale = self.run_cli_raw(
+            "decision", "startup-confirmed", "用户确认当前范围。")
+
+        self.assertEqual(2, stale.returncode)
+        self.assertEqual("startup", self.state()["phase"])
 
     def run_capability(self, kind, outcome="returned"):
         identities = {

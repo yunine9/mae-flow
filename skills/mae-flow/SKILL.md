@@ -23,7 +23,7 @@ python "<插件目录>/scripts/mae-flow.py" current
 python "<插件目录>/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>"
 ```
 
-用户可直接用自然语言改方案。把决定一次写入并推进，例如：
+用户可直接用自然语言改方案。把决定一次写入并推进；命令中的文字可以是忠实的语义摘要，不必逐字复制用户原话，例如：
 
 ```text
 python "<插件目录>/scripts/mae-flow.py" decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"

@@ -142,13 +142,12 @@ def _consumed_user_event_ids(state):
     return consumed
 
 
-def _matching_user_event(root, state, text):
+def _matching_user_event(root, state):
     path = os.path.join(root, _USER_EVENT_LEDGER)
     rows, error = safe_read_json(path)
     if error or not isinstance(rows, list):
         raise ValueError(
-            "未捕获到本轮 CodeAgent UserPromptSubmit 用户原话")
-    wanted = text.strip()
+            "未捕获到本轮 CodeAgent UserPromptSubmit 自然语言输入")
     state_sha256 = _state_sha256(root)
     consumed = _consumed_user_event_ids(state)
     for row in reversed(rows):
@@ -162,10 +161,10 @@ def _matching_user_event(root, state, text):
                 and event_id not in consumed
                 and row.get("state_sha256") == state_sha256
                 and isinstance(prompt, str)
-                and prompt.strip() == wanted):
+                and bool(prompt.strip())):
             return event_id
     raise ValueError(
-        "该决定必须逐字使用本轮尚未消费的 UserPromptSubmit 用户原话")
+        "当前流程状态没有尚未消费的 CodeAgent UserPromptSubmit 自然语言输入")
 
 
 def _bind_user_event(state, event_id, semantic_event):
@@ -480,7 +479,7 @@ def cmd_lean_decision(root, args):
         if not text:
             raise ValueError("自然语言决定不能为空")
         event_id = (
-            _matching_user_event(root, state, text)
+            _matching_user_event(root, state)
             if _requires_user_event(args.event) else "")
         if "." in args.event:
             key = args.key.strip() or args.event.strip()
@@ -505,8 +504,7 @@ def cmd_lean_manifest(root, args):
         event_id = ""
         authorization_decision = (args.decision or "").strip()
         if args.moonlight_refresh and authorization_decision:
-            event_id = _matching_user_event(
-                root, state, authorization_decision)
+            event_id = _matching_user_event(root, state)
         updated, manifest = prepare_manifest_state(
             state, args, root, _git_head_revision(root))
         if args.moonlight_refresh:

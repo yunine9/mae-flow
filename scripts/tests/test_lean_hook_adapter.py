@@ -23,6 +23,7 @@ from mae_flow_core.adapters.lean_hook import (  # noqa: E402
     LeanHookAdapter,
     LeanHookFactPorts,
 )
+from mae_flow_core.application.hooks.models import HookResponse  # noqa: E402
 from mae_flow_core.orchestration import (  # noqa: E402
     CapabilityAttempt,
     CommitPace,
@@ -94,6 +95,25 @@ class LeanHookAdapterTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertEqual(
                     0, adapter.handle("PostToolUse", raw).exit_code)
+
+    def test_legacy_stop_short_circuits_before_input_and_state_access(self):
+        adapter = LeanHookAdapter(self.root, marker_root=self.marker_root)
+        accesses = []
+
+        def explosive_input():
+            accesses.append("input")
+            raise AssertionError("legacy stop read stdin")
+
+        def explosive_runtime():
+            accesses.append("runtime")
+            raise AssertionError("legacy stop read state")
+
+        adapter._runtime = explosive_runtime
+        for event in ("Stop", "SubagentStop", "subagent_stop"):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    HookResponse(), adapter.handle(event, explosive_input))
+        self.assertEqual([], accesses)
 
     def test_session_resume_is_minimal_and_once_per_session(self):
         state = FlowState(
@@ -625,6 +645,59 @@ class LeanHookAdapterTests(unittest.TestCase):
                     (result.stdout + result.stderr).decode("utf-8"),
                 )
 
+    def test_canonical_apply_patch_extracts_exact_targets_for_safety(self):
+        state = replace(self.write_state(), phase=Phase.STORY)
+        self.write_state(state)
+        cases = (
+            (
+                "*** Begin Patch\n"
+                "*** Update File: .mae-flow.json\n"
+                "@@\n-old\n+new\n"
+                "*** End Patch\n",
+                "control files",
+            ),
+            (
+                "*** Begin Patch\n"
+                "*** Add File: src/new_feature.py\n"
+                "+value = 1\n"
+                "*** End Patch\n",
+                "semantic authorization",
+            ),
+        )
+        for command, message in cases:
+            with self.subTest(message=message):
+                response = LeanHookAdapter(
+                    self.root, marker_root=self.marker_root).handle(
+                        "PreToolUse",
+                        {
+                            "tool_name": "apply_patch",
+                            "tool_input": {"command": command},
+                        },
+                )
+                self.assertEqual(2, response.exit_code)
+                self.assertIn(message, response.stderr)
+
+    def test_apply_patch_body_is_not_parsed_as_a_bash_command(self):
+        state = replace(self.write_state(), phase=Phase.CONSTRUCTION)
+        self.write_state(state)
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: src/help_text.py\n"
+            "@@\n"
+            "-message = 'old'\n"
+            "+message = 'never run git reset --hard or rm -rf build'\n"
+            "*** End Patch\n"
+        )
+        response = LeanHookAdapter(
+            self.root, marker_root=self.marker_root).handle(
+                "PreToolUse",
+                {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": patch},
+                },
+            )
+        self.assertEqual(0, response.exit_code, response.stderr)
+
     def test_recursive_delete_uses_actual_commands_and_task_temp_fact(self):
         state = replace(self.write_state(), phase=Phase.CONSTRUCTION)
         self.write_state(state)
@@ -734,7 +807,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(2, reset.exit_code)
         self.assertEqual(0, ordinary.exit_code)
 
-    def test_posttool_records_only_explicit_opaque_capability_facts(self):
+    def test_posttool_records_only_reserved_opaque_capability_return(self):
         self.write_state()
         unknown = self.invoke("PostToolUse", {
             "tool_name": "Bash",
@@ -745,22 +818,30 @@ class LeanHookAdapterTests(unittest.TestCase):
             unchanged = FlowState.from_dict(json.load(stream))
         self.assertEqual((), unchanged.capabilities)
 
-        fact = {
-            "kind": "build",
-            "source_revision": "opaque-source-fact",
-            "environment_revision": "opaque-env-fact",
-            "outcome": "returned",
-            "summary": "host supplied this fact without output parsing",
-        }
+        invocation = "tool-opaque-build-return"
+        reserved = self.invoke("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": invocation,
+            "tool_input": {"skill": "build-fix"},
+        })
+        self.assertEqual(0, reserved.returncode, reserved.stderr.decode("utf-8"))
+        summary = "host returned opaque data without output parsing"
         recorded = self.invoke("PostToolUse", {
             "tool_name": "Skill",
-            "capability_fact": fact,
-            "tool_response": {"unknown": ["shape"]},
+            "tool_use_id": invocation,
+            "tool_input": {"skill": "build-fix"},
+            "tool_response": summary,
         })
         self.assertEqual(0, recorded.returncode, recorded.stderr.decode("utf-8"))
         with open(self.state_path, encoding="utf-8") as stream:
             state = FlowState.from_dict(json.load(stream))
-        self.assertEqual(fact, {
+        self.assertEqual({
+            "kind": "build",
+            "source_revision": "build:startup:-",
+            "environment_revision": "lean-workflow-v1",
+            "outcome": "returned",
+            "summary": summary,
+        }, {
             "kind": state.capabilities[-1].kind,
             "source_revision": state.capabilities[-1].source_revision,
             "environment_revision": state.capabilities[-1].environment_revision,

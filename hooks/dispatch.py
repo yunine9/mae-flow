@@ -5,7 +5,6 @@
 import json
 import locale
 import os
-import subprocess
 import sys
 import tempfile
 import threading
@@ -22,6 +21,10 @@ from mae_flow_core.adapters.lean_hook import (
     LeanHookAdapter,
     LeanHookFactPorts,
 )
+from mae_flow_core.adapters.hook_git_facts import (
+    push_commit_files as _push_commit_files,
+    staged_files,
+)
 
 
 for _stream in (sys.stdout, sys.stderr):
@@ -34,7 +37,6 @@ for _stream in (sys.stdout, sys.stderr):
 LOG = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
 WATCHDOG_SECS = 12
 STDIN_SECS = 3
-GIT_SECS = 5
 _T0 = time.time()
 _INPUT_ENCODING = ""
 _STDIN_THREAD = None
@@ -140,54 +142,11 @@ def _chdir_root(payload):
         pass
 
 
-def _decode_git_paths(raw):
-    error = None
-    encodings = ["utf-8"]
-    for encoding in (locale.getpreferredencoding(False), "gb18030"):
-        normalized = str(encoding or "").lower().replace("-", "")
-        if normalized and all(
-                normalized != item.lower().replace("-", "")
-                for item in encodings):
-            encodings.append(encoding)
-    for encoding in encodings:
-        try:
-            text = raw.decode(encoding, errors="strict")
-            return tuple(path for path in text.split("\0") if path)
-        except (UnicodeDecodeError, LookupError) as exc:
-            error = exc
-    _log("git path decode failed: %s" % type(error).__name__)
-    return ()
-
-
-def _git_paths(root, arguments):
-    """Return exact NUL-delimited repository paths or no facts on failure."""
-    try:
-        result = subprocess.run(
-            ["git", "-c", "core.quotepath=false"] + list(arguments),
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=GIT_SECS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ()
-    return _decode_git_paths(result.stdout) if result.returncode == 0 else ()
-
-
 def _lean_adapter():
     root = os.path.abspath(os.getcwd())
     facts = LeanHookFactPorts(
-        staged_files=lambda unused_payload: _git_paths(
-            root,
-            ("diff", "--cached", "--name-only", "--diff-filter=ACDMRTUXB",
-             "-z", "--"),
-        ),
-        commit_files=lambda unused_payload: _git_paths(
-            root,
-            ("diff-tree", "--root", "--no-commit-id", "--name-only", "-r",
-             "-z", "HEAD", "--"),
-        ),
+        staged_files=lambda unused_payload: staged_files(root),
+        commit_files=lambda payload: _push_commit_files(root, payload),
     )
     return LeanHookAdapter(root, fact_ports=facts)
 
@@ -206,6 +165,12 @@ def _finish(exit_code):
 def main(argv=None):
     arguments = sys.argv if argv is None else argv
     event = arguments[1] if len(arguments) > 1 else ""
+    normalized = "".join(
+        character for character in str(event)
+        if character not in " _-"
+    ).casefold()
+    if normalized in {"stop", "subagentstop"}:
+        raise SystemExit(0)
     _arm_watchdog()
     _log("start " + event)
     exit_code = 0

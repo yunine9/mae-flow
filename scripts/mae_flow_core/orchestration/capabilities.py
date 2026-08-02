@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 
 from .models import CapabilityAttempt
+from .models import Phase
 
 
 SUMMARY_LIMIT = 500
@@ -168,3 +169,27 @@ def record_flow_attempt(state, context, outcome, summary=""):
     if available:
         decisions += ((used_key, authorizations[len(used)]),)
     return replace(state, capabilities=attempts, decisions=decisions)
+
+
+def capability_slot(state, kind):
+    """Derive the one semantic capability slot from recovery state."""
+    capability = _kind(kind).value
+    if capability == "reviewer" and state.phase == Phase.STORY:
+        return "reviewer:design"
+    checkpoint = state.current_cp or "CP1"
+    if capability == "reviewer" and state.phase == Phase.CONSTRUCTION:
+        return "reviewer:cp:%s" % checkpoint
+    scoped_cp = (
+        checkpoint
+        if state.phase in {Phase.CONSTRUCTION, Phase.QUALITY}
+        else "-"
+    )
+    return "%s:%s:%s" % (capability, state.phase.value, scoped_cp)
+
+
+def flow_attempt_context(state, kind):
+    return AttemptContext(
+        kind,
+        capability_slot(state, kind),
+        "lean-workflow-v1",
+    )

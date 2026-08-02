@@ -16,6 +16,46 @@ def is_exit_snapshot_name(name):
     return bool(_SNAPSHOT_NAME.fullmatch(str(name or "")))
 
 
+def explicit_exit(text):
+    """Recognize an unambiguous natural-language workflow exit request."""
+    if not isinstance(text, str):
+        return False
+    value = re.sub(r"\s+", " ", text).strip()
+    if not value:
+        return False
+    if re.search(
+            r"(?:[?？]|怎么|如何|能否|能不能|可以吗|会怎样|后会)",
+            value, re.I):
+        return False
+    if re.search(r"(?:别|不要|不能|无需|不必)\s*(?:再)?(?:退出|停止|关闭)", value):
+        return False
+    if re.fullmatch(
+            r"/mae-flow(?::mae-flow)?\s+(?:exit|direct)(?:\s+.*)?",
+            value, re.I):
+        return True
+    chinese = re.fullmatch(
+        r"(?:(?:请)(?:立即)?|我(?:现在)?(?:想|要|决定|需要)?|立即)?"
+        r"(?:退出|停止|关闭)(?:使用)?\s*"
+        r"(?:mae[- ]?flow|这个工作流|工作流)(?:吧|了)?"
+        r"(?:[，,]\s*直接(?:开发|改代码))?[。！!]?",
+        value,
+        re.I,
+    )
+    stop_using = re.fullmatch(
+        r"(?:我)?(?:现在)?不再(?:使用|走)\s*"
+        r"(?:mae[- ]?flow|这个工作流|工作流)\s*(?:了)?[。！!]?",
+        value,
+        re.I,
+    )
+    english = re.fullmatch(
+        r"(?:please\s+)?(?:exit|stop|disable)\s+"
+        r"(?:mae[- ]?flow|this workflow)(?:\s+now)?[.!]?",
+        value,
+        re.I,
+    )
+    return bool(chinese or stop_using or english)
+
+
 def _inside(parent, child):
     try:
         return os.path.commonpath((parent, child)) == parent

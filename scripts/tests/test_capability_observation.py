@@ -32,11 +32,53 @@ from mae_flow_core.orchestration.capability_registry import (  # noqa: E402
 
 
 class CapabilityRegistryTests(unittest.TestCase):
+    def test_current_agent_hosts_match_only_exact_capability_identities(self):
+        registry = load_capability_registry("/missing")
+        cases = (
+            (
+                {"tool_name": "Agent", "tool_input": {
+                    "subagent_type": "mae-flow:ut-generator-agent"}},
+                "ut",
+            ),
+            (
+                {"tool_name": "spawn_agent", "tool_input": {
+                    "task_name": "codecheck_advisor_agent",
+                    "message": "opaque task prompt"}},
+                "codecheck",
+            ),
+            (
+                {"tool_name": "Task", "tool_input": {
+                    "subagent_type": "story-generator-agent"}},
+                "story",
+            ),
+            (
+                {"tool_name": "Skill", "tool_input": {
+                    "skill": "mae-flow:build-fix"}},
+                "build",
+            ),
+        )
+        for payload, kind in cases:
+            with self.subTest(payload=payload):
+                matched = match_capability(payload, registry)
+                self.assertIsNotNone(matched)
+                self.assertEqual(kind, matched.kind)
+
+        self.assertIsNone(match_capability({
+            "tool_name": "spawn_agent",
+            "tool_input": {
+                "task_name": "codecheck_advisor_agent_extra",
+                "message": "mentions codecheck_advisor_agent",
+            },
+        }, registry))
+
     def test_defaults_match_only_exact_task_and_skill_identities(self):
         cases = (
-            ("Task", {"subagent_type": "compile-agent"}, "build"),
             ("Task", {"subagent_type": "ut-generator-agent"}, "ut"),
-            ("Task", {"subagent_type": "codecheck-fix-agent"}, "codecheck"),
+            ("Task", {"subagent_type": "codecheck-advisor-agent"},
+             "codecheck"),
+            ("Agent", {"agent_type": "mae-flow:craft-reviewer-agent"},
+             "reviewer"),
+            ("spawn_agent", {"task_name": "grill_critic_agent"}, "grill"),
             ("Skill", {"skill": "build-fix"}, "build"),
             ("Skill", {"name": "build-fix"}, "build"),
         )
@@ -182,8 +224,8 @@ class CapabilityRegistryTests(unittest.TestCase):
             registry = load_capability_registry(root)
 
             self.assertEqual("build", match_capability({
-                "tool_name": "Task",
-                "tool_input": {"subagent_type": "compile-agent"},
+                "tool_name": "Skill",
+                "tool_input": {"skill": "build-fix"},
             }, registry).kind)
 
 
@@ -234,25 +276,122 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         with open(self.audit_path, encoding="utf-8") as stream:
             return json.load(stream)
 
-    def test_matching_posttool_records_return_without_quality_parsing(self):
-        raw = "PASS CLEAN warnings=41 disabled=7 count=900"
-        response = LeanHookAdapter(
+    def save_state(self, state):
+        with open(self.state_path, "w", encoding="utf-8") as stream:
+            json.dump(state.to_dict(), stream)
+
+    def test_real_pre_and_post_payload_reserve_one_slot_and_consume_retry(self):
+        adapter = LeanHookAdapter(
             self.root, marker_root=os.path.join(self.root, "markers"),
-            clock_ns=lambda: 123,
-        ).handle("PostToolUse", {
+            clock_ns=lambda: 321,
+        )
+        first_payload = {
             "tool_name": "Skill",
+            "tool_use_id": "tool-build-1",
+            "tool_input": {"skill": "build-fix"},
+        }
+        first = adapter.handle("PreToolUse", first_payload)
+        duplicate = adapter.handle("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-build-duplicate",
+            "tool_input": {"skill": "build-fix"},
+        })
+
+        self.assertEqual(0, first.exit_code)
+        self.assertEqual(2, duplicate.exit_code)
+        self.assertIn("自然语言", duplicate.stderr)
+        attempts = self.read_state().capabilities
+        self.assertEqual(1, len(attempts))
+        self.assertEqual(
+            ("build", "build:startup:-", "lean-workflow-v1", "not-observed"),
+            (
+                attempts[0].kind,
+                attempts[0].source_revision,
+                attempts[0].environment_revision,
+                attempts[0].outcome,
+            ),
+        )
+
+        authorized = self.read_state().with_decision(
+            "capability.retry.build",
+            "用户确认构建环境恢复，授权同一阶段再调用一次。",
+        )
+        self.save_state(authorized)
+        retry = adapter.handle("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-build-2",
+            "tool_input": {"skill": "build-fix"},
+        })
+        self.assertEqual(0, retry.exit_code, retry.stderr)
+        self.assertIn(
+            (
+                "capability.retry.used.build",
+                "用户确认构建环境恢复，授权同一阶段再调用一次。",
+            ),
+            self.read_state().decisions,
+        )
+
+        raw = "PASS CLEAN warnings=41 disabled=7 count=900"
+        post = adapter.handle("PostToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-build-2",
             "tool_input": {"skill": "build-fix"},
             "tool_response": raw,
+        })
+        self.assertEqual(0, post.exit_code)
+        attempts = self.read_state().capabilities
+        self.assertEqual(2, len(attempts))
+        self.assertEqual(("returned", raw), (
+            attempts[-1].outcome, attempts[-1].summary))
+
+    def test_fictional_capability_fields_do_not_create_attempts(self):
+        response = LeanHookAdapter(
+            self.root, marker_root=os.path.join(self.root, "markers"),
+        ).handle("PostToolUse", {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo ordinary"},
+            "tool_response": "ordinary",
             "capability_context": {
-                "source_revision": "src-1",
-                "environment_revision": "env-1",
+                "source_revision": "invented-source",
+                "environment_revision": "invented-environment",
+            },
+            "capability_record": {
+                "kind": "build",
+                "identity": "invented-tool",
+                "source_revision": "invented-source",
+                "environment_revision": "invented-environment",
+                "outcome": "returned",
+                "summary": "invented",
             },
         })
 
         self.assertEqual(0, response.exit_code)
+        self.assertEqual((), self.read_state().capabilities)
+        self.assertFalse(os.path.exists(self.audit_path))
+
+    def test_matching_posttool_records_return_without_quality_parsing(self):
+        raw = "PASS CLEAN warnings=41 disabled=7 count=900"
+        adapter = LeanHookAdapter(
+            self.root, marker_root=os.path.join(self.root, "markers"),
+            clock_ns=lambda: 123,
+        )
+        reserved = adapter.handle("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-build-opaque",
+            "tool_input": {"skill": "build-fix"},
+        })
+        response = adapter.handle("PostToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-build-opaque",
+            "tool_input": {"skill": "build-fix"},
+            "tool_response": raw,
+        })
+
+        self.assertEqual(0, reserved.exit_code)
+        self.assertEqual(0, response.exit_code)
         attempt = self.read_state().capabilities[-1]
         self.assertEqual(
-            ("build", "src-1", "env-1", "returned", raw),
+            ("build", "build:startup:-", "lean-workflow-v1", "returned", raw),
             (
                 attempt.kind,
                 attempt.source_revision,
@@ -297,70 +436,6 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         self.assertEqual("ut-generator-agent", observation["identity"])
         self.assertTrue(observation["return_present"])
 
-    def test_explicit_record_fallback_accepts_only_opaque_outcomes(self):
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"),
-            clock_ns=lambda: 789,
-        )
-        rejected = adapter.handle("PostToolUse", {
-            "tool_name": "Bash",
-            "capability_record": {
-                "kind": "ut",
-                "identity": "cpp-ut-host",
-                "source_revision": "src-2",
-                "environment_revision": "env-2",
-                "outcome": "PASS",
-                "summary": "manufactured conclusion",
-            },
-        })
-        accepted = adapter.handle("PostToolUse", {
-            "tool_name": "Bash",
-            "capability_record": {
-                "kind": "ut",
-                "identity": "cpp-ut-host",
-                "source_revision": "src-2",
-                "environment_revision": "env-2",
-                "outcome": "timed-out",
-                "summary": "host stopped waiting",
-            },
-        })
-
-        self.assertEqual(0, rejected.exit_code)
-        self.assertEqual(0, accepted.exit_code)
-        self.assertEqual(1, len(self.read_state().capabilities))
-        attempt = self.read_state().capabilities[0]
-        self.assertEqual(("ut", "timed-out", "host stopped waiting"), (
-            attempt.kind, attempt.outcome, attempt.summary))
-        audit = self.read_audit()
-        self.assertEqual(1, len(audit))
-        self.assertEqual("cpp-ut-host", audit[0]["payload"]["identity"])
-        self.assertNotIn("PASS", json.dumps(audit))
-
-    def test_explicit_record_fallback_preserves_all_opaque_outcomes(self):
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"))
-
-        for index, outcome in enumerate((
-                "returned", "failed-to-start", "timed-out", "not-observed")):
-            response = adapter.handle("PostToolUse", {
-                "tool_name": "Bash",
-                "capability_record": {
-                    "kind": "codecheck",
-                    "identity": "host-codecheck",
-                    "source_revision": "src-%s" % index,
-                    "environment_revision": "env-1",
-                    "outcome": outcome,
-                    "summary": "opaque %s" % outcome,
-                },
-            })
-            self.assertEqual(0, response.exit_code)
-
-        attempts = self.read_state().capabilities
-        self.assertEqual(
-            ("returned", "failed-to-start", "timed-out", "not-observed"),
-            tuple(attempt.outcome for attempt in attempts),
-        )
-
     def test_observation_and_persistence_errors_fail_open(self):
         def unavailable(*unused):
             raise OSError("audit unavailable")
@@ -377,14 +452,10 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         adapter = LeanHookAdapter(
             self.root, marker_root=os.path.join(self.root, "markers"))
         adapter._update_state = unavailable
-        persistence_failure = adapter.handle("PostToolUse", {
-            "tool_name": "Task",
-            "tool_input": {"subagent_type": "compile-agent"},
-            "tool_response": "opaque",
-            "capability_context": {
-                "source_revision": "src-fail",
-                "environment_revision": "env-fail",
-            },
+        persistence_failure = adapter.handle("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "tool-persistence-failure",
+            "tool_input": {"skill": "build-fix"},
         })
 
         self.assertEqual(0, audit_failure.exit_code)

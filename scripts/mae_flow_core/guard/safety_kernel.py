@@ -431,7 +431,11 @@ def decide_pretool(context, tool, tool_input):
     if not isinstance(context.state, FlowState):
         raise TypeError("context.state must be a FlowState")
 
-    command = _command(tool_input)
+    command = (
+        _command(tool_input)
+        if str(tool or "").casefold() == "bash"
+        else ""
+    )
     if command:
         dangerous = _dangerous_bash_decision(context, command, tool_input)
         if dangerous is not None:

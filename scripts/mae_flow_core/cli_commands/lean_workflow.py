@@ -19,6 +19,7 @@ from mae_flow_core.orchestration import (
     Phase,
     ToolboxRequest,
     advance_flow,
+    capability_slot,
     decode_flow_state,
     record_flow_attempt,
     run_toolbox_request,
@@ -333,27 +334,13 @@ def cmd_lean_decision(root, args):
     return _run(execute)
 
 
-def _attempt_slot(state, kind):
-    if kind == "reviewer" and state.phase == Phase.STORY:
-        return "reviewer:design"
-    checkpoint = state.current_cp or "CP1"
-    if kind == "reviewer" and state.phase == Phase.CONSTRUCTION:
-        return "reviewer:cp:%s" % checkpoint
-    scoped_cp = (
-        checkpoint
-        if state.phase in {Phase.CONSTRUCTION, Phase.QUALITY}
-        else "-"
-    )
-    return "%s:%s:%s" % (kind, state.phase.value, scoped_cp)
-
-
 def _attempt_risk_prefix(kind, slot):
     return "Capability %s did not return in slot %s:" % (kind, slot)
 
 
 def cmd_lean_capability_record(root, args):
     def operation(state):
-        slot = _attempt_slot(state, args.kind)
+        slot = capability_slot(state, args.kind)
         context = AttemptContext(
             args.kind,
             slot,

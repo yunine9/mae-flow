@@ -55,10 +55,10 @@ class HookProtocolTests(unittest.TestCase):
         pretool = set(config["PreToolUse"][0]["matcher"].split("|"))
         posttool = set(config["PostToolUse"][0]["matcher"].split("|"))
         self.assertEqual(
-            {"Edit", "Write", "MultiEdit", "Bash", "Task", "Skill"},
+            {"Edit", "Write", "MultiEdit", "Bash", "Agent", "Task", "Skill"},
             pretool,
         )
-        self.assertEqual({"Task", "Skill"}, posttool)
+        self.assertEqual({"Agent", "Task", "Skill"}, posttool)
 
     def test_decodes_utf8_bom_and_gb18030_without_replacement(self):
         payload = {"prompt": "中文确认", "tool_name": "Edit"}
@@ -133,6 +133,131 @@ class HookProtocolTests(unittest.TestCase):
                     with open(state_path, "rb") as stream:
                         self.assertEqual(original, stream.read())
                     self.assertEqual(before, set(os.listdir(root)))
+
+    def test_legacy_stop_main_exits_before_all_process_boundary_access(self):
+        for event in ("Stop", "SubagentStop", "subagent_stop"):
+            with self.subTest(event=event):
+                accessed = []
+                with mock.patch.object(
+                        self.dispatch, "_arm_watchdog",
+                        side_effect=lambda: accessed.append("watchdog")):
+                    with mock.patch.object(
+                            self.dispatch, "_log",
+                            side_effect=lambda unused: accessed.append("log")):
+                        with mock.patch.object(
+                                self.dispatch, "read_input",
+                                side_effect=lambda: accessed.append("stdin")):
+                            with mock.patch.object(
+                                    self.dispatch, "_lean_adapter",
+                                    side_effect=lambda: accessed.append(
+                                        "adapter")):
+                                with self.assertRaises(SystemExit) as caught:
+                                    self.dispatch.main(["dispatch.py", event])
+                self.assertEqual(0, caught.exception.code)
+                self.assertEqual([], accessed)
+
+    def test_staged_push_collects_exact_files_from_every_published_commit(self):
+        text_facts = {
+            ("rev-parse", "--verify", "HEAD^{commit}"): "cp-2-head",
+            ("rev-parse", "--verify",
+             "refs/remotes/origin/main^{commit}"): "remote-base",
+        }
+
+        def git_text(unused_root, arguments):
+            return text_facts.get(tuple(arguments), "")
+
+        def git_paths(unused_root, arguments):
+            self.assertEqual(
+                ("log", "--format=", "--name-only", "-z",
+                 "remote-base..cp-2-head", "--"),
+                tuple(arguments),
+            )
+            return ("src/cp1.py", "src/cp2.py", "src/cp1.py")
+
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "git push origin HEAD:refs/heads/main",
+            },
+        }
+        self.assertEqual(
+            ("src/cp1.py", "src/cp2.py"),
+            self.dispatch._push_commit_files(
+                ROOT, payload, git_text=git_text, git_paths=git_paths),
+        )
+
+    def test_push_range_includes_unrelated_commits_ahead_of_remote(self):
+        def git_text(unused_root, arguments):
+            values = {
+                ("rev-parse", "--verify", "HEAD^{commit}"): "flow-head",
+                ("rev-parse", "--verify",
+                 "refs/remotes/origin/main^{commit}"): "remote-base",
+            }
+            return values.get(tuple(arguments), "")
+
+        def git_paths(unused_root, unused_arguments):
+            return ("unrelated/private.txt", "src/delivery.py")
+
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "git push origin HEAD:refs/heads/main",
+            },
+        }
+        self.assertEqual(
+            ("unrelated/private.txt", "src/delivery.py"),
+            self.dispatch._push_commit_files(
+                ROOT, payload, git_text=git_text, git_paths=git_paths),
+        )
+
+    def test_push_without_refspec_uses_configured_push_tracking_range(self):
+        def git_text(unused_root, arguments):
+            values = {
+                ("rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                 "@{push}"): "origin/main",
+                ("rev-parse", "--verify", "HEAD^{commit}"): "local-head",
+                ("rev-parse", "--verify",
+                 "refs/remotes/origin/main^{commit}"): "remote-head",
+            }
+            return values.get(tuple(arguments), "")
+
+        def git_paths(unused_root, arguments):
+            self.assertEqual(
+                ("log", "--format=", "--name-only", "-z",
+                 "remote-head..local-head", "--"),
+                tuple(arguments),
+            )
+            return ("src/upstream.py",)
+
+        self.assertEqual(
+            ("src/upstream.py",),
+            self.dispatch._push_commit_files(
+                ROOT,
+                {"tool_name": "Bash", "tool_input": {"command": "git push"}},
+                git_text=git_text,
+                git_paths=git_paths,
+            ),
+        )
+
+    def test_ambiguous_push_refspecs_provide_no_authorization_facts(self):
+        payloads = (
+            {"tool_name": "Bash", "tool_input": {
+                "command": "git push --all origin"}},
+            {"tool_name": "Bash", "tool_input": {
+                "command": "git push origin main release"}},
+            {"tool_name": "Bash", "tool_input": {
+                "command": "git push origin :main"}},
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT, payload,
+                        git_text=lambda unused_root, unused_args: "",
+                        git_paths=lambda unused_root, unused_args: (),
+                    ),
+                )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Test-only protocol and platform adapter for the lean Hook router."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import hashlib
 import json
 import locale
@@ -34,7 +34,9 @@ from ..state_store import (
     safe_read_json,
     update_json,
 )
-from .lean_exit import is_exit_snapshot_name, valid_exit_pointer
+from .hook_capabilities import LeanCapabilityGate
+from .hook_tool_inputs import apply_patch_targets
+from .lean_exit import explicit_exit, is_exit_snapshot_name, valid_exit_pointer
 
 
 SUMMARY_BUDGET = 1200
@@ -93,43 +95,13 @@ def _prompt_event(event):
         }
 
 
-def _explicit_exit(text):
-    if not isinstance(text, str):
-        return False
-    value = re.sub(r"\s+", " ", text).strip()
-    if not value:
-        return False
-    if re.search(
-            r"(?:[?？]|怎么|如何|能否|能不能|可以吗|会怎样|后会)",
-            value, re.I):
-        return False
-    if re.search(r"(?:别|不要|不能|无需|不必)\s*(?:再)?(?:退出|停止|关闭)", value):
-        return False
-    if re.fullmatch(
-            r"/mae-flow(?::mae-flow)?\s+(?:exit|direct)(?:\s+.*)?",
-            value, re.I):
-        return True
-    chinese = re.fullmatch(
-        r"(?:(?:请)(?:立即)?|我(?:现在)?(?:想|要|决定|需要)?|立即)?"
-        r"(?:退出|停止|关闭)(?:使用)?\s*"
-        r"(?:mae[- ]?flow|这个工作流|工作流)(?:吧|了)?"
-        r"(?:[，,]\s*直接(?:开发|改代码))?[。！!]?",
-        value,
-        re.I,
+def _legacy_stop_event(event):
+    return (
+        isinstance(event, str)
+        and bool(re.fullmatch(r"[A-Za-z _-]+", event))
+        and re.sub(r"[ _-]+", "", event).casefold()
+        in {"stop", "subagentstop"}
     )
-    stop_using = re.fullmatch(
-        r"(?:我)?(?:现在)?不再(?:使用|走)\s*"
-        r"(?:mae[- ]?flow|这个工作流|工作流)\s*(?:了)?[。！!]?",
-        value,
-        re.I,
-    )
-    english = re.fullmatch(
-        r"(?:please\s+)?(?:exit|stop|disable)\s+"
-        r"(?:mae[- ]?flow|this workflow)(?:\s+now)?[.!]?",
-        value,
-        re.I,
-    )
-    return bool(chinese or stop_using or english)
 
 
 def _clip(value, maximum=240):
@@ -169,6 +141,8 @@ class LeanHookAdapter:
         self.move_state = move_state or _replace_with_retry
         self.snapshot_writer = snapshot_writer or self._write_snapshot_bytes
         self.pointer_writer = pointer_writer or atomic_write_json
+        self.capabilities = LeanCapabilityGate(
+            self.root, lambda mutate: self._update_state(mutate))
 
     def _valid_pointer(self):
         return valid_exit_pointer(
@@ -301,10 +275,15 @@ class LeanHookAdapter:
     def _pretool(self, state, payload):
         tool = payload.get("tool_name", "")
         tool_input = payload.get("tool_input", {})
+        tool_input = apply_patch_targets(tool, tool_input)
         command = tool_input.get("command", "") if isinstance(
             tool_input, Mapping) else ""
-        delete_targets = recursive_delete_facts(command) if isinstance(
-            command, str) else ()
+        delete_targets = (
+            recursive_delete_facts(command)
+            if str(tool or "").casefold() == "bash"
+            and isinstance(command, str)
+            else ()
+        )
         if delete_targets:
             tool_input = dict(tool_input)
             tool_input["recursive_delete_targets"] = delete_targets
@@ -327,11 +306,9 @@ class LeanHookAdapter:
             )
             decision = decide_pretool(context, tool, tool_input)
         if decision.allow:
-            return HookResponse()
-        return HookResponse(
-            exit_code=2,
-            stderr="[mae-flow] %s\n" % (decision.message or decision.rule),
-        )
+            return self.capabilities.reserve(state, payload)
+        return HookResponse(exit_code=2, stderr=(
+            "[mae-flow] %s\n" % (decision.message or decision.rule)))
 
     def _update_state(self, mutate):
         with ProjectStateLock(self.root):
@@ -339,14 +316,16 @@ class LeanHookAdapter:
             if error or raw is None:
                 raise ValueError(error or "active state is absent")
             state = FlowState.from_dict(raw)
-            atomic_write_json(self.state_path, mutate(state).to_dict())
+            updated = mutate(state)
+            atomic_write_json(self.state_path, updated.to_dict())
+            return updated
 
     def _posttool(self, payload):
         return handle_capability_posttool(
             payload,
             load_capability_registry(self.root),
             self._record_event,
-            self._update_state,
+            self.capabilities.complete,
         )
 
     def _existing_snapshot(self):
@@ -454,13 +433,15 @@ class LeanHookAdapter:
 
     def handle(self, event, raw_input):
         """Handle one raw Hook invocation and return protocol output."""
+        if _legacy_stop_event(event):
+            return HookResponse()
         try:
             raw = raw_input() if callable(raw_input) else raw_input
             payload = _decode_json(raw)
         except (Exception, SystemExit):
             return HookResponse()
 
-        if _prompt_event(event) and _explicit_exit(payload.get("prompt")):
+        if _prompt_event(event) and explicit_exit(payload.get("prompt")):
             try:
                 self._release_takeover()
             except (Exception, SystemExit) as exc:

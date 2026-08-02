@@ -192,6 +192,17 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         self.assertEqual((False, "source_edit"), (quality.allow, quality.rule))
         self.assertTrue(approved_quality.allow)
 
+    def test_non_bash_command_text_is_never_treated_as_shell_execution(self):
+        decision = decide_pretool(
+            _context(_state(phase=Phase.CONSTRUCTION)),
+            "apply_patch",
+            {
+                "command": "git reset --hard HEAD",
+                "targets": ("src/help_text.py",),
+            },
+        )
+        self.assertTrue(decision.allow)
+
     def test_focused_source_edits_require_scope_approval(self):
         unapproved = self.decision(
             _state(path=DeliveryPath.FOCUSED), "src/main.py")

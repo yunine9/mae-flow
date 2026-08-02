@@ -64,22 +64,44 @@ class CapabilityMatch:
     identity: str
 
 
+_AGENT_CAPABILITIES = {
+    "ut-generator-agent": "ut",
+    "codecheck-advisor-agent": "codecheck",
+    "grill-critic-agent": "grill",
+    "story-generator-agent": "story",
+    "craft-reviewer-agent": "reviewer",
+}
+_PLUGIN_AGENT_CAPABILITIES = dict(_AGENT_CAPABILITIES)
+_PLUGIN_AGENT_CAPABILITIES.update({
+    "mae-flow:" + identity: kind
+    for identity, kind in _AGENT_CAPABILITIES.items()
+})
+_CODEX_AGENT_CAPABILITIES = {
+    identity.replace("-", "_"): kind
+    for identity, kind in _AGENT_CAPABILITIES.items()
+}
+
+
 DEFAULT_CAPABILITY_REGISTRY = (
     CapabilitySelector(
         "Task",
         ("subagent_type",),
-        {
-            "ut-generator-agent": "ut",
-            "codecheck-advisor-agent": "codecheck",
-            "grill-critic-agent": "grill",
-            "story-generator-agent": "story",
-            "craft-reviewer-agent": "reviewer",
-        },
+        _PLUGIN_AGENT_CAPABILITIES,
+    ),
+    CapabilitySelector(
+        "Agent",
+        ("subagent_type", "agent_type"),
+        _PLUGIN_AGENT_CAPABILITIES,
+    ),
+    CapabilitySelector(
+        "spawn_agent",
+        ("task_name",),
+        _CODEX_AGENT_CAPABILITIES,
     ),
     CapabilitySelector(
         "Skill",
         ("skill", "name"),
-        {"build-fix": "build"},
+        {"build-fix": "build", "mae-flow:build-fix": "build"},
     ),
 )
 

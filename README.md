@@ -13,7 +13,7 @@ Mae-Flow 是面向 CodeAgent 的交付工作流。它把人留在真正有决策
 交付 REQ-42：修复删除好友后会话缓存未清理的问题。
 ```
 
-启动卡会展示推荐路径、范围、提交节奏和本轮已存在的工作区改动。用户可以直接用自然语言调整或确认；没有固定口令。
+启动卡会一次展示工号、单号与 `feat/fix` 类型、需求来源、推荐路径、提交节奏、基线/工作分支、Build 方式、UT 生成方式、UT 运行入口和本轮已存在的工作区改动。用户可以直接用自然语言调整或确认；没有固定口令。
 
 恢复时直接说“继续 REQ-42”。Mae-Flow 从项目里的最小恢复游标继续，不要求旧会话仍在。要退出时明确说“退出 Mae-Flow”；退出会保存现场并释放控制，不删除业务改动。
 
@@ -36,9 +36,9 @@ Intake → Spec → Design → Construction → Quality → Delivery
 
 | 阶段 | 目标 | 典型产出 |
 |---|---|---|
-| **Intake** | 确认目标、路径、范围、提交节奏和初始脏文件归属 | 启动决定与恢复游标 |
-| **Spec** | 固定 WHAT：可观察行为、边界、非目标和风险 | 按需求分组的 Spec |
-| **Design** | 固定 HOW：接口、数据流、失败语义、可测性和 CP | 默认本地的 Story/设计说明 |
+| **Intake** | 确认完整运行配置、相关业务领域、路径、提交节奏和初始脏文件归属 | 启动决定与恢复游标 |
+| **Spec** | 固定 WHAT：可观察行为、边界、非目标和风险 | 默认本地的变更契约 |
+| **Design** | 形成可独立交付的软件详细设计与测试交接 | 默认本地的 Story |
 | **Construction** | 按 CP 实现；Full 在每个 CP 给用户检视，Focused 连续推进 | 业务改动与本批事实 |
 | **Quality** | 对最终相关输入各调用一次需要的质量能力 | 不透明能力结果与未决风险 |
 | **Delivery** | 展示精确文件清单、提交说明和推送选择 | 精确提交与一次推送 |
@@ -73,16 +73,20 @@ UT capability 自己负责写测试、编译测试和运行测试；弱 C++/gtes
 
 ## 文档与文件归属
 
-需求材料按单号分组：
+需求过程材料按单号分组：
 
 ```text
-docs/mae-flow/requirements/<ticket>/spec.md
+.mae-flow-work/<ticket>/spec.md
 .mae-flow-work/<ticket>/story.md
 .mae-flow-work/<ticket>/decisions.md
 .mae-flow-work/<ticket>/engineering-notes.md
 ```
 
-Spec 和行为基线是持久真相源。Story、决策、工程笔记、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择某一份条件文档入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。
+领域行为基线是默认上库的当前真相源：`docs/mae-flow/behavior/<domain>.md` 按稳定业务能力划分，`index.md` 只做轻量路由。复杂存量领域第一次只记录本次有证据的覆盖，未写到的行为仍是未知，不要求一次补全。
+
+Spec 是本轮确认的 WHAT 变更契约；Story 按模板合并客户场景、业务规格、功能验收标准、软件详细设计和测试交接。二者以及决策、工程笔记、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择某一份条件文档入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。
+
+Delivery 将每个相关领域对账为 `new`、`updated` 或 `unchanged`。只有真实变化的领域文档以及新领域需要的 `index.md` 更新进入精确 manifest；不扫描、不暂存无关领域，也不物理归档历史 Spec。
 
 Focused 启动时不声明 Spec、Story 或 UT handoff 产物；只有语义风险触发升级 Full 时，才一次补入这三条 Full 路径。
 
@@ -93,7 +97,7 @@ Mae-Flow 只对用户已审阅的逐文件 manifest 授权：
 - `git add -- <file>...` 只列精确文件，不使用宽暂存；
 - Windows 反斜杠和大小写别名视为同一文件，重复或含糊路径会被拒绝；
 - 启动前已有的脏文件只有被用户明确采用后才能进入 Delivery；未采用的脏文件可以留在工作区，但不能被自动交付；
-- 提交说明必须符合 `[ticket][feat|fix]description`；
+- 提交只允许发生在 Intake 已确认的工作分支；总体格式仍为 `[ticket][feat|fix]description`，本轮必须使用 Intake 已确认的 exact type；
 - Continuous 生成一个最终本地提交，Staged 按用户确认的 CP manifest 生成多个提交；两者最终都只推送一次；
 - manifest 在确认后变化时必须重新展示，不能沿用旧授权。
 

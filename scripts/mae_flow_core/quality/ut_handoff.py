@@ -109,3 +109,14 @@ def render_ut_context(spec_path, story_path, handoff_text, diff_paths):
         "prioritize directly testable business query conditions, mapping, and other "
         "deterministic logic.",
     )) + "\n"
+
+
+def render_state_ut_context(state, spec_path, story_path, diff_paths):
+    """Render final UT input from ordered, recoverable CP intentions."""
+    from mae_flow_core.orchestration.checkpoints import cumulative_ut_handoff
+    from mae_flow_core.orchestration.models import FlowState
+
+    if not isinstance(state, FlowState):
+        raise TypeError("state must be a FlowState")
+    return render_ut_context(
+        spec_path, story_path, cumulative_ut_handoff(state), diff_paths)

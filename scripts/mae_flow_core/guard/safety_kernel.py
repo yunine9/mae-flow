@@ -1,5 +1,4 @@
 """Pure, fail-open safety policy for lean workflow tool calls."""
-
 from collections.abc import Mapping
 from dataclasses import replace
 import os
@@ -332,10 +331,21 @@ def _commit_decision(context, intent):
         )
     message = _commit_message(intent.arguments)
     ticket = context.state.ticket
-    if not valid_business_commit_message(ticket, message):
+    config = context.state.startup_config
+    expected_branch = config.working_branch
+    if expected_branch and context.current_branch != expected_branch:
         return _block(
             "git_commit",
-            "Commit message must use [%s][feat|fix]描述." % (ticket or "单号"),
+            "Commit must run on the confirmed working branch %s; current is %s."
+            % (expected_branch, context.current_branch or "unknown"),
+        )
+    if not valid_business_commit_message(
+            ticket, message, config.ticket_type):
+        expected_type = config.ticket_type or "feat|fix"
+        return _block(
+            "git_commit",
+            "Commit message must use [%s][%s]描述."
+            % (ticket or "单号", expected_type),
         )
     receipt_error = git_receipt_error(
         context.state, "commit", context.staged_files,

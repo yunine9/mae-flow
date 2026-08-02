@@ -2,8 +2,9 @@
 Implement the approved outcome in coherent checkpoints and create testability seams early for the later formal UT chain.
 
 ## Inspect
-Read the current checkpoint, approved story or focused scope, changed interfaces,
-planned testability seams, cumulative UT handoff, and repository state.
+Read the current CP brief, approved Story or Focused scope, selected behavior
+baseline, changed interfaces, planned testability seams, cumulative UT handoff,
+and repository state.
 After implementing each checkpoint, run `craft-reviewer-agent` once with the
 CODE Reviewer role over that checkpoint diff and direct integration boundary.
 
@@ -12,8 +13,10 @@ Stop for a real ambiguity, a meaningful design deviation, an irreversible risk,
 or an agreed Full-flow checkpoint confirmation.
 
 ## Outputs
-Record changed files, checkpoint decisions, unresolved risks, and the cumulative
-UT handoff for all completed work.
+Record the current CP brief, actual result, one-pass Reviewer conclusion,
+incremental UT intent, changed files, unresolved risks, and the next CP brief.
+The same user card compares the completed CP with the next design. These are
+natural-language recovery facts, not a separate detailed coding-plan document.
 CP Construction does not write, compile, or run formal UT.
 
 ## Next

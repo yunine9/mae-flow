@@ -6,6 +6,7 @@ from .models import (
     DeliveryPath,
     FlowState,
     Phase,
+    StartupConfig,
 )
 
 
@@ -26,7 +27,9 @@ _FIELDS = {
     "capabilities",
     "delivery_files",
     "initial_dirty",
+    "startup_config",
 }
+_LEGACY_FIELDS = _FIELDS - {"startup_config"}
 _STATUSES = {"active", "paused", "complete", "exited"}
 
 
@@ -96,6 +99,32 @@ def _encoded_attempts(value):
     return encoded
 
 
+def _encoded_startup_config(value):
+    if not isinstance(value, StartupConfig):
+        raise ValueError("startup_config must be a StartupConfig")
+    return {
+        field: _string(getattr(value, field), "startup_config.%s" % field)
+        for field in (
+            "worker", "ticket_type", "requirement_source", "base_branch",
+            "working_branch", "build_method", "ut_method", "ut_command")
+    }
+
+
+def _decoded_startup_config(value):
+    if value is None:
+        return StartupConfig()
+    fields = {
+        "worker", "ticket_type", "requirement_source", "base_branch",
+        "working_branch", "build_method", "ut_method", "ut_command",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("startup_config does not match schema-v3")
+    return StartupConfig(**{
+        field: _string(value[field], "startup_config.%s" % field)
+        for field in fields
+    })
+
+
 def _pair_objects(value, field, first, second):
     if not isinstance(value, list):
         raise ValueError("%s must be a list" % field)
@@ -137,6 +166,7 @@ def encode_flow_state(state):
             state.delivery_files, "delivery_files"),
         "initial_dirty": _encoded_strings(
             state.initial_dirty, "initial_dirty"),
+        "startup_config": _encoded_startup_config(state.startup_config),
     }
 
 
@@ -144,7 +174,8 @@ def decode_flow_state(raw):
     """Decode an exact lean-v1 schema-v3 document into immutable values."""
     if not isinstance(raw, dict):
         raise ValueError("lean flow state must be a JSON object")
-    if set(raw) != _FIELDS:
+    raw_fields = set(raw)
+    if raw_fields != _FIELDS and raw_fields != _LEGACY_FIELDS:
         raise ValueError("lean flow state fields do not match schema-v3")
     if raw["engine"] != ENGINE:
         raise ValueError("lean flow state engine must be %s" % ENGINE)
@@ -198,4 +229,5 @@ def decode_flow_state(raw):
         delivery_files=_string_list(
             raw["delivery_files"], "delivery_files"),
         initial_dirty=_string_list(raw["initial_dirty"], "initial_dirty"),
+        startup_config=_decoded_startup_config(raw.get("startup_config")),
     )

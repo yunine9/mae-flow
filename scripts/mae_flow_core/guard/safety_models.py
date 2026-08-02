@@ -22,3 +22,4 @@ class SafetyContext:
     current_dirty_fingerprints: tuple = ()
     safe_write_targets: tuple = ()
     task_owned_temp_dir: str = ""
+    current_branch: str = ""

@@ -12,6 +12,7 @@ from mae_flow_core.adapters.lean_exit import (
     exclusive_backup_bytes,
     release_flow_state,
 )
+from mae_flow_core.adapters.hook_git_facts import git_text
 
 from mae_flow_core.orchestration import (
     AdvanceRequest,
@@ -27,13 +28,17 @@ from mae_flow_core.orchestration import (
     retry_decision_key,
     run_toolbox_request,
 )
-from mae_flow_core.orchestration.documents import DocumentPaths
+from mae_flow_core.orchestration.documents import local_full_artifacts
 from mae_flow_core.orchestration.guidance import (
     render_capability_facts,
     render_guidance,
     render_user_card,
 )
 from mae_flow_core.orchestration.moonlight_policy import apply_moonlight_policy
+from mae_flow_core.orchestration.startup_config import (
+    load_startup_defaults,
+    resolve_startup_config,
+)
 from mae_flow_core.state_store import (
     ProjectStateLock,
     atomic_write_json,
@@ -53,6 +58,8 @@ _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
 _KEYED_SEMANTIC_EVENTS = {
     "risk-resolved", "cp-ready", "cp-progress",
+    "cp-brief", "cp-result", "cp-review", "cp-ut-intent",
+    "domain-selected", "domain-new", "domain-updated", "domain-unchanged",
     "capability-returned", "capability-failed-to-start",
     "capability-timed-out", "capability-not-observed",
 }
@@ -157,23 +164,21 @@ def _initial_dirty(root):
     return tuple(paths), tuple(errors)
 
 
-def _relative(root, path):
-    return os.path.relpath(path, root).replace("\\", "/")
-
-
-def _full_artifacts(root, ticket):
-    documents = DocumentPaths.for_ticket(root, ticket)
-    return (
-        ("spec", _relative(root, documents.spec)),
-        ("story", _relative(root, documents.local_story)),
-        ("ut-handoff", _relative(root, documents.ut_handoff)),
-    )
-
-
 def _start_state(root, args):
     path = DeliveryPath(args.path)
-    full_artifacts = _full_artifacts(root, args.ticket)
+    full_artifacts = local_full_artifacts(args.ticket)
     dirty, git_errors = _initial_dirty(root)
+    defaults, defaults_error = load_startup_defaults(root)
+    explicit_config = dict(
+        worker=args.worker, ticket_type=args.ticket_type,
+        requirement_source=args.requirement, base_branch=args.base_branch,
+        working_branch=args.working_branch, build_method=args.build_method,
+        ut_method=args.ut_method, ut_command=args.ut_command)
+    startup_config = resolve_startup_config(
+        args.ticket.strip(), explicit_config, defaults,
+        current_branch=git_text(root, ("branch", "--show-current")),
+        user_name=git_text(root, ("config", "user.name")),
+    )
     artifacts = full_artifacts if path == DeliveryPath.FULL else ()
     state = FlowState(
         ticket=args.ticket.strip(),
@@ -184,10 +189,14 @@ def _start_state(root, args):
         commit_pace=CommitPace(args.pace),
         artifacts=artifacts,
         initial_dirty=dirty,
+        startup_config=startup_config,
         risks=tuple(
             "Git startup facts unavailable: %s" % error
             for error in git_errors),
     )
+    if defaults_error:
+        state = state.with_decision(
+            "startup.defaults_warning", defaults_error)
     if args.request.strip():
         state = state.with_decision("request.summary", args.request.strip())
     if args.moonlight:
@@ -295,6 +304,11 @@ def cmd_lean_start(root, args):
                         terminal_raw = stream.read()
                     _terminal_backup(path, terminal_raw)
             state = _start_state(root, args)
+            if args.decision.strip():
+                state = advance_flow(state, AdvanceRequest(
+                    "startup-confirmed",
+                    decision_value=args.decision.strip(),
+                )).state
             atomic_write_json(path, state.to_dict())
             if os.path.isfile(pointer_path):
                 archive_file_exclusive(
@@ -334,7 +348,7 @@ def _advance_state(root, state, request):
             and advanced.path == DeliveryPath.FULL):
         existing = {kind for kind, unused_path in advanced.artifacts}
         additions = tuple(
-            item for item in _full_artifacts(root, advanced.ticket)
+            item for item in local_full_artifacts(advanced.ticket)
             if item[0] not in existing
         )
         advanced = replace(

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 
@@ -20,6 +21,7 @@ from mae_flow_core.orchestration.models import (  # noqa: E402
     DeliveryPath,
     FlowState,
     Phase,
+    StartupConfig,
 )
 from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
 from mae_flow_core import state_store  # noqa: E402
@@ -47,6 +49,45 @@ def state_for(phase):
 
 
 class LeanGuidanceTests(unittest.TestCase):
+    def test_recovery_keeps_the_confirmed_operational_configuration_visible(self):
+        state = replace(
+            state_for(Phase.QUALITY),
+            decisions=(("startup.confirmation", "用户已确认完整配置。"),),
+            startup_config=StartupConfig(
+                worker="zhangsan",
+                ticket_type="fix",
+                requirement_source="requirements/query.md",
+                base_branch="main",
+                working_branch="main_zhangsan_REQ-42",
+                build_method="build-fix",
+                ut_method="ut-generator-agent",
+                ut_command="ctest --test-dir build",
+            ),
+        )
+
+        text = render_guidance(state)
+
+        for expected in (
+                "Confirmed startup configuration", "zhangsan", "fix",
+                "requirements/query.md", "main_zhangsan_REQ-42",
+                "build-fix", "ut-generator-agent", "ctest --test-dir build"):
+            self.assertIn(expected, text)
+
+    def test_phase_guidance_connects_behavior_baseline_to_delivery(self):
+        startup = render_guidance(state_for(Phase.STARTUP))
+        spec = render_guidance(state_for(Phase.SPEC))
+        story = render_guidance(state_for(Phase.STORY))
+        delivery = render_guidance(state_for(Phase.DELIVERY))
+
+        self.assertIn("behavior/index.md", startup)
+        self.assertIn("business capability", startup)
+        self.assertIn("selected behavior baseline", spec)
+        self.assertIn(".mae-flow-work", spec)
+        self.assertIn("standalone", story)
+        for action in ("new", "updated", "unchanged"):
+            self.assertIn(action, delivery)
+        self.assertIn("exact manifest", delivery)
+
     def test_each_phase_renders_outcome_focused_recovery_guidance(self):
         for phase in Phase:
             with self.subTest(phase=phase):

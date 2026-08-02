@@ -124,7 +124,7 @@ class LeanToolboxTests(unittest.TestCase):
                 "story",
                 "形成实现设计",
                 (r"docs\requirements\REQ-42.md",),
-                "Story defines HOW",
+                "standalone software detailed design and test handoff",
             ),
             (
                 "chain",

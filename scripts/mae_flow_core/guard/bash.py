@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import re
 
 from ..foundation.git_execution import executed_git_invocations
+from ..foundation.commit_message import valid_business_commit_message
 from .gate import GateDecision
 
 
@@ -26,6 +27,7 @@ class BashGateContext:
     add_paths: tuple
     recursive_delete_targets: tuple
     state_active: bool
+    ticket_type: str = ""
 
 
 def _absolute(rule, message):
@@ -107,16 +109,13 @@ def _pre_commit_format(context):
     if not context.commit_message_present:
         return None
     message = context.commit_message
-    if (
-        context.ticket
-        and not re.match(
-            r"^\[" + re.escape(context.ticket)
-            + r"\]\[(feat|fix)\]", message)
-    ):
+    if context.ticket and not valid_business_commit_message(
+            context.ticket, message, context.ticket_type):
+        expected_type = context.ticket_type or "feat|fix"
         return _block(
             "bash-commit-format",
-            "commit message「%s」不符合 [%s][feat|fix]描述 格式。"
-            % (message, context.ticket),
+            "commit message「%s」不符合 [%s][%s]描述 格式。"
+            % (message, context.ticket, expected_type),
         )
     return None
 

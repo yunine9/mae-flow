@@ -184,10 +184,11 @@ def _require_conditional_document_selections(state, manifest):
             % ", ".join(missing))
 
 
-def _validate_message(ticket, message):
-    if not valid_business_commit_message(ticket, message):
+def _validate_message(state, message):
+    if not valid_business_commit_message(
+            state.ticket, message, state.startup_config.ticket_type):
         raise ValueError(
-            "commit message must be [ticket][feat|fix]description")
+            "commit message must match confirmed [ticket][type]description")
     return message
 
 
@@ -203,7 +204,7 @@ def _continuous_message(state):
     if len(messages) != 1:
         raise ValueError(
             "Continuous delivery requires exactly one commit message decision")
-    return _validate_message(state.ticket, messages[0])
+    return _validate_message(state, messages[0])
 
 
 def _ordered_checkpoints(cp_manifest):
@@ -257,7 +258,7 @@ def _staged_commits(state, cp_manifest, final_manifest):
                 "CP adopted_dirty conflicts with global delivery adoption")
         manifest = _validated_manifest(
             supplied.files, adopted_dirty=expected_adoption)
-        message = _validate_message(state.ticket, item.message)
+        message = _validate_message(state, item.message)
         for path in manifest.files:
             cumulative.append(path)
         commits.append(CommitPlan(message, manifest, True))

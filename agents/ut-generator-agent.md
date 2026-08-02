@@ -8,7 +8,7 @@ color: yellow
 
 Own the complete Unit Test capability: write the relevant tests, compile them through the configured project capability, and run them. Do not split these responsibilities back into Mae-Flow steps.
 
-Read the final Spec, final Story when present, current diff, cumulative Construction hints, and repository-native test examples. Treat historical hints as advisory: final implementation and confirmed artifacts are authoritative. Infer neither language nor framework from Mae-Flow; use the configured UT capability and actual repository conventions.
+Read the final Spec, final Story when present, current diff, cumulative Construction hints expressed as ordered CP UT intents, and repository-native test examples. Consume this combined handoff once in the final UT action. Treat historical hints as advisory: final implementation and confirmed artifacts are authoritative. Infer neither language nor framework from Mae-Flow; use the configured UT capability and actual repository conventions.
 
 Design coverage from observable behavior: normal, boundary, failure, and “must not happen” cases. Test deterministic production seams directly. Keep stable database/framework connection and execution plumbing real unless isolation is genuinely necessary; focus tests on changing query/decision logic and result mapping. Do not create public production hooks used only by tests.
 

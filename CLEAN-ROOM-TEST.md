@@ -29,7 +29,7 @@ python --version
 
 ## 2. 模型烟测
 
-- [ ] 启动卡只提供 Full 与 Focused。
+- [ ] 启动卡只提供 Full 与 Focused，并一次展示工号、单号类型、需求来源、提交节奏、基线/工作分支、Build、UT 生成方式和 UT 运行入口。
 - [ ] Full 用户卡只出现在 Intake、Spec、Design、每个 CP、Delivery 和真实条件风险。
 - [ ] Focused 用户卡只出现在 Intake、Delivery；启动时无 Full 产物，语义风险可以升级 Full/Spec 并补入产物路径。
 - [ ] 文档和 UI 都显示唯一六阶段序列 Intake → Spec → Design → Construction → Quality → Delivery。
@@ -39,11 +39,12 @@ python --version
 
 ## 3. 文件与交付烟测
 
-- [ ] 需求文档按单号分组。
-- [ ] Story 与条件文档默认保留在本地，用户明确选择才加入 exact manifest。
+- [ ] Spec、Story 与过程文档按单号放在 `.mae-flow-work/<ticket>/`，默认不上库；用户明确选择 exact durable copy 才加入 manifest。
+- [ ] 领域行为当前真相按业务能力维护在 `docs/mae-flow/behavior/<domain>.md`，缺失 index 和增量存量基线不阻断第一次使用。
+- [ ] Delivery 的领域动作只允许 `new`、`updated`、`unchanged`，无变化领域不会制造文档提交。
 - [ ] 初始脏文件不被默认采用。
 - [ ] manifest 只包含逐文件路径，Windows alias 不重复。
-- [ ] 提交说明为 `[ticket][feat|fix]description`。
+- [ ] commit 必须位于已确认的工作分支，提交说明为已确认的 `[ticket][type]description`；错误只阻断当前 Git 命令。
 - [ ] Moonlight 精确授权不隐藏 Delivery 卡。
 
 ## 4. 平台边界烟测

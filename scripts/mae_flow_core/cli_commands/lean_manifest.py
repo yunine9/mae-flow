@@ -137,8 +137,10 @@ def _record_checkpoint(state, manifest, args, source_sha):
     if state.phase != Phase.CONSTRUCTION or state.current_cp != args.checkpoint:
         raise ValueError("Staged manifest 只能记录当前 CP 的精确文件")
     message = (args.commit_message or "").strip()
-    if not valid_business_commit_message(state.ticket, message):
-        raise ValueError("CP commit message 必须是 [单号][feat|fix]描述")
+    if not valid_business_commit_message(
+            state.ticket, message, state.startup_config.ticket_type):
+        raise ValueError(
+            "CP commit message 必须匹配已确认的 [单号][类型]描述")
     if args.decision:
         raise ValueError("CP manifest 只声明计划；请另用 decision 确认")
     decisions = tuple(
@@ -202,8 +204,9 @@ def _record_continuous_message(state, args, has_target):
         item for item in state.decisions
         if item[0] != "delivery.commit_message")
     message = (args.commit_message or "").strip()
-    if message and not valid_business_commit_message(state.ticket, message):
-        raise ValueError("commit message 必须是 [单号][feat|fix]描述")
+    if message and not valid_business_commit_message(
+            state.ticket, message, state.startup_config.ticket_type):
+        raise ValueError("commit message 必须匹配已确认的 [单号][类型]描述")
     if has_target and not message:
         raise ValueError("Git delivery requires one exact commit message")
     if message:

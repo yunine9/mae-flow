@@ -24,8 +24,9 @@ _RESERVED_WINDOWS_NAMES = frozenset(
     | {"COM%s" % number for number in ("¹", "²", "³")}
     | {"LPT%s" % number for number in ("¹", "²", "³")}
 )
-_DURABLE_KINDS = frozenset({"spec", "behavior", "behavior-baseline"})
+_DURABLE_KINDS = frozenset({"behavior", "behavior-baseline"})
 _CONDITIONAL_KINDS = frozenset({
+    "spec",
     "story",
     "decisions",
     "engineering",
@@ -39,6 +40,7 @@ _CONDITIONAL_KINDS = frozenset({
     "delivery-notes",
 })
 _CONDITIONAL_FILENAMES = {
+    "spec.md": "spec",
     "story.md": "story",
     "decisions.md": "decisions",
     "engineering.md": "engineering-notes",
@@ -108,10 +110,36 @@ def _root_text(root):
     return value
 
 
+def _behavior_segment(domain):
+    if not isinstance(domain, str) or not domain.strip():
+        raise ValueError("business domain must be non-empty text")
+    value = unicodedata.normalize("NFC", domain.strip())
+    if value.lower().endswith(".md"):
+        value = value[:-3]
+    if (not value or value in {".", ".."} or ".." in value
+            or "/" in value or "\\" in value
+            or _INVALID_WINDOWS_CHARACTER.search(value)
+            or value.rstrip(" .") != value
+            or value.split(".", 1)[0].upper() in _RESERVED_WINDOWS_NAMES
+            or value.casefold() == "index"):
+        raise ValueError("business domain is not a portable path segment")
+    return value
+
+
 def _path_join(root, *parts):
     windows_root = bool(ntpath.splitdrive(root)[0]) or "\\" in root
     join = ntpath.join if windows_root else os.path.join
     return join(root, *parts)
+
+
+def local_full_artifacts(ticket):
+    """Return the three repo-relative Full work-package paths."""
+    prefix = ".mae-flow-work/%s" % _safe_ticket_segment(ticket)
+    return (
+        ("spec", prefix + "/spec.md"),
+        ("story", prefix + "/story.md"),
+        ("ut-handoff", prefix + "/ut-handoff.md"),
+    )
 
 
 @dataclass(frozen=True)
@@ -121,6 +149,7 @@ class DocumentPaths:
     ticket: str
     safe_ticket: str
     local_root: str
+    local_spec: str
     local_story: str
     local_decisions: str
     local_engineering_notes: str
@@ -138,6 +167,11 @@ class DocumentPaths:
     codecheck_ledger: str
     delivery_notes: str
     behavior_root: str
+    behavior_index: str
+
+    def behavior_document(self, domain):
+        return _path_join(
+            self.behavior_root, _behavior_segment(domain) + ".md")
 
     @classmethod
     def for_ticket(cls, root, ticket):
@@ -147,10 +181,12 @@ class DocumentPaths:
         local_root = _path_join(root, ".mae-flow-work", safe)
         requirement_root = _path_join(
             root, "docs", "mae-flow", "requirements", safe)
+        behavior_root = _path_join(root, "docs", "mae-flow", "behavior")
         return cls(
             ticket=original,
             safe_ticket=safe,
             local_root=local_root,
+            local_spec=_path_join(local_root, "spec.md"),
             local_story=_path_join(local_root, "story.md"),
             local_decisions=_path_join(local_root, "decisions.md"),
             local_engineering_notes=_path_join(
@@ -171,7 +207,8 @@ class DocumentPaths:
             codecheck_ledger=_path_join(
                 requirement_root, "codecheck-ledger.md"),
             delivery_notes=_path_join(requirement_root, "delivery-notes.md"),
-            behavior_root=_path_join(root, "docs", "mae-flow", "behavior"),
+            behavior_root=behavior_root,
+            behavior_index=_path_join(behavior_root, "index.md"),
         )
 
 

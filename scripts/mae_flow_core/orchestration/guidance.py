@@ -3,6 +3,12 @@
 import os
 
 from .capabilities import flow_retry_options
+from .behavior_baseline import domain_actions, selected_domains
+from .checkpoints import (
+    checkpoint_context,
+    checkpoint_facts,
+    next_checkpoint_context,
+)
 from .models import CommitPace, DeliveryPath, FlowState, Phase
 from .moonlight_policy import moonlight_authorization_view
 
@@ -18,6 +24,12 @@ def _items(title, values):
         title,
         "\n".join("- %s" % value for value in values),
     )
+
+
+def _latest_decision(state, key):
+    return next((
+        value for existing, value in reversed(state.decisions)
+        if existing == key), "")
 
 
 def render_guidance(state):
@@ -45,11 +57,45 @@ def render_guidance(state):
 
     artifacts = tuple(
         "%s: %s" % (kind, path) for kind, path in state.artifacts)
+    config = state.startup_config
+    defaults_warning = _latest_decision(state, "startup.defaults_warning")
+    startup_title = (
+        "Confirmed startup configuration"
+        if _latest_decision(state, "startup.confirmation")
+        else "Proposed startup configuration")
+    startup = (
+        "worker: %s" % (config.worker or "not configured"),
+        "ticket type: %s" % (config.ticket_type or "not configured"),
+        "requirement source: %s" % (
+            config.requirement_source or "not configured"),
+        "base branch: %s" % (config.base_branch or "not configured"),
+        "working branch: %s" % (
+            config.working_branch or "not configured"),
+        "Build: %s" % (config.build_method or "not configured"),
+        "UT generation: %s" % (config.ut_method or "not configured"),
+        "UT run entry: %s" % (config.ut_command or "not configured"),
+    ) + (("repository defaults warning: %s" % defaults_warning,)
+         if defaults_warning else ())
+    domains = selected_domains(state)
+    actions = tuple(
+        "%s: %s%s" % (
+            item.path, item.action,
+            " — " + item.summary if item.summary else "")
+        for item in domain_actions(state))
+    checkpoints = tuple(
+        "%s: brief=%s | result=%s | review=%s | UT=%s" % (
+            item.name, item.brief or "none", item.result or "none",
+            item.review or "none", item.ut_intent or "none")
+        for item in checkpoint_facts(state))
     context = (
         "Ticket: %s\n"
         "Path: %s\n"
         "Phase: %s\n"
         "CP: %s\n"
+        "%s\n"
+        "%s\n"
+        "%s\n"
+        "%s\n"
         "%s\n"
         "%s"
     ) % (
@@ -57,7 +103,11 @@ def render_guidance(state):
         state.path.value,
         state.phase.value,
         state.current_cp or "none",
+        _items(startup_title, startup),
         _items("Artifacts", artifacts),
+        _items("Selected behavior domains", domains),
+        _items("Behavior reconciliation", actions),
+        _items("Checkpoint context", checkpoints),
         _items("Unresolved risks", state.risks),
     )
     return "%s\n\n%s\n" % (context, phase_guidance)
@@ -112,6 +162,13 @@ def _delivery_user_card(state):
     decisions = {key: value for key, value in state.decisions}
     moonlight = moonlight_authorization_view(state)
     lines = ["需要用户介入: 交付（精确文件、提交说明和是否推送）"]
+    actions = domain_actions(state)
+    if actions:
+        lines.append("领域行为基线:")
+        lines.extend("- %s: %s%s" % (
+            item.path, item.action,
+            " — " + item.summary if item.summary else "")
+            for item in actions)
     if state.delivery_files:
         lines.append("精确文件:")
         lines.extend("- %s" % path for path in state.delivery_files)
@@ -147,8 +204,29 @@ def render_user_card(state):
     moonlight = decisions.get("moonlight.enabled") == "true"
     confirmed = set(decisions)
     if state.phase == Phase.STARTUP:
-        return "" if moonlight else (
-            "需要用户介入: Intake（启动选择、路径、范围和提交节奏）")
+        if moonlight:
+            return ""
+        config = state.startup_config
+        defaults_warning = _latest_decision(
+            state, "startup.defaults_warning")
+        lines = (
+            "需要用户介入: Intake（启动选择、完整配置一次确认）",
+            "完整启动配置:",
+            "- 工号: %s" % (config.worker or "未配置"),
+            "- 单号: %s" % state.ticket,
+            "- 单号类型: %s" % (config.ticket_type or "未配置"),
+            "- 需求来源: %s" % (config.requirement_source or "未配置"),
+            "- 交付路径: %s" % state.path.value,
+            "- 提交节奏: %s" % state.commit_pace.value,
+            "- 基线分支: %s" % (config.base_branch or "未配置"),
+            "- 工作分支: %s" % (config.working_branch or "未配置"),
+            "- Build: %s" % (config.build_method or "未配置"),
+            "- UT 生成: %s" % (config.ut_method or "未配置"),
+            "- UT 运行入口: %s" % (config.ut_command or "未配置"),
+        ) + (("- 预设读取提示: %s" % defaults_warning,)
+             if defaults_warning else ()) + (
+            "请直接用自然语言确认或修改以上任意项。",)
+        return "\n".join(lines)
     if state.path == DeliveryPath.FOCUSED:
         if state.phase == Phase.DELIVERY and "delivery.confirmation" not in confirmed:
             return _delivery_user_card(state)
@@ -163,8 +241,24 @@ def render_user_card(state):
             state.phase == Phase.CONSTRUCTION
             and "construction.cp.%s.confirmation" % (
                 state.current_cp or "CP1") not in confirmed):
-        return "" if moonlight else (
-            "需要用户介入: CP（本批结果和后续节奏）")
+        if moonlight:
+            return ""
+        checkpoint = state.current_cp or "CP1"
+        current = checkpoint_context(state, checkpoint)
+        following = next_checkpoint_context(state, checkpoint)
+        lines = [
+            "需要用户介入: CP（本批实际结果与下一批设计）",
+            "- 当前 CP: %s" % checkpoint,
+            "- 原简报: %s" % (current.brief or "未记录"),
+            "- 实际结果: %s" % (current.result or "未记录"),
+            "- Reviewer: %s" % (current.review or "未记录"),
+            "- 累计 UT 增量: %s" % (current.ut_intent or "未记录"),
+        ]
+        if following is not None:
+            lines.append("- 下一 CP: %s — %s" % (
+                following.name, following.brief or "未记录"))
+        lines.append("请直接用自然语言确认或修改后续设计。")
+        return "\n".join(lines)
     if (
             state.phase == Phase.DELIVERY
             and "delivery.confirmation" not in confirmed):

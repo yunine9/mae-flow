@@ -1,14 +1,18 @@
 ---
 name: story-generator-agent
-description: 基于已确认 Spec 生成 HOW 与可测性设计
+description: 基于已确认 Spec 生成独立的软件详细设计与测试交接 Story
 tools: Read, Write, Glob, Grep
 maxTurns: 80
 color: green
 ---
 
-Generate the Story from the confirmed Spec using `skills/mae-flow/assets/STORY-TEMPLATE.md`.
+Generate the Story from the confirmed Spec using `skills/mae-flow/assets/STORY-TEMPLATE.md`. Keep every existing template section and fill it according to its business meaning.
 
-Spec is the WHAT authority. Story defines HOW: implementation boundary, likely code locations, interfaces, dependency direction, data flow, ownership, error semantics, resource lifetime, concurrency, compatibility, cleanup, and coherent CPs. Keep detail sufficient for a developer to implement and a user to review, without expanding each code line into prose.
+Spec remains the WHAT authority. Story carries the reviewed HOW without being only HOW: it is a standalone software detailed design and test handoff, so a developer or tester must understand the delivered feature without opening Mae-Flow's internal Spec. Consolidate the confirmed customer scenario, business specification (for example capacity, concurrency, limits, and compatibility), and functional acceptance criteria before describing the software detailed design.
+
+Detailed design covers implementation boundaries, likely code locations, interfaces, dependency direction, data flow, ownership, error semantics, resource lifetime, concurrency, compatibility, cleanup, and coherent CPs. Story is not a coding plan: do not expand each code line into prose or prescribe mechanical edit steps. Keep enough detail for implementation and meaningful user review.
+
+End detailed design with coherent CP briefs. Each brief names the observable outcome, likely exact files, key symbols or interfaces, core design action, testability work, and meaningful risk. The Design confirmation presents the complete Story, all CPs, and CP1; later CP cards compare the actual result with this brief and show the next brief. Do not create a separate coding-plan document.
 
 Testability is part of the design. Name deterministic business decisions that Construction must extract from stable framework plumbing, the production-meaningful seam each CP creates, what UT can control and observe, and which real boundary remains integrated. Do not postpone this until UT.
 

@@ -146,7 +146,8 @@ def _checkpoint_plan(state, checkpoint):
     files = _decision_values(state, prefix + "file")
     message = _single_decision(state, prefix + "message", required=True)
     manifest = _validated_manifest(files)
-    return checkpoint, manifest.files, _validate_message(state.ticket, message)
+    return checkpoint, manifest.files, _validate_message(
+        state.ticket, message, state.startup_config.ticket_type)
 
 
 def _staged_receipt_commits(state):
@@ -191,7 +192,8 @@ def _receipt_plan(state, checkpoint=""):
         message = _single_decision(
             state, _COMMIT_MESSAGE_DECISION, required=has_git)
         commits = () if not message else ((
-            "", files, _validate_message(state.ticket, message)),)
+            "", files, _validate_message(
+                state.ticket, message, state.startup_config.ticket_type)),)
         actions = ("add", "commit", "push") if has_git else ()
         source = _source_sha(
             state, _SOURCE_SHA_DECISION, required=has_git)
@@ -344,9 +346,10 @@ def _validated_manifest(paths):
     return manifest
 
 
-def _validate_message(ticket, message):
-    if not valid_business_commit_message(ticket, message):
-        raise ValueError("commit message must be [ticket][feat|fix]description")
+def _validate_message(ticket, message, ticket_type=""):
+    if not valid_business_commit_message(ticket, message, ticket_type):
+        raise ValueError(
+            "commit message must match confirmed [ticket][type]description")
     return message
 
 

@@ -15,7 +15,7 @@ class MFParser(argparse.ArgumentParser):
             "正确用法(高频命令,直接复制):\n"
             '  python "%s" current\n'
             '  python "%s" start --ticket REQ-123 --path focused '
-            '--pace continuous\n'
+            '--pace continuous --decision "用户确认完整配置"\n'
             '  python "%s" decision startup-confirmed "用户的自然语言决定"\n'
             "公共阶段: Intake→Spec→Design→Construction→Quality→Delivery；"
             "startup/story 仅是稳定恢复值。\n"
@@ -33,10 +33,19 @@ def parse_args(argv=None):
 
     start = sub.add_parser("start")
     start.add_argument("--ticket", required=True)
+    start.add_argument("--ticket-type", choices=["feat", "fix"])
+    start.add_argument("--worker")
+    start.add_argument("--requirement")
+    start.add_argument("--base-branch")
+    start.add_argument("--working-branch")
+    start.add_argument("--build-method")
+    start.add_argument("--ut-method")
+    start.add_argument("--ut-command")
     start.add_argument("--path", choices=["full", "focused"], required=True)
     start.add_argument(
         "--pace", choices=["continuous", "staged"], required=True)
     start.add_argument("--request", default="")
+    start.add_argument("--decision", default="")
     start.add_argument("--moonlight", action="store_true")
     start.add_argument("--business-file", action="append", default=[])
     start.add_argument("--allow-commit", action="store_true")

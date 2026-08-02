@@ -21,6 +21,24 @@ from mae_flow_core.orchestration.documents import (  # noqa: E402
 
 
 class LeanDocumentPathTests(unittest.TestCase):
+    def test_behavior_paths_are_portable_and_scoped_to_one_business_domain(self):
+        paths = DocumentPaths.for_ticket(r"C:\Repo", "REQ-DOMAIN")
+
+        self.assertEqual(
+            r"C:\Repo\docs\mae-flow\behavior\index.md",
+            getattr(paths, "behavior_index", None),
+        )
+        behavior_document = getattr(paths, "behavior_document", None)
+        self.assertIsNotNone(behavior_document)
+        self.assertEqual(
+            r"C:\Repo\docs\mae-flow\behavior\order-query.md",
+            behavior_document("order-query"),
+        )
+        for unsafe in ("../order", r"sales\order", "CON", "order/query"):
+            with self.subTest(domain=unsafe):
+                with self.assertRaises(ValueError):
+                    behavior_document(unsafe)
+
     def test_requirement_paths_are_grouped_without_creating_them(self):
         with tempfile.TemporaryDirectory() as root:
             paths = DocumentPaths.for_ticket(root, "REQ-42")
@@ -34,6 +52,10 @@ class LeanDocumentPathTests(unittest.TestCase):
             self.assertEqual(
                 os.path.join(root, ".mae-flow-work", safe),
                 paths.local_root,
+            )
+            self.assertEqual(
+                os.path.join(root, ".mae-flow-work", safe, "spec.md"),
+                paths.local_spec,
             )
             self.assertEqual(
                 os.path.join(
@@ -316,6 +338,7 @@ class LeanDocumentPathTests(unittest.TestCase):
 class LeanDocumentCommitPolicyTests(unittest.TestCase):
     def test_conditional_durable_paths_reuse_document_kind_policy(self):
         expected = {
+            "spec.md": "spec",
             "story.md": "story",
             "decisions.md": "decisions",
             "engineering.md": "engineering-notes",
@@ -339,8 +362,8 @@ class LeanDocumentCommitPolicyTests(unittest.TestCase):
 
     def test_nonconditional_or_local_paths_have_no_conditional_kind(self):
         paths = (
-            "docs/mae-flow/requirements/REQ-42/spec.md",
             "docs/mae-flow/behavior/query.md",
+            ".mae-flow-work/REQ-42/spec.md",
             ".mae-flow-work/REQ-42/story.md",
             "docs/mae-flow/requirements/REQ-42/nested/story.md",
             "src/story.md",
@@ -349,15 +372,17 @@ class LeanDocumentCommitPolicyTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual("", conditional_document_kind(path))
 
-    def test_spec_and_behavior_baseline_are_durable_by_default(self):
-        for kind in ("spec", "behavior", "behavior-baseline"):
+    def test_only_behavior_baselines_are_durable_by_default(self):
+        for kind in ("behavior", "behavior-baseline"):
             with self.subTest(kind=kind):
                 self.assertTrue(commit_policy(kind, False))
                 self.assertTrue(commit_policy(kind, True))
+        self.assertFalse(commit_policy("spec", False))
+        self.assertTrue(commit_policy("spec", True))
 
     def test_conditional_documents_require_explicit_commit_request(self):
         conditional = (
-            "story",
+            "spec", "story",
             "decisions",
             "engineering-notes",
             "chain",

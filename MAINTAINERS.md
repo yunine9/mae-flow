@@ -9,10 +9,10 @@
 1. **语义决定路径。** Full 与 Focused 的选择和升级只看接口、兼容性、数据、安全、共享状态、并发等语义风险，不看文件数、改动行数或目录数量。
 2. **只在高价值点找人。** Full 停在 Intake、Spec、Design、每个 CP、Delivery；Focused 停在 Intake、Delivery。真实歧义、设计偏差、用户级 Reviewer 取舍、昂贵能力再次调用、不可逆动作和 manifest 变化可以增加条件停点。
 3. **能力一次调用。** Build、UT、CodeCheck、Grill、Story、Reviewer 是一次性 opaque capabilities。Host 同步返回后记录事实，不解析私有输出，不后台等待，不自动重试。
-4. **状态是最小恢复游标。** 只保留当前路径、阶段、CP、产物路径、自然语言决定、风险、能力尝试、Delivery 文件和初始脏文件；不把过程报告扩成第二套工作流。
+4. **状态是最小恢复游标。** 只保留已确认启动配置、当前路径/阶段/CP、产物路径、相关业务领域、CP 自然语言事实、风险、能力尝试、Delivery 文件和初始脏文件；不把过程报告扩成第二套工作流。
 5. **写入边界单一。** 工作流命令是 capability 事实的唯一写者；Hooks 只写用户事件和 Git 副作用观察。所有读改写走项目锁和原子替换，专业 Skill/Agent 与文档渲染器不直接写活动状态。
-6. **Git 精确授权。** 每次提交只使用用户审阅的逐文件 manifest；提交说明为 `[ticket][feat|fix]description`；最终只推送一次。
-7. **条件文档默认本地。** Story、决策、工程笔记、链路、走读、CodeCheck 和 Delivery 笔记默认保留在本地，用户明确选择后才能加入精确 manifest。
+6. **Git 精确授权。** 每次提交只使用用户审阅的逐文件 manifest，并匹配已确认的工作分支；提交总体格式是 `[ticket][feat|fix]description`，本轮 type 必须与 Intake 确认值完全一致；最终只推送一次。
+7. **条件文档默认本地。** Spec、Story、决策、工程笔记、链路、走读、CodeCheck 和 Delivery 笔记默认保留在本地，用户明确选择后才能加入精确 manifest。
 8. **安装不是授权。** 没有活动状态时 Hooks fail-open；明确退出在任何阶段生效，保留现场并释放控制。
 
 ## 领域模型
@@ -23,7 +23,7 @@
 | Focused | `focused` | 已定位工作；语义风险出现时升级 Full |
 | Intake | `startup` | 启动选择与初始工作区归属 |
 | Spec | `spec` | WHAT |
-| Design | `story` | HOW、可测性与 CP |
+| Design | `story` | 独立的软件详细设计、测试交接、可测性与 CP |
 | Construction | `construction` | 按 CP 实现 |
 | Quality | `quality` | 单次 opaque capability 事实 |
 | Delivery | `delivery` | 精确 manifest 与副作用授权 |
@@ -45,6 +45,8 @@ scripts/tests/                         发布场景、平台边界与回归套�
 依赖方向从 adapter/application 指向纯 orchestration/guard。业务策略不得导入 CLI 或 Hook 平台实现。`hooks/dispatch.py` 只负责有界输入、装配、输出和 fail-open，不承载路径选择或阶段逻辑。
 
 ## 路径与停点
+
+Intake 从仓库预设和用户修改中一次确认工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、Build、UT 生成与 UT 运行入口。恢复上下文始终显示这份已确认配置；后续阶段不重新猜测。领域选择按业务能力语义完成，不按目录、类、文件数或行数划分。
 
 Full 的常规推进：
 
@@ -85,10 +87,12 @@ Build 和其他 capability 必须由 Host 同步调用。调用前，主 Agent �
 
 `DocumentPaths.for_ticket()` 把每个需求分为两组：
 
-- 持久组：`docs/mae-flow/requirements/<safe-ticket>/spec.md` 与行为基线；
-- 本地组：`.mae-flow-work/<safe-ticket>/` 下的 Story、决定、工程笔记、UT handoff、走读、CodeCheck 与 Delivery 笔记。
+- 默认持久组：`docs/mae-flow/behavior/<domain>.md` 当前行为基线，以及新领域需要的轻量 `index.md` 路由更新；
+- 本地组：`.mae-flow-work/<safe-ticket>/` 下的 Spec、Story、决定、工程笔记、UT handoff、走读、CodeCheck 与 Delivery 笔记。
 
-条件文档即使存在于持久目录，也必须有 `delivery.conditional_document` 的精确选择才能交付。未知 document kind 维持本地策略，肯定布尔值不能把拼写错误升级为提交权限。
+Spec 是工作流内确认的变更契约，Story 是按模板生成的独立软件详细设计和测试交接；两者都不是长期当前真相，也不把逐行编码计划落盘。条件文档的 durable copy 即使存在于 `docs/mae-flow/requirements/<safe-ticket>/`，也必须有 `delivery.conditional_document` 的精确选择才能交付。未知 document kind 维持本地策略，肯定布尔值不能把拼写错误升级为提交权限。
+
+领域行为基线按稳定业务能力划分。复杂存量领域第一次只建立本次证据覆盖的增量基线，遗漏保持未知。Delivery 对每个已选领域记录 `new`、`updated` 或 `unchanged`；只有变化文件进入 exact manifest，新领域同时更新 index，普通对账不增加用户停点。
 
 ## Git 与脏工作区
 
@@ -100,7 +104,7 @@ Build 和其他 capability 必须由 Host 同步调用。调用前，主 Agent �
 2. 文件位于当前精确 manifest；
 3. 采用事实仍与当前路径 identity 一致。
 
-未采用的文件不妨碍 Construction，但会阻止自动 commit/push。Continuous 需要恰好一个提交说明；Staged 的有序 CP manifests 必须逐个获批，且它们的并集恰好等于最终 manifest。
+未采用的文件不妨碍 Construction，但会阻止自动 commit/push。Continuous 需要恰好一个提交说明；Staged 的有序 CP manifests 必须逐个获批，且它们的并集恰好等于最终 manifest。Hook 只在 Git 副作用边界核对已确认的工作分支、单号、类型和 exact manifest；失败不回退阶段，也不让 Build、UT 或 CodeCheck 失效。
 
 ## Moonlight
 

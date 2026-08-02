@@ -27,6 +27,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     DeliveryPath,
     FlowState,
     Phase,
+    StartupConfig,
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
@@ -77,6 +78,7 @@ def _context(state, repository_root="/repo", **overrides):
         "commit_files": (),
         "initial_dirty": (),
         "current_dirty_fingerprints": (),
+        "current_branch": "",
     }
     values.update(overrides)
     return SafetyContext(**values)
@@ -587,6 +589,47 @@ class SourceEditAuthorizationTests(unittest.TestCase):
 
 
 class GitManifestSafetyTests(unittest.TestCase):
+    def test_commit_requires_the_confirmed_ticket_type_and_working_branch(self):
+        configured = replace(
+            _state(
+                phase=Phase.DELIVERY,
+                delivery_files=("src/a.cpp", "tests/a_test.cpp"),
+                commit_pace=CommitPace.CONTINUOUS,
+            ),
+            startup_config=StartupConfig(
+                worker="zhangsan",
+                ticket_type="fix",
+                base_branch="main",
+                working_branch="main_zhangsan_REQ-7",
+            ),
+        )
+        state = _with_final_receipt(configured)
+        exact = ("src/a.cpp", "tests/a_test.cpp")
+
+        wrong_type = self.bash(
+            state, "git commit -m '[REQ-7][feat]修复查询映射'",
+            staged_files=exact,
+            current_branch="main_zhangsan_REQ-7",
+        )
+        wrong_branch = self.bash(
+            state, "git commit -m '[REQ-7][fix]修复查询映射'",
+            staged_files=exact,
+            current_branch="main",
+        )
+        exact_commit = self.bash(
+            state, "git commit -m '[REQ-7][fix]修复查询映射'",
+            staged_files=exact,
+            current_branch="main_zhangsan_REQ-7",
+        )
+
+        self.assertEqual((False, "git_commit"),
+                         (wrong_type.allow, wrong_type.rule))
+        self.assertIn("[REQ-7][fix]", wrong_type.message)
+        self.assertEqual((False, "git_commit"),
+                         (wrong_branch.allow, wrong_branch.rule))
+        self.assertIn("main_zhangsan_REQ-7", wrong_branch.message)
+        self.assertTrue(exact_commit.allow, exact_commit.message)
+
     def manifest_state(self, **overrides):
         values = {
             "phase": Phase.DELIVERY,

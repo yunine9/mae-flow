@@ -16,7 +16,9 @@ from .transition_facts import (
     staged_checkpoint_receipts_valid as _staged_checkpoint_receipts_valid,
 )
 from .transition_support import (
+    record_context_fact as _record_context_fact,
     record_capability_observation as _record_capability_observation,
+    resolve_risk as _resolve_risk,
 )
 
 @dataclass(frozen=True)
@@ -114,7 +116,6 @@ _CAPABILITY_OUTCOMES = {
     "capability-timed-out": "timed-out",
     "capability-not-observed": "not-observed",
 }
-_RISK_RESOLUTION = "risk.resolution"
 _USER_DECISION_EVENTS = frozenset(
     set(_CONFIRMATION_KEYS)
     | {"cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
@@ -145,47 +146,6 @@ def _user_stops(path):
     if path == DeliveryPath.FULL:
         return _FULL_USER_STOPS
     return _FOCUSED_USER_STOPS
-
-
-def _resolve_risk(state, request):
-    identity = request.decision_key
-    resolution = request.decision_value
-    matches = tuple(
-        index for index, risk in enumerate(state.risks)
-        if isinstance(identity, str) and identity and risk == identity)
-    if len(matches) != 1:
-        return AdvanceResult(
-            state,
-            True,
-            "Risk resolution requires one exact, currently stored risk "
-            "identity.",
-        )
-    if not isinstance(resolution, str) or not resolution.strip():
-        return AdvanceResult(
-            state,
-            True,
-            "Risk resolution requires a non-empty natural-language decision.",
-        )
-
-    index = matches[0]
-    remaining = state.risks[:index] + state.risks[index + 1:]
-    audit = "%s Resolved risk: %s" % (resolution.strip(), identity)
-    updated = replace(
-        state,
-        risks=remaining,
-        decisions=state.decisions + ((_RISK_RESOLUTION, audit),),
-    )
-    if remaining:
-        return AdvanceResult(
-            updated,
-            True,
-            "The identified risk was resolved; other risks remain.",
-        )
-    return AdvanceResult(
-        updated,
-        False,
-        "The identified risk was resolved by a natural-language decision.",
-    )
 
 
 def advance_flow(state, request):
@@ -222,7 +182,13 @@ def advance_flow(state, request):
         )
 
     if kind == "risk-resolved":
-        return _resolve_risk(state, request)
+        return AdvanceResult(*_resolve_risk(
+            state, request.decision_key, request.decision_value))
+
+    context_fact = _record_context_fact(
+        state, kind, request.decision_key, request.decision_value)
+    if context_fact is not None:
+        return AdvanceResult(context_fact[0], False, context_fact[1])
 
     if kind in {"delivery-completed", "complete"}:
         if state.phase != Phase.DELIVERY:

@@ -7,11 +7,11 @@ import sys
 import tempfile
 import unittest
 
-
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
+import mae_flow_core.quality.ut_handoff as ut_handoff_module  # noqa: E402
 from mae_flow_core.quality import (  # noqa: E402
     append_ut_handoff,
     render_ut_context,
@@ -88,6 +88,29 @@ class AppendUtHandoffTests(unittest.TestCase):
 
 
 class RenderUtContextTests(unittest.TestCase):
+    def test_state_context_uses_ordered_checkpoint_ut_intents_once(self):
+        renderer = getattr(ut_handoff_module, "render_state_ut_context", None)
+        self.assertIsNotNone(renderer)
+        from mae_flow_core.orchestration import (  # noqa: E402
+            CommitPace, DeliveryPath, FlowState, Phase)
+        state = FlowState(
+            ticket="REQ-42",
+            path=DeliveryPath.FULL,
+            phase=Phase.QUALITY,
+            commit_pace=CommitPace.CONTINUOUS,
+            decisions=(
+                ("construction.cp.CP1.ut-intent", "覆盖查询条件组合。"),
+                ("construction.cp.CP2.ut-intent", "覆盖结果映射和空结果。"),
+            ),
+        )
+
+        context = renderer(
+            state, ".mae-flow-work/REQ-42/spec.md",
+            ".mae-flow-work/REQ-42/story.md", ("src/query.cpp",))
+
+        self.assertLess(context.index("CP1"), context.index("CP2"))
+        self.assertEqual(1, context.count("覆盖查询条件组合。"))
+        self.assertEqual(1, context.count("覆盖结果映射和空结果。"))
     def test_missing_spec_or_story_paths_are_context_not_a_gate(self):
         cases = (
             ("", "story.md", "Story path (exact): story.md"),

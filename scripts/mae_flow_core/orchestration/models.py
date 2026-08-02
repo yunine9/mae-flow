@@ -24,6 +24,30 @@ class Phase(str, Enum):
 
 
 @dataclass(frozen=True)
+class StartupConfig:
+    """Operational inputs confirmed once during Intake."""
+
+    worker: str = ""
+    ticket_type: str = ""
+    requirement_source: str = ""
+    base_branch: str = ""
+    working_branch: str = ""
+    build_method: str = ""
+    ut_method: str = ""
+    ut_command: str = ""
+
+    def __post_init__(self):
+        for field in (
+                "worker", "ticket_type", "requirement_source",
+                "base_branch", "working_branch", "build_method",
+                "ut_method", "ut_command"):
+            if not isinstance(getattr(self, field), str):
+                raise ValueError("startup_config.%s must be a string" % field)
+        if self.ticket_type not in {"", "feat", "fix"}:
+            raise ValueError("startup_config.ticket_type must be feat or fix")
+
+
+@dataclass(frozen=True)
 class CapabilityAttempt:
     kind: str
     source_revision: str
@@ -85,10 +109,13 @@ class FlowState:
     capabilities: tuple = ()
     delivery_files: tuple = ()
     initial_dirty: tuple = ()
+    startup_config: StartupConfig = StartupConfig()
 
     @classmethod
-    def new(cls, ticket, path, pace):
-        return cls(ticket, path, Phase.STARTUP, pace)
+    def new(cls, ticket, path, pace, startup_config=None):
+        return cls(
+            ticket, path, Phase.STARTUP, pace,
+            startup_config=startup_config or StartupConfig())
 
     def with_decision(self, key, value):
         return replace(self, decisions=self.decisions + ((key, value),))

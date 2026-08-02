@@ -50,6 +50,66 @@ def with_returned_review(state):
 
 
 class FullTransitionTests(unittest.TestCase):
+    def test_checkpoint_brief_result_review_and_ut_intent_are_recovery_facts(self):
+        state = flow(phase=Phase.CONSTRUCTION)
+        events = (
+            ("cp-brief", "CP1", "修改 query_builder.cpp 的过滤条件边界。"),
+            ("cp-result", "CP1", "过滤条件和结果映射已经实现。"),
+            ("cp-review", "CP1", "Reviewer 未发现阻塞问题。"),
+            ("cp-ut-intent", "CP1", "覆盖条件组合和结果映射，不 Mock 连接框架。"),
+            ("cp-brief", "CP2", "接入调用方并保持旧接口兼容。"),
+        )
+        for event, checkpoint, text in events:
+            state = advance_flow(
+                state, AdvanceRequest(event, checkpoint, text)).state
+
+        expected = {
+            "construction.cp.CP1.brief": "修改 query_builder.cpp 的过滤条件边界。",
+            "construction.cp.CP1.result": "过滤条件和结果映射已经实现。",
+            "construction.cp.CP1.review": "Reviewer 未发现阻塞问题。",
+            "construction.cp.CP1.ut-intent": "覆盖条件组合和结果映射，不 Mock 连接框架。",
+            "construction.cp.CP2.brief": "接入调用方并保持旧接口兼容。",
+        }
+        self.assertTrue(expected.items() <= dict(state.decisions).items())
+        self.assertEqual(state, FlowState.from_dict(state.to_dict()))
+
+    def test_domain_selection_and_delivery_action_survive_as_lightweight_facts(self):
+        state = flow(phase=Phase.STARTUP)
+        path = "docs/mae-flow/behavior/order-query.md"
+
+        selected = advance_flow(state, AdvanceRequest(
+            "domain-selected", path,
+            "订单查询是本需求唯一相关业务能力。"))
+        updated = advance_flow(selected.state, AdvanceRequest(
+            "domain-updated", path,
+            "交付后查询过滤规则成为当前行为。"))
+
+        self.assertFalse(selected.needs_user)
+        self.assertFalse(updated.needs_user)
+        self.assertIn(("behavior.domain.selected", path),
+                      updated.state.decisions)
+        self.assertIn(
+            ("behavior.domain.action",
+             path + "\tupdated\t交付后查询过滤规则成为当前行为。"),
+            updated.state.decisions,
+        )
+        self.assertEqual(updated.state,
+                         FlowState.from_dict(updated.state.to_dict()))
+
+    def test_domain_selection_rejects_nonportable_windows_names(self):
+        state = flow(phase=Phase.STARTUP)
+        for path in (
+                "docs/mae-flow/behavior/CON.md",
+                "docs/mae-flow/behavior/order?.md",
+                "docs/mae-flow/behavior/order .md"):
+            with self.subTest(path=path):
+                result = advance_flow(
+                    state,
+                    AdvanceRequest("domain-selected", path, "相关领域。"),
+                )
+                self.assertEqual(state, result.state)
+                self.assertIn("portable", result.reason)
+
     def test_user_confirmation_requires_real_prose_and_issues_bound_receipt(self):
         startup = flow()
         blank = advance_flow(startup, AdvanceRequest("startup-confirmed"))

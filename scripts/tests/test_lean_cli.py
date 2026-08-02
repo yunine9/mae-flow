@@ -141,6 +141,181 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn("Traceback", result.stdout + result.stderr)
 
+    def test_start_persists_and_renders_the_complete_confirmed_configuration(self):
+        started = self.run_cli(
+            "start",
+            "--ticket", "REQ-CONFIG",
+            "--ticket-type", "feat",
+            "--worker", "zhangsan",
+            "--requirement", "requirements/query.md",
+            "--base-branch", "main",
+            "--build-method", "build-fix",
+            "--ut-method", "ut-generator-agent",
+            "--ut-command", "ctest --test-dir build",
+            "--path", "full",
+            "--pace", "continuous",
+        )
+
+        self.assert_success(started)
+        self.assertEqual({
+            "worker": "zhangsan",
+            "ticket_type": "feat",
+            "requirement_source": "requirements/query.md",
+            "base_branch": "main",
+            "working_branch": "main_zhangsan_REQ-CONFIG",
+            "build_method": "build-fix",
+            "ut_method": "ut-generator-agent",
+            "ut_command": "ctest --test-dir build",
+        }, self.state()["startup_config"])
+        for expected in (
+                "完整启动配置", "zhangsan", "requirements/query.md",
+                "main_zhangsan_REQ-CONFIG", "build-fix",
+                "ut-generator-agent", "ctest --test-dir build"):
+            self.assertIn(expected, started.stdout)
+        self.assertIn("Proposed startup configuration", started.stdout)
+        self.assertNotIn("Confirmed startup configuration", started.stdout)
+
+    def test_start_can_atomically_consume_the_one_startup_card_decision(self):
+        started = self.run_cli_raw(
+            "start", "--ticket", "REQ-ONE-CARD",
+            "--ticket-type", "feat", "--worker", "zhangsan",
+            "--requirement", "用户消息中的需求",
+            "--base-branch", "main",
+            "--working-branch", "main_zhangsan_REQ-ONE-CARD",
+            "--build-method", "build-fix",
+            "--ut-method", "ut-generator-agent",
+            "--ut-command", "ctest --test-dir build",
+            "--path", "full", "--pace", "continuous",
+            "--decision", "用户确认这张完整配置卡并进入 Spec。",
+        )
+
+        self.assert_success(started)
+        state = self.state()
+        self.assertEqual("spec", state["phase"])
+        self.assertIn(
+            {"key": "startup.confirmation",
+             "value": "用户确认这张完整配置卡并进入 Spec。"},
+            state["decisions"],
+        )
+        self.assertIn("Confirmed startup configuration", started.stdout)
+        self.assertNotIn("需要用户介入: Intake", started.stdout)
+
+    def test_repository_defaults_prefill_startup_and_cli_values_override_them(self):
+        with open(os.path.join(self.root, ".mae-flow-defaults.json"),
+                  "w", encoding="utf-8-sig") as stream:
+            json.dump({
+                "工号": "default-user",
+                "单号类型": "fix",
+                "基线分支": "develop",
+                "编译方式": "repository-build-skill",
+                "UT生成方式": "repository-ut-agent",
+                "UT运行命令": "repository-test-command",
+            }, stream, ensure_ascii=False)
+
+        started = self.run_cli(
+            "start", "--ticket", "REQ-DEFAULTS",
+            "--ticket-type", "feat",
+            "--worker", r"DOMAIN\actual-user",
+            "--path", "focused", "--pace", "staged",
+        )
+
+        self.assert_success(started)
+        config = self.state()["startup_config"]
+        self.assertEqual("actual-user", config["worker"])
+        self.assertEqual("feat", config["ticket_type"])
+        self.assertEqual("develop", config["base_branch"])
+        self.assertEqual(
+            "develop_actual-user_REQ-DEFAULTS", config["working_branch"])
+        self.assertEqual("repository-build-skill", config["build_method"])
+        self.assertEqual("repository-ut-agent", config["ut_method"])
+        self.assertEqual("repository-test-command", config["ut_command"])
+
+    def test_malformed_repository_defaults_are_visible_but_nonblocking(self):
+        with open(os.path.join(self.root, ".mae-flow-defaults.json"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("{broken-json")
+
+        started = self.run_cli(
+            "start", "--ticket", "REQ-BAD-DEFAULTS",
+            "--ticket-type", "fix", "--worker", "zhangsan",
+            "--base-branch", "main", "--path", "focused",
+            "--pace", "continuous",
+        )
+
+        self.assert_success(started)
+        state = self.state()
+        self.assertFalse(any(
+            "defaults" in risk.lower() for risk in state["risks"]))
+        warnings = [
+            item["value"] for item in state["decisions"]
+            if item["key"] == "startup.defaults_warning"
+        ]
+        self.assertEqual(1, len(warnings))
+        self.assertIn("预设读取提示", started.stdout)
+
+    def test_current_recovers_selected_domains_and_final_reconciliation(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-DOMAIN", "--path", "focused",
+            "--pace", "continuous"))
+        domain = "docs/mae-flow/behavior/order-query.md"
+
+        self.assert_success(self.run_cli_raw(
+            "advance", "domain-selected", "--key", domain,
+            "--decision", "本次只涉及订单查询业务能力。"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "domain-updated", "--key", domain,
+            "--decision", "查询过滤规则已按交付后的当前行为更新。"))
+        current = self.run_cli_raw("current")
+
+        self.assert_success(current)
+        self.assertIn("Selected behavior domains", current.stdout)
+        self.assertIn(domain, current.stdout)
+        self.assertIn("updated", current.stdout)
+        self.assertIn("查询过滤规则", current.stdout)
+
+    def test_full_spec_and_story_artifacts_are_grouped_locally_by_default(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-LOCAL-DESIGN", "--path", "full",
+            "--pace", "continuous"))
+
+        artifacts = {
+            item["kind"]: item["path"] for item in self.state()["artifacts"]}
+        self.assertTrue(artifacts["spec"].startswith(".mae-flow-work/"))
+        self.assertTrue(artifacts["spec"].endswith("/spec.md"))
+        self.assertTrue(artifacts["story"].startswith(".mae-flow-work/"))
+        self.assertTrue(artifacts["story"].endswith("/story.md"))
+
+    def test_cp_card_combines_actual_review_ut_intent_and_next_brief(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-CP-CARD", "--path", "full",
+            "--pace", "continuous"))
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP1"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        facts = (
+            ("cp-brief", "CP1", "提取可测试的查询条件构造。"),
+            ("cp-result", "CP1", "查询构造已从数据库框架中分离。"),
+            ("cp-review", "CP1", "Reviewer 未发现阻塞问题。"),
+            ("cp-ut-intent", "CP1", "覆盖条件组合，不 Mock 数据库连接。"),
+            ("cp-brief", "CP2", "接入结果映射并保持旧接口。"),
+        )
+        for event, checkpoint, text in facts:
+            self.assert_success(self.run_cli_raw(
+                "advance", event, "--key", checkpoint,
+                "--decision", text))
+
+        current = self.run_cli_raw("current")
+
+        self.assert_success(current)
+        for expected in (
+                "原简报", "查询构造已从数据库框架中分离",
+                "Reviewer 未发现阻塞问题", "不 Mock 数据库连接",
+                "下一 CP: CP2", "接入结果映射"):
+            self.assertIn(expected, current.stdout)
+
     def test_exclusive_backups_never_replace_a_name_collision(self):
         base = os.path.join(self.root, ".mae-flow.json")
         patches = (

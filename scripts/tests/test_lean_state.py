@@ -19,6 +19,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     DeliveryPath,
     FlowState,
     Phase,
+    StartupConfig,
     decode_flow_state,
 )
 from mae_flow_core.state_store import (  # noqa: E402
@@ -47,10 +48,26 @@ ALLOWED_TOP_LEVEL_FIELDS = {
     "capabilities",
     "delivery_files",
     "initial_dirty",
+    "startup_config",
 }
 
 
 class LeanStateContractTests(unittest.TestCase):
+    def test_new_state_serializes_an_explicit_startup_configuration(self):
+        encoded = FlowState.new(
+            "REQ-7", DeliveryPath.FULL, CommitPace.CONTINUOUS).to_dict()
+
+        self.assertEqual({
+            "worker": "",
+            "ticket_type": "",
+            "requirement_source": "",
+            "base_branch": "",
+            "working_branch": "",
+            "build_method": "",
+            "ut_method": "",
+            "ut_command": "",
+        }, encoded.get("startup_config"))
+
     def test_round_trip_keeps_recovery_facts(self):
         state = FlowState.new(
             "REQ-7", DeliveryPath.FULL, CommitPace.CONTINUOUS)
@@ -73,8 +90,27 @@ class LeanStateContractTests(unittest.TestCase):
                 "tests", "source-1", "env-1", "passed", "focused"),),
             delivery_files=("src/feature.py",),
             initial_dirty=("notes.txt",),
+            startup_config=StartupConfig(
+                worker="zhangsan",
+                ticket_type="fix",
+                requirement_source="requirements/fix.md",
+                base_branch="main",
+                working_branch="main_zhangsan_REQ-7",
+                build_method="build-fix",
+                ut_method="ut-generator-agent",
+                ut_command="ctest --test-dir build",
+            ),
         )
         self.assertEqual(state, FlowState.from_dict(state.to_dict()))
+
+    def test_decoder_keeps_pre_configuration_schema_v3_recoverable(self):
+        with open(FIXTURE, encoding="utf-8") as stream:
+            raw = json.load(stream)
+        raw.pop("startup_config")
+
+        recovered = FlowState.from_dict(raw)
+
+        self.assertEqual(StartupConfig(), recovered.startup_config)
 
     def test_fixture_is_a_decodable_flow_state(self):
         with open(FIXTURE, encoding="utf-8") as stream:

@@ -17,10 +17,11 @@
 ### 1.1 small Full
 
 - [ ] 一个只改少量业务行为的需求可以由用户选择 Full；界面没有用文件数或行数劝退。
-- [ ] Intake 展示路径、范围、提交节奏和初始脏文件归属，普通自然语言即可确认。
+- [ ] Intake 一卡展示工号、单号类型、需求来源、路径、提交节奏、基线/工作分支、Build、UT 生成/运行入口和初始脏文件归属，普通自然语言即可修改或确认。
+- [ ] Intake 读取行为 index 后只选择相关业务能力领域；index 缺失或复杂存量领域未完整建模均不阻断。
 - [ ] Spec 只固定 WHAT；Grill fake 只调用一次，不透明返回后停在 Spec 用户卡。
-- [ ] Design 只固定 HOW、可测性和 CP；Story/Reviewer fake 各只调用一次，不透明返回后停在 Design 用户卡。
-- [ ] 每个 CP 只出现一次用户检视；普通进度不会增加停点。
+- [ ] Design 的 Story 按模板同时承载客户场景、业务规格、功能验收、软件详细设计和测试交接；它不是逐行编码计划。Story/Reviewer fake 各只调用一次，不透明返回后停在 Design 用户卡。
+- [ ] 每个 CP 的同一张卡展示原简报、实际结果、Reviewer、累计 UT 增量和下一 CP，用户可自然语言修改后续设计；普通进度不会增加停点。
 - [ ] Quality 不重复先前能力，Delivery 展示精确文件、提交说明和推送选择。
 
 ### 1.2 complex Full
@@ -28,7 +29,7 @@
 - [ ] 至少三个 CP 依次可见，CP1 未确认时不能静默打开 CP2。
 - [ ] 跨 CP 接口/共享状态集成会记录原因，但已明确的工作不会额外找人签字。
 - [ ] 真实歧义或有意义的设计偏差会停下，并保留可恢复风险事实。
-- [ ] 会话重启后 `SessionStart` 只注入当前阶段、CP、关键产物、风险和最后一次 capability；不回放长历史。
+- [ ] 会话重启后 `current` 保留已确认启动配置、相关领域和 CP 事实；`SessionStart` 只注入有界摘要，不回放长历史或重跑 capability。
 
 ## 2. Focused review-fix
 
@@ -47,8 +48,9 @@
 
 ## 4. 文档与工作区
 
-- [ ] Spec、Story、决策和工程说明按同一需求分组。
-- [ ] Story 和其他条件文档默认保留在本地；仅当用户明确选择入库时加入 manifest。
+- [ ] Spec、Story、决策和工程说明位于同一 `.mae-flow-work/<ticket>/` 本地目录。
+- [ ] Spec、Story 和其他条件文档默认保留在本地；仅当用户明确选择入库时加入 manifest。
+- [ ] 领域行为文档按业务能力划分；Delivery 对每个相关领域记录 `new`、`updated` 或 `unchanged`，只将真实变化的领域文件和必要 index 更新加入 manifest。
 - [ ] 未采用的初始脏文件可以留在工作区，但不会进入自动 Delivery。
 - [ ] 用户采用的初始脏文件同时出现在 adoption facts 和 exact manifest。
 - [ ] 损坏恢复状态不会被覆盖；普通开发 fail-open，明确退出仍保存坏现场并释放控制。
@@ -57,7 +59,7 @@
 
 - [ ] manifest 逐文件展示；反斜杠/大小写别名不能生成重复文件。
 - [ ] 暂存结果必须与 manifest 完全相等，额外文件或缺少文件都拒绝。
-- [ ] 提交说明匹配 `[ticket][feat|fix]description`。
+- [ ] 在错误分支或使用错误单号类型时 commit 被本地拒绝；切到已确认的工作分支并使用 `[ticket][confirmed-type]description` 后同一 Git 操作可继续，不回退流程或重跑质量能力。
 - [ ] Continuous 只有一个最终提交；Staged 的 CP manifests 并集恰好等于最终 manifest；最终只推送一次。
 - [ ] Moonlight 只对用户点名的业务文件和 commit/push 布尔值生效。
 - [ ] 未点名条件文档、manifest 变化、能力失败、未拥有脏文件和 push 失败会安全停下。

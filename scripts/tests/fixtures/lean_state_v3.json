@@ -12,5 +12,15 @@
   "risks": [],
   "capabilities": [],
   "delivery_files": [],
-  "initial_dirty": []
+  "initial_dirty": [],
+  "startup_config": {
+    "worker": "",
+    "ticket_type": "",
+    "requirement_source": "",
+    "base_branch": "",
+    "working_branch": "",
+    "build_method": "",
+    "ut_method": "",
+    "ut_command": ""
+  }
 }

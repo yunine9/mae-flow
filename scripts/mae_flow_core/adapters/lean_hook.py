@@ -62,6 +62,7 @@ class LeanHookFactPorts:
     head_sha: object = _empty_paths
     destination_sha: object = _empty_paths
     head_commit_files: object = _empty_paths
+    current_branch: object = _empty_paths
 
 
 def _decode_json(raw):
@@ -358,6 +359,8 @@ class LeanHookAdapter:
                 safe_write_targets=self._fact_paths(
                     self.facts.safe_write_targets, payload),
                 task_owned_temp_dir=task_temp,
+                current_branch=self._fact_text(
+                    self.facts.current_branch, payload),
             )
             decision = decide_pretool(context, tool, tool_input)
         if decision.allow:

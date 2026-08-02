@@ -6,7 +6,7 @@ Choose exactly one mode for the current action; never combine them.
 
 Use Interactive Grill to expand unanswered requirement branches until the requested WHAT is observable and testable.
 
-- Investigate facts in the request, code, and environment. Ask the user only for decisions.
+- Investigate facts in the request, selected behavior baseline, code, and environment. Ask the user only for decisions. In an incremental legacy baseline, absent text is unknown rather than proof that behavior does not exist.
 - Follow every requirement branch created by an answer. Ask one question at a time, with evidence, impact, and a recommended answer.
 - Describe acceptance in observable behavior: inputs, preconditions, triggers, outputs, failure behavior, and outcomes a user or caller can detect.
 - Keep HOW out of this work; HOW belongs to Story. Implementation types, functions, files, algorithms, and module choices are not requirement decisions.

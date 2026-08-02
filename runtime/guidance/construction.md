@@ -12,3 +12,5 @@ Implement the approved behavior one coherent CP at a time.
 - When coding reveals an implementation deviation, record it and compare it with the confirmed Spec and behavior baseline. Align the implementation when the artifacts remain correct; otherwise propose an artifact update for user review. Never silently rewrite either authority.
 
 Construction records natural-language UT handoff facts: behavior completed, deterministic logic, seam created, real framework boundary retained, and implementation deviation. A CP does not write, compile, or run formal UT.
+
+For each Full CP, keep four short recoverable facts: its confirmed brief, actual result, one-pass CODE Reviewer conclusion, and incremental UT intent. The CP card shows those facts together with the next CP brief, and the user may revise the next design in natural language. These facts are guidance, not a fixed report schema or a new coding-plan file.

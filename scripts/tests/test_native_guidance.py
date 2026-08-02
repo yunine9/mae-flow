@@ -216,6 +216,25 @@ class CapabilityPreservationTests(unittest.TestCase):
 
 
 class NativeGuidanceSemanticTests(unittest.TestCase):
+    def test_public_docs_match_local_spec_and_durable_behavior_lifecycle(self):
+        readme = read_text(os.path.join(ROOT, "README.md"))
+        maintainers = read_text(os.path.join(ROOT, "MAINTAINERS.md"))
+        combined = readme + "\n" + maintainers
+
+        self.assertIn(".mae-flow-work/<ticket>/spec.md", combined)
+        self.assertIn("docs/mae-flow/behavior/<domain>.md", combined)
+        self.assertIn("new", combined)
+        self.assertIn("updated", combined)
+        self.assertIn("unchanged", combined)
+        self.assertIn("业务能力", combined)
+        self.assertIn("Story", combined)
+        self.assertIn("软件详细设计", combined)
+        self.assertIn("工号", combined)
+        self.assertIn("UT 运行入口", combined)
+        self.assertIn("已确认的工作分支", combined)
+        self.assertNotIn("Spec 和行为基线是持久真相源", combined)
+        self.assertNotIn("持久组：`docs/mae-flow/requirements/<safe-ticket>/spec.md`", combined)
+
     def test_production_skill_uses_lean_phases_and_once_only_capabilities(self):
         skill = read_text(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
         command = read_text(os.path.join(ROOT, "commands", "mae-flow.md"))
@@ -282,6 +301,12 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("how", prompts["story-generator-agent.md"].lower())
         self.assertIn("testability", prompts[
             "story-generator-agent.md"].lower())
+        story = prompts["story-generator-agent.md"].lower()
+        for concept in (
+                "standalone", "customer scenario", "business specification",
+                "functional acceptance criteria", "software detailed design",
+                "test handoff", "not a coding plan"):
+            self.assertIn(concept, story)
         self.assertIn("at most once per cp", prompts[
             "craft-reviewer-agent.md"].lower())
         ut = prompts["ut-generator-agent.md"].lower()

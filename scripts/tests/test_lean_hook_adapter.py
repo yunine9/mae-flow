@@ -31,6 +31,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     DeliveryPath,
     FlowState,
     Phase,
+    StartupConfig,
     advance_flow,
     flow_attempt_context,
     record_flow_attempt,
@@ -985,6 +986,57 @@ class LeanHookAdapterTests(unittest.TestCase):
 
         self.assertEqual(2, response.exit_code)
         self.assertIn("[REQ-5][feat|fix]", response.stderr)
+
+    def test_commit_uses_the_confirmed_branch_and_ticket_type(self):
+        base = self.receipt_state()
+        state = replace(
+            base,
+            decisions=tuple(
+                item for item in base.decisions
+                if item[0] != DELIVERY_RECEIPT_KEY),
+            startup_config=StartupConfig(
+                ticket_type="fix",
+                working_branch="main_zhangsan_REQ-5",
+            ),
+        )
+        receipt = issue_delivery_receipt(
+            state, "用户确认精确文件、提交信息和远端目标。")
+        state = replace(
+            state,
+            decisions=state.decisions + ((DELIVERY_RECEIPT_KEY, receipt),),
+        )
+        self.write_state(state)
+        files = ("tests/a_test.cpp", "src/a.cpp")
+
+        def invoke(branch, message):
+            adapter = LeanHookAdapter(
+                self.root,
+                marker_root=self.marker_root,
+                fact_ports=LeanHookFactPorts(
+                    staged_files=lambda unused: files,
+                    current_branch=lambda unused: branch,
+                    head_sha=lambda unused: "a" * 40,
+                ),
+            )
+            return adapter.handle("PreToolUse", {
+                "tool_name": "Bash",
+                "tool_use_id": "commit-contract",
+                "tool_input": {
+                    "command": "git commit -m '%s'" % message,
+                },
+            })
+
+        wrong_branch = invoke("main", "[REQ-5][fix]修复提交格式")
+        wrong_type = invoke(
+            "main_zhangsan_REQ-5", "[REQ-5][feat]修复提交格式")
+        correct = invoke(
+            "main_zhangsan_REQ-5", "[REQ-5][fix]修复提交格式")
+
+        self.assertEqual(2, wrong_branch.exit_code)
+        self.assertIn("confirmed working branch", wrong_branch.stderr)
+        self.assertEqual(2, wrong_type.exit_code)
+        self.assertIn("[REQ-5][fix]", wrong_type.stderr)
+        self.assertEqual(0, correct.exit_code, correct.stderr)
 
     def test_fact_port_failure_does_not_hide_an_independent_danger(self):
         state = replace(self.write_state(), phase=Phase.CONSTRUCTION)

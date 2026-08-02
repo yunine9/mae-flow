@@ -9,6 +9,15 @@ GIT_GLOBAL_VALUE_OPTIONS = {
     "-C", "-c", "--git-dir", "--work-tree", "--namespace",
     "--super-prefix", "--config-env", "--exec-path",
 }
+_REDIRECTION_MARKER = "__mae_flow_shell_redirection__"
+_FILE_REDIRECTIONS = {"<", ">", ">>", "<>", ">|", "&>", "&>>"}
+_FD_REDIRECTIONS = {"<&", ">&"}
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+_UNSUPPORTED_COMMAND_WORDS = {
+    "{", "}", "[[", "]]", "case", "coproc", "do", "done", "elif",
+    "else", "esac", "fi", "for", "function", "if", "in", "select",
+    "then", "time", "until", "while",
+}
 
 
 def _is_git_executable(token):
@@ -78,6 +87,118 @@ def _shell_tokens(command):
         return None
 
 
+def _redirection_operator(command, index):
+    spelling = command[index:]
+    if spelling.startswith(("<<<", "<<", "<(", ">(")):
+        return None
+    for operator in (
+            "&>>", "&>", "<>", ">>", ">|", "<&", ">&", "<", ">"):
+        if spelling.startswith(operator):
+            return operator
+    return ""
+
+
+def _io_number_start(command, index):
+    start = index
+    while start and command[start - 1].isdigit():
+        start -= 1
+    if start == index:
+        return index
+    if start and command[start - 1] not in " \t\r\n;&|()":
+        return index
+    return start
+
+
+def _marked_redirections(command):
+    """Mark bounded redirects while preserving raw IO-number adjacency."""
+    if _REDIRECTION_MARKER in command:
+        return None
+    result = []
+    redirects = {}
+    quote = ""
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            result.append(char)
+            if char == quote:
+                quote = ""
+            elif char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 1
+                result.append(command[index])
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(command):
+            result.extend((char, command[index + 1]))
+            index += 2
+            continue
+        if char in ("'", '"'):
+            quote = char
+            result.append(char)
+            index += 1
+            continue
+        if command[index:index + 2] in ("&&", "|&"):
+            result.extend(command[index:index + 2])
+            index += 2
+            continue
+        if char not in "<>&":
+            result.append(char)
+            index += 1
+            continue
+        operator = _redirection_operator(command, index)
+        if operator is None:
+            return None
+        if not operator:
+            result.append(char)
+            index += 1
+            continue
+        start = (
+            _io_number_start(command, index)
+            if operator[0] in "<>" else index)
+        if start < index:
+            del result[-(index - start):]
+        marker = "%s%d__" % (_REDIRECTION_MARKER, len(redirects))
+        redirects[marker] = operator
+        result.extend((" ", marker, " "))
+        index += len(operator)
+    return "".join(result), redirects
+
+
+def _record_tokens(command):
+    marked = _marked_redirections(command)
+    if marked is None:
+        return None
+    spelling, redirects = marked
+    tokens = _shell_tokens(spelling)
+    if tokens is None:
+        return None
+    result = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        operator = redirects.get(token)
+        if not operator:
+            result.append(token)
+            index += 1
+            continue
+        if index + 1 >= len(tokens):
+            return None
+        target = tokens[index + 1]
+        if (
+                target in redirects
+                or target and all(char in ";&|()\n" for char in target)
+                or not target
+                or any(marker in target for marker in ("$", "`"))):
+            return None
+        if operator in _FD_REDIRECTIONS and not re.fullmatch(r"[0-9]+|-", target):
+            return None
+        if operator not in _FILE_REDIRECTIONS | _FD_REDIRECTIONS:
+            return None
+        result.append(_REDIRECTION_MARKER)
+        index += 2
+    return tuple(result)
+
+
 def shell_command_groups(command):
     """Tokenize shell command positions without splitting quoted separators."""
     tokens = _shell_tokens(command)
@@ -114,7 +235,7 @@ def _control_tokens(tokens):
         index = 0
         while index < len(token):
             pair = token[index:index + 2]
-            if pair in ("&&", "||", "|&"):
+            if pair in ("&&", "||", "|&", "((", "))"):
                 yield pair
                 index += 2
             else:
@@ -124,12 +245,13 @@ def _control_tokens(tokens):
 
 def shell_command_records(command):
     """Preserve bounded shell scope/control metadata, or ``None`` if opaque."""
-    tokens = _shell_tokens(command)
+    tokens = _record_tokens(command)
     if tokens is None:
         return None
 
     records = []
     words = []
+    redirected = False
     scope = ()
     conditional_scopes = (False,)
     pending = ""
@@ -142,20 +264,36 @@ def shell_command_records(command):
         return parent + (next_scope,)
 
     def flush(after=""):
-        nonlocal words
-        if not words:
+        nonlocal redirected, words
+        if not words and not redirected:
             return False
+        operation = next((
+            token.casefold() for token in words
+            if not _ASSIGNMENT.fullmatch(token) and token != "!"
+        ), "")
+        if operation in _UNSUPPORTED_COMMAND_WORDS:
+            return None
         isolated = pending in ("|", "|&") or after in ("|", "|&", "&")
         record_scope = child_scope(scope) if isolated else scope
         records.append(ShellCommandRecord(
             tuple(words),
             record_scope,
-            conditional_scopes[-1] or pending in ("&&", "||"),
+            conditional_scopes[-1]
+            or pending in ("&&", "||")
+            or redirected,
         ))
         words = []
+        redirected = False
         return True
 
     for token in _control_tokens(tokens):
+        if token == _REDIRECTION_MARKER:
+            if closed_compound:
+                return None
+            redirected = True
+            continue
+        if token in ("((", "))"):
+            return None
         if token not in {";", "&", "&&", "||", "|", "|&", "(", ")", "\n"}:
             if closed_compound:
                 return None
@@ -163,7 +301,7 @@ def shell_command_records(command):
             continue
 
         if token == "(":
-            if words or closed_compound:
+            if words or redirected or closed_compound:
                 return None
             scope = child_scope(scope)
             conditional_scopes += (
@@ -182,7 +320,10 @@ def shell_command_records(command):
             closed_compound = True
             continue
 
-        had_operand = flush(token) or closed_compound
+        flushed = flush(token)
+        if flushed is None:
+            return None
+        had_operand = flushed or closed_compound
         if not had_operand:
             if token == "\n" and pending in ("", ";", "\n"):
                 pending = "\n"
@@ -191,8 +332,9 @@ def shell_command_records(command):
         pending = ";" if token == "\n" else token
         closed_compound = False
 
-    if words:
-        flush()
+    if words or redirected:
+        if flush() is None:
+            return None
     elif not closed_compound and pending in ("&&", "||", "|", "|&"):
         return None
     if scope:

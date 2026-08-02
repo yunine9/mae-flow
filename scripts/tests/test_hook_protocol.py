@@ -493,6 +493,212 @@ class HookProtocolTests(unittest.TestCase):
                 )
                 self.assertEqual([], reads)
 
+    def test_redirection_keeps_repository_context_changes_in_parent_scope(self):
+        commands = (
+            "cd /tmp/other &>/dev/null; "
+            "git push origin HEAD:refs/heads/main",
+            "export GIT_DIR=/tmp/other/.git &>/dev/null; "
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other 2>&1; "
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other &&>/dev/null; "
+            "git push origin HEAD:refs/heads/main",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                reads = []
+
+                def git_text(unused_root, arguments):
+                    reads.append(("text", tuple(arguments)))
+                    return self._root_push_text(unused_root, arguments)
+
+                def git_paths(unused_root, arguments):
+                    reads.append(("paths", tuple(arguments)))
+                    return ("root-authorized.py",)
+
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=git_text,
+                        git_paths=git_paths,
+                    ),
+                )
+                self.assertEqual([], reads)
+
+    def test_unsupported_compound_syntax_fails_before_fact_reads(self):
+        commands = (
+            "{ cd /tmp/other; "
+            "git push origin HEAD:refs/heads/main; }",
+            "if true; then cd /tmp/other; fi; "
+            "git push origin HEAD:refs/heads/main",
+            "for path in /tmp/other; do cd \"$path\"; done; "
+            "git push origin HEAD:refs/heads/main",
+            "select path in /tmp/other; do cd \"$path\"; done; "
+            "git push origin HEAD:refs/heads/main",
+            "while false; do cd /tmp/other; done; "
+            "git push origin HEAD:refs/heads/main",
+            "until true; do cd /tmp/other; done; "
+            "git push origin HEAD:refs/heads/main",
+            "case value in value) cd /tmp/other;; esac; "
+            "git push origin HEAD:refs/heads/main",
+            "function change_root { cd /tmp/other; }; change_root; "
+            "git push origin HEAD:refs/heads/main",
+            "time cd /tmp/other; "
+            "git push origin HEAD:refs/heads/main",
+            "coproc cd /tmp/other; "
+            "git push origin HEAD:refs/heads/main",
+            "(( value = 1 )); "
+            "git push origin HEAD:refs/heads/main",
+            "[[ -d /tmp/other ]] && cd /tmp/other; "
+            "git push origin HEAD:refs/heads/main",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                reads = []
+
+                def git_text(unused_root, arguments):
+                    reads.append(("text", tuple(arguments)))
+                    return self._root_push_text(unused_root, arguments)
+
+                def git_paths(unused_root, arguments):
+                    reads.append(("paths", tuple(arguments)))
+                    return ("root-authorized.py",)
+
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=git_text,
+                        git_paths=git_paths,
+                    ),
+                )
+                self.assertEqual([], reads)
+
+    def test_opaque_or_malformed_redirection_fails_before_fact_reads(self):
+        commands = (
+            "cd /tmp/other >; "
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other 2>&; "
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other ><context.log; "
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other <<EOF\nEOF\n"
+            "git push origin HEAD:refs/heads/main",
+            "cd /tmp/other <<<context; "
+            "git push origin HEAD:refs/heads/main",
+            "printf ready <(cd /tmp/other); "
+            "git push origin HEAD:refs/heads/main",
+            "printf ready >(cd /tmp/other); "
+            "git push origin HEAD:refs/heads/main",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                reads = []
+
+                def git_text(unused_root, arguments):
+                    reads.append(("text", tuple(arguments)))
+                    return self._root_push_text(unused_root, arguments)
+
+                def git_paths(unused_root, arguments):
+                    reads.append(("paths", tuple(arguments)))
+                    return ("root-authorized.py",)
+
+                self.assertEqual(
+                    (),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=git_text,
+                        git_paths=git_paths,
+                    ),
+                )
+                self.assertEqual([], reads)
+
+    def test_known_simple_redirection_keeps_exact_root_push_facts(self):
+        commands = (
+            "printf ready >/dev/null; "
+            "git push origin HEAD:refs/heads/main",
+            "printf ready 2>&1; "
+            "git push origin HEAD:refs/heads/main",
+            "git push origin HEAD:refs/heads/main >/dev/null",
+            "git push origin HEAD:refs/heads/main 2>&1",
+            "git push origin HEAD:refs/heads/main &>/dev/null",
+            "</dev/null git push origin HEAD:refs/heads/main 2>/dev/null",
+        )
+
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    ("src/root.py",),
+                    self.dispatch._push_commit_files(
+                        ROOT,
+                        {"tool_name": "Bash", "tool_input": {
+                            "command": command,
+                        }},
+                        git_text=self._root_push_text,
+                        git_paths=lambda unused_root, unused_args: (
+                            "src/root.py",),
+                    ),
+                )
+
+    def test_spaced_numeric_argv_is_not_treated_as_an_io_number(self):
+        def git_text(unused_root, arguments):
+            values = {
+                ("rev-parse", "--verify", "2^{commit}"): "numeric-head",
+                ("rev-parse", "--verify",
+                 "refs/remotes/origin/2^{commit}"): "numeric-remote",
+            }
+            return values.get(tuple(arguments), "")
+
+        def git_paths(unused_root, arguments):
+            self.assertEqual(
+                ("log", "--format=", "--name-only", "-z",
+                 "numeric-remote..numeric-head", "--"),
+                tuple(arguments),
+            )
+            return ("src/numeric-ref.py",)
+
+        self.assertEqual(
+            ("src/numeric-ref.py",),
+            self.dispatch._push_commit_files(
+                ROOT,
+                {"tool_name": "Bash", "tool_input": {
+                    "command": "git push origin 2 >/dev/null",
+                }},
+                git_text=git_text,
+                git_paths=git_paths,
+            ),
+        )
+
+    def test_reserved_words_as_ordinary_argv_keep_exact_push_facts(self):
+        command = (
+            "printf '%s' { } if then elif else fi for select while until "
+            "do done case in esac function time coproc '[[']; "
+            "git push origin HEAD:refs/heads/main"
+        )
+
+        self.assertEqual(
+            ("src/root.py",),
+            self.dispatch._push_commit_files(
+                ROOT,
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                git_text=self._root_push_text,
+                git_paths=lambda unused_root, unused_args: ("src/root.py",),
+            ),
+        )
+
     def test_push_ref_selecting_config_fails_before_fact_reads(self):
         commands = (
             "git -c remote.origin.push=refs/heads/main:refs/heads/release "

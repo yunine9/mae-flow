@@ -3,6 +3,7 @@
 import locale
 import os
 import re
+import shlex
 import subprocess
 
 from ..foundation.git_intent import git_delivery_intents
@@ -316,11 +317,8 @@ def _direct_push_position(tokens):
     return None
 
 
-def _changes_repository_context(root, command, expected_pushes):
+def _changes_repository_context(root, records, expected_pushes):
     expected_cwd = os.path.normcase(os.path.realpath(root))
-    records = shell_command_records(command)
-    if records is None:
-        return True
     contexts = {(): (expected_cwd, frozenset(), False)}
     direct_pushes = 0
 
@@ -455,12 +453,18 @@ def push_commit_files(
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if payload.get("tool_name") != "Bash" or not isinstance(command, str):
         return ()
+    records = shell_command_records(command)
+    if records is None:
+        return ()
+    proof_command = "; ".join(
+        " ".join(shlex.quote(token) for token in record.tokens)
+        for record in records if record.tokens)
     pushes = tuple(
-        intent for intent in git_delivery_intents(command)
+        intent for intent in git_delivery_intents(proof_command)
         if intent.operation == "push")
     if len(pushes) != 1 or pushes[0].opaque_pathspec:
         return ()
-    if _changes_repository_context(root, command, len(pushes)):
+    if _changes_repository_context(root, records, len(pushes)):
         return ()
     endpoints = _push_endpoints(root, pushes[0].arguments, git_text)
     if not endpoints:

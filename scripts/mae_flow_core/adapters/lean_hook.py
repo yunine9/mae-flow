@@ -1,4 +1,4 @@
-"""Test-only protocol and platform adapter for the lean Hook router."""
+"""Production protocol and platform adapter for the lean Hook router."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -54,7 +54,7 @@ def _empty_paths(_payload):
 
 @dataclass(frozen=True)
 class LeanHookFactPorts:
-    """Exact repository facts supplied by the eventual production adapter."""
+    """Exact repository facts supplied at the production adapter boundary."""
 
     staged_files: object = _empty_paths
     commit_files: object = _empty_paths
@@ -132,7 +132,7 @@ def _brief_list(values, maximum, render):
 
 
 class LeanHookAdapter:
-    """Compose lean Hook routing while treating adapter failures as ordinary."""
+    """Compose production lean Hook routing with bounded fail-open handling."""
 
     def __init__(
             self, root, marker_root=None, fact_ports=None, event_sink=None,

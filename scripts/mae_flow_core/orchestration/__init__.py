@@ -1,4 +1,4 @@
-"""Test-only orchestration values for the lean workflow redesign."""
+"""Production orchestration values for the lean Full/Focused workflow."""
 
 from .capabilities import (
     AttemptContext,

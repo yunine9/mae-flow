@@ -7,20 +7,28 @@ on:
 
 jobs:
   release-gate:
-    name: release-gate (${{ matrix.os }})
+    name: release-gate (${{ matrix.os }}, Python ${{ matrix.python }})
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            python: '3.8'
+          - os: windows-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.11'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -33,4 +41,4 @@ jobs:
       - name: Structured selftest
         run: python scripts/selftest.py
       - name: Whitespace check
-        run: git diff --check
+        run: git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}..${{ github.sha }}"

@@ -89,6 +89,10 @@ EXPECTED_RETIRED_TEST_SOURCES = {
     "scripts/tests/test_compile_side_effects.py",
     "scripts/tests/test_delivery_checkpoint_navigation.py",
     "scripts/tests/test_hook_block_diagnostics.py",
+    "scripts/tests/test_hook_protocol.py:HookProtocolTests."
+    "test_missing_maeflow_script_fails_open",
+    "scripts/tests/test_lightcheck.py:LightCheckTests."
+    "test_existing_violation_without_regression_is_only_logged",
     "scripts/tests/test_refactor_completion.py:"
     "DifferentialCoverageContractTests."
     "test_registered_scenarios_have_complete_coverage_metadata",
@@ -281,6 +285,7 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
         raw_only_current = {
             "scripts/tests/test_capability_observation.py",
             "scripts/tests/test_codecheck_advisory.py",
+            "scripts/tests/test_delivery_receipt.py",
             "scripts/tests/test_quality_selection.py",
             "scripts/tests/test_ut_handoff.py",
         }
@@ -291,7 +296,7 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             if filename.startswith("test_") and filename.endswith(".py")
         }
 
-        self.assertEqual(31, len(expected))
+        self.assertEqual(32, len(expected))
         self.assertEqual(expected, actual)
         self.assertTrue(os.path.isfile(os.path.join(
             ROOT, "scripts", "tests", "reference_specengine_diagnostic.py")))
@@ -338,6 +343,32 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
         ], by_source[
             "scripts/tests/test_capabilities.py:EmbeddedCapabilityTests."
             "test_prepare_accepts_git_worktree_dot_git_file"])
+
+    def test_historic_method_differences_have_exact_current_successors(self):
+        with open(
+                os.path.join(
+                    ROOT, "runtime", "guidance",
+                    "capability-preservation.json"),
+                encoding="utf-8") as stream:
+            preservation = json.load(stream)
+        by_source = {
+            item["source"]: item["replacement_semantic_tests"]
+            for item in preservation["retired_test_inventory"]
+        }
+        self.assertEqual([
+            "scripts/tests/test_hook_protocol.py:HookProtocolTests."
+            "test_unexpected_top_level_exception_fails_open",
+        ], by_source[
+            "scripts/tests/test_hook_protocol.py:HookProtocolTests."
+            "test_missing_maeflow_script_fails_open"])
+        self.assertEqual([
+            "scripts/tests/test_lightcheck.py:LightCheckTests."
+            "test_touched_preexisting_threshold_violation_is_reported",
+            "scripts/tests/test_lightcheck.py:LightCheckTests."
+            "test_cli_reports_findings_but_returns_success",
+        ], by_source[
+            "scripts/tests/test_lightcheck.py:LightCheckTests."
+            "test_existing_violation_without_regression_is_only_logged"])
 
 
 if __name__ == "__main__":

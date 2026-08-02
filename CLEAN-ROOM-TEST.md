@@ -30,8 +30,8 @@ python --version
 ## 2. 模型烟测
 
 - [ ] 启动卡只提供 Full 与 Focused。
-- [ ] Full 用户卡只出现在 Startup、Spec、Story、每个 CP、Delivery 和真实条件风险。
-- [ ] Focused 用户卡只出现在 Startup、Delivery；语义风险可以升级 Full/Spec。
+- [ ] Full 用户卡只出现在 Intake、Spec、Design、每个 CP、Delivery 和真实条件风险。
+- [ ] Focused 用户卡只出现在 Intake、Delivery；启动时无 Full 产物，语义风险可以升级 Full/Spec 并补入产物路径。
 - [ ] 文档和 UI 都显示唯一六阶段序列 Intake → Spec → Design → Construction → Quality → Delivery。
 - [ ] Build、UT、CodeCheck、Grill、Story、Reviewer 被描述为一次性 opaque capabilities。
 - [ ] Host Hook 是唯一写者；生产只有 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`。
@@ -51,7 +51,7 @@ python --version
 - [ ] drive、UNC、反斜杠与大小写 identity 通过。
 - [ ] locked replace/delete 在固定 attempt 内成功或明确失败；验收过程不实际等待。
 - [ ] fake Host capability 同步返回；timeout 使用短 subprocess 边界，不依赖 POSIX signal。
-- [ ] 输入未变时复用 capability result，不后台轮询或自动再次调用。
+- [ ] 首次调用后任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化不自动授权，也不后台轮询。
 
 ## 5. 发布门
 

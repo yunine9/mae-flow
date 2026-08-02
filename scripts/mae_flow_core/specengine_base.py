@@ -12,7 +12,7 @@
 - ``archive``        —— 对应 ``openspec archive <change> --yes``
 - ``status``         —— 对应 ``openspec status --change <name>`` 的核心信息
 
-对拍纪律（tests/test_specengine.py 差分测试保证）：
+对拍纪律（scripts/tests/reference_specengine_diagnostic.py 差分诊断保证）：
 
 - 校验宽严与 CLI 完全一致——CLI 放过的不拦、CLI 拦的必拦；
 - archive 合并后的 ``openspec/`` 目录树与 CLI 逐字节一致（统一行尾后比较）；

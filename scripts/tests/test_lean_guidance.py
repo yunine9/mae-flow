@@ -89,8 +89,9 @@ class LeanGuidanceTests(unittest.TestCase):
         self.assertIn("HOW", story)
         self.assertIn("cumulative UT handoff", construction)
         self.assertIn("at most once", quality)
-        self.assertIn("meaningful change", quality)
-        self.assertIn("user chooses", quality)
+        self.assertIn("current user decision", quality)
+        self.assertIn("Changed source, phase, CP, or environment", quality)
+        self.assertIn("never auto-authorizes", quality)
 
     def test_empty_artifacts_render_as_none(self):
         text = render_guidance(FlowState.new(
@@ -147,7 +148,8 @@ class LeanHarnessTests(unittest.TestCase):
             started = self.run_harness(
                 path, "start", "REQ-9", "focused", "continuous")
             advanced = self.run_harness(
-                path, "advance", "startup-confirmed")
+                path, "advance", "startup-confirmed", "--value",
+                "The user confirmed the Focused route.")
             decided = self.run_harness(
                 path, "decision", "construction.scope", "Keep the fix local.")
             current = self.run_harness(path, "current")

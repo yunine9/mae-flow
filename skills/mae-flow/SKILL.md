@@ -33,22 +33,22 @@ python "<插件目录>/scripts/mae-flow.py" decision startup-confirmed "用户�
 
 ## 两条交付路径
 
-- Full：Startup → Spec → Story → Construction → Quality → Delivery。适合行为尚需澄清、跨模块设计、公共接口、兼容性、安全、数据、共享状态或并发风险。
-- Focused：Startup → Construction → Quality → Delivery。适合已定位缺陷、局部修改和评审意见修复。判断只看语义风险，不看行数或文件数；实现中出现上述风险就 `advance upgrade-to-full --decision "<依据>"`。
+- Full：Intake → Spec → Design → Construction → Quality → Delivery。适合行为尚需澄清、跨模块设计、公共接口、兼容性、安全、数据、共享状态或并发风险。
+- Focused：Intake → Construction → Quality → Delivery。适合已定位缺陷、局部修改和评审意见修复。判断只看语义风险，不看行数或文件数；实现中出现上述风险就 `advance upgrade-to-full --decision "<依据>"`。
 
-Full 的五个高价值用户介入点是 Startup、Spec、Story、CP 和 Delivery。Focused 只固定停 Startup 与 Delivery。其余只有真实歧义、设计偏离、Reviewer 取舍、不可逆风险或昂贵能力重试才找用户。每次给用户一张短卡：当前结论、影响、推荐选择和可直接自然语言修改的内容。
+Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delivery。Focused 只固定停 Intake 与 Delivery。其余只有真实歧义、设计偏离、Reviewer 取舍、不可逆风险或昂贵能力重试才找用户。每次给用户一张短卡：当前结论、影响、推荐选择和可直接自然语言修改的内容。
 
 ## 六个阶段
 
-### Startup
+### Intake
 
-阅读需求、仓库事实和初始脏文件，推荐 Full/Focused 与 Continuous/Staged。用户确认一次即可；不要求固定话术。
+阅读需求、仓库事实和初始脏文件，推荐 Full/Focused 与 Continuous/Staged。用户确认一次即可；不要求固定话术。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`。
 
 ### Spec
 
 Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 在呈审前调用 `grill-critic-agent` 做 one read-only pass；CLEAR 直接继续，只有真实待决分支交用户。Spec 位于 `docs/mae-flow/requirements/<ticket>/spec.md`。
 
-### Story
+### Design
 
 Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点、类/接口、依赖与数据流、错误和资源语义、CP、验证意图及可测性 seam。调用 `story-generator-agent` 一次，再调用 Design Reviewer 一次。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 durable 路径。
 
@@ -66,7 +66,7 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 - Build：直接调用配置的 `build-fix` Skill 一次。该 Skill 对自己的编译负责；Mae-Flow 不再另派编译角色，也不猜内部 Maven/g++ 封装的输出。
 - UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
 
-生产 Host Hook 是正常能力调用的单一写入者：PreToolUse 自动预留由当前阶段和 exact CP 派生的 `not-observed` attempt slot，匹配同一 `tool_use_id` 和真实返回的 PostToolUse 自动完成 `returned` 观察及不透明摘要。主 Agent 返回后不再手工记录第二次；未观察到返回时保留 `not-observed`，兼容 CLI 只留给没有 Host Hook 的诊断入口，不用于正常 Host 流程。Design Reviewer 和每个 CP Reviewer 是不同 slot。同 slot 不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用消费一次授权。
+生产 Host Hook 是正常能力调用的单一写入者：PreToolUse 自动预留由当前阶段和 exact CP 派生的 `not-observed` attempt slot，匹配同一 `tool_use_id` 和真实返回的 PostToolUse 自动完成 `returned` 观察及不透明摘要。主 Agent 返回后不再手工记录第二次；未观察到返回时保留 `not-observed`。Design Reviewer 和每个 CP Reviewer 是不同 slot。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
 
 ### Delivery
 
@@ -77,6 +77,8 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 - Staged：每个用户已确认 CP 先记录该 CP exact manifest 和提交说明，再做一个本地提交；同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
 
 Spec/行为基线是长期真相源。Story、决策、工程笔记、Chain、Review/CodeCheck 台账和交付说明默认本地；只有用户明确点名该文件进入版本库，才通过 `--conditional-document <exact path>` 选择。
+
+Focused 启动不声明 Spec、Story 或 UT handoff；只有 `upgrade-to-full` 成功时才补入这三条 Full 产物路径。
 
 ## Moonlight
 
@@ -93,4 +95,4 @@ manifest 确定后，只有已启用 Moonlight 的流程可用 `--moonlight-refr
 - Agent 只修改任务相关业务文件；用户已有脏文件保持可见，纳入交付前必须自然语言确认归属。
 - 任何提交都使用 exact files 和原有 `[单号][feat|fix]描述` 格式；不提交 Mae-Flow 状态、本地过程目录或未点名条件文档。
 - Reviewer 提供证据，不制造无休止反工；接受修复后不自动再派同一 Reviewer。
-- Build/UT/CodeCheck 是工具箱能力。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。
+- Build、UT、CodeCheck 是工作流质量能力；独立 CLI 工具箱只暴露 UT、CodeCheck、Grill、Story 和 Chain。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。

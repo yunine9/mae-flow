@@ -17,9 +17,9 @@
 ### 1.1 small Full
 
 - [ ] 一个只改少量业务行为的需求可以由用户选择 Full；界面没有用文件数或行数劝退。
-- [ ] Startup 展示路径、范围、提交节奏和初始脏文件归属，普通自然语言即可确认。
+- [ ] Intake 展示路径、范围、提交节奏和初始脏文件归属，普通自然语言即可确认。
 - [ ] Spec 只固定 WHAT；Grill fake 只调用一次，不透明返回后停在 Spec 用户卡。
-- [ ] Design 只固定 HOW、可测性和 CP；Story/Reviewer fake 各只调用一次，不透明返回后停在 Story 用户卡。
+- [ ] Design 只固定 HOW、可测性和 CP；Story/Reviewer fake 各只调用一次，不透明返回后停在 Design 用户卡。
 - [ ] 每个 CP 只出现一次用户检视；普通进度不会增加停点。
 - [ ] Quality 不重复先前能力，Delivery 展示精确文件、提交说明和推送选择。
 
@@ -32,9 +32,9 @@
 
 ## 2. Focused review-fix
 
-- [ ] Focused 只有 Startup 与 Delivery 两个固定停点。
+- [ ] Focused 只有 Intake 与 Delivery 两个固定停点，启动时不声明 Spec、Story 或 UT handoff。
 - [ ] Reviewer/CodeCheck 的未知输出原样作为 opaque summary 保存，不解析成 clean/fail。
-- [ ] 用户修复使相关源码 revision 变化后，获得新的单次 capability 机会；输入未变时不自动再次调用。
+- [ ] 首次调用后，源码 revision、阶段、CP 或环境变化都不自动产生新调用；当前用户决定绑定新 slot 后才能再次调用。
 - [ ] 若评审揭示接口、兼容性、数据、安全、共享状态或并发风险，记录自然语言原因并升级 Full/Spec。
 
 ## 3. Capability 边界

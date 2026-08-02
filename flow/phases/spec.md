@@ -14,4 +14,5 @@ Produce the reviewed specification and record remaining risks or decisions in
 natural language. Record critic failure without automatic retry.
 
 ## Next
-Proceed to Story. The next meaningful action is to confirm the reviewed WHAT.
+Proceed to Design (the stable recovery value is `story`). The next meaningful
+action is to confirm the reviewed WHAT.

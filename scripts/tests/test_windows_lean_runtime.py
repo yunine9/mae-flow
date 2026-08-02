@@ -108,23 +108,43 @@ class WindowsPathAndEncodingTests(unittest.TestCase):
 
 
 class WindowsLockedFileTests(unittest.TestCase):
-    def test_replace_retry_is_bounded_without_real_waiting(self):
-        attempts = []
-        delays = []
+    def test_replace_retry_stops_on_success_and_is_bounded_without_waiting(self):
+        transient_attempts = []
+        transient_delays = []
+
+        def transient_replace(source, destination):
+            transient_attempts.append((source, destination))
+            if len(transient_attempts) < 3:
+                raise PermissionError("simulated transient Windows file lock")
+
+        with mock.patch.object(
+                state_store.os, "replace",
+                side_effect=transient_replace), mock.patch.object(
+                    state_store.time, "sleep",
+                    side_effect=transient_delays.append):
+            state_store._replace_with_retry(
+                "source.tmp", "state.json", attempts=5, base_delay=0.1)
+
+        self.assertEqual(3, len(transient_attempts))
+        self.assertEqual([0.1, 0.2], transient_delays)
+
+        permanent_attempts = []
+        permanent_delays = []
 
         def locked_replace(source, destination):
-            attempts.append((source, destination))
+            permanent_attempts.append((source, destination))
             raise PermissionError("simulated Windows file lock")
 
         with mock.patch.object(
                 state_store.os, "replace", side_effect=locked_replace), mock.patch.object(
-                    state_store.time, "sleep", side_effect=delays.append):
+                    state_store.time, "sleep",
+                    side_effect=permanent_delays.append):
             with self.assertRaises(PermissionError):
                 state_store._replace_with_retry(
                     "source.tmp", "state.json", attempts=4, base_delay=0.25)
 
-        self.assertEqual(4, len(attempts))
-        self.assertEqual([0.25, 0.5, 1.0], delays)
+        self.assertEqual(4, len(permanent_attempts))
+        self.assertEqual([0.25, 0.5, 1.0], permanent_delays)
 
     def test_delete_retry_stops_on_success_and_is_bounded_on_permanent_lock(self):
         transient_attempts = []
@@ -146,6 +166,7 @@ class WindowsLockedFileTests(unittest.TestCase):
         self.assertEqual([0.1, 0.2], transient_delays)
 
         permanent_attempts = []
+        permanent_delays = []
 
         def permanent_delete(path):
             permanent_attempts.append(path)
@@ -153,11 +174,13 @@ class WindowsLockedFileTests(unittest.TestCase):
 
         with mock.patch.object(
                 state_store.os, "remove", side_effect=permanent_delete), mock.patch.object(
-                    state_store.time, "sleep", return_value=None):
+                    state_store.time, "sleep",
+                    side_effect=permanent_delays.append):
             with self.assertRaises(PermissionError):
                 state_store.remove_with_retry(
-                    "state.json", attempts=3, base_delay=0)
+                    "state.json", attempts=3, base_delay=0.1)
         self.assertEqual(3, len(permanent_attempts))
+        self.assertEqual([0.1, 0.2], permanent_delays)
 
 
 class WindowsProcessBoundaryTests(unittest.TestCase):
@@ -223,14 +246,24 @@ class WindowsProcessBoundaryTests(unittest.TestCase):
                 state.capabilities[0].summary,
             )
 
-    def test_ci_uses_real_windows_runner_and_portable_python_command(self):
+    def test_ci_uses_real_windows_python38_lane_and_commit_range_diff(self):
         workflow_path = os.path.join(
             ROOT, ".github", "workflows", "selftest.yml")
         with open(workflow_path, encoding="utf-8") as stream:
             workflow = stream.read()
         self.assertIn("windows-latest", workflow)
         self.assertIn("ubuntu-latest", workflow)
+        self.assertIn("python: '3.8'", workflow)
+        self.assertIn("python: '3.11'", workflow)
         self.assertIn("actions/setup-python", workflow)
+        self.assertIn("python-version: ${{ matrix.python }}", workflow)
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn(
+            'git diff --check "${{ github.event.pull_request.base.sha '
+            '|| github.event.before }}..${{ github.sha }}"',
+            workflow,
+        )
+        self.assertNotIn("run: git diff --check\n", workflow)
         self.assertIn("python scripts/selftest.py", workflow)
         self.assertNotIn("python3", workflow)
 

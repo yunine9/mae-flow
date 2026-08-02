@@ -1,4 +1,4 @@
-"""Validation for the test-only lean workflow exit pointer."""
+"""Validation and publication for the production lean exit lifecycle."""
 
 from collections.abc import Mapping
 import hashlib

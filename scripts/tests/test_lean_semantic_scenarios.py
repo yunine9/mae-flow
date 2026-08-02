@@ -437,7 +437,9 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             "- src/a.cpp",
             "- %s" % story,
             "提交说明: %s" % message,
-            "Moonlight 权限: allow_commit=true, allow_push=false",
+            "Moonlight requested: allow_commit=true, allow_push=false",
+            "Moonlight effective: allow_commit=true, allow_push=false",
+            "Moonlight block reason: none",
         ))
         self.assertIn(expected_card, current.stdout)
 
@@ -481,7 +483,9 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             "提交说明（按 CP 顺序）:",
             "- CP1: %s" % first_message,
             "- CP2: %s" % second_message,
-            "Moonlight 权限: allow_commit=true, allow_push=true",
+            "Moonlight requested: allow_commit=true, allow_push=true",
+            "Moonlight effective: allow_commit=true, allow_push=true",
+            "Moonlight block reason: none",
         ))
         self.assertIn(expected_card, current.stdout)
         self.assertNotIn("尚未选择", current.stdout)
@@ -534,6 +538,46 @@ class ProductDocumentationContractTests(unittest.TestCase):
         self.assertIn("Host Hook 是唯一写者", text)
         self.assertIn("默认保留在本地", text)
         self.assertIn("[ticket][feat|fix]description", text)
+
+    def test_public_stage_and_retry_terms_match_skill_and_cli(self):
+        public_sequence = (
+            "Intake → Spec → Design → Construction → Quality → Delivery")
+        guides = {
+            path: self.read(path)
+            for path in ("README.md", "MAINTAINERS.md", "skills/mae-flow/SKILL.md")
+        }
+        for path, text in guides.items():
+            with self.subTest(path=path):
+                self.assertIn(public_sequence, text)
+                self.assertIn(
+                    "首次调用后，任何再次调用都需要当前用户决定；源码、阶段、"
+                    "CP 或环境变化只改变授权键，不自动授权。",
+                    text,
+                )
+        cli_source = self.read(
+            "scripts/mae_flow_core/orchestration/guidance.py")
+        self.assertIn("需要用户介入: Intake（启动选择", cli_source)
+        self.assertIn("需要用户介入: Design（Story", cli_source)
+        self.assertNotIn("需要用户介入: 启动选择", cli_source)
+        self.assertNotIn("需要用户介入: Story（", cli_source)
+
+    def test_public_ci_is_fake_host_proof_not_internal_tool_execution(self):
+        workflow = self.read(".github/workflows/selftest.yml")
+        for private_selector in (
+                "build-fix", "ut-generator-agent", "codecheck-advisor-agent"):
+            self.assertNotIn(private_selector, workflow)
+        self.assertIn(
+            "CI 不调用真实内部 Build、UT 或 CodeCheck", self.read("README.md"))
+        self.assertIn(
+            "语义场景不能调用内部 Build、UT 或 CodeCheck",
+            self.read("MAINTAINERS.md"),
+        )
+        self.assertIn(
+            "不调用真实内部 Build、UT 或 CodeCheck", self.read("FIELD-TEST.md"))
+        self.assertIn(
+            "CI 不安装或调用真实内部 Build、UT、CodeCheck",
+            self.read("CLEAN-ROOM-TEST.md"),
+        )
 
     def test_retired_current_guidance_is_absent_but_history_is_non_operational(self):
         current = "\n".join(

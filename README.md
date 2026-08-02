@@ -21,8 +21,8 @@ Mae-Flow 是面向 CodeAgent 的交付工作流。它把人留在真正有决策
 
 | 路径 | 适用情况 | 固定用户停点 |
 |---|---|---|
-| **Full** | 需要显式规格、设计或逐检查点检视的工作 | Startup、Spec、Story、每个 CP、Delivery |
-| **Focused** | 已定位且语义边界清楚的局部工作 | Startup、Delivery |
+| **Full** | 需要显式规格、设计或逐检查点检视的工作 | Intake、Spec、Design、每个 CP、Delivery |
+| **Focused** | 已定位且语义边界清楚的局部工作 | Intake、Delivery |
 
 路径由语义决定，不由文件数或行数决定。一个只改一行的兼容性修复可以选择 Full；一个涉及多个文件但边界清楚的机械落位可以选择 Focused。Focused 一旦发现接口、兼容性、数据、安全、共享状态、并发或其他真实语义风险，就升级到 Full 的 Spec，不静默扩大范围。
 
@@ -63,10 +63,10 @@ Intake → Spec → Design → Construction → Quality → Delivery
 
 Build、UT、CodeCheck、Grill、Story、Reviewer 都是一次性、不透明的 capability，不是隐藏的子流程。
 
-- 每个相关源码与环境上下文默认至多调用一次；同一上下文再次调用需要用户明确决定。
+- 每个语义阶段/CP slot 默认至多调用一次。
 - Host 的同步返回就是完成边界。Mae-Flow 不解析内部输出格式，不把 `PASS`、`CLEAN`、计数或任意私有字段推断成质量结论。
 - 记录的结果只有 `returned`、`failed-to-start`、`timed-out` 或 `not-observed` 以及一段有界摘要。
-- 没有后台轮询、等待循环或自动重试。输入真正变化后可获得新的单次机会；输入未变时复用已记录结果。
+- 没有后台轮询、等待循环或自动重试。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。
 - 独立调用不会创建活动工作流，不会提交或推送。输出文件默认保留在本地。
 
 UT capability 自己负责写测试、编译测试和运行测试；弱 C++/gtest 环境无法证明执行数量时，只如实保留不透明返回。CodeCheck 输出未知时同样只记录事实，不臆造 verdict。
@@ -84,6 +84,8 @@ docs/mae-flow/requirements/<ticket>/spec.md
 
 Spec 和行为基线是持久真相源。Story、决策、工程笔记、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择某一份条件文档入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。
 
+Focused 启动时不声明 Spec、Story 或 UT handoff 产物；只有语义风险触发升级 Full 时，才一次补入这三条 Full 路径。
+
 ## Git 交付
 
 Mae-Flow 只对用户已审阅的逐文件 manifest 授权：
@@ -97,9 +99,9 @@ Mae-Flow 只对用户已审阅的逐文件 manifest 授权：
 
 ## Moonlight
 
-Moonlight 是同一工作流上的精确预授权，不是第三条路径。用户明确给出允许的业务文件以及是否允许 commit/push 后，它可以略过 Full 的常规 Startup、Spec、Story、CP 等待；歧义、真实风险、能力失败、未拥有的脏文件、manifest 变化和推送失败仍会安全停下。
+Moonlight 是同一工作流上的精确预授权，不是第三条路径。用户明确给出允许的业务文件以及是否允许 commit/push 后，它可以略过 Full 的常规 Intake、Spec、Design、CP 等待；歧义、真实风险、能力失败、未拥有的脏文件、manifest 变化和推送失败仍会安全停下。
 
-Delivery 卡始终可见。Moonlight 可以授权卡片所描述的精确副作用，但不会把交付信息藏起来，也不会自动纳入未点名的 Story 或其他条件文档。
+Delivery 卡始终可见，并同时展示 Moonlight requested 权限、effective 权限和被撤销时的 block reason。Moonlight 可以授权卡片所描述的精确副作用，但不会把交付信息藏起来，也不会自动纳入未点名的 Story 或其他条件文档。
 
 ## 四个生产 Hooks
 
@@ -126,6 +128,6 @@ python scripts/selftest.py
 git diff --check
 ```
 
-CI 在真实 `windows-latest` 和 `ubuntu-latest` 上运行同一组发布门。Windows runner 负责证明真实盘符、反斜杠、大小写、文件锁、控制台编码和同步子进程语义；Linux 上的 `ntpath` 测试只是快速回归，不替代 Windows job。
+CI 在真实 `windows-latest`（Python 3.8 与 3.11）和 `ubuntu-latest`（Python 3.11）上运行同一组发布门，并对当前 push/PR 的真实 base..head 提交范围执行 diff check。CI 不调用真实内部 Build、UT 或 CodeCheck；能力场景只使用 fake Host payload 和不透明 outcome。Windows runner 负责证明真实盘符、反斜杠、大小写、文件锁、控制台编码和同步子进程语义；Linux 上的 `ntpath` 测试只是快速回归，不替代 Windows job。
 
 维护与发布规则见 [MAINTAINERS.md](MAINTAINERS.md)，人工场景见 [FIELD-TEST.md](FIELD-TEST.md)，干净环境验收见 [CLEAN-ROOM-TEST.md](CLEAN-ROOM-TEST.md)。

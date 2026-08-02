@@ -7,7 +7,7 @@
 ## 不变量
 
 1. **语义决定路径。** Full 与 Focused 的选择和升级只看接口、兼容性、数据、安全、共享状态、并发等语义风险，不看文件数、改动行数或目录数量。
-2. **只在高价值点找人。** Full 停在 Startup、Spec、Story、每个 CP、Delivery；Focused 停在 Startup、Delivery。真实歧义、设计偏差、用户级 Reviewer 取舍、昂贵能力再次调用、不可逆动作和 manifest 变化可以增加条件停点。
+2. **只在高价值点找人。** Full 停在 Intake、Spec、Design、每个 CP、Delivery；Focused 停在 Intake、Delivery。真实歧义、设计偏差、用户级 Reviewer 取舍、昂贵能力再次调用、不可逆动作和 manifest 变化可以增加条件停点。
 3. **能力一次调用。** Build、UT、CodeCheck、Grill、Story、Reviewer 是一次性 opaque capabilities。Host 同步返回后记录事实，不解析私有输出，不后台等待，不自动重试。
 4. **状态是最小恢复游标。** 只保留当前路径、阶段、CP、产物路径、自然语言决定、风险、能力尝试、Delivery 文件和初始脏文件；不把过程报告扩成第二套工作流。
 5. **Hook 单写。** Host Hook 是唯一写者；所有读改写走项目锁和原子替换。Agent、capability 和文档渲染器不直接写活动状态。
@@ -49,9 +49,9 @@ scripts/tests/                         发布场景、平台边界与回归套�
 Full 的常规推进：
 
 ```text
-Startup 确认
+Intake 确认
   → Spec + Grill 单次返回 + 用户确认
-  → Story + Reviewer 单次返回 + 用户确认
+  → Design（Story + Reviewer 单次返回）+ 用户确认
   → Construction（每个 CP 用户确认）
   → Quality
   → Delivery 用户确认
@@ -60,13 +60,13 @@ Startup 确认
 Focused 的常规推进：
 
 ```text
-Startup 确认
+Intake 确认
   → Construction
   → Quality
   → Delivery 用户确认
 ```
 
-Focused 中的普通走读修复不创建新模式。若工作仍是已定位的局部修改，修复后的相关输入获得新的单次能力机会并继续；若发现真实语义风险，记录自然语言依据后升级到 Full/Spec。
+Focused 中的普通走读修复不创建新模式，也不预声明 Spec、Story 或 UT handoff 产物。若工作仍是已定位的局部修改就继续；若发现真实语义风险，记录自然语言依据后升级到 Full/Spec，并在升级时补入 Full 产物路径。
 
 ## Capability 合同
 
@@ -77,7 +77,7 @@ Focused 中的普通走读修复不创建新模式。若工作仍是已定位的
 - `timed-out`
 - `not-observed`
 
-同一 kind/source/environment 已有尝试时，默认复用该结果并向用户提供一次自然语言再次调用选择。只有相关源码或环境变化，或用户明确授权，才能记录新尝试。不要从 summary 中寻找 `PASS`、`CLEAN`、数字、测试框架字段或未来工具格式。
+首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。决定绑定 kind、语义 phase/CP slot 和 environment；旧 slot 的决定不能被新 slot 消费。不要从 summary 中寻找 `PASS`、`CLEAN`、数字、测试框架字段或未来工具格式。
 
 Build 和其他 capability 必须由 Host 同步调用。完成信号是工具调用返回本身；没有后台 worker、进度文件探测或自动再次执行。超时由 Host 边界报告 `timed-out`，工作流保留可恢复事实并按风险决定是否找人。
 
@@ -106,7 +106,7 @@ Build 和其他 capability 必须由 Host 同步调用。完成信号是工具�
 
 Moonlight 只在普通 `FlowState` 上保存四类预授权事实：enabled、business files、allow commit、allow push。文件集合使用与 Delivery 相同的 exact identity。授权重复、冲突、缺字段、包含 manifest 外文件或遗漏 manifest 文件时 fail-closed 并要求重新授权。
 
-Moonlight 可以压缩常规等待，但 Delivery 卡始终透明。风险、未拥有脏文件、capability 非正常结果、manifest 变化、推送失败或缺少真实 adapter observation 都安全停下；明确 exit 不受这些风险阻挡。
+Moonlight 可以压缩常规等待，但 Delivery 卡始终透明地分别显示 requested/effective 权限和 block reason。风险、未拥有脏文件、capability 非正常结果、manifest 变化、推送失败或缺少真实 adapter observation 都安全停下；明确 exit 不受这些风险阻挡。
 
 ## 四个生产 Hooks
 
@@ -127,7 +127,7 @@ Moonlight 可以压缩常规等待，但 Delivery 卡始终透明。风险、未
 - 文本资源兼容 CRLF，但生成文件固定 LF。
 - 路径测试必须覆盖 drive、UNC、反斜杠、大小写和保留文件名。
 - `os.replace`/`os.remove` 的 `PermissionError` 只做有界、可测试的短锁重试；达到 attempt 上限立即上抛。
-- macOS/Linux 上的 `ntpath` 用例用于快速回归；只有真实 Windows CI job 才是发布证明。
+- macOS/Linux 上的 `ntpath` 用例用于快速回归；真实 Windows Python 3.8/3.11 CI job 才是发布证明。
 
 ## 测试纪律
 

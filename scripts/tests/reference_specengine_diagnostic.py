@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""specengine 回归测试：纯单元测试 + 与内嵌 OpenSpec CLI 的差分对拍。
+"""迁移专用 specengine 诊断：纯单元检查 + 与内嵌 OpenSpec CLI 差分对拍。
 
 对拍原则：同一输入语料复制两份，一份交给内嵌 Node CLI（行为真相源），
 一份交给纯 Python 引擎；比较 validate verdict 与 archive 之后整个
@@ -8,7 +8,7 @@
 发现不一致时改引擎服从 CLI，不改测试迁就引擎。
 
 本机没有 node 时差分对拍用例整体 skip（并在 skip 理由里注明）；
-纯单元测试不依赖 node，任何环境都必须全绿。
+纯单元诊断不依赖 node；本文件不是当前生产发布 suite。
 """
 
 import json

@@ -53,6 +53,15 @@ class MoonlightPolicyResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class MoonlightAuthorizationView:
+    """Requested and effective permissions plus any withholding reason."""
+
+    requested: MoonlightAuthorization
+    effective: MoonlightAuthorization
+    block_reason: str
+
+
 def _identity(path):
     return path.replace("\\", "/").casefold()
 
@@ -196,6 +205,26 @@ def _effective_authorization(state, requested):
             "explicitly named: %s" % ", ".join(outside))
 
     return requested, "The current exact manifest is preauthorized."
+
+
+def moonlight_authorization_view(state):
+    """Describe persisted Moonlight intent without hiding policy revocation."""
+    if not isinstance(state, FlowState):
+        raise TypeError("state must be a FlowState")
+    requested, stored_reason = _stored_authorization(state)
+    if stored_reason:
+        return MoonlightAuthorizationView(
+            requested, _disabled_authorization(), stored_reason)
+    effective, effective_reason = _effective_authorization(state, requested)
+    withheld = (
+        (requested.allow_commit and not effective.allow_commit)
+        or (requested.allow_push and not effective.allow_push)
+    )
+    return MoonlightAuthorizationView(
+        requested,
+        effective,
+        effective_reason if withheld else "",
+    )
 
 
 def _append_risk(state, risk):

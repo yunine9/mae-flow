@@ -373,7 +373,12 @@ class MoonlightPolicyTests(unittest.TestCase):
         ready = apply_moonlight_policy(
             state, AdvanceRequest("startup-ready"))
         advanced = apply_moonlight_policy(
-            ready.state, AdvanceRequest("startup-confirmed"))
+            ready.state,
+            AdvanceRequest(
+                "startup-confirmed",
+                decision_value="Moonlight confirms the selected Full route.",
+            ),
+        )
 
         self.assertFalse(ready.needs_user)
         self.assertEqual(Phase.STARTUP, ready.state.phase)
@@ -502,7 +507,12 @@ class MoonlightPolicyTests(unittest.TestCase):
         premature = apply_moonlight_policy(
             ready.state, AdvanceRequest("delivery-completed"))
         confirmed = apply_moonlight_policy(
-            ready.state, AdvanceRequest("delivery-confirmed"))
+            ready.state,
+            AdvanceRequest(
+                "delivery-confirmed",
+                decision_value="The user confirmed this exact manifest.",
+            ),
+        )
         completed = apply_moonlight_policy(
             confirmed.state,
             AdvanceRequest(
@@ -527,7 +537,12 @@ class MoonlightPolicyTests(unittest.TestCase):
             ("src/a.cpp",),
         )
         state = apply_moonlight_policy(
-            state, AdvanceRequest("delivery-confirmed")).state
+            state,
+            AdvanceRequest(
+                "delivery-confirmed",
+                decision_value="The user confirmed this exact manifest.",
+            ),
+        ).state
 
         for observation in ("", "  \t\r\n"):
             with self.subTest(observation=repr(observation)):

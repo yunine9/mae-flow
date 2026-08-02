@@ -158,19 +158,25 @@ def _relative(root, path):
     return os.path.relpath(path, root).replace("\\", "/")
 
 
-def _start_state(root, args):
-    documents = DocumentPaths.for_ticket(root, args.ticket)
-    dirty, git_errors = _initial_dirty(root)
-    artifacts = (
+def _full_artifacts(root, ticket):
+    documents = DocumentPaths.for_ticket(root, ticket)
+    return (
         ("spec", _relative(root, documents.spec)),
         ("story", _relative(root, documents.local_story)),
         ("ut-handoff", _relative(root, documents.ut_handoff)),
     )
+
+
+def _start_state(root, args):
+    path = DeliveryPath(args.path)
+    full_artifacts = _full_artifacts(root, args.ticket)
+    dirty, git_errors = _initial_dirty(root)
+    artifacts = full_artifacts if path == DeliveryPath.FULL else ()
     state = FlowState(
         ticket=args.ticket.strip(),
-        path=DeliveryPath(args.path),
+        path=path,
         phase=FlowState.new(
-            args.ticket.strip(), DeliveryPath(args.path),
+            args.ticket.strip(), path,
             CommitPace(args.pace)).phase,
         commit_pace=CommitPace(args.pace),
         artifacts=artifacts,
@@ -316,12 +322,23 @@ def _moonlight_enabled(state):
         for key, value in state.decisions)
 
 
-def _advance_state(state, request):
+def _advance_state(root, state, request):
     if _moonlight_enabled(state):
         result = apply_moonlight_policy(state, request)
-        return result.state, result.reason
-    result = advance_flow(state, request)
-    return result.state, result.reason
+    else:
+        result = advance_flow(state, request)
+    advanced = result.state
+    if (
+            state.path == DeliveryPath.FOCUSED
+            and advanced.path == DeliveryPath.FULL):
+        existing = {kind for kind, unused_path in advanced.artifacts}
+        additions = tuple(
+            item for item in _full_artifacts(root, advanced.ticket)
+            if item[0] not in existing
+        )
+        advanced = replace(
+            advanced, artifacts=advanced.artifacts + additions)
+    return advanced, result.reason
 
 
 def _semantic_request(event, key, decision):
@@ -337,7 +354,7 @@ def cmd_lean_advance(root, args):
             raise ValueError(
                 "该用户决定事件只能使用 decision 与自然语言确认")
         request = _semantic_request(args.event, args.key, args.decision)
-        return _advance_state(current, request)
+        return _advance_state(root, current, request)
 
     def execute():
         state, reason = _mutate(
@@ -374,7 +391,7 @@ def cmd_lean_decision(root, args):
             key = _validate_natural_decision(state, key, text)
             return state.with_decision(key, text), "已记录自然语言决定。"
         request = _semantic_request(args.event, args.key, text)
-        return _advance_state(state, request)
+        return _advance_state(root, state, request)
 
     def execute():
         state, reason = _mutate(root, operation)

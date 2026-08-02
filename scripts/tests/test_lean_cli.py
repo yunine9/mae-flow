@@ -132,7 +132,7 @@ class LeanCliTests(unittest.TestCase):
             "start", "--ticket", "REQ-42", "--path", "full",
             "--pace", "continuous")
         self.assert_success(started)
-        self.assertIn("需要用户介入: 启动选择", started.stdout)
+        self.assertIn("需要用户介入: Intake（启动选择", started.stdout)
 
         startup = self.run_cli(
             "decision", "startup-confirmed", "按完整开发和一次交付继续。")
@@ -145,7 +145,7 @@ class LeanCliTests(unittest.TestCase):
         spec = self.run_cli(
             "decision", "spec-confirmed", "可观察行为和范围已确认。")
         self.assert_success(spec)
-        self.assertIn("需要用户介入: Story", spec.stdout)
+        self.assertIn("需要用户介入: Design（Story", spec.stdout)
 
         self.assert_success(self.run_capability("story"))
         self.assert_success(self.run_capability("reviewer"))
@@ -182,6 +182,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "start", "--ticket", "DTS-9", "--path", "focused",
             "--pace", "continuous"))
+        self.assertEqual([], self.state()["artifacts"])
         construction = self.run_cli(
             "decision", "startup-confirmed", "已定位局部修复，直接实现。")
         self.assert_success(construction)
@@ -195,6 +196,14 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("Path: full", upgraded.stdout)
         self.assertIn("Phase: spec", upgraded.stdout)
         self.assertIn("需要用户介入: Spec", upgraded.stdout)
+        artifacts = self.state()["artifacts"]
+        self.assertEqual(
+            ["spec", "story", "ut-handoff"],
+            [item["kind"] for item in artifacts],
+        )
+        self.assertTrue(artifacts[0]["path"].endswith("/spec.md"))
+        self.assertIn(".mae-flow-work", artifacts[1]["path"])
+        self.assertTrue(artifacts[2]["path"].endswith("/ut-handoff.md"))
 
     def test_focused_migrated_spec_and_story_render_recovery_not_full_reviews(self):
         from pathlib import Path
@@ -540,7 +549,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual("true", decisions["moonlight.enabled"])
         self.assertEqual("false", decisions["moonlight.allow_commit"])
         self.assertEqual("false", decisions["moonlight.allow_push"])
-        self.assertNotIn("需要用户介入: 启动选择", started.stdout)
+        self.assertNotIn("需要用户介入: Intake（启动选择", started.stdout)
 
         refreshed = self.run_cli(
             "manifest", "--file", "src/service.cpp",
@@ -886,6 +895,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("当前 CP", wrong_cp.stderr)
 
     def test_delivery_card_uses_effective_moonlight_authorization(self):
+        self.env["PYTHONDONTWRITEBYTECODE"] = "1"
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-ML2", "--path", "focused",
             "--pace", "continuous", "--moonlight"))
@@ -902,6 +912,15 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(authorized)
         self.assertIn("需要用户介入: 交付", authorized.stdout)
         self.assertIn("src/a.cpp", authorized.stdout)
+        self.assertIn(
+            "Moonlight requested: allow_commit=true, allow_push=true",
+            authorized.stdout,
+        )
+        self.assertIn(
+            "Moonlight effective: allow_commit=true, allow_push=true",
+            authorized.stdout,
+        )
+        self.assertIn("Moonlight block reason: none", authorized.stdout)
 
         state["risks"] = ["远端权限仍不明确"]
         with open(state_path, "w", encoding="utf-8") as stream:
@@ -909,6 +928,19 @@ class LeanCliTests(unittest.TestCase):
         blocked = self.run_cli("current")
         self.assert_success(blocked)
         self.assertIn("需要用户介入: 交付", blocked.stdout)
+        self.assertIn(
+            "Moonlight requested: allow_commit=true, allow_push=true",
+            blocked.stdout,
+        )
+        self.assertIn(
+            "Moonlight effective: allow_commit=false, allow_push=false",
+            blocked.stdout,
+        )
+        self.assertIn(
+            "Moonlight block reason: Unresolved workflow risk requires a "
+            "safe stop.",
+            blocked.stdout,
+        )
 
 
 if __name__ == "__main__":

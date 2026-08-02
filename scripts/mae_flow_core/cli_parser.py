@@ -17,6 +17,8 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" start --ticket REQ-123 --path focused '
             '--pace continuous\n'
             '  python "%s" decision startup-confirmed "用户的自然语言决定"\n'
+            "公共阶段: Intake→Spec→Design→Construction→Quality→Delivery；"
+            "startup/story 仅是稳定恢复值。\n"
             "其余生产命令: advance|manifest|exit|"
             "ut|codecheck|grill|story|chain；内部轻量建议: lightcheck。\n"
             "旧状态只用 migrate-flow 单向迁移。" % (me, me, me),

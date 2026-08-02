@@ -3,6 +3,7 @@
 import os
 
 from .models import CommitPace, DeliveryPath, FlowState, Phase
+from .moonlight_policy import moonlight_authorization_view
 
 
 _PHASE_ROOT = os.path.abspath(os.path.join(
@@ -81,6 +82,7 @@ def _delivery_message_lines(state, decisions):
 
 def _delivery_user_card(state):
     decisions = {key: value for key, value in state.decisions}
+    moonlight = moonlight_authorization_view(state)
     lines = ["需要用户介入: 交付（精确文件、提交说明和是否推送）"]
     if state.delivery_files:
         lines.append("精确文件:")
@@ -88,11 +90,18 @@ def _delivery_user_card(state):
     else:
         lines.append("精确文件: none")
     lines.extend(_delivery_message_lines(state, decisions))
-    lines.append(
-        "Moonlight 权限: allow_commit=%s, allow_push=%s" % (
-            decisions.get("moonlight.allow_commit", "false"),
-            decisions.get("moonlight.allow_push", "false"),
-        ))
+    lines.extend((
+        "Moonlight requested: allow_commit=%s, allow_push=%s" % (
+            str(moonlight.requested.allow_commit).lower(),
+            str(moonlight.requested.allow_push).lower(),
+        ),
+        "Moonlight effective: allow_commit=%s, allow_push=%s" % (
+            str(moonlight.effective.allow_commit).lower(),
+            str(moonlight.effective.allow_push).lower(),
+        ),
+        "Moonlight block reason: %s" % (
+            moonlight.block_reason or "none"),
+    ))
     return "\n".join(lines)
 
 
@@ -111,7 +120,7 @@ def render_user_card(state):
     confirmed = set(decisions)
     if state.phase == Phase.STARTUP:
         return "" if moonlight else (
-            "需要用户介入: 启动选择（路径、范围和提交节奏）")
+            "需要用户介入: Intake（启动选择、路径、范围和提交节奏）")
     if state.path == DeliveryPath.FOCUSED:
         if state.phase == Phase.DELIVERY and "delivery.confirmation" not in confirmed:
             return _delivery_user_card(state)
@@ -121,7 +130,7 @@ def render_user_card(state):
             "需要用户介入: Spec（可观察行为和范围）")
     if state.phase == Phase.STORY:
         return "" if moonlight else (
-            "需要用户介入: Story（实现边界、设计和可测性）")
+            "需要用户介入: Design（Story 实现边界、设计和可测性）")
     if (
             state.phase == Phase.CONSTRUCTION
             and "construction.cp.%s.confirmation" % (

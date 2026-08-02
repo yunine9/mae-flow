@@ -2,21 +2,21 @@
   "hooks": {
     "SessionStart": [
       {"hooks": [{"type": "command",
-                  "command": "python -c \"import os,runpy,sys;p=os.path.join(os.environ.get('CODEAGENT3_PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT') or '', 'hooks', 'dispatch.py');sys.argv=[p,sys.argv[1]];os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\" sessionstart", "timeout": 15}]}
+                  "command": "R=\"${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" sessionstart; else exit 0; fi", "timeout": 15}]}
     ],
     "UserPromptSubmit": [
       {"hooks": [{"type": "command",
-                  "command": "python -c \"import os,runpy,sys;p=os.path.join(os.environ.get('CODEAGENT3_PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT') or '', 'hooks', 'dispatch.py');sys.argv=[p,sys.argv[1]];os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\" userprompt", "timeout": 15}]}
+                  "command": "R=\"${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" userprompt; else exit 0; fi", "timeout": 15}]}
     ],
     "PreToolUse": [
       {"matcher": "Edit|Write|MultiEdit|Bash|WriteStdin|Agent|Task|Skill",
        "hooks": [{"type": "command",
-                  "command": "python -c \"import os,runpy,sys;p=os.path.join(os.environ.get('CODEAGENT3_PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT') or '', 'hooks', 'dispatch.py');sys.argv=[p,sys.argv[1]];os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\" pretooluse", "timeout": 15}]}
+                  "command": "R=\"${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" pretooluse; else exit 0; fi", "timeout": 15}]}
     ],
     "PostToolUse": [
       {"matcher": "Bash|Agent|Task|Skill",
        "hooks": [{"type": "command",
-                  "command": "python -c \"import os,runpy,sys;p=os.path.join(os.environ.get('CODEAGENT3_PLUGIN_ROOT') or os.environ.get('CLAUDE_PLUGIN_ROOT') or '', 'hooks', 'dispatch.py');sys.argv=[p,sys.argv[1]];os.path.isfile(p) and runpy.run_path(p,run_name='__main__')\" posttooluse", "timeout": 15}]}
+                  "command": "R=\"${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" posttooluse; else exit 0; fi", "timeout": 15}]}
     ]
   }
 }

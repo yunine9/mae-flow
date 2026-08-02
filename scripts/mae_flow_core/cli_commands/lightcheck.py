@@ -396,7 +396,7 @@ def _print_lightcheck_findings(findings, report):
     if report:
         print("  人类可读报告: " + report, file=sys.stderr)
     print("  请按项目 formatter/附近同类代码修正后再提交；"
-          "最多修复并复查两轮，仍不确定则留给正式 CodeCheck，禁止扩大范围。",
+          "不确定的建议留给正式 CodeCheck，禁止扩大范围。",
           file=sys.stderr)
 
 def _print_lightcheck_degraded(result, report):
@@ -426,7 +426,9 @@ def _print_lightcheck_result(result, quiet=False):
 
 def cmd_lightcheck(st, args):
     try:
-        result = _working_lightcheck_scope(st or {})
+        candidates = getattr(args, "file", None)
+        result = _working_lightcheck_scope(
+            st or {}, candidates=candidates if candidates else None)
     except Exception as exc:
         # 此命令的合同就是 fail-open；即使适配层自身有 bug 也只报告。
         result = _lightcheck_tool_error(

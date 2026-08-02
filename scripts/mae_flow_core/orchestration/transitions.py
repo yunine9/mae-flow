@@ -2,7 +2,20 @@
 
 from dataclasses import dataclass, replace
 
-from .models import DeliveryPath, FlowState, Phase
+from .models import CommitPace, DeliveryPath, FlowState, Phase
+from .transition_facts import (
+    DELIVERY_CONFIRMATION as _DELIVERY_CONFIRMATION,
+    DELIVERY_CONFIRMED_FILE as _DELIVERY_CONFIRMED_FILE,
+    STAGED_FINAL_FILE as _STAGED_FINAL_FILE,
+    authorize_exact_delivery as _authorize_exact_delivery,
+    checkpoint_confirmation_key as _checkpoint_confirmation_key,
+    checkpoint_files as _checkpoint_files,
+    checkpoint_name as _checkpoint_name,
+    decision_values as _decision_values,
+    latest_review_attempt as _latest_review_attempt,
+    review_attempt_risk as _review_attempt_risk,
+    same_exact_files as _same_exact_files,
+)
 
 
 @dataclass(frozen=True)
@@ -154,9 +167,8 @@ _RISK_RESOLUTION = "risk.resolution"
 
 
 def _with_decision(state, request, default_key, default_value):
-    key = request.decision_key or default_key
     value = request.decision_value or default_value
-    return state.with_decision(key, value)
+    return state.with_decision(default_key, value)
 
 
 def _with_review_decision(state, request, key, default_value):
@@ -261,13 +273,33 @@ def advance_flow(state, request):
                 "Delivery cannot complete while workflow risks remain "
                 "unresolved.",
             )
-        if not any(
-                key == "delivery.confirmation"
-                for key, unused in state.decisions):
+        if not any(key == _DELIVERY_CONFIRMATION
+                   for key, unused in state.decisions):
             return AdvanceResult(
                 state, False,
                 "Delivery completion requires prior delivery authorization.",
             )
+        confirmed_files = _decision_values(state, _DELIVERY_CONFIRMED_FILE)
+        if (not state.delivery_files
+                or not _same_exact_files(
+                    confirmed_files, state.delivery_files)):
+            return AdvanceResult(
+                state, False,
+                "Delivery completion requires confirmation of the current "
+                "exact manifest.",
+            )
+        if state.commit_pace == CommitPace.STAGED:
+            final_files = _decision_values(state, _STAGED_FINAL_FILE)
+            checkpoint_files = _checkpoint_files(state)
+            if (not final_files
+                    or not _same_exact_files(final_files, state.delivery_files)
+                    or not _same_exact_files(
+                        checkpoint_files, state.delivery_files)):
+                return AdvanceResult(
+                    state, False,
+                    "Staged delivery completion requires the recorded final "
+                    "checkpoint union.",
+                )
         completed = _with_review_decision(
             state,
             request,
@@ -298,6 +330,22 @@ def advance_flow(state, request):
 
     review = _REVIEW_DECISIONS.get((state.phase, kind))
     if review is not None and state.path == DeliveryPath.FULL:
+        attempt = _latest_review_attempt(state)
+        if attempt is None:
+            return AdvanceResult(
+                state,
+                False,
+                "The matching review capability attempt has not been "
+                "recorded for this phase.",
+            )
+        if attempt.outcome != "returned" or kind.endswith("-failed"):
+            failed = _review_attempt_risk(state, attempt)
+            return AdvanceResult(
+                failed,
+                True,
+                "The review capability did not return normally; no required "
+                "review fact was recorded.",
+            )
         key, value = review
         reviewed = _with_review_decision(state, request, key, value)
         return AdvanceResult(
@@ -318,6 +366,30 @@ def advance_flow(state, request):
     if kind in _NON_BLOCKING_EVENTS:
         return AdvanceResult(state, False, _NON_BLOCKING_EVENTS[kind])
 
+    if (kind == "cp-ready"
+            and state.phase == Phase.CONSTRUCTION
+            and state.path == DeliveryPath.FULL):
+        current = state.current_cp or "CP1"
+        requested = request.decision_key.strip()
+        if requested:
+            requested = _checkpoint_name(requested)
+            current_key = _checkpoint_confirmation_key(current)
+            if (requested != current and not any(
+                    key == current_key for key, unused in state.decisions)):
+                return AdvanceResult(
+                    state,
+                    True,
+                    "The current checkpoint must be confirmed before the "
+                    "next checkpoint is opened.",
+                )
+            current = requested
+        ready = replace(state, current_cp=current)
+        return AdvanceResult(
+            ready,
+            True,
+            "This checkpoint needs user confirmation before continuing.",
+        )
+
     if (state.phase, kind) in _user_stops(state.path):
         return AdvanceResult(
             state, True,
@@ -325,16 +397,29 @@ def advance_flow(state, request):
         )
 
     if kind == "cp-confirmed" and state.phase == Phase.CONSTRUCTION:
-        confirmed = _with_decision(
-            state, request, *_CONFIRMATION_DECISIONS[kind])
+        checkpoint = state.current_cp or "CP1"
+        if state.path == DeliveryPath.FULL:
+            checkpoint = _checkpoint_name(checkpoint)
+        key = _checkpoint_confirmation_key(checkpoint)
+        confirmed = _with_review_decision(
+            replace(state, current_cp=checkpoint),
+            request,
+            key,
+            _CONFIRMATION_DECISIONS[kind][1],
+        )
         return AdvanceResult(
             confirmed, False,
             "The checkpoint and commit pace were confirmed.",
         )
 
     if kind == "delivery-confirmed" and state.phase == Phase.DELIVERY:
-        key, value = _CONFIRMATION_DECISIONS[kind]
-        authorized = _with_review_decision(state, request, key, value)
+        if not state.delivery_files:
+            return AdvanceResult(
+                state,
+                False,
+                "Delivery confirmation requires a non-empty exact manifest.",
+            )
+        authorized = _authorize_exact_delivery(state, request)
         return AdvanceResult(
             authorized, False,
             "The reviewed delivery was authorized; side effects remain pending.",
@@ -364,6 +449,8 @@ def advance_flow(state, request):
     target = _transition_table(state.path).get((state.phase, kind))
     if target is not None:
         advanced = replace(state, phase=target)
+        if target == Phase.CONSTRUCTION and not advanced.current_cp:
+            advanced = replace(advanced, current_cp="CP1")
         default = _CONFIRMATION_DECISIONS.get(kind)
         if default is not None:
             advanced = _with_decision(advanced, request, *default)

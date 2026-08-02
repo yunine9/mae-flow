@@ -25,10 +25,11 @@ Full 固定展示 Startup、Spec、Story、CP、Delivery 五张短卡；Focused 
 
 ## 质量与交付
 
-- Construction 对 changed code 运行一次 `lightcheck`，主 Agent顺手修安全项；它不是门禁，也不触发 Build 或复查。
+- Construction 用 `lightcheck --file <exact changed file>...` 检查一次精确本次代码，主 Agent顺手修安全项；无 exact scope 就 fail-open，不扫用户启动前现场，也不触发 Build 或复查。
 - 正式 CodeCheck 调 `codecheck-advisor-agent` 一次；Build 直接调 `build-fix`；UT 调 `ut-generator-agent`，由它完成 write/compile/run。
 - Continuous 使用一个最终提交和 one final push。
-- Staged 每个已确认 CP 用 `manifest --checkpoint <CP> --file <exact files>... --commit-message "[单号][feat|fix]描述" --decision "<用户检视>"` 后本地提交；Delivery 用 `manifest --final --file <累计 union>...`，然后 one final push。同一文件可跨 CP 重复。
+- Staged 用 `advance cp-ready --key <CP>` 打开新 CP，当前 CP 独立确认后才用 `manifest --checkpoint <CP> --file <exact files>... --commit-message "[单号][feat|fix]描述" --decision "<用户检视>"` 本地提交；Delivery 用 `manifest --final --file <累计 union>...`，然后 one final push。同一文件可跨 CP 重复。
+- 启动时已脏文件进入 manifest 时，每个都传 `--adopt-dirty "<file>=<用户自然语言归属决定>"`。Moonlight refresh 只用于已启用流程，并带 `--decision "<当前 exact manifest 授权>"`。
 - 条件文档只有用户明确要求入库时才传 `--conditional-document <exact path>`。
 
-任何能力失败或超时都不自动重启、不等待、不轮询。先报告事实；只有 state 中已有本轮 `capability.retry.<kind>` 自然语言决定，才进行同上下文下一次尝试。
+任何能力失败或超时都不自动重启、不等待、不轮询。Attempt slot 由阶段和 current CP 派生，改 caller 的 source/environment 不会绕过。只有 state 中已有本轮 `capability.retry.<kind>` 自然语言决定，才进行同 slot 下一次尝试。

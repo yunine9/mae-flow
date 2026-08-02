@@ -750,7 +750,7 @@ class LightCheckTests(unittest.TestCase):
             self.root, "pycache")
         run = subprocess.run(
             [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
-             "lightcheck", "--quiet"],
+             "lightcheck", "--file", path, "--quiet"],
             cwd=repo, text=True, capture_output=True, env=environment,
             timeout=20,
         )
@@ -788,7 +788,7 @@ class LightCheckTests(unittest.TestCase):
             self.root, "csharp-pycache")
         run = subprocess.run(
             [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
-             "lightcheck", "--quiet"],
+             "lightcheck", "--file", path, "--quiet"],
             cwd=repo, text=True, capture_output=True, env=environment,
             timeout=20,
         )
@@ -824,7 +824,7 @@ class LightCheckTests(unittest.TestCase):
             self.root, "deletion-pycache")
         run = subprocess.run(
             [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
-             "lightcheck", "--quiet"],
+             "lightcheck", "--file", path, "--quiet"],
             cwd=repo, text=True, capture_output=True, env=environment,
             timeout=20,
         )

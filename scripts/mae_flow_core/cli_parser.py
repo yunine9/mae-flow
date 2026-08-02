@@ -66,7 +66,9 @@ def parse_args(argv=None):
 
     manifest = sub.add_parser("manifest")
     manifest.add_argument("--file", action="append", required=True)
-    manifest.add_argument("--adopt-dirty", action="append", default=[])
+    manifest.add_argument(
+        "--adopt-dirty", action="append", default=[],
+        metavar="FILE=自然语言归属决定")
     manifest.add_argument("--conditional-document", action="append", default=[])
     manifest.add_argument("--moonlight-refresh", action="store_true")
     manifest.add_argument("--allow-commit", action="store_true")
@@ -247,6 +249,9 @@ def parse_args(argv=None):
     ])
     role_task.add_argument("--checkpoint")
     lightcheck = sub.add_parser("lightcheck")
+    lightcheck.add_argument(
+        "--file", action="append", default=[],
+        help="精确本次修改代码文件；可重复")
     lightcheck.add_argument(
         "--quiet", action="store_true",
         help="CLEAN/安全降级时静默；仅发现高置信问题才提示")

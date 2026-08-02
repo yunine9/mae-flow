@@ -125,8 +125,7 @@ def main():
         if handle_early_state_command(args):
             return None
     route = command_dispatch.lean_route(args.cmd)
-    if route is not None and not (
-            args.cmd == "exit" and schema == "legacy"):
+    if route is not None:
         return command_dispatch.invoke(
             route, api.exports(), root=root, args=args)
     return _legacy_main()

@@ -1,6 +1,6 @@
 ---
 name: mae-flow
-description: 面向开发同事的高效率、高质量需求交付流程；在真正需要人介入时聪明地让人介入。用户明确要求用 Mae-Flow 交付需求、修复缺陷或启动 Moonlight 时使用；普通问答或直接改码不自动接管。
+description: Use when 用户明确要求用 Mae-Flow 交付需求、修复缺陷或启动 Moonlight；普通问答或直接改码不自动接管。
 ---
 
 # Mae-Flow
@@ -56,7 +56,7 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 
 按用户确认的 Story 或 Focused 范围完成业务代码。编码时就创建测试所需的生产语义 seam，把稳定框架编排与可变业务判断分开；CP 只累计自然语言 UT handoff，不正式写或跑 UT。
 
-每个 CP 的 CODE Reviewer at most once per CP，只读本 CP diff 和直接集成边界，不形成复查循环。对 changed code 运行一次内部 `lightcheck`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。
+每个 CP 的 CODE Reviewer at most once per CP，只读本 CP diff 和直接集成边界，不形成复查循环。用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
 
 ### Quality
 
@@ -72,11 +72,12 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 python "<插件目录>/scripts/mae-flow.py" capability-record <kind> <outcome> --source <语义上下文> --environment <环境上下文> --summary "<观察摘要>"
 ```
 
-同一上下文不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用会消费一次授权。源码或环境有实质变化时本来就有一次新尝试，但仍会消费此前遗留的重试决定，避免以后误用。
+真正的 attempt slot 由 Mae-Flow 按当前阶段和 exact CP 派生；`--source/--environment` 是兼容性调用参数，改它们不会创建新 slot。Design Reviewer 和每个 CP Reviewer 是不同 slot。同 slot 不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用消费一次授权。
 
 ### Delivery
 
 先展示 exact files、初始脏文件归属、质量观察、提交说明和目标分支。只暂存逐个文件，禁止目录、glob、`git add .` 或夹带 Mae-Flow 控制文件。
+交付清单包含启动时已脏文件时，对每个文件使用 `--adopt-dirty "<file>=<用户自然语言归属决定>"`。Delivery 确认会绑定当前 exact manifest；manifest 改变后必须重新向用户展示。
 
 - Continuous：最终一个 `[单号][feat|fix]描述` 提交，one final push。
 - Staged：每个用户已确认 CP 先记录该 CP exact manifest 和提交说明，再做一个本地提交；同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
@@ -87,7 +88,7 @@ Spec/行为基线是长期真相源。Story、决策、工程笔记、Chain、Re
 
 Moonlight 是 Full/Focused 上的授权策略，不是另一套流程。用户明确开启时在 `start` 增加 `--moonlight`。只有用户同时点名 exact business files 并授权时，才记录 commit/push 权限；未形成精确 manifest、存在未归属脏文件、风险、能力异常或 push 失败时仍安全停下。
 
-manifest 确定后，可用 `--moonlight-refresh --allow-commit --allow-push` 刷新 exact authorization。条件文档仍必须独立点名。Moonlight 不允许强推、隐藏失败、删除测试或用重复调用碰运气。
+manifest 确定后，只有已启用 Moonlight 的流程可用 `--moonlight-refresh --allow-commit --allow-push --decision "<用户对当前 exact manifest 的自然语言授权>"` 刷新权限。条件文档仍必须独立点名。Moonlight 不允许强推、隐藏失败、删除测试或用重复调用碰运气。
 
 ## 独立工具箱
 

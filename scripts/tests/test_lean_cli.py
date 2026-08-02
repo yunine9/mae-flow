@@ -191,6 +191,86 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(2, consumed.returncode)
         self.assertEqual(2, len(self.state()["capabilities"]))
 
+    def test_capability_slot_is_state_derived_not_caller_controlled(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-SLOT", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "已定位局部修复。"))
+        first = self.run_cli(
+            "capability-record", "build", "returned",
+            "--source", "caller-a", "--environment", "env-a")
+        changed_labels = self.run_cli(
+            "capability-record", "build", "returned",
+            "--source", "caller-b", "--environment", "env-b")
+
+        self.assert_success(first)
+        self.assertEqual(2, changed_labels.returncode)
+        self.assertIn("自然语言重试决定", changed_labels.stderr)
+        self.assertEqual(
+            "build:construction:CP1",
+            self.state()["capabilities"][0]["source_revision"],
+        )
+
+        self.assert_success(self.run_cli(
+            "decision", "capability.retry.build",
+            "用户确认构建环境恢复，再试一次。"))
+        self.assert_success(self.run_cli(
+            "capability-record", "build", "returned",
+            "--source", "caller-c", "--environment", "env-c"))
+
+    def test_design_and_new_cp_reviewer_use_distinct_state_slots(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-REVIEW-SLOT", "--path", "full",
+            "--pace", "staged"))
+        state = self.state()
+        state["phase"] = "story"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        self.assert_success(self.run_cli(
+            "capability-record", "reviewer", "returned",
+            "--source", "caller-design", "--environment", "same"))
+
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP2"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        cp = self.run_cli(
+            "capability-record", "reviewer", "returned",
+            "--source", "caller-cp", "--environment", "same")
+
+        self.assert_success(cp)
+        self.assertEqual(
+            ["reviewer:design", "reviewer:cp:CP2"],
+            [item["source_revision"]
+             for item in self.state()["capabilities"]],
+        )
+
+    def test_nonreturned_capability_is_visible_as_risk_until_a_returned_retry(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-CAP-RISK", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "已定位局部修复。"))
+        failed = self.run_cli(
+            "capability-record", "build", "timed-out",
+            "--source", "ignored", "--environment", "ignored")
+        self.assert_success(failed)
+        self.assertTrue(self.state()["risks"])
+
+        self.assert_success(self.run_cli(
+            "decision", "capability.retry.build",
+            "用户确认环境恢复，重试一次。"))
+        returned = self.run_cli(
+            "capability-record", "build", "returned",
+            "--source", "still-ignored", "--environment", "still-ignored")
+
+        self.assert_success(returned)
+        self.assertEqual([], self.state()["risks"])
+
     def test_generic_decisions_cannot_forge_reserved_authorization_facts(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-AUTH", "--path", "focused",
@@ -209,6 +289,20 @@ class LeanCliTests(unittest.TestCase):
             "decision", "delivery.commit_message",
             "[REQ-AUTH][fix]修复授权边界")
         self.assert_success(allowed)
+
+    def test_semantic_confirmation_rejects_reserved_key_override(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-SEMANTIC", "--path", "focused",
+            "--pace", "continuous"))
+        before = self.state()
+
+        rejected = self.run_cli(
+            "decision", "startup-confirmed", "继续局部修复。",
+            "--key", "moonlight.enabled")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("不接受 --key", rejected.stderr)
+        self.assertEqual(before, self.state())
 
     def test_manifest_is_exact_and_inactive_execution_is_rejected_but_exit_is_immediate(self):
         self.assert_success(self.run_cli(
@@ -239,6 +333,30 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(again)
         self.assertEqual("exited", self.state()["status"])
 
+    def test_manifest_change_clears_prior_delivery_confirmation_and_result(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-REBIND", "--path", "focused",
+            "--pace", "continuous"))
+        state = self.state()
+        state["phase"] = "delivery"
+        state["delivery_files"] = ["src/a.cpp"]
+        state["decisions"].extend((
+            {"key": "delivery.confirmation", "value": "Deliver A."},
+            {"key": "delivery.confirmed_file", "value": "src/a.cpp"},
+            {"key": "delivery.result", "value": "Pushed A."},
+        ))
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        changed = self.run_cli("manifest", "--file", "src/b.cpp")
+
+        self.assert_success(changed)
+        keys = [item["key"] for item in self.state()["decisions"]]
+        self.assertNotIn("delivery.confirmation", keys)
+        self.assertNotIn("delivery.confirmed_file", keys)
+        self.assertNotIn("delivery.result", keys)
+
     def test_toolbox_alias_is_stateless_and_never_calls_external_capability(self):
         result = self.run_cli(
             "codecheck", "--request", "检查本次查询修复", "--file",
@@ -265,7 +383,8 @@ class LeanCliTests(unittest.TestCase):
 
         refreshed = self.run_cli(
             "manifest", "--file", "src/service.cpp",
-            "--moonlight-refresh", "--allow-commit", "--allow-push")
+            "--moonlight-refresh", "--allow-commit", "--allow-push",
+            "--decision", "用户授权当前精确清单的提交与推送。")
         self.assert_success(refreshed)
         refreshed_decisions = {}
         for item in self.state()["decisions"]:
@@ -278,17 +397,69 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(["true"], refreshed_decisions[
             "moonlight.allow_push"])
 
+    def test_moonlight_refresh_requires_existing_mode_and_manifest_decision(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-NORMAL", "--path", "focused",
+            "--pace", "continuous"))
+        ordinary = self.run_cli(
+            "manifest", "--file", "src/a.cpp", "--moonlight-refresh",
+            "--allow-commit", "--allow-push", "--decision",
+            "用户只授权当前精确文件。")
+        self.assertEqual(2, ordinary.returncode)
+        self.assertIn("未启用 Moonlight", ordinary.stderr)
+        self.assert_success(self.run_cli("exit", "--reason", "切换测试流。"))
+
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-MOON", "--path", "focused",
+            "--pace", "continuous", "--moonlight"))
+        missing_decision = self.run_cli(
+            "manifest", "--file", "src/a.cpp", "--moonlight-refresh",
+            "--allow-commit", "--allow-push")
+        self.assertEqual(2, missing_decision.returncode)
+        self.assertIn("自然语言", missing_decision.stderr)
+
+        accepted = self.run_cli(
+            "manifest", "--file", "src/a.cpp", "--moonlight-refresh",
+            "--allow-commit", "--allow-push", "--decision",
+            "用户授权当前精确清单的提交与推送。")
+        self.assert_success(accepted)
+        decisions = self.state()["decisions"]
+        self.assertIn({
+            "key": "moonlight.authorization_decision",
+            "value": "用户授权当前精确清单的提交与推送。",
+        }, decisions)
+        self.assertIn({
+            "key": "moonlight.business_file",
+            "value": "src/a.cpp",
+        }, decisions)
+
     def test_lightcheck_is_a_fail_open_internal_utility_not_a_flow_transition(self):
         source = os.path.join(self.root, "service.cpp")
         with open(source, "w", encoding="utf-8") as stream:
             stream.write("int lookup(int id) { return id + 42; }\n")
         before = None
         state_path = os.path.join(self.root, ".mae-flow.json")
-        result = self.run_cli("lightcheck")
+        result = self.run_cli("lightcheck", "--file", "service.cpp")
         self.assert_success(result)
         self.assertIn("轻量编码预检", result.stdout + result.stderr)
+        self.assertNotIn("两轮", result.stdout + result.stderr)
         self.assertEqual(before, None if not os.path.exists(state_path)
                          else self.state())
+
+    def test_lightcheck_without_exact_changed_scope_skips_instead_of_scanning_dirty(self):
+        with open(os.path.join(self.root, "inherited.cpp"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("int inherited() { return 42; }\n")
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-LIGHT", "--path", "focused",
+            "--pace", "continuous"))
+        before = self.state()
+
+        result = self.run_cli("lightcheck")
+
+        self.assert_success(result)
+        self.assertIn("未提供精确本次修改文件", result.stdout)
+        self.assertEqual(before, self.state())
 
     def test_terminal_state_is_rotated_byte_for_byte_before_a_new_ticket(self):
         self.assert_success(self.run_cli(
@@ -336,6 +507,34 @@ class LeanCliTests(unittest.TestCase):
             name.startswith(".mae-flow.json.v2-backup.")
             for name in os.listdir(self.root)))
 
+    def test_legacy_exit_is_immediate_without_ack_or_migration(self):
+        state_path = os.path.join(self.root, ".mae-flow.json")
+        original = (json.dumps({
+            "schema_version": 2,
+            "revision": 1,
+            "current": "build",
+            "config": {"单号": "REQ-OLD"},
+            "choices": {"workflow": "full"},
+            "history": [],
+        }, ensure_ascii=False) + "\n").encode("utf-8")
+        with open(state_path, "wb") as stream:
+            stream.write(original)
+
+        exited = self.run_cli("exit", "--reason", "立即退出旧流程。")
+
+        self.assert_success(exited)
+        self.assertFalse(os.path.exists(state_path))
+        backups = [
+            name for name in os.listdir(self.root)
+            if name.startswith(".mae-flow.json.exited-backup.")
+        ]
+        self.assertEqual(1, len(backups))
+        with open(os.path.join(self.root, backups[0]), "rb") as stream:
+            self.assertEqual(original, stream.read())
+        self.assertFalse(any(
+            name.startswith(".mae-flow.json.v2-backup.")
+            for name in os.listdir(self.root)))
+
     def test_every_conditional_document_in_manifest_needs_independent_selection(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-DOC", "--path", "focused",
@@ -350,20 +549,70 @@ class LeanCliTests(unittest.TestCase):
             "--conditional-document", story)
         self.assert_success(accepted)
 
+    def test_manifest_rejects_flow_controls_and_requires_dirty_ownership(self):
+        os.makedirs(os.path.join(self.root, "src"), exist_ok=True)
+        with open(os.path.join(self.root, "src", "existing.cpp"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("int existing() { return 1; }\n")
+        started = self.run_cli(
+            "start", "--ticket", "REQ-OWN", "--path", "focused",
+            "--pace", "continuous")
+        self.assert_success(started)
+        self.assertIn("启动时已有改动", started.stdout)
+        for path in (
+                ".mae-flow-history.jsonl",
+                ".mae-flow/session.json",
+                ".codecheckcli/result.json"):
+            with self.subTest(path=path):
+                rejected = self.run_cli("manifest", "--file", path)
+                self.assertEqual(2, rejected.returncode)
+                self.assertIn("控制文件", rejected.stderr)
+
+        unowned = self.run_cli(
+            "manifest", "--file", "src/existing.cpp")
+        self.assertEqual(2, unowned.returncode)
+        self.assertIn("归属", unowned.stderr)
+        owned = self.run_cli(
+            "manifest", "--file", "src/existing.cpp",
+            "--adopt-dirty",
+            "src/existing.cpp=用户确认该启动时改动属于本单。")
+        self.assert_success(owned)
+        self.assertIn("本单已接管", owned.stdout)
+        self.assertIn({
+            "key": "delivery.adopted_dirty",
+            "value": "src/existing.cpp",
+        }, self.state()["decisions"])
+        self.assertIn({
+            "key": "delivery.adopted_dirty_reason",
+            "value": "src/existing.cpp\t用户确认该启动时改动属于本单。",
+        }, self.state()["decisions"])
+
     def test_staged_cp_manifests_allow_same_file_then_require_final_union(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-STAGE", "--path", "full",
             "--pace", "staged"))
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP1"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        self.assert_success(self.run_cli(
+            "decision", "cp-confirmed", "用户检视并确认 CP1。"))
         cp1 = self.run_cli(
             "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
             "--commit-message", "[REQ-STAGE][feat]完成查询入口",
             "--decision", "用户检视并确认 CP1。")
+        self.assert_success(cp1)
+        self.assert_success(self.run_cli(
+            "advance", "cp-ready", "--key", "CP2"))
+        self.assert_success(self.run_cli(
+            "decision", "cp-confirmed", "用户检视并确认 CP2。"))
         cp2 = self.run_cli(
             "manifest", "--checkpoint", "CP2", "--file", "src/a.cpp",
             "--file", "src/b.cpp",
             "--commit-message", "[REQ-STAGE][feat]完成结果映射",
             "--decision", "用户检视并确认 CP2。")
-        self.assert_success(cp1)
         self.assert_success(cp2)
         bad_final = self.run_cli(
             "manifest", "--final", "--file", "src/a.cpp")
@@ -375,13 +624,76 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(["src/a.cpp", "src/b.cpp"],
                          self.state()["delivery_files"])
 
+    def test_next_full_checkpoint_gets_a_new_user_card_and_confirmation(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-CP", "--path", "full",
+            "--pace", "staged"))
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP1"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        first = self.run_cli(
+            "decision", "cp-confirmed", "CP1 已检视。")
+        self.assert_success(first)
+        self.assertNotIn("需要用户介入: CP", first.stdout)
+
+        second_ready = self.run_cli("advance", "cp-ready", "--key", "CP2")
+
+        self.assert_success(second_ready)
+        self.assertIn("需要用户介入: CP", second_ready.stdout)
+        self.assertEqual("CP2", self.state()["current_cp"])
+        second = self.run_cli(
+            "decision", "cp-confirmed", "CP2 已检视。")
+        self.assert_success(second)
+        decisions = self.state()["decisions"]
+        self.assertIn({
+            "key": "construction.cp.CP1.confirmation",
+            "value": "CP1 已检视。",
+        }, decisions)
+        self.assertIn({
+            "key": "construction.cp.CP2.confirmation",
+            "value": "CP2 已检视。",
+        }, decisions)
+
+    def test_staged_manifest_requires_confirmation_of_the_current_checkpoint(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-CP-MANIFEST", "--path", "full",
+            "--pace", "staged"))
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP1"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        arguments = (
+            "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
+            "--commit-message", "[REQ-CP-MANIFEST][feat]完成 CP1",
+            "--decision", "用户检视 CP1 范围。",
+        )
+
+        unconfirmed = self.run_cli(*arguments)
+        self.assertEqual(2, unconfirmed.returncode)
+        self.assertIn("当前 CP", unconfirmed.stderr)
+        self.assert_success(self.run_cli(
+            "decision", "cp-confirmed", "用户确认 CP1 结果。"))
+        wrong_cp = self.run_cli(
+            "manifest", "--checkpoint", "CP2", "--file", "src/a.cpp",
+            "--commit-message", "[REQ-CP-MANIFEST][feat]完成 CP2",
+            "--decision", "用户检视 CP2 范围。")
+        self.assertEqual(2, wrong_cp.returncode)
+        self.assertIn("当前 CP", wrong_cp.stderr)
+        self.assert_success(self.run_cli(*arguments))
+
     def test_delivery_card_uses_effective_moonlight_authorization(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-ML2", "--path", "focused",
             "--pace", "continuous", "--moonlight"))
         self.assert_success(self.run_cli(
             "manifest", "--file", "src/a.cpp", "--moonlight-refresh",
-            "--allow-commit", "--allow-push"))
+            "--allow-commit", "--allow-push", "--decision",
+            "用户授权当前精确清单的提交与推送。"))
         state = self.state()
         state["phase"] = "delivery"
         state_path = os.path.join(self.root, ".mae-flow.json")

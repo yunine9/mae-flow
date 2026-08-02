@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 
-from mae_flow_core.guard.manifest import DeliveryManifest, authorize_delivery
 from mae_flow_core.foundation.commit_message import valid_business_commit_message
 from mae_flow_core.orchestration import (
     AdvanceRequest,
@@ -17,16 +16,14 @@ from mae_flow_core.orchestration import (
     DeliveryPath,
     FlowState,
     MoonlightAuthorization,
+    Phase,
     ToolboxRequest,
     advance_flow,
     decode_flow_state,
     record_flow_attempt,
     run_toolbox_request,
 )
-from mae_flow_core.orchestration.documents import (
-    DocumentPaths,
-    conditional_document_kind,
-)
+from mae_flow_core.orchestration.documents import DocumentPaths
 from mae_flow_core.orchestration.guidance import (
     render_guidance,
     render_user_card,
@@ -38,11 +35,12 @@ from mae_flow_core.state_store import (
     atomic_write_json,
     safe_read_json,
 )
+from .lean_manifest import prepare_manifest_state
 
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
-_CONDITIONAL_DECISION = "delivery.conditional_document"
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
+_KEYED_SEMANTIC_EVENTS = {"risk-resolved", "cp-ready", "cp-progress"}
 
 
 def _die(message):
@@ -202,6 +200,25 @@ def _render(state, reason):
         print("精确交付清单:")
         for path in state.delivery_files:
             print("- " + path)
+    if state.phase in {Phase.STARTUP, Phase.DELIVERY} and state.initial_dirty:
+        adopted = {
+            value.replace("\\", "/").casefold()
+            for key, value in state.decisions
+            if key == "delivery.adopted_dirty"
+        }
+        reasons = {}
+        for key, value in state.decisions:
+            if key == "delivery.adopted_dirty_reason" and "\t" in value:
+                path, detail = value.split("\t", 1)
+                reasons[path.replace("\\", "/").casefold()] = detail
+        print("启动时已有改动与归属:")
+        for path in state.initial_dirty:
+            identity = path.replace("\\", "/").casefold()
+            if identity in adopted:
+                print("- %s: 本单已接管 — %s" % (
+                    path, reasons.get(identity, "用户已确认归属")))
+            else:
+                print("- %s: 默认不属于本单" % path)
     card = render_user_card(state)
     if card:
         print(card)
@@ -264,10 +281,16 @@ def _advance_state(state, request):
     return result.state, result.reason
 
 
+def _semantic_request(event, key, decision):
+    normalized = event.strip().lower()
+    if key.strip() and normalized not in _KEYED_SEMANTIC_EVENTS:
+        raise ValueError("语义事件 %s 不接受 --key" % normalized)
+    return AdvanceRequest(event, key, decision)
+
+
 def cmd_lean_advance(root, args):
     def execute():
-        request = AdvanceRequest(
-            args.event, args.key, args.decision)
+        request = _semantic_request(args.event, args.key, args.decision)
         state, reason = _mutate(
             root, lambda current: _advance_state(current, request))
         _render(state, reason)
@@ -301,7 +324,7 @@ def cmd_lean_decision(root, args):
             key = args.key.strip() or args.event.strip()
             _validate_natural_decision(state, key, text)
             return state.with_decision(key, text), "已记录自然语言决定。"
-        request = AdvanceRequest(args.event, args.key, text)
+        request = _semantic_request(args.event, args.key, text)
         return _advance_state(state, request)
 
     def execute():
@@ -310,12 +333,40 @@ def cmd_lean_decision(root, args):
     return _run(execute)
 
 
+def _attempt_slot(state, kind):
+    if kind == "reviewer" and state.phase == Phase.STORY:
+        return "reviewer:design"
+    checkpoint = state.current_cp or "CP1"
+    if kind == "reviewer" and state.phase == Phase.CONSTRUCTION:
+        return "reviewer:cp:%s" % checkpoint
+    scoped_cp = (
+        checkpoint
+        if state.phase in {Phase.CONSTRUCTION, Phase.QUALITY}
+        else "-"
+    )
+    return "%s:%s:%s" % (kind, state.phase.value, scoped_cp)
+
+
+def _attempt_risk_prefix(kind, slot):
+    return "Capability %s did not return in slot %s:" % (kind, slot)
+
+
 def cmd_lean_capability_record(root, args):
     def operation(state):
+        slot = _attempt_slot(state, args.kind)
         context = AttemptContext(
-            args.kind, args.source.strip(), args.environment.strip())
+            args.kind,
+            slot,
+            "lean-workflow-v1",
+        )
         updated = record_flow_attempt(
             state, context, args.outcome, summary=args.summary)
+        prefix = _attempt_risk_prefix(args.kind, slot)
+        risks = tuple(
+            risk for risk in updated.risks if not risk.startswith(prefix))
+        if args.outcome != "returned":
+            risks += (("%s %s." % (prefix, args.outcome)),)
+        updated = replace(updated, risks=risks)
         return updated, (
             "已记录 %s 能力返回事实；未解析私有输出或推断 PASS/CLEAN。"
             % args.kind)
@@ -326,117 +377,15 @@ def cmd_lean_capability_record(root, args):
     return _run(execute)
 
 
-def _validate_manifest_files(files):
-    for path in files:
-        parts = path.replace("\\", "/").split("/")
-        if any(part.startswith(".mae-flow.json") for part in parts):
-            raise ValueError("交付清单不能包含 Mae-Flow 控制文件")
-        if ".mae-flow-work" in parts:
-            raise ValueError("本地过程文档不能进入交付清单")
-
-
-def _conditional_decisions(state, selected, files):
-    file_ids = {path.replace("\\", "/").casefold() for path in files}
-    selected_ids = []
-    decisions = tuple(
-        item for item in state.decisions
-        if item[0] != _CONDITIONAL_DECISION)
-    for path in selected:
-        normalized = path.replace("\\", "/")
-        if normalized.casefold() not in file_ids:
-            raise ValueError("条件文档必须同时出现在精确交付清单中")
-        if not conditional_document_kind(normalized):
-            raise ValueError("--conditional-document 只接受需求目录下的条件文档")
-        selected_ids.append(normalized.casefold())
-        decisions += ((_CONDITIONAL_DECISION, normalized),)
-    missing = tuple(
-        path for path in files
-        if conditional_document_kind(path)
-        and path.replace("\\", "/").casefold() not in selected_ids)
-    if missing:
-        raise ValueError(
-            "交付清单中的每个条件文档都需要本次独立选择: %s"
-            % ", ".join(missing))
-    return decisions
-
-
-def _checkpoint_prefix(checkpoint):
-    if (
-            not isinstance(checkpoint, str)
-            or not re.fullmatch(r"[A-Za-z0-9_-]+", checkpoint)):
-        raise ValueError("checkpoint 必须是字母、数字、下划线或短横线")
-    return "delivery.cp.%s." % checkpoint
-
-
-def _record_checkpoint(state, manifest, args):
-    prefix = _checkpoint_prefix(args.checkpoint)
-    message = (args.commit_message or "").strip()
-    decision = (args.decision or "").strip()
-    if not valid_business_commit_message(state.ticket, message):
-        raise ValueError("CP commit message 必须是 [单号][feat|fix]描述")
-    if not decision:
-        raise ValueError("CP manifest 需要用户的自然语言检视决定")
-    decisions = tuple(
-        item for item in state.decisions if not item[0].startswith(prefix))
-    decisions += tuple((prefix + "file", path) for path in manifest.files)
-    decisions += (
-        (prefix + "message", message),
-        (prefix + "confirmation", decision),
-    )
-    return replace(state, decisions=decisions, current_cp=args.checkpoint)
-
-
-def _checkpoint_union(state):
-    files = []
-    for key, value in state.decisions:
-        if key.startswith("delivery.cp.") and key.endswith(".file"):
-            identity = value.replace("\\", "/").casefold()
-            if all(
-                    identity != item.replace("\\", "/").casefold()
-                    for item in files):
-                files.append(value)
-    return tuple(files)
-
-
-def _validate_staged_manifest(state, manifest, args, root):
-    checkpoint = bool(args.checkpoint)
-    final = bool(args.final)
-    if checkpoint == final:
-        raise ValueError(
-            "Staged manifest 必须二选一: --checkpoint <CP> 或 --final")
-    if checkpoint:
-        return _record_checkpoint(state, manifest, args)
-    expected = DeliveryManifest.from_paths(
-        _checkpoint_union(state), repository_root=root).files
-    expected_ids = {path.replace("\\", "/").casefold() for path in expected}
-    actual_ids = {
-        path.replace("\\", "/").casefold() for path in manifest.files}
-    if not expected or expected_ids != actual_ids:
-        raise ValueError("最终 manifest 必须等于所有已确认 CP manifest 的累计 union")
-    if args.commit_message or args.decision:
-        raise ValueError("最终累计 manifest 不创建额外本地 commit")
-    return state
-
-
 def cmd_lean_manifest(root, args):
     def operation(state):
-        manifest = DeliveryManifest.from_paths(
-            args.file,
-            adopted_dirty=args.adopt_dirty,
-            repository_root=root,
-        )
-        _validate_manifest_files(manifest.files)
-        if state.commit_pace == CommitPace.STAGED:
-            state = _validate_staged_manifest(state, manifest, args, root)
-        elif args.checkpoint or args.final or args.commit_message or args.decision:
-            raise ValueError("Continuous 只记录一次最终精确 manifest")
-        updated = authorize_delivery(state, manifest)
-        updated = replace(
-            updated,
-            decisions=_conditional_decisions(
-                updated, args.conditional_document, manifest.files),
-        )
+        updated, manifest = prepare_manifest_state(state, args, root)
         if args.moonlight_refresh:
+            if not _moonlight_enabled(updated):
+                raise ValueError("当前流程未启用 Moonlight，不能刷新不可逆权限")
+            authorization_decision = (args.decision or "").strip()
+            if not authorization_decision:
+                raise ValueError("Moonlight 权限刷新需要自然语言用户决定")
             requested = MoonlightAuthorization(
                 True,
                 manifest.files,
@@ -444,6 +393,14 @@ def cmd_lean_manifest(root, args):
                 bool(args.allow_push),
             )
             updated = apply_moonlight_policy(updated, requested).state
+            decisions = tuple(
+                item for item in updated.decisions
+                if item[0] != "moonlight.authorization_decision")
+            decisions += ((
+                "moonlight.authorization_decision",
+                authorization_decision,
+            ),)
+            updated = replace(updated, decisions=decisions)
         elif args.allow_commit or args.allow_push:
             raise ValueError(
                 "Moonlight 权限刷新需要显式 --moonlight-refresh")
@@ -502,5 +459,8 @@ def cmd_lean_toolbox(unused_root, args):
 
 def cmd_lean_lightcheck(unused_root, args):
     """Run one fail-open changed-code suggestion pass without state effects."""
+    if not args.file:
+        print("[mae-flow] 轻量编码预检未提供精确本次修改文件，已自动放行。")
+        return 0
     from .lightcheck import cmd_lightcheck
-    return cmd_lightcheck(None, args)
+    return cmd_lightcheck({}, args)

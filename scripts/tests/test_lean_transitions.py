@@ -14,6 +14,7 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core.orchestration import (  # noqa: E402
     AdvanceRequest,
+    CapabilityAttempt,
     CommitPace,
     DeliveryPath,
     FlowState,
@@ -32,7 +33,78 @@ def flow(path=DeliveryPath.FULL, phase=Phase.STARTUP, status="active"):
     )
 
 
+def with_returned_review(state):
+    if state.phase == Phase.SPEC:
+        attempt = CapabilityAttempt(
+            "grill", "grill:spec:-", "lean-workflow-v1", "returned")
+    elif state.phase == Phase.STORY:
+        attempt = CapabilityAttempt(
+            "reviewer", "reviewer:design", "lean-workflow-v1", "returned")
+    else:
+        return state
+    return replace(state, capabilities=state.capabilities + (attempt,))
+
+
 class FullTransitionTests(unittest.TestCase):
+    def test_review_fact_requires_matching_returned_capability_attempt(self):
+        cases = (
+            (Phase.SPEC, "grill-clear", "grill", "grill:spec:-",
+             "review.grill"),
+            (Phase.STORY, "design-review-approved", "reviewer",
+             "reviewer:design", "review.design"),
+        )
+        for phase, event, kind, slot, review_key in cases:
+            with self.subTest(phase=phase):
+                missing = advance_flow(
+                    flow(phase=phase), AdvanceRequest(event))
+                ready = replace(
+                    flow(phase=phase),
+                    capabilities=(CapabilityAttempt(
+                        kind, slot, "lean-workflow-v1", "returned"),),
+                )
+                recorded = advance_flow(ready, AdvanceRequest(event))
+
+                self.assertFalse(any(
+                    key == review_key
+                    for key, unused in missing.state.decisions))
+                self.assertIn("attempt", missing.reason.lower())
+                self.assertTrue(any(
+                    key == review_key
+                    for key, unused in recorded.state.decisions))
+
+    def test_failed_review_attempt_becomes_risk_not_required_review_fact(self):
+        state = replace(
+            flow(phase=Phase.SPEC),
+            capabilities=(CapabilityAttempt(
+                "grill", "grill:spec:-", "lean-workflow-v1",
+                "timed-out"),),
+        )
+
+        failed = advance_flow(state, AdvanceRequest("grill-failed"))
+        confirmation = advance_flow(
+            failed.state, AdvanceRequest("spec-confirmed"))
+
+        self.assertTrue(failed.state.risks)
+        self.assertFalse(any(
+            key == "review.grill"
+            for key, unused in failed.state.decisions))
+        self.assertEqual(Phase.SPEC, confirmation.state.phase)
+
+    def test_confirmation_fact_key_cannot_be_overridden_by_request(self):
+        result = advance_flow(flow(), AdvanceRequest(
+            "startup-confirmed",
+            "moonlight.enabled",
+            "Proceed with the reviewed Full path.",
+        ))
+
+        self.assertIn((
+            "startup.confirmation",
+            "Proceed with the reviewed Full path.",
+        ), result.state.decisions)
+        self.assertFalse(any(
+            key == "moonlight.enabled"
+            for key, unused in result.state.decisions))
+
     def test_full_confirmation_sequence_visits_every_phase(self):
         cases = (
             (Phase.STARTUP, "startup-confirmed", Phase.SPEC),
@@ -45,9 +117,11 @@ class FullTransitionTests(unittest.TestCase):
             with self.subTest(phase=phase, event=event):
                 original = flow(phase=phase)
                 if phase == Phase.SPEC:
+                    original = with_returned_review(original)
                     original = advance_flow(
                         original, AdvanceRequest("grill-clear")).state
                 elif phase == Phase.STORY:
+                    original = with_returned_review(original)
                     original = advance_flow(
                         original,
                         AdvanceRequest("design-review-approved"),
@@ -88,7 +162,8 @@ class FullTransitionTests(unittest.TestCase):
         for phase, review_event, confirmation, expected in cases:
             with self.subTest(phase=phase):
                 reviewed = advance_flow(
-                    flow(phase=phase), AdvanceRequest(review_event))
+                    with_returned_review(flow(phase=phase)),
+                    AdvanceRequest(review_event))
                 result = advance_flow(
                     reviewed.state, AdvanceRequest(confirmation))
                 self.assertFalse(reviewed.needs_user)
@@ -111,7 +186,7 @@ class FullTransitionTests(unittest.TestCase):
         )
         for phase, review_key, confirmation, expected in cases:
             with self.subTest(phase=phase):
-                state = flow(phase=phase)
+                state = with_returned_review(flow(phase=phase))
                 tradeoff = advance_flow(
                     state, AdvanceRequest("reviewer-tradeoff"))
                 first = advance_flow(tradeoff.state, AdvanceRequest(
@@ -149,7 +224,7 @@ class FullTransitionTests(unittest.TestCase):
                 state = flow(phase=phase)
                 result = advance_flow(state, AdvanceRequest(event))
                 self.assertTrue(result.needs_user)
-                self.assertIs(state, result.state)
+                self.assertEqual(state.phase, result.state.phase)
 
     def test_cp_confirmation_records_pace_decision_without_changing_phase(self):
         state = flow(phase=Phase.CONSTRUCTION)
@@ -160,14 +235,47 @@ class FullTransitionTests(unittest.TestCase):
         ))
         self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
         self.assertIn((
-            "construction.commit_pace",
+            "construction.cp.CP1.confirmation",
             "Keep staged commits at meaningful checkpoint boundaries.",
         ), result.state.decisions)
         self.assertFalse(result.needs_user)
 
+    def test_each_checkpoint_has_its_own_current_confirmation(self):
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            current_cp="CP1",
+        )
+        cp1 = advance_flow(
+            state,
+            AdvanceRequest("cp-confirmed", decision_value="CP1 reviewed."),
+        ).state
+        cp2_ready = advance_flow(
+            cp1,
+            AdvanceRequest("cp-ready", decision_key="CP2"),
+        )
+        cp2 = advance_flow(
+            cp2_ready.state,
+            AdvanceRequest("cp-confirmed", decision_value="CP2 reviewed."),
+        ).state
+
+        self.assertTrue(cp2_ready.needs_user)
+        self.assertEqual("CP2", cp2_ready.state.current_cp)
+        self.assertIn((
+            "construction.cp.CP1.confirmation", "CP1 reviewed."),
+            cp2.decisions,
+        )
+        self.assertIn((
+            "construction.cp.CP2.confirmation", "CP2 reviewed."),
+            cp2.decisions,
+        )
+
     def test_delivery_confirmation_authorizes_without_completing_full_flow(self):
-        result = advance_flow(
+        state = replace(
             flow(phase=Phase.DELIVERY),
+            delivery_files=("src/a.cpp",),
+        )
+        result = advance_flow(
+            state,
             AdvanceRequest(
                 "delivery-confirmed",
                 "delivery.decision",
@@ -182,8 +290,93 @@ class FullTransitionTests(unittest.TestCase):
         ), result.state.decisions)
         self.assertFalse(result.needs_user)
 
+    def test_delivery_confirmation_is_bound_to_nonempty_exact_manifest(self):
+        empty = advance_flow(
+            flow(phase=Phase.DELIVERY),
+            AdvanceRequest("delivery-confirmed", decision_value="Deliver."),
+        )
+        ready = replace(
+            flow(phase=Phase.DELIVERY),
+            commit_pace=CommitPace.CONTINUOUS,
+            delivery_files=("src/a.cpp", "tests/a_test.cpp"),
+        )
+        confirmed = advance_flow(
+            ready,
+            AdvanceRequest(
+                "delivery-confirmed",
+                decision_value="Deliver these exact files.",
+            ),
+        )
+
+        self.assertFalse(any(
+            key == "delivery.confirmation"
+            for key, unused in empty.state.decisions))
+        self.assertIn("manifest", empty.reason.lower())
+        self.assertEqual(
+            ["src/a.cpp", "tests/a_test.cpp"],
+            [value for key, value in confirmed.state.decisions
+             if key == "delivery.confirmed_file"],
+        )
+
+    def test_delivery_completion_rejects_manifest_changed_after_confirmation(self):
+        ready = replace(
+            flow(phase=Phase.DELIVERY),
+            commit_pace=CommitPace.CONTINUOUS,
+            delivery_files=("src/a.cpp",),
+        )
+        confirmed = advance_flow(
+            ready,
+            AdvanceRequest("delivery-confirmed", decision_value="Deliver A."),
+        ).state
+        changed = replace(confirmed, delivery_files=("src/b.cpp",))
+
+        result = advance_flow(
+            changed,
+            AdvanceRequest("delivery-completed", decision_value="Pushed."),
+        )
+
+        self.assertEqual("active", result.state.status)
+        self.assertIn("manifest", result.reason.lower())
+
+    def test_staged_completion_requires_recorded_final_checkpoint_union(self):
+        state = replace(
+            flow(phase=Phase.DELIVERY),
+            delivery_files=("src/a.cpp", "src/b.cpp"),
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP2.file", "src/b.cpp"),
+            ),
+        )
+        confirmed = advance_flow(
+            state,
+            AdvanceRequest("delivery-confirmed", decision_value="Deliver union."),
+        ).state
+        missing_final = advance_flow(
+            confirmed,
+            AdvanceRequest("delivery-completed", decision_value="Pushed."),
+        )
+        finalized = replace(
+            confirmed,
+            decisions=confirmed.decisions + (
+                ("delivery.staged_final_file", "src/a.cpp"),
+                ("delivery.staged_final_file", "src/b.cpp"),
+            ),
+        )
+        completed = advance_flow(
+            finalized,
+            AdvanceRequest("delivery-completed", decision_value="Pushed."),
+        )
+
+        self.assertEqual("active", missing_final.state.status)
+        self.assertIn("final", missing_final.reason.lower())
+        self.assertEqual("complete", completed.state.status)
+
     def test_delivery_completion_requires_authorization_and_a_later_event(self):
-        state = flow(phase=Phase.DELIVERY)
+        state = replace(
+            flow(phase=Phase.DELIVERY),
+            commit_pace=CommitPace.CONTINUOUS,
+            delivery_files=("src/a.cpp",),
+        )
         premature = advance_flow(
             state, AdvanceRequest("delivery-completed"))
         authorized = advance_flow(
@@ -206,7 +399,7 @@ class FullTransitionTests(unittest.TestCase):
         ), completed.state.decisions)
 
     def test_grill_clear_is_non_blocking_and_recorded_only_once(self):
-        state = flow(phase=Phase.SPEC)
+        state = with_returned_review(flow(phase=Phase.SPEC))
         first = advance_flow(state, AdvanceRequest(
             "grill-clear",
             "review.grill",
@@ -226,7 +419,7 @@ class FullTransitionTests(unittest.TestCase):
         )
 
     def test_design_reviewer_clear_is_non_blocking_and_recorded_once(self):
-        state = flow(phase=Phase.STORY)
+        state = with_returned_review(flow(phase=Phase.STORY))
         first = advance_flow(state, AdvanceRequest(
             "design-review-approved",
             "review.design",
@@ -245,41 +438,44 @@ class FullTransitionTests(unittest.TestCase):
             sum(key == "review.design" for key, unused in second.state.decisions),
         )
 
-    def test_review_failure_is_recorded_once_without_retry_or_user_stop(self):
+    def test_review_failure_never_satisfies_required_review(self):
         cases = (
             (
                 Phase.SPEC,
                 "grill-failed",
-                "grill-clear",
+                "grill",
+                "grill:spec:-",
                 "review.grill",
                 "spec-confirmed",
-                Phase.STORY,
             ),
             (
                 Phase.STORY,
                 "design-review-failed",
-                "design-review-approved",
+                "reviewer",
+                "reviewer:design",
                 "review.design",
                 "story-confirmed",
-                Phase.CONSTRUCTION,
             ),
         )
-        for phase, failure, retry, key, confirmation, target in cases:
+        for phase, failure, kind, slot, key, confirmation in cases:
             with self.subTest(phase=phase):
-                failed = advance_flow(
-                    flow(phase=phase), AdvanceRequest(failure))
-                repeated = advance_flow(
-                    failed.state, AdvanceRequest(retry))
-                advanced = advance_flow(
-                    repeated.state, AdvanceRequest(confirmation))
-                self.assertFalse(failed.needs_user)
-                self.assertEqual(failed.state, repeated.state)
-                self.assertEqual(
-                    1,
-                    sum(existing == key
-                        for existing, unused in repeated.state.decisions),
+                state = replace(
+                    flow(phase=phase),
+                    capabilities=(CapabilityAttempt(
+                        kind, slot, "lean-workflow-v1", "timed-out"),),
                 )
-                self.assertEqual(target, advanced.state.phase)
+                failed = advance_flow(
+                    state, AdvanceRequest(failure))
+                advanced = advance_flow(
+                    failed.state, AdvanceRequest(confirmation))
+                self.assertTrue(failed.needs_user)
+                self.assertTrue(failed.state.risks)
+                self.assertEqual(
+                    0,
+                    sum(existing == key
+                        for existing, unused in failed.state.decisions),
+                )
+                self.assertEqual(phase, advanced.state.phase)
 
 
 class FocusedTransitionTests(unittest.TestCase):
@@ -592,6 +788,11 @@ class TerminalTransitionTests(unittest.TestCase):
             with self.subTest(phase=phase):
                 state = flow(phase=phase)
                 if phase == Phase.DELIVERY:
+                    state = replace(
+                        state,
+                        commit_pace=CommitPace.CONTINUOUS,
+                        delivery_files=("src/a.cpp",),
+                    )
                     state = advance_flow(
                         state, AdvanceRequest("delivery-confirmed")).state
                 result = advance_flow(state, AdvanceRequest("complete"))

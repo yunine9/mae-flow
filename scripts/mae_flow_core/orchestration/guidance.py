@@ -89,7 +89,8 @@ def render_user_card(state):
             "需要用户介入: Story（实现边界、设计和可测性）")
     if (
             state.phase == Phase.CONSTRUCTION
-            and "construction.checkpoint_confirmation" not in confirmed):
+            and "construction.cp.%s.confirmation" % (
+                state.current_cp or "CP1") not in confirmed):
         return "" if moonlight else (
             "需要用户介入: CP（本批结果和后续节奏）")
     if (

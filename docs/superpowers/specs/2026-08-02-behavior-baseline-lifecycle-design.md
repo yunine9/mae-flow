@@ -35,6 +35,8 @@ human-readable domain behavior documents.
 - Recording implementation history inside the current behavior baseline.
 - Treating a behavior document as exhaustive before its legacy domain has been
   incrementally understood.
+- Redesigning the Story template or turning Story into a step-by-step coding
+  plan.
 - Adding a documentation maintenance command before real drift demonstrates a
   need for one.
 
@@ -58,8 +60,11 @@ no lifecycle status is required in a Spec.
 
 Behavior documents describe externally meaningful rules, boundaries, and
 exceptions. They are not software detailed designs and do not replace Story.
-Spec remains the WHAT authority for the current change; Story remains the HOW
-authority for implementation.
+Spec remains the workflow's confirmed change contract. Story consolidates the
+confirmed customer scenarios, business specifications, acceptance criteria,
+software detailed design, and test design into a standalone handoff for
+developers and testers. Domain documents remain the durable current-behavior
+truth consumed by future workflows.
 
 ## File Model
 
@@ -181,9 +186,16 @@ creates a Spec instead of silently changing the contract.
 
 ### Story, Construction, and Quality
 
-The approved Spec and reviewed Story continue to guide construction. Behavior
-documents are context, not a second implementation plan. Checkpoint review and
-Quality remain unchanged; they do not validate or regenerate behavior documents.
+The approved Spec feeds the reviewed Story. Story follows the existing template:
+its scenario, business-specification, and acceptance sections make the intended
+function testable without requiring the tester to read Mae-Flow's internal Spec;
+its detailed-design and test-design sections guide development and verification.
+Story describes software design and coherent checkpoints, not line-by-line or
+function-by-function coding instructions.
+
+Behavior documents are context, not a second detailed design. Checkpoint review
+and Quality remain unchanged; they do not validate or regenerate behavior
+documents.
 
 ### Delivery reconciliation
 

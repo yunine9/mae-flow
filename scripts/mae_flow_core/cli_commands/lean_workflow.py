@@ -10,7 +10,6 @@ import time
 
 from mae_flow_core.orchestration import (
     AdvanceRequest,
-    AttemptContext,
     CommitPace,
     DeliveryPath,
     FlowState,
@@ -18,9 +17,9 @@ from mae_flow_core.orchestration import (
     Phase,
     ToolboxRequest,
     advance_flow,
-    capability_slot,
     decode_flow_state,
-    record_flow_attempt,
+    flow_attempt_context,
+    retry_decision_key,
     run_toolbox_request,
 )
 from mae_flow_core.orchestration.documents import DocumentPaths
@@ -317,13 +316,14 @@ def _validate_natural_decision(state, key, text):
     if key.startswith(retry_prefix):
         kind = key[len(retry_prefix):]
         if kind in _RETRY_KINDS:
-            return
+            return retry_decision_key(flow_attempt_context(state, kind))
         raise ValueError("该 capability key 是流程保留事实，不能直接写入")
     if key.startswith((
             "capability.", "moonlight.", "delivery.", "review.",
             "startup.", "spec.", "story.", "focused.", "construction.",
             "quality.", "risk.")) or key == "workflow.path":
         raise ValueError("该 key 是流程保留事实，请使用对应语义命令")
+    return key
 
 
 def cmd_lean_decision(root, args):
@@ -333,45 +333,10 @@ def cmd_lean_decision(root, args):
             raise ValueError("自然语言决定不能为空")
         if "." in args.event:
             key = args.key.strip() or args.event.strip()
-            _validate_natural_decision(state, key, text)
+            key = _validate_natural_decision(state, key, text)
             return state.with_decision(key, text), "已记录自然语言决定。"
         request = _semantic_request(args.event, args.key, text)
         return _advance_state(state, request)
-
-    def execute():
-        state, reason = _mutate(root, operation)
-        _render(state, reason)
-    return _run(execute)
-
-
-def _attempt_risk_prefix(kind, slot):
-    return "Capability %s did not return in slot %s:" % (kind, slot)
-
-
-def cmd_lean_capability_record(root, args):
-    def operation(state):
-        slot = capability_slot(state, args.kind)
-        context = AttemptContext(
-            args.kind,
-            slot,
-            "lean-workflow-v1",
-        )
-        updated = record_flow_attempt(
-            state, context, args.outcome, summary=args.summary)
-        prefix = _attempt_risk_prefix(args.kind, slot)
-        review_prefix = "Review capability %s did not return in slot %s:" % (
-            args.kind, slot)
-        risks = tuple(
-            risk for risk in updated.risks
-            if (not risk.startswith(prefix)
-                and (args.outcome != "returned"
-                     or not risk.startswith(review_prefix))))
-        if args.outcome != "returned":
-            risks += (("%s %s." % (prefix, args.outcome)),)
-        updated = replace(updated, risks=risks)
-        return updated, (
-            "已记录 %s 能力返回事实；未解析私有输出或推断 PASS/CLEAN。"
-            % args.kind)
 
     def execute():
         state, reason = _mutate(root, operation)

@@ -21,6 +21,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     automatic_attempt_allowed,
     record_attempt,
     record_flow_attempt,
+    retry_decision_key,
     retry_options,
 )
 from mae_flow_core.orchestration.capability_registry import (  # noqa: E402
@@ -72,23 +73,21 @@ class LeanCapabilityTests(unittest.TestCase):
         self.assertGreater(len(attempts[-1].summary), 0)
         self.assertLess(len(attempts[-1].summary), 5000)
 
-    def test_source_change_permits_exactly_one_new_automatic_attempt(self):
+    def test_source_change_requires_a_new_exact_user_decision(self):
         attempts = (CapabilityAttempt(
             "build", "production-1", "environment-1", "returned"),)
         changed = AttemptContext(
             CapabilityKind.BUILD, "production-2", "environment-1")
-        self.assertTrue(automatic_attempt_allowed(attempts, changed))
-        attempts = record_attempt(attempts, changed, "returned")
         self.assertFalse(automatic_attempt_allowed(attempts, changed))
+        self.assertTrue(retry_options(attempts, changed).needs_user)
 
-    def test_environment_change_permits_exactly_one_new_automatic_attempt(self):
+    def test_environment_change_requires_a_new_exact_user_decision(self):
         attempts = (CapabilityAttempt(
             "build", "production-1", "environment-1", "returned"),)
         changed = AttemptContext(
             "build", "production-1", "environment-2")
-        self.assertTrue(automatic_attempt_allowed(attempts, changed))
-        attempts = record_attempt(attempts, changed, "timed-out")
         self.assertFalse(automatic_attempt_allowed(attempts, changed))
+        self.assertTrue(retry_options(attempts, changed).needs_user)
 
     def test_user_authorization_allows_an_unchanged_retry(self):
         attempts = (CapabilityAttempt(
@@ -136,29 +135,39 @@ class LeanCapabilityTests(unittest.TestCase):
         self.assertFalse(
             automatic_attempt_allowed(attempts, after_test_change))
 
-    def test_next_real_attempt_consumes_retry_choice_even_after_context_change(self):
+    def test_retry_choice_is_bound_to_the_exact_semantic_slot(self):
         state = FlowState.new(
             "REQ-42", DeliveryPath.FOCUSED, CommitPace.CONTINUOUS)
         state = record_flow_attempt(
             state, self.build, "timed-out")
+        original_key = retry_decision_key(self.build)
         state = state.with_decision(
-            "capability.retry.build",
+            original_key,
             "用户决定在环境恢复后再试一次。",
         )
 
         changed = AttemptContext(
             "build", "production-2", "environment-2")
-        state = record_flow_attempt(state, changed, "returned")
-
-        self.assertIn(
-            (
-                "capability.retry.used.build",
-                "用户决定在环境恢复后再试一次。",
-            ),
-            state.decisions,
-        )
         with self.assertRaisesRegex(ValueError, "自然语言重试决定"):
             record_flow_attempt(state, changed, "returned")
+
+        changed_key = retry_decision_key(changed)
+        state = state.with_decision(
+            changed_key,
+            "用户确认新的语义槽位需要再尝试一次。",
+        )
+        state = record_flow_attempt(state, changed, "returned")
+
+        self.assertNotIn(
+            (original_key.replace(".retry.", ".retry.used."),
+             "用户决定在环境恢复后再试一次。"),
+            state.decisions,
+        )
+        self.assertIn(
+            (changed_key.replace(".retry.", ".retry.used."),
+             "用户确认新的语义槽位需要再尝试一次。"),
+            state.decisions,
+        )
 
     def test_production_registry_uses_thin_capabilities_not_legacy_fixers(self):
         cases = (

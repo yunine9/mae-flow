@@ -17,7 +17,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" start --ticket REQ-123 --path focused '
             '--pace continuous\n'
             '  python "%s" decision startup-confirmed "用户的自然语言决定"\n'
-            "其余生产命令: advance|capability-record|manifest|exit|"
+            "其余生产命令: advance|manifest|exit|"
             "ut|codecheck|grill|story|chain；内部轻量建议: lightcheck。\n"
             "旧状态只用 migrate-flow 单向迁移。" % (me, me, me),
             file=sys.stderr,
@@ -49,17 +49,6 @@ def parse_args(argv=None):
     decision.add_argument("event")
     decision.add_argument("text")
     decision.add_argument("--key", default="")
-
-    capability_record = sub.add_parser("capability-record")
-    capability_record.add_argument(
-        "kind", choices=[
-            "build", "ut", "codecheck", "reviewer", "grill", "story"])
-    capability_record.add_argument(
-        "outcome", choices=[
-            "returned", "failed-to-start", "timed-out", "not-observed"])
-    capability_record.add_argument("--source", required=True)
-    capability_record.add_argument("--environment", required=True)
-    capability_record.add_argument("--summary", default="")
 
     manifest = sub.add_parser("manifest")
     manifest.add_argument("--file", action="append", required=True)

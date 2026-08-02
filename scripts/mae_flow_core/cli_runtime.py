@@ -17,7 +17,6 @@ _HANDLERS = {
         "cmd_lean_current",
         "cmd_lean_advance",
         "cmd_lean_decision",
-        "cmd_lean_capability_record",
         "cmd_lean_manifest",
         "cmd_lean_exit",
         "cmd_lean_toolbox",

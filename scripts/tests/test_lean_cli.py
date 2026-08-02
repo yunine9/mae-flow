@@ -12,6 +12,11 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CLI = os.path.join(ROOT, "scripts", "mae-flow.py")
+SCRIPTS = os.path.join(ROOT, "scripts")
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+from mae_flow_core.adapters.lean_hook import LeanHookAdapter  # noqa: E402
 
 
 class LeanCliTests(unittest.TestCase):
@@ -22,6 +27,7 @@ class LeanCliTests(unittest.TestCase):
         self.env = dict(os.environ)
         self.env["PYTHONPYCACHEPREFIX"] = os.path.join(
             self.root, "pycache")
+        self.capability_invocations = 0
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -43,6 +49,37 @@ class LeanCliTests(unittest.TestCase):
                   encoding="utf-8") as stream:
             return json.load(stream)
 
+    def run_capability(self, kind, outcome="returned"):
+        identities = {
+            "build": ("Skill", "skill", "build-fix"),
+            "ut": ("Agent", "subagent_type", "ut-generator-agent"),
+            "codecheck": (
+                "Agent", "subagent_type", "codecheck-advisor-agent"),
+            "reviewer": (
+                "Agent", "subagent_type", "craft-reviewer-agent"),
+            "grill": ("Agent", "subagent_type", "grill-critic-agent"),
+            "story": ("Agent", "subagent_type", "story-generator-agent"),
+        }
+        tool_name, field, identity = identities[kind]
+        self.capability_invocations += 1
+        payload = {
+            "tool_name": tool_name,
+            "tool_use_id": "test-capability-%d" % self.capability_invocations,
+            "tool_input": {field: identity},
+        }
+        adapter = LeanHookAdapter(
+            self.root, marker_root=os.path.join(self.root, "markers"))
+        response = adapter.handle("PreToolUse", payload)
+        if response.exit_code == 0 and outcome == "returned":
+            response = adapter.handle("PostToolUse", dict(
+                payload, tool_response="opaque synchronous host return"))
+        return subprocess.CompletedProcess(
+            args=(kind, outcome),
+            returncode=response.exit_code,
+            stdout=response.stdout,
+            stderr=response.stderr,
+        )
+
     def assert_success(self, result):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn("Traceback", result.stdout + result.stderr)
@@ -59,9 +96,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(startup)
         self.assertIn("需要用户介入: Spec", startup.stdout)
 
-        self.assert_success(self.run_cli(
-            "capability-record", "grill", "returned",
-            "--source", "spec-v1", "--environment", "critic-v1"))
+        self.assert_success(self.run_capability("grill"))
         self.assert_success(self.run_cli(
             "decision", "grill-clear", "只读质询未发现待决分支。"))
         spec = self.run_cli(
@@ -69,12 +104,8 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(spec)
         self.assertIn("需要用户介入: Story", spec.stdout)
 
-        self.assert_success(self.run_cli(
-            "capability-record", "story", "returned",
-            "--source", "spec-v1", "--environment", "story-v1"))
-        self.assert_success(self.run_cli(
-            "capability-record", "reviewer", "returned",
-            "--source", "story-v1", "--environment", "design-review"))
+        self.assert_success(self.run_capability("story"))
+        self.assert_success(self.run_capability("reviewer"))
         self.assert_success(self.run_cli(
             "decision", "design-review-approved", "设计检视无待裁决项。"))
         story = self.run_cli(
@@ -87,15 +118,9 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(cp)
         self.assertNotIn("需要用户介入", cp.stdout)
         self.assert_success(self.run_cli("advance", "construction-complete"))
-        self.assert_success(self.run_cli(
-            "capability-record", "codecheck", "returned",
-            "--source", "final-diff-v1", "--environment", "codecheck-v1"))
-        self.assert_success(self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "production-v1", "--environment", "build-v1"))
-        self.assert_success(self.run_cli(
-            "capability-record", "ut", "returned",
-            "--source", "final-diff-v1", "--environment", "ut-v1"))
+        self.assert_success(self.run_capability("codecheck"))
+        self.assert_success(self.run_capability("build"))
+        self.assert_success(self.run_capability("ut"))
         delivery = self.run_cli("advance", "quality-complete")
         self.assert_success(delivery)
         self.assertIn("需要用户介入: 交付", delivery.stdout)
@@ -163,14 +188,10 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-7", "--path", "focused",
             "--pace", "continuous"))
-        first = self.run_cli(
-            "capability-record", "build", "timed-out",
-            "--source", "production-v1", "--environment", "build-v1")
+        first = self.run_capability("build", "not-observed")
         self.assert_success(first)
 
-        rejected = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "production-v1", "--environment", "build-v1")
+        rejected = self.run_capability("build")
         self.assertEqual(2, rejected.returncode)
         self.assertIn("自然语言重试决定", rejected.stderr)
         self.assertEqual(1, len(self.state()["capabilities"]))
@@ -179,30 +200,22 @@ class LeanCliTests(unittest.TestCase):
             "decision", "capability.retry.build",
             "构建环境已恢复，用户决定再尝试一次。")
         self.assert_success(authorized)
-        retried = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "production-v1", "--environment", "build-v1")
+        retried = self.run_capability("build")
         self.assert_success(retried)
         self.assertEqual(2, len(self.state()["capabilities"]))
 
-        consumed = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "production-v1", "--environment", "build-v1")
+        consumed = self.run_capability("build")
         self.assertEqual(2, consumed.returncode)
         self.assertEqual(2, len(self.state()["capabilities"]))
 
-    def test_capability_slot_is_state_derived_not_caller_controlled(self):
+    def test_capability_slot_is_derived_from_state_by_the_hook(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-SLOT", "--path", "focused",
             "--pace", "continuous"))
         self.assert_success(self.run_cli(
             "decision", "startup-confirmed", "已定位局部修复。"))
-        first = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "caller-a", "--environment", "env-a")
-        changed_labels = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "caller-b", "--environment", "env-b")
+        first = self.run_capability("build")
+        changed_labels = self.run_capability("build")
 
         self.assert_success(first)
         self.assertEqual(2, changed_labels.returncode)
@@ -215,9 +228,21 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "decision", "capability.retry.build",
             "用户确认构建环境恢复，再试一次。"))
+        self.assert_success(self.run_capability("build"))
+
+    def test_public_cli_cannot_forge_a_capability_record(self):
         self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-NO-FORGE", "--path", "focused",
+            "--pace", "continuous"))
+        before = self.state()
+
+        rejected = self.run_cli(
             "capability-record", "build", "returned",
-            "--source", "caller-c", "--environment", "env-c"))
+            "--source", "forged", "--environment", "forged")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("invalid choice", rejected.stderr)
+        self.assertEqual(before, self.state())
 
     def test_design_and_new_cp_reviewer_use_distinct_state_slots(self):
         self.assert_success(self.run_cli(
@@ -228,9 +253,7 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
-        self.assert_success(self.run_cli(
-            "capability-record", "reviewer", "returned",
-            "--source", "caller-design", "--environment", "same"))
+        self.assert_success(self.run_capability("reviewer"))
 
         state = self.state()
         state["phase"] = "construction"
@@ -238,9 +261,10 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
-        cp = self.run_cli(
-            "capability-record", "reviewer", "returned",
-            "--source", "caller-cp", "--environment", "same")
+        self.assert_success(self.run_cli(
+            "decision", "capability.retry.reviewer",
+            "用户确认在 CP2 的精确检视槽位再尝试一次。"))
+        cp = self.run_capability("reviewer")
 
         self.assert_success(cp)
         self.assertEqual(
@@ -255,18 +279,14 @@ class LeanCliTests(unittest.TestCase):
             "--pace", "continuous"))
         self.assert_success(self.run_cli(
             "decision", "startup-confirmed", "已定位局部修复。"))
-        failed = self.run_cli(
-            "capability-record", "build", "timed-out",
-            "--source", "ignored", "--environment", "ignored")
+        failed = self.run_capability("build", "not-observed")
         self.assert_success(failed)
         self.assertTrue(self.state()["risks"])
 
         self.assert_success(self.run_cli(
             "decision", "capability.retry.build",
             "用户确认环境恢复，重试一次。"))
-        returned = self.run_cli(
-            "capability-record", "build", "returned",
-            "--source", "still-ignored", "--environment", "still-ignored")
+        returned = self.run_capability("build")
 
         self.assert_success(returned)
         self.assertEqual([], self.state()["risks"])
@@ -277,9 +297,7 @@ class LeanCliTests(unittest.TestCase):
             "--pace", "continuous"))
         self.assert_success(self.run_cli(
             "decision", "startup-confirmed", "用户确认进入 Full Spec。"))
-        self.assert_success(self.run_cli(
-            "capability-record", "grill", "timed-out",
-            "--source", "ignored", "--environment", "ignored"))
+        self.assert_success(self.run_capability("grill", "not-observed"))
         self.assert_success(self.run_cli(
             "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
         risks = self.state()["risks"]
@@ -294,9 +312,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_cli(
             "decision", "capability.retry.grill",
             "用户确认环境恢复，授权 Grill 再尝试一次。"))
-        self.assert_success(self.run_cli(
-            "capability-record", "grill", "returned",
-            "--source", "still-ignored", "--environment", "still-ignored"))
+        self.assert_success(self.run_capability("grill"))
         self.assert_success(self.run_cli(
             "decision", "grill-clear", "Grill 已返回，未发现待决分支。"))
 

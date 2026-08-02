@@ -69,7 +69,9 @@ class LeanCompositionTests(unittest.TestCase):
                             "returned",
                         )
                     advanced = advance_flow(
-                        advanced, AdvanceRequest(event)).state
+                        advanced, AdvanceRequest(
+                            event, "", "用户确认迁移后的语义恢复步骤。"),
+                    ).state
 
                 self.assertEqual(path, recovered.path)
                 self.assertEqual(phase, recovered.phase)
@@ -95,7 +97,11 @@ class LeanCompositionTests(unittest.TestCase):
                 migrated = migrate_legacy_flow(
                     legacy(current, "review")).state
                 recovered = decode_flow_state(encode_flow_state(migrated))
-                result = advance_flow(recovered, AdvanceRequest(event))
+                result = advance_flow(
+                    recovered,
+                    AdvanceRequest(
+                        event, "", "用户确认迁移后的语义恢复步骤。"),
+                )
 
                 self.assertEqual(DeliveryPath.FOCUSED, recovered.path)
                 self.assertEqual(phase, recovered.phase)

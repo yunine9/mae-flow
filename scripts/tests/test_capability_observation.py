@@ -20,9 +20,12 @@ from mae_flow_core.application.hooks.capability_observation import (  # noqa: E4
     observe_return,
 )
 from mae_flow_core.orchestration import (  # noqa: E402
+    CapabilityKind,
     CommitPace,
     DeliveryPath,
     FlowState,
+    flow_attempt_context,
+    retry_decision_key,
 )
 from mae_flow_core.orchestration.capability_registry import (  # noqa: E402
     CapabilitySelector,
@@ -39,12 +42,6 @@ class CapabilityRegistryTests(unittest.TestCase):
                 {"tool_name": "Agent", "tool_input": {
                     "subagent_type": "mae-flow:ut-generator-agent"}},
                 "ut",
-            ),
-            (
-                {"tool_name": "spawn_agent", "tool_input": {
-                    "task_name": "codecheck_advisor_agent",
-                    "message": "opaque task prompt"}},
-                "codecheck",
             ),
             (
                 {"tool_name": "Task", "tool_input": {
@@ -66,8 +63,8 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertIsNone(match_capability({
             "tool_name": "spawn_agent",
             "tool_input": {
-                "task_name": "codecheck_advisor_agent_extra",
-                "message": "mentions codecheck_advisor_agent",
+                "task_name": "codecheck_advisor_agent",
+                "message": "the async acknowledgement is not a return",
             },
         }, registry))
 
@@ -78,7 +75,6 @@ class CapabilityRegistryTests(unittest.TestCase):
              "codecheck"),
             ("Agent", {"agent_type": "mae-flow:craft-reviewer-agent"},
              "reviewer"),
-            ("spawn_agent", {"task_name": "grill_critic_agent"}, "grill"),
             ("Skill", {"skill": "build-fix"}, "build"),
             ("Skill", {"name": "build-fix"}, "build"),
         )
@@ -150,6 +146,26 @@ class CapabilityRegistryTests(unittest.TestCase):
                 "tool_input": {"skill": "build-fix"},
             }, registry).kind)
 
+    def test_project_config_cannot_treat_async_spawn_ack_as_a_return(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(
+                    os.path.join(root, ".mae-flow-defaults.json"),
+                    "w", encoding="utf-8") as stream:
+                json.dump({
+                    "capability_selectors": [{
+                        "tool_name": "spawn_agent",
+                        "identity_fields": ["task_name"],
+                        "values": {"ut_generator_agent": "ut"},
+                    }],
+                }, stream)
+
+            matched = match_capability({
+                "tool_name": "spawn_agent",
+                "tool_input": {"task_name": "ut_generator_agent"},
+            }, load_capability_registry(root))
+
+            self.assertIsNone(matched)
+
     def test_custom_bash_selector_requires_exact_command_value(self):
         registry = (
             CapabilitySelector(
@@ -167,6 +183,23 @@ class CapabilityRegistryTests(unittest.TestCase):
         self.assertEqual(("ut", "run-project-ut"), (
             exact.kind, exact.identity))
         self.assertIsNone(mentioned)
+
+    def test_project_selector_cannot_redefine_the_trusted_build_skill(self):
+        registry = (
+            CapabilitySelector(
+                "Bash", ("command",), {"pretend-build": "build"}),
+            CapabilitySelector(
+                "Skill", ("skill",), {"other-build": "build"}),
+        )
+
+        for tool_name, tool_input in (
+                ("Bash", {"command": "pretend-build"}),
+                ("Skill", {"skill": "other-build"})):
+            with self.subTest(tool_name=tool_name):
+                self.assertIsNone(match_capability({
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                }, registry))
 
     def test_selector_rejects_string_in_place_of_identity_field_list(self):
         with self.assertRaises(ValueError):
@@ -312,8 +345,11 @@ class LeanCapabilityObservationTests(unittest.TestCase):
             ),
         )
 
+        context = flow_attempt_context(
+            self.read_state(), CapabilityKind.BUILD)
+        retry_key = retry_decision_key(context)
         authorized = self.read_state().with_decision(
-            "capability.retry.build",
+            retry_key,
             "用户确认构建环境恢复，授权同一阶段再调用一次。",
         )
         self.save_state(authorized)
@@ -325,7 +361,7 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         self.assertEqual(0, retry.exit_code, retry.stderr)
         self.assertIn(
             (
-                "capability.retry.used.build",
+                retry_key.replace(".retry.", ".retry.used."),
                 "用户确认构建环境恢复，授权同一阶段再调用一次。",
             ),
             self.read_state().decisions,
@@ -466,7 +502,7 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         self.assertEqual("ut-generator-agent", observation["identity"])
         self.assertTrue(observation["return_present"])
 
-    def test_observation_and_persistence_errors_fail_open(self):
+    def test_post_observation_errors_fail_open_but_reservation_fails_closed(self):
         def unavailable(*unused):
             raise OSError("audit unavailable")
 
@@ -489,7 +525,25 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         })
 
         self.assertEqual(0, audit_failure.exit_code)
-        self.assertEqual(0, persistence_failure.exit_code)
+        self.assertEqual(2, persistence_failure.exit_code)
+        self.assertIn("failed closed", persistence_failure.stderr)
+
+    def test_async_spawn_ack_never_reserves_or_completes_a_capability(self):
+        adapter = LeanHookAdapter(
+            self.root, marker_root=os.path.join(self.root, "markers"))
+        payload = {
+            "tool_name": "spawn_agent",
+            "tool_use_id": "spawn-ut-1",
+            "tool_input": {"task_name": "ut_generator_agent"},
+        }
+
+        pre = adapter.handle("PreToolUse", payload)
+        post = adapter.handle("PostToolUse", dict(
+            payload, tool_response={"agent_id": "agent-123"}))
+
+        self.assertEqual(0, pre.exit_code)
+        self.assertEqual(0, post.exit_code)
+        self.assertEqual((), self.read_state().capabilities)
 
 
 if __name__ == "__main__":

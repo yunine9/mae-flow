@@ -9,6 +9,7 @@ from .capabilities import (
     flow_attempt_context,
     record_attempt,
     record_flow_attempt,
+    retry_decision_key,
     retry_options,
 )
 from .delivery import (
@@ -58,6 +59,7 @@ __all__ = [
     "plan_delivery",
     "record_attempt",
     "record_flow_attempt",
+    "retry_decision_key",
     "retry_options",
     "run_toolbox_request",
 ]

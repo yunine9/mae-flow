@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from enum import Enum
+import hashlib
 
 from .models import CapabilityAttempt
 from .models import Phase
@@ -95,7 +96,7 @@ def retry_options(attempts, context):
             return RetryOption(
                 True,
                 False,
-                "User authorized another attempt for unchanged inputs.",
+                "User authorized another attempt for this exact slot.",
             )
         return RetryOption(
             False,
@@ -103,10 +104,16 @@ def retry_options(attempts, context):
             "An attempt already exists for unchanged inputs.",
         )
     if _same_capability_seen(attempts, context):
+        if context.user_authorized:
+            return RetryOption(
+                True,
+                False,
+                "User authorized an attempt for this exact changed slot.",
+            )
         return RetryOption(
-            True,
             False,
-            "Relevant source or environment changed; one attempt is available.",
+            True,
+            "This capability was already attempted in another slot.",
         )
     return RetryOption(
         True,
@@ -138,6 +145,28 @@ def record_attempt(attempts, context, outcome, summary=""):
     return tuple(attempts) + (attempt,)
 
 
+def _retry_digest(context):
+    if not isinstance(context, AttemptContext):
+        raise TypeError("context must be an AttemptContext")
+    raw = "\0".join((
+        context.kind.value,
+        context.source_revision,
+        context.environment_revision,
+    )).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def retry_decision_key(context):
+    """Return the user authorization key bound to one exact semantic slot."""
+    return "capability.retry.%s.%s" % (
+        context.kind.value, _retry_digest(context))
+
+
+def _retry_used_key(context):
+    return "capability.retry.used.%s.%s" % (
+        context.kind.value, _retry_digest(context))
+
+
 def record_flow_attempt(state, context, outcome, summary=""):
     """Record one opaque attempt and consume one state-backed retry choice."""
     from .models import FlowState
@@ -146,8 +175,8 @@ def record_flow_attempt(state, context, outcome, summary=""):
         raise TypeError("state must be a FlowState")
     if not isinstance(context, AttemptContext):
         raise TypeError("context must be an AttemptContext")
-    retry_key = "capability.retry.%s" % context.kind.value
-    used_key = "capability.retry.used.%s" % context.kind.value
+    retry_key = retry_decision_key(context)
+    used_key = _retry_used_key(context)
     authorizations = tuple(
         value for key, value in state.decisions if key == retry_key)
     used = tuple(value for key, value in state.decisions if key == used_key)
@@ -162,7 +191,7 @@ def record_flow_attempt(state, context, outcome, summary=""):
     if not option.allowed:
         raise ValueError(
             "同一上下文已有能力尝试；需要先记录本轮自然语言重试决定 %s"
-            % retry_key)
+            % ("capability.retry.%s" % context.kind.value))
     attempts = record_attempt(
         state.capabilities, effective, outcome, summary=summary)
     decisions = state.decisions

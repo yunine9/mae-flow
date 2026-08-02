@@ -76,12 +76,7 @@ _PLUGIN_AGENT_CAPABILITIES.update({
     "mae-flow:" + identity: kind
     for identity, kind in _AGENT_CAPABILITIES.items()
 })
-_CODEX_AGENT_CAPABILITIES = {
-    identity.replace("-", "_"): kind
-    for identity, kind in _AGENT_CAPABILITIES.items()
-}
-
-
+_TRUSTED_BUILD_SKILLS = {"build-fix", "mae-flow:build-fix"}
 DEFAULT_CAPABILITY_REGISTRY = (
     CapabilitySelector(
         "Task",
@@ -92,11 +87,6 @@ DEFAULT_CAPABILITY_REGISTRY = (
         "Agent",
         ("subagent_type", "agent_type"),
         _PLUGIN_AGENT_CAPABILITIES,
-    ),
-    CapabilitySelector(
-        "spawn_agent",
-        ("task_name",),
-        _CODEX_AGENT_CAPABILITIES,
     ),
     CapabilitySelector(
         "Skill",
@@ -133,6 +123,8 @@ def match_capability(payload, registry):
     tool_input = payload.get("tool_input")
     if not isinstance(tool_name, str) or not isinstance(tool_input, Mapping):
         return None
+    if tool_name == "spawn_agent":
+        return None
     matches = []
     try:
         selectors = tuple(registry)
@@ -144,6 +136,10 @@ def match_capability(payload, registry):
                 and selector.tool_name == tool_name):
             matched = _selector_matches(selector, tool_input)
             if matched is not None:
+                if (matched.kind == "build"
+                        and (matched.tool_name != "Skill"
+                             or matched.identity not in _TRUSTED_BUILD_SKILLS)):
+                    continue
                 matches.append(matched)
     distinct = {
         (match.kind, match.identity)

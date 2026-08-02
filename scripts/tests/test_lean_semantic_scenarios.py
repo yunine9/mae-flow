@@ -42,6 +42,7 @@ from mae_flow_core.orchestration.capabilities import (  # noqa: E402
     flow_attempt_context,
     record_attempt,
     record_flow_attempt,
+    retry_decision_key,
     retry_options,
 )
 from mae_flow_core.orchestration.delivery import plan_delivery  # noqa: E402
@@ -90,7 +91,8 @@ class FullWorkflowScenarioTests(unittest.TestCase):
             "REQ-SMALL", DeliveryPath.FULL, CommitPace.CONTINUOUS)
 
         self.assertTrue(advance(state, "startup-ready").needs_user)
-        state = advance(state, "startup-confirmed").state
+        state = advance(
+            state, "startup-confirmed", value="用户确认进入 Full Spec。").state
         self.assertEqual(Phase.SPEC, state.phase)
         self.assertTrue(advance(state, "spec-ready").needs_user)
 
@@ -101,7 +103,8 @@ class FullWorkflowScenarioTests(unittest.TestCase):
             "opaque grill return",
         )
         state = advance(state, "grill-clear").state
-        state = advance(state, "spec-confirmed").state
+        state = advance(
+            state, "spec-confirmed", value="用户确认 Spec 行为边界。").state
         self.assertEqual(Phase.STORY, state.phase)
         self.assertTrue(advance(state, "story-ready").needs_user)
 
@@ -112,10 +115,12 @@ class FullWorkflowScenarioTests(unittest.TestCase):
             "opaque design review return",
         )
         state = advance(state, "design-review-clear").state
-        state = advance(state, "story-confirmed").state
+        state = advance(
+            state, "story-confirmed", value="用户确认 Story 实现设计。").state
         self.assertEqual(Phase.CONSTRUCTION, state.phase)
         self.assertTrue(advance(state, "cp-ready").needs_user)
-        state = advance(state, "cp-confirmed").state
+        state = advance(
+            state, "cp-confirmed", value="用户确认 CP1 结果。").state
         self.assertFalse(advance(state, "cp-progress").needs_user)
 
         state = advance(state, "construction-complete").state
@@ -127,7 +132,7 @@ class FullWorkflowScenarioTests(unittest.TestCase):
     def test_complex_full_keeps_every_cp_visible_without_size_thresholds(self):
         state = full_at(
             Phase.CONSTRUCTION,
-            pace=CommitPace.STAGED,
+            pace=CommitPace.CONTINUOUS,
             current_cp="CP1",
         )
 
@@ -135,7 +140,9 @@ class FullWorkflowScenarioTests(unittest.TestCase):
         for checkpoint in ("CP1", "CP2", "CP3"):
             ready = advance(state, "cp-ready", checkpoint)
             observed.append((ready.state.current_cp, ready.needs_user))
-            state = advance(ready.state, "cp-confirmed").state
+            state = advance(
+                ready.state, "cp-confirmed",
+                value="用户确认 %s 结果。" % checkpoint).state
 
         integration = advance(
             state,
@@ -154,7 +161,8 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         state = FlowState.new(
             "REQ-REVIEW-FIX", DeliveryPath.FOCUSED, CommitPace.CONTINUOUS)
         self.assertTrue(advance(state, "startup-ready").needs_user)
-        state = advance(state, "startup-confirmed").state
+        state = advance(
+            state, "startup-confirmed", value="用户确认局部修复范围。").state
         self.assertEqual(Phase.CONSTRUCTION, state.phase)
 
         first = AttemptContext(
@@ -165,7 +173,11 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
 
         changed = AttemptContext(
             CapabilityKind.CODECHECK, "focused-source-v2", "host-env-v1")
-        self.assertTrue(retry_options(state.capabilities, changed).allowed)
+        self.assertFalse(retry_options(state.capabilities, changed).allowed)
+        state = state.with_decision(
+            retry_decision_key(changed),
+            "用户确认在新的代码检视语义槽位再尝试一次。",
+        )
         state = record_flow_attempt(
             state, changed, "returned", "opaque return after the user fix")
         state = advance(state, "construction-complete").state
@@ -230,42 +242,40 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         )
         self.assertEqual("returned", attempts[0].outcome)
 
-    def test_capability_record_cli_synchronously_persists_three_host_outcomes(self):
-        cases = (
-            ("returned", "host returned opaque success data"),
-            ("failed-to-start", "host could not start the capability"),
-            ("timed-out", "host synchronous boundary timed out"),
-        )
-        for index, (outcome, summary) in enumerate(cases):
-            with self.subTest(outcome=outcome):
-                with tempfile.TemporaryDirectory() as root:
-                    initialized = subprocess.run(
-                        ["git", "init", "-q"], cwd=root,
-                        capture_output=True, timeout=10)
-                    self.assertEqual(0, initialized.returncode)
-                    started = run_cli(
-                        root,
-                        "start", "--ticket", "REQ-BUILD-%d" % index,
-                        "--path", "focused", "--pace", "continuous",
-                    )
-                    self.assertEqual(0, started.returncode)
+    def test_hook_persists_only_a_reserved_synchronous_host_return(self):
+        with tempfile.TemporaryDirectory() as root:
+            initialized = subprocess.run(
+                ["git", "init", "-q"], cwd=root,
+                capture_output=True, timeout=10)
+            self.assertEqual(0, initialized.returncode)
+            started = run_cli(
+                root,
+                "start", "--ticket", "REQ-BUILD-HOOK",
+                "--path", "focused", "--pace", "continuous",
+            )
+            self.assertEqual(0, started.returncode)
+            adapter = LeanHookAdapter(
+                root, marker_root=os.path.join(root, "markers"))
+            payload = {
+                "tool_name": "Skill",
+                "tool_use_id": "build-return-1",
+                "tool_input": {"skill": "build-fix"},
+            }
 
-                    recorded = run_cli(
-                        root,
-                        "capability-record", "build", outcome,
-                        "--source", "controlled-build-source-%d" % index,
-                        "--environment", "controlled-host-v1",
-                        "--summary", summary,
-                    )
-                    self.assertEqual(0, recorded.returncode)
-                    with open(os.path.join(root, ".mae-flow.json"),
-                              encoding="utf-8") as stream:
-                        persisted = json.load(stream)
-                    self.assertEqual(1, len(persisted["capabilities"]))
-                    attempt = persisted["capabilities"][0]
-                    self.assertEqual("build", attempt["kind"])
-                    self.assertEqual(outcome, attempt["outcome"])
-                    self.assertEqual(summary, attempt["summary"])
+            reserved = adapter.handle("PreToolUse", payload)
+            recorded = adapter.handle("PostToolUse", dict(
+                payload, tool_response="host returned opaque data"))
+
+            self.assertEqual(0, reserved.exit_code)
+            self.assertEqual(0, recorded.exit_code)
+            with open(os.path.join(root, ".mae-flow.json"),
+                      encoding="utf-8") as stream:
+                persisted = json.load(stream)
+            self.assertEqual(1, len(persisted["capabilities"]))
+            attempt = persisted["capabilities"][0]
+            self.assertEqual("build", attempt["kind"])
+            self.assertEqual("returned", attempt["outcome"])
+            self.assertEqual("host returned opaque data", attempt["summary"])
 
     def test_same_result_is_reused_and_never_automatically_retried(self):
         state = full_at(Phase.QUALITY)

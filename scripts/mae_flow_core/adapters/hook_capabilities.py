@@ -60,8 +60,14 @@ class LeanCapabilityGate:
                 "slot": context.source_revision,
                 "attempt_index": len(updated.capabilities) - 1,
             }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            risk_prefix = "Capability %s did not return in slot %s:" % (
+                matched.kind, context.source_revision)
+            risks = updated.risks
+            if not any(risk.startswith(risk_prefix) for risk in risks):
+                risks += (("%s not-observed." % risk_prefix),)
             return replace(
                 updated,
+                risks=risks,
                 decisions=updated.decisions + ((
                     _PENDING + matched.kind, pending),),
             )
@@ -74,7 +80,12 @@ class LeanCapabilityGate:
                 stderr="[mae-flow] %s\n" % exc,
             )
         except (Exception, SystemExit):
-            return HookResponse()
+            return HookResponse(
+                exit_code=2,
+                stderr=(
+                    "[mae-flow] Capability reservation failed closed; "
+                    "state was not durably updated.\n"),
+            )
         return HookResponse()
 
     def complete(self, payload, observation):
@@ -127,7 +138,19 @@ class LeanCapabilityGate:
             decisions = tuple(
                 item for index, item in enumerate(state.decisions)
                 if index != pending_index)
+            risks = state.risks
+            if observation.return_present:
+                prefixes = (
+                    "Capability %s did not return in slot %s:" % (
+                        observation.kind, pending.get("slot")),
+                    "Review capability %s did not return in slot %s:" % (
+                        observation.kind, pending.get("slot")),
+                )
+                risks = tuple(
+                    risk for risk in risks
+                    if not risk.startswith(prefixes))
             return replace(
-                state, capabilities=tuple(attempts), decisions=decisions)
+                state, capabilities=tuple(attempts), decisions=decisions,
+                risks=risks)
 
         self.update_state(complete_attempt)

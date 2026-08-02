@@ -6,7 +6,10 @@ import re
 import subprocess
 
 from ..foundation.git_intent import git_delivery_intents
-from ..foundation.git_shell import shell_command_groups
+from ..foundation.git_shell import (
+    _global_option_width,
+    shell_command_records,
+)
 
 
 GIT_SECS = 5
@@ -22,7 +25,21 @@ _PUSH_FLAGS = {
 _AMBIGUOUS_PUSH_FLAGS = {"--all", "--mirror", "--tags", "--delete"}
 _SAFE_REF = re.compile(r"[A-Za-z0-9._/-]+")
 _CONTEXT_OPTIONS = {
-    "-C", "--git-dir", "--work-tree", "--namespace",
+    "-C", "--bare", "--git-dir", "--work-tree", "--namespace",
+}
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+_OPAQUE_CONTEXT_OPERATIONS = {
+    ".", "eval", "popd", "pushd", "shopt", "source", "trap",
+}
+_SAFE_REMOTE_CONFIG = {
+    "partialclonefilter", "promisor", "proxy", "proxyauthmethod",
+    "prune", "prunetags", "pushoption", "receivepack",
+    "skipdefaultupdate", "skipfetchall", "tagopt", "uploadpack", "vfs",
+}
+_SAFE_BRANCH_CONFIG = {"description", "mergeoptions", "rebase"}
+_SAFE_PUSH_CONFIG = {
+    "gpgsign", "negotiate", "pushoption", "usebitmaps",
+    "useforceifincludes",
 }
 
 
@@ -95,13 +112,21 @@ def _context_environment_name(value):
 
 def _remote_changing_config(value):
     key = str(value or "").split("=", 1)[0].casefold()
+    if key == "remote.pushdefault":
+        return True
+    remote = re.fullmatch(r"remote\..+\.([^.]+)", key)
+    if remote:
+        return remote.group(1) not in _SAFE_REMOTE_CONFIG
+    branch = re.fullmatch(r"branch\..+\.([^.]+)", key)
+    if branch:
+        return branch.group(1) not in _SAFE_BRANCH_CONFIG
+    if key.startswith("push."):
+        return key[5:] not in _SAFE_PUSH_CONFIG
     return bool(
-        key == "remote.pushdefault"
-        or re.fullmatch(r"remote\..+\.(?:url|pushurl)", key)
-        or re.fullmatch(r"branch\..+\.(?:remote|pushremote)", key)
-        or re.fullmatch(r"url\..+\.(?:insteadof|pushinsteadof)", key)
+        key.startswith("url.")
         or key == "include.path"
-        or re.fullmatch(r"includeif\..+\.path", key)
+        or key.startswith("includeif.")
+        or key.startswith("submodule.")
     )
 
 
@@ -139,10 +164,8 @@ def _inline_context_changed(tokens, git_index, push_index):
         for value in tokens[push_index + 1:])
 
 
-def _next_shell_cwd(current, tokens):
-    if not tokens or tokens[0].casefold() != "cd":
-        return current
-    arguments = list(tokens[1:])
+def _next_shell_cwd(current, arguments):
+    arguments = list(arguments)
     if arguments[:1] == ["--"]:
         arguments = arguments[1:]
     if (
@@ -158,53 +181,172 @@ def _next_shell_cwd(current, tokens):
     return os.path.normcase(os.path.realpath(path))
 
 
-def _next_context_environment(active, tokens):
+def _next_context_environment(active, operation, arguments):
+    if active is None:
+        return None
     updated = set(active)
-    if not tokens:
-        return updated
-    operation = tokens[0].casefold()
     if operation in {"export", "set"}:
-        for value in tokens[1:]:
+        for value in arguments:
             name = _context_environment_name(value)
             if name:
                 updated.add(name)
     elif operation == "unset":
-        for value in tokens[1:]:
+        for value in arguments:
             name = _context_environment_name(value)
             if name:
                 updated.discard(name)
-    elif all("=" in value for value in tokens):
-        for value in tokens:
+    elif operation == "assignment":
+        for value in arguments:
             name = _context_environment_name(value)
             if name:
                 updated.add(name)
-    return updated
+    return frozenset(updated)
 
 
-def _changes_repository_context(root, command):
+def _operation_position(tokens):
+    index = 0
+    while index < len(tokens) and _ASSIGNMENT.fullmatch(tokens[index]):
+        index += 1
+    while index < len(tokens) and tokens[index] == "!":
+        index += 1
+    return index
+
+
+def _persistent_context_after(state, tokens):
+    cwd, environment, opaque = state
+    operation_index = _operation_position(tokens)
+    if operation_index >= len(tokens):
+        return (
+            cwd,
+            _next_context_environment(
+                environment, "assignment", tokens),
+            opaque,
+        )
+
+    operation = tokens[operation_index].casefold()
+    arguments = tokens[operation_index + 1:]
+    if operation == "cd":
+        return _next_shell_cwd(cwd, arguments), environment, opaque
+    if operation in {"export", "set", "unset"}:
+        if operation == "set" and any(
+                value.startswith(("-", "+")) for value in arguments):
+            return cwd, environment, True
+        return (
+            cwd,
+            _next_context_environment(environment, operation, arguments),
+            opaque,
+        )
+    if operation in _OPAQUE_CONTEXT_OPERATIONS:
+        return cwd, environment, True
+    if operation in {"builtin", "command"}:
+        nested = 0
+        inspection = False
+        while nested < len(arguments) and arguments[nested].startswith("-"):
+            option = arguments[nested]
+            nested += 1
+            if option == "--":
+                break
+            if operation == "command" and re.fullmatch(r"-[Vv]+", option):
+                inspection = True
+        nested_operation = (
+            arguments[nested].casefold()
+            if not inspection and nested < len(arguments) else "")
+        if nested_operation in (
+                _OPAQUE_CONTEXT_OPERATIONS
+                | {"cd", "export", "set", "unset"}):
+            return cwd, environment, True
+    if operation in {"declare", "local", "readonly", "typeset"} and any(
+            _context_environment_name(value) for value in arguments):
+        return cwd, environment, True
+    return state
+
+
+def _conditional_context(before, after):
+    return (
+        before[0] if before[0] == after[0] else None,
+        before[1] if before[1] == after[1] else None,
+        before[2] or after[2],
+    )
+
+
+def _direct_git_index(tokens):
+    index = _operation_position(tokens)
+    while index < len(tokens):
+        executable = re.split(
+            r"[\\/]", str(tokens[index] or ""))[-1].casefold()
+        if executable in {"command", "command.exe"}:
+            index += 1
+            while index < len(tokens) and tokens[index].startswith("-"):
+                if tokens[index] == "--":
+                    index += 1
+                    break
+                if not re.fullmatch(r"-[p]+", tokens[index]):
+                    return None
+                index += 1
+            continue
+        if executable in {"env", "env.exe"}:
+            index += 1
+            while index < len(tokens):
+                if tokens[index] == "--":
+                    index += 1
+                    break
+                if _ASSIGNMENT.fullmatch(tokens[index]):
+                    index += 1
+                    continue
+                if tokens[index].startswith("-"):
+                    return None
+                break
+            continue
+        return index if executable in {"git", "git.exe"} else None
+    return None
+
+
+def _direct_push_position(tokens):
+    git_index = _direct_git_index(tokens)
+    if git_index is None:
+        return None
+    index = git_index + 1
+    while index < len(tokens):
+        width = _global_option_width(tokens, index)
+        if not width:
+            break
+        index += width
+    if index < len(tokens) and tokens[index].casefold() == "push":
+        return git_index, index
+    return None
+
+
+def _changes_repository_context(root, command, expected_pushes):
     expected_cwd = os.path.normcase(os.path.realpath(root))
-    effective_cwd = expected_cwd
-    context_environment = set()
-    for tokens in shell_command_groups(command):
-        for git_index, token in enumerate(tokens):
-            executable = re.split(r"[\\/]", str(token or ""))[-1].casefold()
-            if executable not in {"git", "git.exe"}:
-                continue
-            push_index = next((
-                index for index in range(git_index + 1, len(tokens))
-                if tokens[index].casefold() == "push"
-            ), None)
-            if push_index is None:
-                continue
+    records = shell_command_records(command)
+    if records is None:
+        return True
+    contexts = {(): (expected_cwd, frozenset(), False)}
+    direct_pushes = 0
+
+    def context_for(scope):
+        if scope not in contexts:
+            contexts[scope] = context_for(scope[:-1])
+        return contexts[scope]
+
+    for record in records:
+        before = context_for(record.scope)
+        push_position = _direct_push_position(record.tokens)
+        if push_position is not None:
+            direct_pushes += 1
+            git_index, push_index = push_position
             if (
-                    effective_cwd != expected_cwd
-                    or context_environment
-                    or _inline_context_changed(tokens, git_index, push_index)):
+                    before[0] != expected_cwd
+                    or before[1] != frozenset()
+                    or before[2]
+                    or _inline_context_changed(
+                        record.tokens, git_index, push_index)):
                 return True
-        effective_cwd = _next_shell_cwd(effective_cwd, tokens)
-        context_environment = _next_context_environment(
-            context_environment, tokens)
-    return False
+        after = _persistent_context_after(before, record.tokens)
+        contexts[record.scope] = (
+            _conditional_context(before, after)
+            if record.conditional else after)
+    return direct_pushes != expected_pushes
 
 
 def _push_positionals(arguments):
@@ -313,12 +455,12 @@ def push_commit_files(
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if payload.get("tool_name") != "Bash" or not isinstance(command, str):
         return ()
-    if _changes_repository_context(root, command):
-        return ()
     pushes = tuple(
         intent for intent in git_delivery_intents(command)
         if intent.operation == "push")
     if len(pushes) != 1 or pushes[0].opaque_pathspec:
+        return ()
+    if _changes_repository_context(root, command, len(pushes)):
         return ()
     endpoints = _push_endpoints(root, pushes[0].arguments, git_text)
     if not endpoints:

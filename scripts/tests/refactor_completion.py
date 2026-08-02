@@ -25,6 +25,8 @@ APPROVED_RELEASE_SUITE_COMMANDS = [
     "python scripts/tests/test_lean_guidance.py",
     "python scripts/tests/test_native_guidance.py",
     "python scripts/tests/test_lean_composition.py",
+    "python scripts/tests/test_lean_semantic_scenarios.py",
+    "python scripts/tests/test_windows_lean_runtime.py",
     "python scripts/tests/test_lean_delivery.py",
     "python scripts/tests/test_lean_documents.py",
     "python scripts/tests/test_lean_moonlight.py",

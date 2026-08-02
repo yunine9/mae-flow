@@ -12,6 +12,8 @@ REFACTOR_SAFETY_SUITES = (
     ("Lean guidance and harness", ("scripts/tests/test_lean_guidance.py",), 90, 4000),
     ("Native guidance semantics", ("scripts/tests/test_native_guidance.py",), 90, 5000),
     ("Lean composition", ("scripts/tests/test_lean_composition.py",), 90, 4000),
+    ("Lean semantic scenarios", ("scripts/tests/test_lean_semantic_scenarios.py",), 90, 6000),
+    ("Windows lean runtime", ("scripts/tests/test_windows_lean_runtime.py",), 90, 6000),
     ("Lean delivery policy", ("scripts/tests/test_lean_delivery.py",), 90, 4000),
     ("Lean document paths", ("scripts/tests/test_lean_documents.py",), 90, 4000),
     ("Lean moonlight policy", ("scripts/tests/test_lean_moonlight.py",), 90, 4000),

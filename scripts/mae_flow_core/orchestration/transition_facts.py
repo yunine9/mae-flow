@@ -179,6 +179,10 @@ def _receipt_plan(state, checkpoint=""):
             "", files, _validate_message(state.ticket, message)),)
         actions = ("add", "commit", "push") if has_git else ()
     else:
+        final_files = decision_values(state, STAGED_FINAL_FILE)
+        if not same_exact_files(final_files, state.delivery_files):
+            raise ValueError(
+                "Staged receipt requires the explicit final checkpoint union")
         commits = _staged_receipt_commits(state)
         if not has_git:
             actions = ()

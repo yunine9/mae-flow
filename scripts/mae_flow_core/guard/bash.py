@@ -161,7 +161,8 @@ def _post_early(context):
     if any(
             operation == "push" and any(
                 argument == "-f"
-                or argument.startswith("--force")
+                or (argument.startswith("--force")
+                    and not argument.startswith("--force-with-lease="))
                 or argument.startswith("+")
                 for argument in arguments)
             for operation, arguments in executed_git_invocations(command)):

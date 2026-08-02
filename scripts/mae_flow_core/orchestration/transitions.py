@@ -4,21 +4,16 @@ from dataclasses import dataclass, replace
 from .models import CommitPace, DeliveryPath, FlowState, Phase
 from .transition_facts import (
     DELIVERY_CONFIRMATION as _DELIVERY_CONFIRMATION,
-    DELIVERY_CONFIRMED_FILE as _DELIVERY_CONFIRMED_FILE,
-    STAGED_FINAL_FILE as _STAGED_FINAL_FILE,
     add_material_risk as _add_material_risk,
     authorize_checkpoint as _authorize_checkpoint,
     authorize_exact_delivery as _authorize_exact_delivery,
     checkpoint_confirmation_key as _checkpoint_confirmation_key,
-    checkpoint_files as _checkpoint_files,
     checkpoint_name as _checkpoint_name,
     clear_downstream_authorization as _clear_downstream_authorization,
     current_delivery_receipt as _current_delivery_receipt,
-    decision_values as _decision_values,
     delivery_effects_observed as _delivery_effects_observed,
     latest_review_attempt as _latest_review_attempt,
     review_attempt_risk as _review_attempt_risk,
-    same_exact_files as _same_exact_files,
     staged_checkpoint_receipts_valid as _staged_checkpoint_receipts_valid,
 )
 
@@ -240,27 +235,6 @@ def advance_flow(state, request):
                 state, False,
                 "Delivery completion requires a current exact receipt.",
             )
-        confirmed_files = _decision_values(state, _DELIVERY_CONFIRMED_FILE)
-        if (not state.delivery_files
-                or not _same_exact_files(
-                    confirmed_files, state.delivery_files)):
-            return AdvanceResult(
-                state, False,
-                "Delivery completion requires confirmation of the current "
-                "exact manifest.",
-            )
-        if state.commit_pace == CommitPace.STAGED:
-            final_files = _decision_values(state, _STAGED_FINAL_FILE)
-            checkpoint_files = _checkpoint_files(state)
-            if (not final_files
-                    or not _same_exact_files(final_files, state.delivery_files)
-                    or not _same_exact_files(
-                        checkpoint_files, state.delivery_files)):
-                return AdvanceResult(
-                    state, False,
-                    "Staged delivery completion requires the recorded final "
-                    "checkpoint union.",
-                )
         if not _delivery_effects_observed(state, receipt):
             return AdvanceResult(
                 state,

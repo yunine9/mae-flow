@@ -67,7 +67,7 @@ class HookProtocolTests(unittest.TestCase):
             },
             pretool,
         )
-        self.assertEqual({"Agent", "Task", "Skill"}, posttool)
+        self.assertEqual({"Bash", "Agent", "Task", "Skill"}, posttool)
 
     def test_real_registration_dispatch_blocks_cross_platform_writers(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:

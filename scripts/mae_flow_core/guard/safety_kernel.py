@@ -12,7 +12,12 @@ from .command_policy import (
     dangerous_bash_result,
     recursive_delete_facts,
 )
-from .manifest import DeliveryManifest, authorize_delivery, compare_staged
+from .manifest import (
+    DeliveryManifest,
+    authorize_delivery,
+    git_receipt_error,
+    unknown_git_alias,
+)
 from .intent import (
     is_documentation as _is_documentation,
     is_local_work_package as _is_local_work_package,
@@ -25,7 +30,6 @@ from .intent import (
 
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
 _FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
-_QUALITY_SOURCE_FIX_APPROVED = "quality.source_fix_approved"
 @dataclass(frozen=True)
 class SafetyDecision:
     allow: bool
@@ -83,12 +87,7 @@ def _source_edit_allowed(state):
         return _has_decision(state, _FOCUSED_SCOPE_APPROVED)
     if state.path != DeliveryPath.FULL:
         return False
-    if state.phase == Phase.CONSTRUCTION:
-        return True
-    return (
-        state.phase == Phase.QUALITY
-        and _has_decision(state, _QUALITY_SOURCE_FIX_APPROVED)
-    )
+    return state.phase == Phase.CONSTRUCTION
 
 
 def _relative_write_targets(context, tool, tool_input):
@@ -328,29 +327,11 @@ def _stage_decision(context, intent):
             "git_staging",
             "Startup-dirty files require explicit manifest adoption.",
         )
+    receipt_error = git_receipt_error(
+        context.state, "add", requested.files, intent.arguments)
+    if receipt_error:
+        return _block("git_staging", receipt_error)
     return _allow("git_staging")
-
-
-def _exact_manifest_decision(context, actual_files, rule):
-    manifest = _manifest(context)
-    if (
-            manifest is None
-            or not manifest.files
-            or _manifest_has_unadopted_dirty(context, manifest)):
-        return _block(
-            rule,
-            "Delivery requires an authorized manifest with explicit dirty adoption.",
-        )
-    try:
-        comparison = compare_staged(manifest, actual_files)
-    except (TypeError, ValueError):
-        return _block(rule, "Delivery file facts are not exact repository files.")
-    if not comparison.matches:
-        return _block(
-            rule,
-            "Delivery files do not exactly match the authorized manifest.",
-        )
-    return _allow(rule)
 
 
 def _commit_decision(context, intent):
@@ -371,8 +352,12 @@ def _commit_decision(context, intent):
             "git_commit",
             "Commit message must use [%s][feat|fix]描述." % (ticket or "单号"),
         )
-    return _exact_manifest_decision(
-        context, context.staged_files, "git_commit")
+    receipt_error = git_receipt_error(
+        context.state, "commit", context.staged_files,
+        intent.arguments, message or "")
+    return (
+        _block("git_commit", receipt_error)
+        if receipt_error else _allow("git_commit"))
 
 
 def _commit_message(arguments):
@@ -392,8 +377,11 @@ def _push_decision(context, intent):
             "git_publish",
             "Opaque wrapped Git publish cannot be authorized exactly.",
         )
-    return _exact_manifest_decision(
-        context, context.commit_files, "git_publish")
+    receipt_error = git_receipt_error(
+        context.state, "push", context.commit_files, intent.arguments)
+    return (
+        _block("git_publish", receipt_error)
+        if receipt_error else _allow("git_publish"))
 
 
 def _mutation_precheck(context, tool, tool_input, command):
@@ -434,6 +422,12 @@ def _git_delivery_decision(context, command):
             decision = _push_decision(context, intent)
         if not decision.allow:
             return decision
+    alias = unknown_git_alias(command)
+    if alias:
+        return _block(
+            "git_alias",
+            "Unknown Git alias invocation is fail-closed: %s." % alias,
+        )
     return None
 
 
@@ -486,6 +480,9 @@ def decide_stateless_pretool(
     dangerous = _dangerous_bash_decision(context, command, tool_input)
     if dangerous is not None:
         return dangerous
+    alias = unknown_git_alias(command)
+    if alias:
+        return _block("git_alias", "Unknown Git alias is fail-closed.")
     if any(
             intent.operation in ("commit", "push")
             for intent in git_intent.git_delivery_intents(command)):

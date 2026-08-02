@@ -5,14 +5,11 @@ import os
 import re
 import shlex
 import subprocess
-
 from ..foundation.git_intent import git_delivery_intents
 from ..foundation.git_shell import (
     _global_option_width,
     shell_command_records,
 )
-
-
 GIT_SECS = 5
 _PUSH_VALUE_OPTIONS = {
     "--repo", "--receive-pack", "--exec", "-o", "--push-option",
@@ -43,7 +40,6 @@ _SAFE_PUSH_CONFIG = {
     "useforceifincludes",
 }
 
-
 def _decode_paths(raw):
     encodings = ["utf-8"]
     for encoding in (locale.getpreferredencoding(False), "gb18030"):
@@ -60,7 +56,6 @@ def _decode_paths(raw):
             continue
     return ()
 
-
 def git_paths(root, arguments):
     """Return exact NUL-delimited repository paths or no facts on failure."""
     try:
@@ -75,7 +70,6 @@ def git_paths(root, arguments):
     except (OSError, subprocess.SubprocessError):
         return ()
     return _decode_paths(result.stdout) if result.returncode == 0 else ()
-
 
 def git_text(root, arguments):
     try:
@@ -94,7 +88,6 @@ def git_text(root, arguments):
     paths = _decode_paths(result.stdout + b"\0")
     return paths[0].strip() if len(paths) == 1 else ""
 
-
 def staged_files(root):
     return git_paths(
         root,
@@ -102,14 +95,12 @@ def staged_files(root):
          "-z", "--"),
     )
 
-
 def _context_environment_name(value):
     name = str(value or "").split("=", 1)[0].upper()
     return name if (
         name in {"GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE"}
         or name.startswith("GIT_CONFIG_")
     ) else ""
-
 
 def _remote_changing_config(value):
     key = str(value or "").split("=", 1)[0].casefold()
@@ -129,7 +120,6 @@ def _remote_changing_config(value):
         or key.startswith("includeif.")
         or key.startswith("submodule.")
     )
-
 
 def _inline_context_changed(tokens, git_index, push_index):
     context = tokens[:git_index] + tokens[git_index + 1:push_index]
@@ -164,7 +154,6 @@ def _inline_context_changed(tokens, git_index, push_index):
         value == "--repo" or value.startswith("--repo=")
         for value in tokens[push_index + 1:])
 
-
 def _next_shell_cwd(current, arguments):
     arguments = list(arguments)
     if arguments[:1] == ["--"]:
@@ -180,7 +169,6 @@ def _next_shell_cwd(current, arguments):
             return None
         path = os.path.join(current, path)
     return os.path.normcase(os.path.realpath(path))
-
 
 def _next_context_environment(active, operation, arguments):
     if active is None:
@@ -203,7 +191,6 @@ def _next_context_environment(active, operation, arguments):
                 updated.add(name)
     return frozenset(updated)
 
-
 def _operation_position(tokens):
     index = 0
     while index < len(tokens) and _ASSIGNMENT.fullmatch(tokens[index]):
@@ -211,7 +198,6 @@ def _operation_position(tokens):
     while index < len(tokens) and tokens[index] == "!":
         index += 1
     return index
-
 
 def _persistent_context_after(state, tokens):
     cwd, environment, opaque = state
@@ -223,7 +209,6 @@ def _persistent_context_after(state, tokens):
                 environment, "assignment", tokens),
             opaque,
         )
-
     operation = tokens[operation_index].casefold()
     arguments = tokens[operation_index + 1:]
     if operation == "cd":
@@ -482,3 +467,33 @@ def push_commit_files(
          remote_commit + ".." + source_commit, "--"),
     )
     return tuple(dict.fromkeys(paths))
+
+
+def head_sha(root, unused_payload=None):
+    return git_text(root, ("rev-parse", "--verify", "HEAD^{commit}"))
+
+
+def head_commit_files(root, unused_payload=None):
+    return git_paths(
+        root,
+        ("show", "--format=", "--name-only", "-z", "HEAD", "--"),
+    )
+
+
+def push_destination_sha(root, payload):
+    tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if payload.get("tool_name") != "Bash" or not isinstance(command, str):
+        return ""
+    pushes = tuple(
+        intent for intent in git_delivery_intents(command)
+        if intent.operation == "push" and not intent.opaque_pathspec)
+    if len(pushes) != 1:
+        return ""
+    records = shell_command_records(command)
+    if records is None or _changes_repository_context(root, records, 1):
+        return "invalid-repository-context"
+    endpoints = _push_endpoints(root, pushes[0].arguments, git_text)
+    return (
+        git_text(root, ("rev-parse", "--verify", endpoints[1] + "^{commit}"))
+        if endpoints else "")

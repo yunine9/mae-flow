@@ -16,7 +16,9 @@ from ..application.hooks.lean_events import (
     handle_lean_hook_event,
 )
 from ..application.hooks.capability_observation import (
+    complete_git_posttool,
     handle_capability_posttool,
+    reserve_git_pretool,
 )
 from ..application.hooks.models import HookResponse
 from ..guard.command_policy import recursive_delete_facts
@@ -56,6 +58,9 @@ class LeanHookFactPorts:
     current_dirty_fingerprints: object = _empty_paths
     safe_write_targets: object = _empty_paths
     task_owned_temp_dir: object = _empty_paths
+    head_sha: object = _empty_paths
+    destination_sha: object = _empty_paths
+    head_commit_files: object = _empty_paths
 
 
 def _decode_json(raw):
@@ -276,6 +281,17 @@ class LeanHookAdapter:
         except (Exception, SystemExit):
             return ""
 
+    def _git_facts(self, payload):
+        return {
+            "staged_files": self._fact_paths(self.facts.staged_files, payload),
+            "commit_files": self._fact_paths(self.facts.commit_files, payload),
+            "head_commit_files": self._fact_paths(
+                self.facts.head_commit_files, payload),
+            "head_sha": self._fact_text(self.facts.head_sha, payload),
+            "destination_sha": self._fact_text(
+                self.facts.destination_sha, payload),
+        }
+
     def _pretool(self, state, payload):
         tool = payload.get("tool_name", "")
         tool_input = payload.get("tool_input", {})
@@ -310,6 +326,10 @@ class LeanHookAdapter:
             )
             decision = decide_pretool(context, tool, tool_input)
         if decision.allow:
+            reservation = reserve_git_pretool(
+                payload, state, self._git_facts(payload), self._update_state)
+            if reservation is not None:
+                return reservation
             return self.capabilities.reserve(state, payload)
         return HookResponse(exit_code=2, stderr=(
             "[mae-flow] %s\n" % (decision.message or decision.rule)))
@@ -325,6 +345,10 @@ class LeanHookAdapter:
             return updated
 
     def _posttool(self, payload):
+        git_result = complete_git_posttool(
+            payload, self._git_facts(payload), self._update_state)
+        if git_result is not None:
+            return git_result
         return handle_capability_posttool(
             payload,
             load_capability_registry(self.root),

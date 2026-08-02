@@ -25,11 +25,17 @@ from mae_flow_core.adapters.lean_hook import (  # noqa: E402
 )
 from mae_flow_core.application.hooks.models import HookResponse  # noqa: E402
 from mae_flow_core.orchestration import (  # noqa: E402
+    AdvanceRequest,
     CapabilityAttempt,
     CommitPace,
     DeliveryPath,
     FlowState,
     Phase,
+    advance_flow,
+)
+from mae_flow_core.orchestration.delivery import (  # noqa: E402
+    DELIVERY_RECEIPT_KEY,
+    issue_delivery_receipt,
 )
 from mae_flow_core.state_store import ProjectStateLock  # noqa: E402
 
@@ -78,6 +84,28 @@ class LeanHookAdapterTests(unittest.TestCase):
         with open(self.state_path, "w", encoding="utf-8") as stream:
             json.dump(state.to_dict(), stream, ensure_ascii=False)
         return state
+
+    def receipt_state(self):
+        state = FlowState(
+            ticket="REQ-5",
+            path=DeliveryPath.FOCUSED,
+            phase=Phase.DELIVERY,
+            commit_pace=CommitPace.CONTINUOUS,
+            delivery_files=("src/a.cpp", "tests/a_test.cpp"),
+            decisions=(
+                ("delivery.commit_message", "[REQ-5][fix]修复提交格式"),
+                ("delivery.plan.remote", "origin"),
+                ("delivery.plan.destination_ref", "refs/heads/main"),
+                ("delivery.plan.expected_destination_sha", "a" * 40),
+                ("delivery.plan.new_branch", "false"),
+            ),
+        )
+        receipt = issue_delivery_receipt(
+            state, "用户确认精确文件、提交信息和远端目标。")
+        return replace(
+            state,
+            decisions=state.decisions + ((DELIVERY_RECEIPT_KEY, receipt),),
+        )
 
     def test_malformed_ordinary_event_fails_open_at_protocol_boundary(self):
         result = self.invoke("PostToolUse", b"{not-json")
@@ -738,7 +766,7 @@ class LeanHookAdapterTests(unittest.TestCase):
                 })
                 self.assertEqual(expected, result.returncode)
 
-    def test_exact_manifest_facts_allow_commit_and_push(self):
+    def test_exact_manifest_without_receipt_or_reservation_cannot_deliver(self):
         state = replace(
             self.write_state(),
             phase=Phase.DELIVERY,
@@ -760,7 +788,97 @@ class LeanHookAdapterTests(unittest.TestCase):
                     "tool_name": "Bash",
                     "tool_input": {"command": command},
                 })
-                self.assertEqual(0, response.exit_code, response.stderr)
+                self.assertEqual(2, response.exit_code, response.stderr)
+
+    def test_git_reservation_and_post_facts_complete_the_exact_receipt(self):
+        self.write_state(self.receipt_state())
+        repository = {
+            "staged": (),
+            "head": "1" * 40,
+            "destination": "a" * 40,
+            "head_files": (),
+        }
+        files = ("tests/a_test.cpp", "src/a.cpp")
+        facts = LeanHookFactPorts(
+            staged_files=lambda unused: repository["staged"],
+            commit_files=lambda unused: files,
+            head_sha=lambda unused: repository["head"],
+            destination_sha=lambda unused: repository["destination"],
+            head_commit_files=lambda unused: repository["head_files"],
+        )
+        adapter = LeanHookAdapter(
+            self.root, marker_root=self.marker_root, fact_ports=facts)
+        steps = (
+            ("add-1", "git add src/a.cpp tests/a_test.cpp", "add"),
+            (
+                "commit-1",
+                "git commit -m '[REQ-5][fix]修复提交格式'",
+                "commit",
+            ),
+            (
+                "push-1",
+                "git push --force-with-lease=refs/heads/main:%s "
+                "origin HEAD:refs/heads/main" % ("a" * 40),
+                "push",
+            ),
+        )
+        for tool_use_id, command, operation in steps:
+            with self.subTest(operation=operation):
+                pre = adapter.handle("PreToolUse", {
+                    "tool_name": "Bash",
+                    "tool_use_id": tool_use_id,
+                    "tool_input": {"command": command},
+                })
+                self.assertEqual(0, pre.exit_code, pre.stderr)
+                if operation == "add":
+                    repository["staged"] = files
+                elif operation == "commit":
+                    repository["head"] = "b" * 40
+                    repository["head_files"] = files
+                else:
+                    repository["destination"] = "b" * 40
+                post = adapter.handle("PostToolUse", {
+                    "tool_name": "Bash",
+                    "tool_use_id": tool_use_id,
+                    "tool_input": {"command": command},
+                    "tool_response": "opaque host return",
+                })
+                self.assertEqual(0, post.exit_code, post.stderr)
+
+        with open(self.state_path, encoding="utf-8") as stream:
+            state = FlowState.from_dict(json.load(stream))
+        keys = [key for key, unused in state.decisions]
+        self.assertEqual(1, keys.count("delivery.git.commit_observation"))
+        self.assertEqual(1, keys.count("delivery.git.push_observation"))
+        completed = advance_flow(
+            state,
+            AdvanceRequest(
+                "delivery-completed",
+                decision_value="Hook observed the exact Git effects.",
+            ),
+        )
+        self.assertEqual("complete", completed.state.status)
+
+    def test_git_reservation_persistence_failure_is_fail_closed(self):
+        self.write_state(self.receipt_state())
+        facts = LeanHookFactPorts(
+            staged_files=lambda unused: (),
+            head_sha=lambda unused: "1" * 40,
+        )
+        adapter = LeanHookAdapter(
+            self.root, marker_root=self.marker_root, fact_ports=facts)
+        adapter._update_state = mock.Mock(side_effect=OSError("disk full"))
+
+        response = adapter.handle("PreToolUse", {
+            "tool_name": "Bash",
+            "tool_use_id": "add-fail",
+            "tool_input": {
+                "command": "git add src/a.cpp tests/a_test.cpp",
+            },
+        })
+
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("reservation", response.stderr.lower())
 
     def test_exact_manifest_does_not_bypass_commit_message_contract(self):
         state = replace(

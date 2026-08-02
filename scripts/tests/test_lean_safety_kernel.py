@@ -26,6 +26,10 @@ from mae_flow_core.orchestration import (  # noqa: E402
     FlowState,
     Phase,
 )
+from mae_flow_core.orchestration.delivery import (  # noqa: E402
+    DELIVERY_RECEIPT_KEY,
+    issue_delivery_receipt,
+)
 
 
 FIXTURE_PATH = os.path.join(
@@ -49,12 +53,13 @@ def _state(
         decisions=(),
         delivery_files=(),
         initial_dirty=(),
-        capabilities=()):
+        capabilities=(),
+        commit_pace=CommitPace.STAGED):
     return FlowState(
         ticket="REQ-7",
         path=path,
         phase=phase,
-        commit_pace=CommitPace.STAGED,
+        commit_pace=commit_pace,
         decisions=decisions,
         delivery_files=delivery_files,
         initial_dirty=initial_dirty,
@@ -73,6 +78,28 @@ def _context(state, repository_root="/repo", **overrides):
     }
     values.update(overrides)
     return SafetyContext(**values)
+
+
+def _with_final_receipt(state):
+    decisions = state.decisions + (
+        ("delivery.commit_message", "[REQ-7][fix]修复查询映射"),
+        ("delivery.plan.remote", "origin"),
+        ("delivery.plan.destination_ref", "refs/heads/main"),
+        ("delivery.plan.expected_destination_sha", "a" * 40),
+        ("delivery.plan.new_branch", "false"),
+    )
+    planned = replace(
+        state,
+        phase=Phase.DELIVERY,
+        commit_pace=CommitPace.CONTINUOUS,
+        decisions=decisions,
+    )
+    receipt = issue_delivery_receipt(
+        planned, "User confirmed the exact Git delivery plan.")
+    return replace(
+        planned,
+        decisions=planned.decisions + ((DELIVERY_RECEIPT_KEY, receipt),),
+    )
 
 
 class LeanSafetyKernelFixtureTests(unittest.TestCase):
@@ -97,6 +124,8 @@ class LeanSafetyKernelFixtureTests(unittest.TestCase):
             delivery_files=authorized,
             initial_dirty=dirty,
         )
+        if authorized and item["operation_family"].startswith("git_"):
+            state = _with_final_receipt(state)
         context = _context(
             state,
             repository_root=root,
@@ -169,7 +198,7 @@ class SourceEditAuthorizationTests(unittest.TestCase):
             {"targets": (target,)},
         )
 
-    def test_full_source_edits_require_construction_or_quality_fix_approval(self):
+    def test_full_source_edits_require_explicit_construction_phase(self):
         construction = self.decision(
             _state(phase=Phase.CONSTRUCTION), "src/main.py")
         story = self.decision(
@@ -190,7 +219,10 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         self.assertTrue(construction.allow)
         self.assertEqual((False, "source_edit"), (story.allow, story.rule))
         self.assertEqual((False, "source_edit"), (quality.allow, quality.rule))
-        self.assertTrue(approved_quality.allow)
+        self.assertEqual(
+            (False, "source_edit"),
+            (approved_quality.allow, approved_quality.rule),
+        )
 
     def test_non_bash_command_text_is_never_treated_as_shell_execution(self):
         decision = decide_pretool(
@@ -504,7 +536,7 @@ class GitManifestSafetyTests(unittest.TestCase):
             "delivery_files": ("src/a.cpp", "tests/a_test.cpp"),
         }
         values.update(overrides)
-        return _state(**values)
+        return _with_final_receipt(_state(**values))
 
     def bash(self, state, command, **facts):
         return decide_pretool(
@@ -512,6 +544,41 @@ class GitManifestSafetyTests(unittest.TestCase):
             "Bash",
             {"command": command},
         )
+
+    def test_git_effects_require_current_receipt_and_exact_bound_fields(self):
+        bare = _state(
+            phase=Phase.DELIVERY,
+            delivery_files=("src/a.cpp", "tests/a_test.cpp"),
+            commit_pace=CommitPace.CONTINUOUS,
+        )
+        exact = ("src/a.cpp", "tests/a_test.cpp")
+        self.assertFalse(self.bash(
+            bare, "git add src/a.cpp tests/a_test.cpp").allow)
+
+        state = self.manifest_state()
+        allowed_add = self.bash(
+            state, "git add src/a.cpp tests/a_test.cpp")
+        wrong_message = self.bash(
+            state, "git commit -m '[REQ-7][fix]其他信息'",
+            staged_files=exact)
+        exact_message = self.bash(
+            state, "git commit -m '[REQ-7][fix]修复查询映射'",
+            staged_files=exact)
+        implicit_push = self.bash(
+            state, "git push origin HEAD", commit_files=exact)
+        canonical_push = self.bash(
+            state,
+            "git push --force-with-lease=refs/heads/main:%s "
+            "origin HEAD:refs/heads/main" % ("a" * 40),
+            commit_files=exact,
+        )
+
+        self.assertTrue(allowed_add.allow)
+        self.assertFalse(wrong_message.allow)
+        self.assertTrue(exact_message.allow)
+        self.assertFalse(implicit_push.allow)
+        self.assertFalse(canonical_push.allow)
+        self.assertIn("observed", canonical_push.message.lower())
 
     def test_broad_staging_and_commit_options_block_before_manifest_checks(self):
         state = self.manifest_state()
@@ -542,7 +609,8 @@ class GitManifestSafetyTests(unittest.TestCase):
             commit.allow, commit.rule))
 
     def test_git_pathspec_magic_cannot_be_authorized_as_an_exact_file(self):
-        state = self.manifest_state(
+        state = _state(
+            phase=Phase.DELIVERY,
             delivery_files=(":(exclude)README.md",))
 
         add = self.bash(state, "git add -- ':(exclude)README.md'")
@@ -596,7 +664,7 @@ class GitManifestSafetyTests(unittest.TestCase):
                 "git commit --pathspec-from-file=paths.txt -m second && "
                 "git push origin main",
                 {"staged_files": exact, "commit_files": exact},
-                "git_commit",
+                "git_staging",
             ),
             (
                 "git push origin main && "
@@ -652,13 +720,14 @@ class GitManifestSafetyTests(unittest.TestCase):
         cases = (
             ("git commit -m update", False),
             ("git commit -m '[REQ-8][fix]错误单号'", False),
-            ("git commit -m '[REQ-7][feat]实现查询条件'", True),
-            ("git commit -m '[REQ-7][feat]保留尾部空格 '", True),
-            ("git commit -m '[REQ-7][feat]摘要\n正文'", True),
+            ("git commit -m '[REQ-7][fix]修复查询映射'", True),
+            ("git commit -m '[REQ-7][feat]实现查询条件'", False),
+            ("git commit -m '[REQ-7][feat]保留尾部空格 '", False),
+            ("git commit -m '[REQ-7][feat]摘要\n正文'", False),
             ("git commit -m '[REQ-7][feat] 描述前有空格'", False),
             (
                 'cmd.exe /d /c git commit -m "[REQ-7][fix]修复结果映射"',
-                True,
+                False,
             ),
         )
         for command, expected_allow in cases:
@@ -698,7 +767,7 @@ class GitManifestSafetyTests(unittest.TestCase):
             commit_files=("src/a.cpp", "README.md"),
         )
 
-        self.assertTrue(exact.allow)
+        self.assertFalse(exact.allow)
         self.assertEqual((False, "git_publish"), (
             mismatch.allow, mismatch.rule))
 
@@ -718,9 +787,9 @@ class GitManifestSafetyTests(unittest.TestCase):
             commit_files=("src/a.cpp",),
         )
 
-        self.assertEqual((False, "git_commit"), (
+        self.assertEqual((False, "git_staging"), (
             commit_after_add.allow, commit_after_add.rule))
-        self.assertEqual((False, "git_publish"), (
+        self.assertEqual((False, "git_commit"), (
             push_after_commit.allow, push_after_commit.rule))
 
     def test_startup_dirty_path_requires_explicit_manifest_adoption(self):
@@ -870,6 +939,15 @@ class GitManifestSafetyTests(unittest.TestCase):
         for command in commands:
             with self.subTest(command=command):
                 self.assertTrue(self.bash(state, command).allow)
+
+    def test_hidden_repository_or_global_git_aliases_fail_closed(self):
+        state = self.manifest_state()
+
+        hidden = self.bash(state, "git ship")
+        known = self.bash(state, "git status --short")
+
+        self.assertEqual((False, "git_alias"), (hidden.allow, hidden.rule))
+        self.assertTrue(known.allow)
 
 
 class PublicValueTests(unittest.TestCase):

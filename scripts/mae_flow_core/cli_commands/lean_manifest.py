@@ -16,7 +16,6 @@ _DELIVERY_BINDING_KEYS = {
     "delivery.confirmed_file",
     "delivery.receipt",
     "delivery.result",
-    "delivery.git.commit_observation",
     "delivery.git.push_observation",
 }
 _STAGED_FINAL_FILE = "delivery.staged_final_file"

@@ -22,6 +22,9 @@ from mae_flow_core.adapters.lean_hook import (
     LeanHookFactPorts,
 )
 from mae_flow_core.adapters.hook_git_facts import (
+    head_commit_files,
+    head_sha,
+    push_destination_sha,
     push_commit_files as _push_commit_files,
     staged_files,
 )
@@ -147,6 +150,9 @@ def _lean_adapter():
     facts = LeanHookFactPorts(
         staged_files=lambda unused_payload: staged_files(root),
         commit_files=lambda payload: _push_commit_files(root, payload),
+        head_sha=lambda payload: head_sha(root, payload),
+        destination_sha=lambda payload: push_destination_sha(root, payload),
+        head_commit_files=lambda payload: head_commit_files(root, payload),
     )
     return LeanHookAdapter(root, fact_ports=facts)
 

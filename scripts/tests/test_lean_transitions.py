@@ -428,27 +428,27 @@ class FullTransitionTests(unittest.TestCase):
                 ("delivery.cp.CP2.message", "[REQ-42][fix]complete CP2"),
             ),
         )
-        confirmed = advance_flow(
+        missing_final = advance_flow(
             state,
             AdvanceRequest("delivery-confirmed", decision_value="Deliver union."),
-        ).state
-        missing_final = advance_flow(
-            confirmed,
-            AdvanceRequest("delivery-completed", decision_value="Pushed."),
         )
         finalized = replace(
-            confirmed,
-            decisions=confirmed.decisions + (
+            state,
+            decisions=state.decisions + (
                 ("delivery.staged_final_file", "src/a.cpp"),
                 ("delivery.staged_final_file", "src/b.cpp"),
             ),
         )
-        completed = advance_flow(
+        confirmed = advance_flow(
             finalized,
+            AdvanceRequest("delivery-confirmed", decision_value="Deliver union."),
+        ).state
+        completed = advance_flow(
+            confirmed,
             AdvanceRequest("delivery-completed", decision_value="Pushed."),
         )
 
-        self.assertEqual("active", missing_final.state.status)
+        self.assertIs(state, missing_final.state)
         self.assertIn("final", missing_final.reason.lower())
         self.assertEqual("complete", completed.state.status)
 

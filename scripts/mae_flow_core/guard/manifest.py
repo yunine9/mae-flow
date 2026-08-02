@@ -2,15 +2,26 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+import json
 import ntpath
 import os
 import re
 
+from ..foundation.git_shell import git_invocations
 from ..orchestration.models import FlowState
 
 
 _GLOB_CHARACTERS = re.compile(r"[*?\[\]]")
 _ADOPTION_DECISION = "delivery.adopted_dirty"
+_GIT_BUILTINS = frozenset("""
+add am apply archive bisect blame branch bundle cat-file check-ref-format
+checkout cherry cherry-pick clean clone commit config describe diff difftool
+fetch for-each-ref format-patch fsck gc grep init log ls-files maintenance
+merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog
+remote repack replace reset restore rev-list rev-parse revert rm show show-branch
+sparse-checkout stash status submodule switch symbolic-ref tag update-index
+worktree
+""".split())
 
 
 def _is_absolute(path):
@@ -236,3 +247,185 @@ def authorize_delivery(state, manifest):
         delivery_files=manifest.files,
         decisions=decisions,
     )
+
+
+def _git_receipt(state):
+    from ..orchestration.transition_facts import (
+        DELIVERY_RECEIPT_KEY,
+        checkpoint_receipt_key,
+        decision_values,
+        load_delivery_receipt,
+        valid_delivery_receipt,
+    )
+
+    if state.status != "active" or state.risks:
+        return None
+    checkpoint = ""
+    key = DELIVERY_RECEIPT_KEY
+    if state.phase.value == "construction":
+        checkpoint = state.current_cp
+        if not checkpoint:
+            return None
+        key = checkpoint_receipt_key(checkpoint)
+    elif state.phase.value != "delivery":
+        return None
+    values = decision_values(state, key)
+    if len(values) != 1 or not valid_delivery_receipt(
+            state, values[0], checkpoint):
+        return None
+    try:
+        return load_delivery_receipt(values[0])
+    except ValueError:
+        return None
+
+
+def _observed_commit_count(state, digest):
+    count = 0
+    for key, raw in state.decisions:
+        if key != "delivery.git.commit_observation":
+            continue
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if (isinstance(value, dict)
+                and value.get("receipt_digest") == digest):
+            count += 1
+    return count
+
+
+def _commit_observations(state):
+    values = []
+    for key, raw in state.decisions:
+        if key != "delivery.git.commit_observation":
+            continue
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            values.append(value)
+    return values
+
+
+def _all_receipt_commits_observed(state, receipt):
+    from ..orchestration.transition_facts import (
+        checkpoint_receipt_key,
+        decision_values,
+        load_delivery_receipt,
+        valid_delivery_receipt,
+    )
+
+    observations = _commit_observations(state)
+    for checkpoint, files, unused_message in receipt.commits:
+        digest = receipt.digest
+        if checkpoint and state.path.value == "full":
+            values = decision_values(state, checkpoint_receipt_key(checkpoint))
+            if (len(values) != 1
+                    or not valid_delivery_receipt(
+                        state, values[0], checkpoint)):
+                return False
+            digest = load_delivery_receipt(values[0]).digest
+        match = next((
+            value for value in observations
+            if value.get("receipt_digest") == digest
+            and _same_git_files(files, value.get("files", ()))
+        ), None)
+        if match is None:
+            return False
+        observations.remove(match)
+    return True
+
+
+def _same_git_files(expected, actual):
+    try:
+        return _by_identity(_normalize_paths(expected)) == _by_identity(
+            _normalize_paths(actual))
+    except (TypeError, ValueError):
+        return False
+
+
+def _canonical_push_arguments(receipt):
+    lease = "--force-with-lease=%s:%s" % (
+        receipt.destination_ref, receipt.expected_destination_sha)
+    return (
+        lease,
+        receipt.remote,
+        "HEAD:%s" % receipt.destination_ref,
+    )
+
+
+def git_receipt_error(
+        state, operation, actual_files=(), arguments=(), message=""):
+    """Return why one Git effect is outside the current user receipt."""
+    receipt = _git_receipt(state)
+    if receipt is None:
+        return "Git delivery requires one current exact user receipt."
+    observed = _observed_commit_count(state, receipt.digest)
+    if operation in {"add", "commit"}:
+        if operation not in receipt.requested_actions:
+            return "The current receipt does not request this Git effect."
+        if observed >= len(receipt.commits):
+            return "Every commit requested by the receipt is already observed."
+        unused_checkpoint, files, expected_message = receipt.commits[observed]
+        if not _same_git_files(files, actual_files):
+            return "Git files must equal the next exact receipt commit."
+        if operation == "commit" and message != expected_message:
+            return "Commit message must equal the current receipt message."
+    elif operation == "push":
+        if "push" not in receipt.requested_actions:
+            return "The current receipt does not request a push."
+        required_commits = receipt.requested_actions.count("commit")
+        if observed < required_commits:
+            return "Push requires every receipt commit to be observed first."
+        if not _all_receipt_commits_observed(state, receipt):
+            return "Push requires repository observation of every receipt commit."
+        if tuple(arguments) != _canonical_push_arguments(receipt):
+            return (
+                "Push must use the receipt's canonical explicit remote, "
+                "destination ref, and force-with-lease SHA.")
+        if (not receipt.new_branch
+                and not _same_git_files(receipt.files, actual_files)):
+            return "Published files must equal the exact receipt manifest."
+    else:
+        return "Unsupported Git delivery operation."
+    return ""
+
+
+def git_receipt_reservation(
+        state, operation, actual_files=(), arguments=(), message=""):
+    """Return immutable reservation facts after the same exact authorization."""
+    error = git_receipt_error(
+        state, operation, actual_files, arguments, message)
+    if error:
+        raise ValueError(error)
+    receipt = _git_receipt(state)
+    observed = _observed_commit_count(state, receipt.digest)
+    files = receipt.files
+    expected_message = ""
+    if operation in {"add", "commit"}:
+        unused_checkpoint, files, expected_message = receipt.commits[observed]
+    return {
+        "receipt_digest": receipt.digest,
+        "files": list(files),
+        "message": expected_message,
+        "remote": receipt.remote,
+        "destination_ref": receipt.destination_ref,
+        "expected_destination_sha": receipt.expected_destination_sha,
+        "new_branch": receipt.new_branch,
+    }
+
+
+def unknown_git_alias(command):
+    inline_read_only = set(re.findall(
+        r"alias\.([A-Za-z0-9_-]+)=(?:['\"])?"
+        r"(?:log|status|diff|show|grep|blame)\b",
+        command,
+        re.I,
+    ))
+    known_inline = {name.casefold() for name in inline_read_only}
+    return next((
+        operation for operation, unused in git_invocations(command)
+        if operation not in _GIT_BUILTINS
+        and operation.casefold() not in known_inline
+    ), "")

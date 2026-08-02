@@ -210,11 +210,58 @@ def _python_record(arguments):
     return paths, opaque, False
 
 
+def _literal_targets(values):
+    values = tuple(values)
+    literal = tuple(value for value in values if not _DYNAMIC_PATH.search(value))
+    return literal, len(literal) != len(values) or not bool(values)
+
+
+def _in_place_script_targets(arguments):
+    in_place = any(
+        re.match(r"^-[A-Za-z]*i", token) or token.startswith("--in-place")
+        for token in arguments
+    )
+    if not in_place:
+        return (), False
+    program_options = {"-e", "-E", "--expression", "-I"}
+    values = _non_options(arguments, program_options)
+    explicit_program = any(
+        token.split("=", 1)[0] in program_options for token in arguments)
+    targets = values if explicit_program else values[1:]
+    return _literal_targets(targets)
+
+
 def _record_mutation(record):
     executable = _name(record.executable)
     arguments = tuple(record.arguments)
     if executable == "sed":
         return _sed_targets(arguments), False, False
+    if executable == "truncate":
+        targets = _non_options(
+            arguments, {"-s", "--size", "-r", "--reference"})
+        paths, opaque = _literal_targets(targets)
+        return paths, opaque, False
+    if executable == "dd":
+        outputs = tuple(
+            token.split("=", 1)[1]
+            for token in arguments if token.startswith("of=")
+        )
+        if not outputs:
+            return (), False, False
+        paths, opaque = _literal_targets(outputs)
+        return paths, opaque, False
+    if executable in {"perl", "ruby"}:
+        paths, opaque = _in_place_script_targets(arguments)
+        return paths, opaque, False
+    if executable == "patch":
+        if any(token in {"--dry-run", "-C"} for token in arguments):
+            return (), False, False
+        return (), True, False
+    if executable == "git" and arguments[:1] == ("apply",):
+        if any(token in {"--check", "--stat", "--numstat", "--summary"}
+               for token in arguments[1:]):
+            return (), False, False
+        return (), True, False
     if executable == "tee":
         return _non_options(arguments, {"--output-error"}), False, False
     if executable in {"cp", "copy", "copy.exe"}:

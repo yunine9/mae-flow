@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+import os
 
 from ..foundation import git_intent
 from ..foundation.commit_message import valid_business_commit_message
@@ -467,14 +468,26 @@ def decide_pretool(context, tool, tool_input):
 def decide_stateless_pretool(
         repository_root, tool, tool_input, task_owned_temp_dir=""):
     """Keep confirmed danger blocked when FlowState cannot be decoded."""
-    if str(tool or "").casefold() != "bash":
-        return _allow()
     context = SafetyContext(
         state=None,
         repository_root=repository_root,
         task_owned_temp_dir=task_owned_temp_dir,
     )
-    command = _command(tool_input)
+    normalized_tool = str(tool or "").casefold()
+    command = _command(tool_input) if normalized_tool == "bash" else ""
+    mutation = (
+        classify_command_mutation(command, tool_input) if command else None)
+    classified_input = _classified_write_input(tool_input, mutation)
+    targets, unused_ambiguous = _relative_write_targets(
+        context, tool, classified_input)
+    if (os.path.isfile(os.path.join(repository_root, ".mae-flow.json"))
+            and any(_is_protected_control(path) for path in targets)):
+        return _block(
+            "protected_control",
+            "Corrupt Mae-Flow control files remain single-writer state.",
+        )
+    if normalized_tool != "bash":
+        return _allow()
     if not command:
         return _allow()
     dangerous = _dangerous_bash_decision(context, command, tool_input)

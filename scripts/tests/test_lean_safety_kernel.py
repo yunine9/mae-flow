@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 
@@ -18,6 +19,7 @@ from mae_flow_core.guard.safety_kernel import (  # noqa: E402
     SafetyContext,
     SafetyDecision,
     decide_pretool,
+    decide_stateless_pretool,
 )
 from mae_flow_core.orchestration import (  # noqa: E402
     CapabilityAttempt,
@@ -449,6 +451,56 @@ class SourceEditAuthorizationTests(unittest.TestCase):
                     (blocked.allow, blocked.rule),
                 )
                 self.assertTrue(allowed.allow, command)
+
+    def test_common_codeagent_writers_share_phase_authorization(self):
+        before = _state(phase=Phase.STORY)
+        during = _state(phase=Phase.CONSTRUCTION)
+        commands = (
+            ("truncate -s 0 src/main.py", True),
+            ("dd if=/dev/null of=src/main.py", True),
+            ("perl -pi -e 's/old/new/' src/main.py", True),
+            ("ruby -pi -e 'gsub(/old/, \'new\')' src/main.py", True),
+            ("patch -p0 < change.patch", False),
+            ("git apply change.patch", False),
+        )
+
+        for command, allowed_during_construction in commands:
+            with self.subTest(command=command):
+                blocked = decide_pretool(
+                    _context(before), "Bash", {"command": command})
+                allowed = decide_pretool(
+                    _context(during), "Bash", {"command": command})
+                self.assertEqual(
+                    (False, "source_edit"),
+                    (blocked.allow, blocked.rule),
+                )
+                self.assertEqual(
+                    allowed_during_construction,
+                    allowed.allow,
+                    command,
+                )
+
+    def test_corrupt_state_still_protects_literal_flow_control_writes(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, ".mae-flow.json"), "wb") as stream:
+                stream.write(b"corrupt")
+
+            blocked = decide_stateless_pretool(
+                root,
+                "Bash",
+                {"command": "printf x > .mae-flow.json"},
+            )
+            allowed = decide_stateless_pretool(
+                root,
+                "Bash",
+                {"command": "printf x > src/recovery-note.txt"},
+            )
+
+        self.assertEqual(
+            (False, "protected_control"),
+            (blocked.allow, blocked.rule),
+        )
+        self.assertTrue(allowed.allow)
 
     def test_shell_writers_never_mutate_flow_control_aliases(self):
         state = _state(phase=Phase.CONSTRUCTION)

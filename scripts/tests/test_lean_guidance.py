@@ -113,6 +113,22 @@ class LeanGuidanceTests(unittest.TestCase):
         self.assertIn("does not write, compile, or run formal UT", construction)
         self.assertNotIn("tests leading each behavior change", construction)
 
+    def test_focused_recovery_from_full_only_phases_never_demands_full_reviews(self):
+        for phase in (Phase.SPEC, Phase.STORY):
+            with self.subTest(phase=phase):
+                state = FlowState(
+                    ticket="DTS-RECOVER",
+                    path=DeliveryPath.FOCUSED,
+                    phase=phase,
+                    commit_pace=CommitPace.CONTINUOUS,
+                )
+                text = render_guidance(state)
+                self.assertIn("Focused 恢复路径", text)
+                self.assertIn("Construction", text)
+                self.assertIn("upgrade-to-full", text)
+                self.assertNotIn("exactly once", text)
+                self.assertNotIn("approval of", text)
+
 
 class LeanHarnessTests(unittest.TestCase):
     def run_harness(self, state_path, *arguments):

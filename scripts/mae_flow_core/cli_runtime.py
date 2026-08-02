@@ -33,6 +33,7 @@ from .cli_commands import story_diag as _story_diag
 from .cli_commands import moonlight_commands as _moonlight_commands
 from .cli_commands import lifecycle as _lifecycle
 from .cli_commands import lean_migration as _lean_migration
+from .cli_commands import lean_workflow as _lean_workflow
 from .cli_commands import dispatch as _dispatch
 
 api.register(shared)
@@ -65,6 +66,7 @@ _COMMAND_MODULES = (
     _moonlight_commands,
     _lifecycle,
     _lean_migration,
+    _lean_workflow,
     _dispatch,
 )
 for _module in _COMMAND_MODULES:
@@ -90,8 +92,22 @@ globals().update(api.exports())
 _legacy_main = main
 
 
+def _state_schema(root):
+    path = os.path.join(root, ".mae-flow.json")
+    raw, error = safe_read_json(path)
+    if error:
+        return "corrupt"
+    if not isinstance(raw, dict):
+        return "missing"
+    if raw.get("engine") == "lean-v1" and raw.get("schema_version") == 3:
+        return "lean"
+    if raw.get("schema_version") == 2:
+        return "legacy"
+    return "unsupported"
+
+
 def main():
-    """Intercept migration/current before schema-v2 runtime loading."""
+    """Prefer lean commands without stealing a live schema-v2 flow."""
     args = parse_args()
     root, _ = find_project_root()
     if root != os.getcwd():
@@ -101,8 +117,18 @@ def main():
                 "[mae-flow] 调用目录非项目根,已定位到: %s" % root,
                 file=sys.stderr,
             )
-    if handle_early_state_command(args):
-        return None
+    schema = _state_schema(root)
+    if args.cmd == "migrate-flow":
+        if handle_early_state_command(args):
+            return None
+    if args.cmd == "current" and schema in {"legacy", "corrupt", "unsupported"}:
+        if handle_early_state_command(args):
+            return None
+    route = command_dispatch.lean_route(args.cmd)
+    if route is not None and not (
+            args.cmd == "exit" and schema == "legacy"):
+        return command_dispatch.invoke(
+            route, api.exports(), root=root, args=args)
     return _legacy_main()
 
 class _CliRuntimeModule(types.ModuleType):

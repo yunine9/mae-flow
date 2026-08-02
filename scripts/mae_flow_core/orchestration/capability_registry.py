@@ -69,9 +69,11 @@ DEFAULT_CAPABILITY_REGISTRY = (
         "Task",
         ("subagent_type",),
         {
-            "compile-agent": "build",
             "ut-generator-agent": "ut",
-            "codecheck-fix-agent": "codecheck",
+            "codecheck-advisor-agent": "codecheck",
+            "grill-critic-agent": "grill",
+            "story-generator-agent": "story",
+            "craft-reviewer-agent": "reviewer",
         },
     ),
     CapabilitySelector(

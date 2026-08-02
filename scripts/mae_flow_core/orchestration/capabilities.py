@@ -1,6 +1,6 @@
 """Opaque expensive-capability facts and single-attempt decisions."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from .models import CapabilityAttempt
@@ -23,6 +23,9 @@ class CapabilityKind(str, Enum):
     UNIT_TEST = "ut"
     CODECHECK = "codecheck"
     FORMAL_CODECHECK = "codecheck"
+    REVIEWER = "reviewer"
+    GRILL = "grill"
+    STORY = "story"
 
 
 def _kind(value):
@@ -132,3 +135,36 @@ def record_attempt(attempts, context, outcome, summary=""):
         summary[:SUMMARY_LIMIT],
     )
     return tuple(attempts) + (attempt,)
+
+
+def record_flow_attempt(state, context, outcome, summary=""):
+    """Record one opaque attempt and consume one state-backed retry choice."""
+    from .models import FlowState
+
+    if not isinstance(state, FlowState):
+        raise TypeError("state must be a FlowState")
+    if not isinstance(context, AttemptContext):
+        raise TypeError("context must be an AttemptContext")
+    retry_key = "capability.retry.%s" % context.kind.value
+    used_key = "capability.retry.used.%s" % context.kind.value
+    authorizations = tuple(
+        value for key, value in state.decisions if key == retry_key)
+    used = tuple(value for key, value in state.decisions if key == used_key)
+    available = len(authorizations) > len(used)
+    effective = AttemptContext(
+        context.kind,
+        context.source_revision,
+        context.environment_revision,
+        user_authorized=available,
+    )
+    option = retry_options(state.capabilities, effective)
+    if not option.allowed:
+        raise ValueError(
+            "同一上下文已有能力尝试；需要先记录本轮自然语言重试决定 %s"
+            % retry_key)
+    attempts = record_attempt(
+        state.capabilities, effective, outcome, summary=summary)
+    decisions = state.decisions
+    if available:
+        decisions += ((used_key, authorizations[len(used)]),)
+    return replace(state, capabilities=attempts, decisions=decisions)

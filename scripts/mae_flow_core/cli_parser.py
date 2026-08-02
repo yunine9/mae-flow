@@ -16,18 +16,15 @@ class MFParser(argparse.ArgumentParser):
         me = os.path.abspath(sys.argv[0])
         print("[mae-flow] 参数错误: " + message, file=sys.stderr)
         print(
-            "正确用法(高频三条,直接复制):\n"
+            "正确用法(高频命令,直接复制):\n"
             '  python "%s" current\n'
-            '  python "%s" done [--choice 值] [--set 键=值]\n'
-            '  python "%s" init\n'
-            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
-            "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|migrate-flow|exit"
-            "(用法见 current/exit 指令)。\n"
-            "注意:子命令不带连字符(是 current 不是 --current);"
-            "done 的 --set 可重复,值含空格要加引号；"
-            "高风险裁决先用 messages 取得回答 ID，再传 --message-id；"
-            "不要把用户原话复制进 shell。" % (me, me, me),
+            '  python "%s" start --ticket REQ-123 --path focused '
+            '--pace continuous\n'
+            '  python "%s" decision startup-confirmed "用户的自然语言决定"\n'
+            "其余生产命令: advance|capability-record|manifest|exit|"
+            "ut|codecheck|grill|story|chain；内部轻量建议: lightcheck。\n"
+            "旧状态只用 migrate-flow 单向迁移；不再使用固定 ACK、消息 ID、"
+            "任务卡或证据令牌。" % (me, me, me),
             file=sys.stderr)
         sys.exit(2)
 
@@ -35,6 +32,54 @@ class MFParser(argparse.ArgumentParser):
 def parse_args(argv=None):
     parser = MFParser(prog="mae-flow")
     sub = parser.add_subparsers(dest="cmd", required=True)
+    start = sub.add_parser("start")
+    start.add_argument("--ticket", required=True)
+    start.add_argument("--path", choices=["full", "focused"], required=True)
+    start.add_argument(
+        "--pace", choices=["continuous", "staged"], required=True)
+    start.add_argument("--request", default="")
+    start.add_argument("--moonlight", action="store_true")
+    start.add_argument("--business-file", action="append", default=[])
+    start.add_argument("--allow-commit", action="store_true")
+    start.add_argument("--allow-push", action="store_true")
+
+    advance = sub.add_parser("advance")
+    advance.add_argument("event")
+    advance.add_argument("--decision", default="")
+    advance.add_argument("--key", default="")
+
+    decision = sub.add_parser("decision")
+    decision.add_argument("event")
+    decision.add_argument("text")
+    decision.add_argument("--key", default="")
+
+    capability_record = sub.add_parser("capability-record")
+    capability_record.add_argument(
+        "kind", choices=[
+            "build", "ut", "codecheck", "reviewer", "grill", "story"])
+    capability_record.add_argument(
+        "outcome", choices=[
+            "returned", "failed-to-start", "timed-out", "not-observed"])
+    capability_record.add_argument("--source", required=True)
+    capability_record.add_argument("--environment", required=True)
+    capability_record.add_argument("--summary", default="")
+
+    manifest = sub.add_parser("manifest")
+    manifest.add_argument("--file", action="append", required=True)
+    manifest.add_argument("--adopt-dirty", action="append", default=[])
+    manifest.add_argument("--conditional-document", action="append", default=[])
+    manifest.add_argument("--moonlight-refresh", action="store_true")
+    manifest.add_argument("--allow-commit", action="store_true")
+    manifest.add_argument("--allow-push", action="store_true")
+    manifest.add_argument("--checkpoint")
+    manifest.add_argument("--final", action="store_true")
+    manifest.add_argument("--commit-message")
+    manifest.add_argument("--decision")
+
+    for toolbox_kind in ("ut", "codecheck", "grill", "story", "chain"):
+        toolbox = sub.add_parser(toolbox_kind)
+        toolbox.add_argument("--request", default="")
+        toolbox.add_argument("--file", action="append", default=[])
     init = sub.add_parser("init")
     init.add_argument("--ack")
     init.add_argument(

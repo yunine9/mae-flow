@@ -42,6 +42,7 @@ REQUIRED_ROLE_CAPABILITIES = {
     ("role:cp-implementer-agent", "CP implementer"),
     ("role:compile-agent", "compile agent"),
     ("role:codecheck-fix-agent", "CodeCheck fixer"),
+    ("role:codecheck-advisor-agent", "CodeCheck advisor"),
     ("role:ut-generator-agent", "UT generator"),
 }
 REQUIRED_FILE_CAPABILITIES = {
@@ -215,6 +216,63 @@ class CapabilityPreservationTests(unittest.TestCase):
 
 
 class NativeGuidanceSemanticTests(unittest.TestCase):
+    def test_production_skill_uses_lean_phases_and_once_only_capabilities(self):
+        skill = read_text(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
+        command = read_text(os.path.join(ROOT, "commands", "mae-flow.md"))
+        combined = (skill + "\n" + command).lower()
+        for concept in (
+                "startup", "spec", "story", "construction", "quality",
+                "delivery", "full", "focused", "moonlight", "lightcheck",
+                "codecheck-advisor-agent", "build-fix", "exact files",
+                "one final push"):
+            self.assertIn(concept, combined)
+        for forbidden in (
+                "done --", "agent-task", "task_card", "task card",
+                "message-id", "exact ack", "sleep", "poll", "compile-agent",
+                "codecheck-fix-agent"):
+            self.assertNotIn(forbidden, combined)
+
+    def test_thin_role_prompts_have_no_report_or_delivery_protocol(self):
+        prompts = {
+            name: read_text(os.path.join(ROOT, "agents", name))
+            for name in (
+                "grill-critic-agent.md", "story-generator-agent.md",
+                "craft-reviewer-agent.md", "ut-generator-agent.md")
+        }
+        combined = "\n".join(prompts.values()).lower()
+        for forbidden in (
+                "task_card_sha256", "task card", "任务卡", "_result:",
+                "commit -m", "git commit", "retry loop", "固定首行"):
+            self.assertNotIn(forbidden, combined)
+        self.assertIn("read-only", prompts["grill-critic-agent.md"].lower())
+        self.assertIn("one pass", prompts["grill-critic-agent.md"].lower())
+        self.assertIn("story-template.md", prompts[
+            "story-generator-agent.md"].lower())
+        self.assertIn("how", prompts["story-generator-agent.md"].lower())
+        self.assertIn("testability", prompts[
+            "story-generator-agent.md"].lower())
+        self.assertIn("at most once per cp", prompts[
+            "craft-reviewer-agent.md"].lower())
+        ut = prompts["ut-generator-agent.md"].lower()
+        for concept in (
+                "write", "compile", "run", "final spec", "final story",
+                "current diff", "cumulative"):
+            self.assertIn(concept, ut)
+
+    def test_codecheck_advisor_is_single_pass_advisory_not_a_fixer_chain(self):
+        path = os.path.join(ROOT, "agents", "codecheck-advisor-agent.md")
+        self.assertTrue(os.path.isfile(path), path)
+        text = read_text(path).lower()
+        self.assertIn("exact changed production files", text)
+        self.assertIn("one", text)
+        self.assertIn("fullcheck", text)
+        self.assertIn("opaque", text)
+        self.assertIn("raw-only", text)
+        self.assertIn("disposition", text)
+        for forbidden in (
+                "task_card_sha256", "codecheck_result:", "recheck",
+                "commit", "build"):
+            self.assertNotIn(forbidden, text)
     def test_requirement_branching_observable_what_and_internal_checklist(self):
         text = guidance(self, "grill").lower()
         for concept in (

@@ -6,6 +6,7 @@ from .capabilities import (
     RetryOption,
     automatic_attempt_allowed,
     record_attempt,
+    record_flow_attempt,
     retry_options,
 )
 from .delivery import (
@@ -14,7 +15,14 @@ from .delivery import (
     DeliveryPlan,
     plan_delivery,
 )
-from .models import CapabilityAttempt, CommitPace, DeliveryPath, FlowState, Phase
+from .models import (
+    CapabilityAttempt,
+    CommitPace,
+    DeliveryPath,
+    FlowState,
+    MoonlightAuthorization,
+    Phase,
+)
 from .migration import MigrationResult, migrate_legacy_flow
 from .state_schema import decode_flow_state, encode_flow_state
 from .toolbox import ToolboxRequest, ToolboxResult, run_toolbox_request
@@ -31,6 +39,7 @@ __all__ = [
     "DeliveryPlan",
     "FlowState",
     "MigrationResult",
+    "MoonlightAuthorization",
     "Phase",
     "RetryOption",
     "ToolboxRequest",
@@ -44,6 +53,7 @@ __all__ = [
     "migrate_legacy_flow",
     "plan_delivery",
     "record_attempt",
+    "record_flow_attempt",
     "retry_options",
     "run_toolbox_request",
 ]

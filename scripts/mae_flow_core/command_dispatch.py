@@ -64,12 +64,37 @@ FLOW_ROUTES = MappingProxyType({
 })
 
 
+# Production schema-v3 commands route here first.  The legacy tables stay
+# reachable only until the explicit retirement task classifies old tests and
+# migration behavior; they are not advertised by the Mae-Flow Skill.
+LEAN_ROUTES = MappingProxyType({
+    "start": CommandRoute("cmd_lean_start", ("root", "args")),
+    "current": CommandRoute("cmd_lean_current", ("root", "args")),
+    "advance": CommandRoute("cmd_lean_advance", ("root", "args")),
+    "decision": CommandRoute("cmd_lean_decision", ("root", "args")),
+    "capability-record": CommandRoute(
+        "cmd_lean_capability_record", ("root", "args")),
+    "manifest": CommandRoute("cmd_lean_manifest", ("root", "args")),
+    "exit": CommandRoute("cmd_lean_exit", ("root", "args")),
+    "ut": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "codecheck": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "grill": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "story": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "chain": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "lightcheck": CommandRoute("cmd_lean_lightcheck", ("root", "args")),
+})
+
+
 def action_route(action):
     return ACTION_ROUTES.get(action)
 
 
 def flow_route(command):
     return FLOW_ROUTES.get(command)
+
+
+def lean_route(command):
+    return LEAN_ROUTES.get(command)
 
 
 def invoke(route, handlers, **context):

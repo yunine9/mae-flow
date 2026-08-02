@@ -381,6 +381,15 @@
       "status": "friction-removed"
     },
     {
+      "source": "role:codecheck-advisor-agent",
+      "capability": "CodeCheck advisor",
+      "new_home": "agents/codecheck-advisor-agent.md",
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_codecheck_advisor_is_single_pass_advisory_not_a_fixer_chain"
+      ],
+      "status": "preserved"
+    },
+    {
       "source": "role:ut-generator-agent",
       "capability": "UT generator",
       "new_home": "runtime/guidance/quality.md and the configured UT capability",

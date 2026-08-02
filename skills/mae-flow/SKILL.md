@@ -1,164 +1,101 @@
 ---
 name: mae-flow
-description: 由状态机和工具门禁驱动的端到端需求交付工作流。仅当用户明确表达要交付/开发一个需求或修复一个缺陷时触发:给出了单号（DTS/REQ 开头）、提供了 SE 设计文档、明说"开始做这个需求/落地成代码提 MR",或明确要求使用"月光宝盒/moonlight"无人值守开发。用户仅输入 init、安装、环境等模糊词或意图不明时不要触发,先询问对方想做什么。即使用户贴出完整需求描述,也必须走完整流程,禁止跳过任何阶段直接写代码。
-
+description: 面向开发同事的高效率、高质量需求交付流程；在真正需要人介入时聪明地让人介入。用户明确要求用 Mae-Flow 交付需求、修复缺陷或启动 Moonlight 时使用；普通问答或直接改码不自动接管。
 ---
 
-# Mae-Flow(mae-flow 驱动)
+# Mae-Flow
 
-**全程使用简体中文与用户交流**(代码、命令、报错原文除外),无论用户消息是什么语言或只是一个命令。
-**用户话术纪律(用户界面层彻底封装)**:面向用户的一切展示与提问用公司语言,上游术语不进用户视野——
-openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词不对用户说;统一说法:
-规格条目(=delta spec)、变更目录(=change)、规格定稿(=archive/归档)、方案讨论(=brainstorming)、
-代码精简(=ponytail review)、开发方式=完整开发(full)/已定位问题修复(hotfix)/局部修改(tweak)/
-处理评审意见(review)。
-内部命令、--choice 代号、文件路径、报错原文照旧;doctor/排障输出保留原词(那是给维护人看的)。
+全程用简体中文交流。目标是高效率、高质量；在需要人介入时聪明地让人介入。
 
-本流程**不由你解释和记忆**,由状态机工具驱动。你的职责只有一个循环:
+Mae-Flow 只管理交付语义和恢复游标，专业能力由配置的 Skill/Agent 自己负责。不要解析私有工具输出，不要为证明工具工作而增加格式、凭证或重复执行。
 
-```
-python "<插件目录>/scripts/mae-flow.py" current   # 拿当前步骤指令(用 python,不是 python3——Windows 无 python3 命令)
-→ 严格按打印的指令执行(需要用户确认的,按铁律1:优先 AskUserQuestion,不可用才结束回复等待)
-→ python ".../mae-flow.py" done [--ack|--choice|--set]   # 声明完成,工具校验证据后给出下一步
+## 入口
+
+插件命令统一用 Windows 可用的 `python`：
+
+```text
+python "<插件目录>/scripts/mae-flow.py" current
 ```
 
-首次触发:先 `mae-flow.py init`(已有 .mae-flow.json 则直接 `current` 续跑)。
-脚本路径优先从 hook 注入行读取(每条消息都带 `python "<绝对路径>"`,以它为准);
-注入行缺失时才 Glob 兜底——**注意插件不在项目树内,只在插件安装目录范围内搜,禁止全盘/主目录扫描**;
-还找不到就直接问用户。命令报"python 不存在"是解释器问题不是路径问题,勿因此去搜文件。
-`python` 命令不可用时:**立即停止流程**,告知用户"请先自行安装 Python 3,装好后重新发起",不做任何变通。
+已有状态先 `current`。新需求由用户确认推荐路线后启动：
 
-## 月光宝盒（用户明确开启时覆盖所有“等待用户”指令）
-
-用户消息明确包含“月光宝盒”或“moonlight”时，不走普通 init，直接执行：
-
-```
-python "<插件目录>/scripts/mae-flow.py" moonlight on --ack "月光宝盒"
+```text
+python "<插件目录>/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>"
 ```
 
-若用户原文只有英文 `moonlight`，`--ack` 就原样传 `moonlight`。命令会在无状态时初始化、有在途状态时
-原地切换；之后仍按 current → 执行 → done 循环，但**禁止调用 AskUserQuestion，禁止结束回复等待用户**。
-原本的确认点由本次开启授权替代：根据需求、代码和仓库规则采用不扩大范围的保守结论，写进阶段产物。
-完整启动原话由状态机持久化，/clear 或重启后以 current 打印的「月光宝盒启动需求」恢复，不凭记忆重构需求。
-完整开发仍须生成 UT 行为蓝图、全局 CP 路线图和细粒度 Task，并为每个 CP 运行新鲜的
-PLAN/CODE Reviewer；月光宝盒只旁路人工等待，自动采用连续开发节奏，不得省略这些角色。
-Reviewer 明确标为“人工裁决”的 Finding 不属于无人值守授权，必须执行 current 提示的
-`moonlight blocked` 保留现场到早晨。
+用户可直接用自然语言改方案。把决定一次写入并推进，例如：
 
-质量步骤必须先真实执行并尽力修复。确认继续尝试只会重复消耗时，按 current 给出的命令执行
-`moonlight defer --reason "<遗留+已尝试+风险>"`，把问题写入本地报告并继续；不能谎报 PASS/CLEAN/OK。
-build 只有 tasks 全部完成、实现已提交、仅剩编译问题时才允许 defer，不能拿“尽力而为”跳过需求实现。
-UT 自查后明确是源码缺陷时，先按 current 执行 `moonlight unlock-source --reason "<依据>"`，再修源码；
-done 会回流完整质量链。分支推送后停在 `moonlight_review`，不自动定稿规格。
-若需求材料、权限或外部依赖客观缺失，执行 current 给出的 `moonlight blocked --reason "<现场>"`；
-它会保存报告并允许 Stop Hook 放行，早晨用 `moonlight repair` 从原步骤继续。除此之外主 Agent 提前结束会被打回。
-
-月光宝盒的特殊入口：
-
-- `moonlight report`：查看夜间结果和遗留；
-- `moonlight repair`：根据报告开启下一轮修复，重新跑编译、CodeCheck、UT、最终验证和推送；
-- `moonlight finalize`：早晨检查完成后恢复普通模式并进入规格定稿；评审意见处理直接结束；
-- `moonlight off`：保留断点，恢复普通交互模式。
-
-月光宝盒只允许“带着真实问题继续”，不允许自动豁免、删除/禁用测试、缩小测试范围、伪造执行证据、
-强推或合并。push 失败仍须如实停下，因为本地状态机不能伪造远端成功。
-
-## 用户主动退出（优先级高于 current）
-
-**插件安装不等于流程启用**：项目根没有 `.mae-flow.json` 时，所有源码/命令 Hook 必须完整旁路，
-用户可以照常直接改代码、补 UT；禁止因为看见插件就自行 init。只有用户明确发起 mae-flow 交付后才接管。
-
-用户在任意阶段明确表示“不想继续用流程、后面直接改代码/补 UT”时，**不要把它解释成 skip、goto、
-暂停或普通修改指令**，也不要继续执行 current。最可靠的做法是让用户直接发送：
-
-```
-/mae-flow:mae-flow exit
+```text
+python "<插件目录>/scripts/mae-flow.py" decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"
 ```
 
-UserPromptSubmit Hook 会把这条真实用户事件直接作为授权，原子保存现场并退出，不再二次确认，也不依赖
-可能已经损坏的 ack 账本。明确的“退出 mae-flow，保留现场，后面直接开发”同样可以一次退出；
-“能不能退出/退出会怎样”只是询问，不得误触发。
-如果流程已经到 `end`，所有 Hook 门禁本来就已解除；再次 exit 是幂等成功并保留终态。看到“无需再次退出”
-后立即停止本命令处理，不得继续调用裸 CLI，更不得要求用户去真实终端执行 `exit --interactive`。
-若 Hook/中文捕获本身已坏，把下面命令原样交给用户在**真实终端手动运行**（Agent 的 Bash 管道会被拒）：
+机器事实或普通阶段事件用 `advance`。遇到用户明确退出，立即执行 `exit --reason "<自然语言>"`；退出不回滚业务文件，也不要求再次确认。
 
+## 两条交付路径
+
+- Full：Startup → Spec → Story → Construction → Quality → Delivery。适合行为尚需澄清、跨模块设计、公共接口、兼容性、安全、数据、共享状态或并发风险。
+- Focused：Startup → Construction → Quality → Delivery。适合已定位缺陷、局部修改和评审意见修复。判断只看语义风险，不看行数或文件数；实现中出现上述风险就 `advance upgrade-to-full --decision "<依据>"`。
+
+Full 的五个高价值用户介入点是 Startup、Spec、Story、CP 和 Delivery。Focused 只固定停 Startup 与 Delivery。其余只有真实歧义、设计偏离、Reviewer 取舍、不可逆风险或昂贵能力重试才找用户。每次给用户一张短卡：当前结论、影响、推荐选择和可直接自然语言修改的内容。
+
+## 六个阶段
+
+### Startup
+
+阅读需求、仓库事实和初始脏文件，推荐 Full/Focused 与 Continuous/Staged。用户确认一次即可；不要求固定话术。
+
+### Spec
+
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 在呈审前调用 `grill-critic-agent` 做 one read-only pass；CLEAR 直接继续，只有真实待决分支交用户。Spec 位于 `docs/mae-flow/requirements/<ticket>/spec.md`。
+
+### Story
+
+Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点、类/接口、依赖与数据流、错误和资源语义、CP、验证意图及可测性 seam。调用 `story-generator-agent` 一次，再调用 Design Reviewer 一次。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 durable 路径。
+
+### Construction
+
+按用户确认的 Story 或 Focused 范围完成业务代码。编码时就创建测试所需的生产语义 seam，把稳定框架编排与可变业务判断分开；CP 只累计自然语言 UT handoff，不正式写或跑 UT。
+
+每个 CP 的 CODE Reviewer at most once per CP，只读本 CP diff 和直接集成边界，不形成复查循环。对 changed code 运行一次内部 `lightcheck`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。
+
+### Quality
+
+根据语义影响和用户选择决定质量能力。Full 的通常建议顺序是 CodeCheck → Build → UT，但用户可删减、改序或承担明确风险。
+
+- CodeCheck：调用 `codecheck-advisor-agent` 一次，只给 exact changed production files/functions。它只请求一次正式 fullcheck。主 Agent修安全项；每条结构化意见都要有去向，raw-only 结果原样保留，不自动复验。
+- Build：直接调用配置的 `build-fix` Skill 一次。该 Skill 对自己的编译负责；Mae-Flow 不再另派编译角色，也不猜内部 Maven/g++ 封装的输出。
+- UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
+
+能力返回只记录 `returned | failed-to-start | timed-out | not-observed`：
+
+```text
+python "<插件目录>/scripts/mae-flow.py" capability-record <kind> <outcome> --source <语义上下文> --environment <环境上下文> --summary "<观察摘要>"
 ```
-python "<插件目录>/scripts/mae-flow.py" exit --interactive --reason "切换为普通开发"
-```
 
-退出只保留现场并解除接管，不回滚、不删除业务文件。命令成功后按普通开发请求执行，不再运行
-current/done，也不再自行补流程检查。只有用户后来明确要求“重新接回原流程”时才可执行 init；
-先执行 `messages` 取得本条真实消息 ID：恢复原断点用 `init --message-id <ID>`；保留旧现场开启另一流程
-用 `init --new --message-id <ID>`。普通改码请求不得被 Agent 擅自解释成重新启用。init 会重新取证，
-禁止复用退出前的编译、CodeCheck、UT 或子 agent 令牌。`.mae-flow.json.exited` 只是退出指针，禁止
-移动或改名成主状态；不同单需要并行时仍按一仓一单原则另开 worktree。
+同一上下文不自动重试，不等待、不轮询、不转后台。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次真实调用会消费一次授权。源码或环境有实质变化时本来就有一次新尝试，但仍会消费此前遗留的重试决定，避免以后误用。
 
-## 独立能力（明确点名时不启动完整流程）
+### Delivery
 
-用户明确使用 `/mae-flow:mae-flow ut`、`/mae-flow:mae-flow codecheck` 或 `/mae-flow:mae-flow grill` 时，走
-`mae-flow.py action ...` 轻量任务控制层，**禁止执行 init**。独立任务只保护自己的任务卡和结果记录，
-不启用阶段源码门禁；普通改码始终放行。任务状态位于 `.mae-flow-work/standalone-action.json`，
-24 小时自动失效，用户随时可用 `action cancel` 结束，取消只保留现场、不回滚代码。
+先展示 exact files、初始脏文件归属、质量观察、提交说明和目标分支。只暂存逐个文件，禁止目录、glob、`git add .` 或夹带 Mae-Flow 控制文件。
 
-- UT：专项 Agent 真实生成并运行测试，疑似源码缺陷交用户裁决；
-- CodeCheck：脚本先扫，0 告警不派 Agent，有告警才修复并复验，禁止自动豁免；
-- Grill：主 Agent 与用户逐题交互，只读 critic 在备课后和收尾前各查一次遗漏，不进入设计或编码。
+- Continuous：最终一个 `[单号][feat|fix]描述` 提交，one final push。
+- Staged：每个用户已确认 CP 先记录该 CP exact manifest 和提交说明，再做一个本地提交；同一文件可在后续 CP 继续演进。Delivery 记录所有 CP 的累计 union manifest，只做 one final push。
 
-三者默认不 commit、不 push，支持带着未提交工作区开始，任务卡用 HEAD + 初始文件指纹区分用户原有改动
-和专项 Agent 新改动。存在完整流程状态时不得叠加；由用户先 `/mae-flow:mae-flow exit`，Agent 不得代替用户退出。
-其中独立 UT/CodeCheck 使用两段式启动：`action start` 只解析并冻结文件范围，必须把完整清单展示给用户
-二次确认；用户明确确认当前范围后直接执行 `action confirm-scope`，命令自动读取绑定范围指纹的回答，
-不得拼接固定确认口令。UT 范围至少包含一个被测业务
-文件，空范围或只有测试文件直接拒绝；CodeCheck 自动排除测试文件。确认前不得运行检查、生成测试或派
-专项 Agent，用户要求调整时必须取消后按新范围重开，禁止 Agent 静默扩大范围。
+Spec/行为基线是长期真相源。Story、决策、工程笔记、Chain、Review/CodeCheck 台账和交付说明默认本地；只有用户明确点名该文件进入版本库，才通过 `--conditional-document <exact path>` 选择。
 
-## 铁律(工具管不了、必须你自己守的)
+## Moonlight
 
-1. **🔴 STOP 只用于真正需要用户决策的事项**（模式/范围/豁免/风险裁决）。实现方式按优先级
-   （月光宝盒除外：开启消息已构成本轮统一授权，运行期间不得再询问）:
-   ① 首选平台结构化提问工具(AskUserQuestion):把选项/问题呈现给用户点选,拿到选择即可同轮继续;
-   ② 该工具不可用时,才结束回复纯文本等用户下一条消息。
-   指令里凡是"结束回复等用户/等回答"一律按此优先级理解。
-   禁止代替用户做决定。普通流程选择由 AskUserQuestion 按钮完成，点选后直接 `done --choice ...`，
-   harness 自动读取结果，**不得再让用户补输“确认××”**。编译通过、检查完成、代码已提交等事实由机器
-   证据判断，不得为了阶段收尾索要确认。豁免、修改被测源码、承担风险、强制跳转等高影响动作先执行
-   `messages` 取得当前步骤真实回答 ID，再用 `--message-id <ID>` 强验真；禁止把用户原话复制进 Shell，
-   **伪造、猜测或跨步骤复用消息 ID 是最严重的违规**。
-   编码前 `checkpoint plan` 展示检查点后，用户只选择一次开发节奏；分阶段模式在每个远端收据处才停，
-   一次完成模式中途不停。检查点选择必须使用收据呈现后的新回答，上一批同文案不能复用；月光宝盒不执行这些询问。
-2. **完整流程中禁止执行 current 输出之外的任何流程动作**。不要预判后面的阶段,不要提前做,做完当前步就 done。
-   用户明确发起的独立 UT/CodeCheck/Grill 只执行 `action` 输出的当前动作，不得借机启动或推进完整流程。
-   唯一例外是上面的“用户主动退出”：退出意图一旦明确，优先走 exit，不得用 current 把用户拽回流程。
-3. done 被拒(证据不足/缺配置)时,按报错补齐后重试,禁止绕过工具直接推进。同一确认错误连续出现时，
-   **停止重复执行相同命令，但流程没有锁死，也禁止退出重开来“清故障”**：执行 messages 查看实际提取答案；
-   AskUserQuestion 没回传时，让用户发送当前页面要求的一条普通确认消息即可恢复。配置确认必须先执行
-   `config-review` 生成绑定完整配置与需求文档指纹的确认单，单项“确认 master”不能给整份配置背书。
-   用户确实不想排障仍可走 `/mae-flow:mae-flow exit`；Hook 也坏时用真实终端 `exit --interactive`，任何关卡都不得
-   以“保护质量”为由剥夺退出能力。若失败项明确是
-   COMPILE/CODECHECK/UT/STORY/ASKUSER 等 **Agent 令牌**，报错会同时给出“用户承担风险继续”命令；
-   必须先把具体风险展示给用户并让用户二选一（重试 / 承担风险继续），只有用户明确选后者才能按提示执行
-   `accept-risk`。它不等于 skip/goto，只替代当前步骤这一个令牌，其他机器证据照常检查。
-4. 意图不明的输入(单个词、无单号无文档):先问用户想做什么,不要 init。
-5. 中断恢复:直接 `current` 即回到断点；只按 current 的最小恢复清单读取
-   **规格/设计 → UT 蓝图 → 全局路线图 → 当前 plan → 当前 CP reviews → Git diff/历史**，
-   不回放完整会话；需要看交付阶段与已登记产物用 `spec show`;
-   确需人工修复用 `goto <step> --force` 并告知用户。
-   **Agent 令牌兜底通道**:AskUserQuestion 或专项 Agent 客观异常、继续重跑代价过高时，不再用 goto 跳整步；
-   把报错中的具体风险展示给用户，取得**纯文本或结构化选项的明确确认**后，执行报错给出的
-   `accept-risk <agent> --reason <风险> --message-id <messages输出的ID>`。消息 ID 会与当前步骤用户
-   真实输入精确验真，
-   放行绑定当前步骤、任务卡和 HEAD，代码一变即失效，并写入历史审计。
+Moonlight 是 Full/Focused 上的授权策略，不是另一套流程。用户明确开启时在 `start` 增加 `--moonlight`。只有用户同时点名 exact business files 并授权时，才记录 commit/push 权限；未形成精确 manifest、存在未归属脏文件、风险、能力异常或 push 失败时仍安全停下。
 
-子 agent 契约在 agents/ 各定义文件中;返回只认 `XXX_RESULT:` 标记,无标记/异常中断一律视同失败。
-第一次失败先看真实拒签原因：如果已有可复用执行凭证，只做便宜的报告重答；否则把“重跑预计耗时”和
-“不重跑的具体风险”一起交给用户选择。用户选重试才重启 agent；选承担风险则走 `accept-risk`，
-禁止主 agent 因为自己嫌慢替用户做决定，也禁止无限自动重启。
-被 gate 拦到写入时 **禁止换工具硬绕**(Write 被拦就改 bash 是最坏反应,造成"时灵时不灵"的假象):
-先执行 mae-flow doctor 看当前步骤权限与在建区状态;拦截连续出现三次会在报错里给出用户放行令
-(`allow <编号> --message-id <ID>`)与整步跳过通道,按提示把风险交用户裁决,不要自己找绕路。
-打回消息附「尸检线索」时,**必须把线索原样转告新实例**——死因是某工具持续报错的,提醒新实例按契约
-"带着情报死"条款直接 FAIL/BLOCKED 上报,别让它把同一堵墙再撞一遍。
-重启计数的范围 = **本次进入该步骤内的连续失败**:步骤经 goto/回退重新进入后计数归零;
-agent 一旦合法收尾(令牌到手)计数即清零——不要把整个会话历史里的历次派发终身累加。
-**任何情况下禁止主会话代做子 agent 的专职产出**(STORY/UT/codecheck 修复)——代做会整体绕过契约校验,
-比失败更糟;产出可以晚,不能假。
+manifest 确定后，可用 `--moonlight-refresh --allow-commit --allow-push` 刷新 exact authorization。条件文档仍必须独立点名。Moonlight 不允许强推、隐藏失败、删除测试或用重复调用碰运气。
+
+## 独立工具箱
+
+用户明确只要 UT、CodeCheck、Grill、Story 或 Chain 时，直接调用同名命令。它们是 one-shot，无流程状态、无交付副作用、无自动重试；停止使用就是结束。
+
+## 不可破坏的交付行为
+
+- Agent 只修改任务相关业务文件；用户已有脏文件保持可见，纳入交付前必须自然语言确认归属。
+- 任何提交都使用 exact files 和原有 `[单号][feat|fix]描述` 格式；不提交 Mae-Flow 状态、本地过程目录或未点名条件文档。
+- Reviewer 提供证据，不制造无休止反工；接受修复后不自动再派同一 Reviewer。
+- Build/UT/CodeCheck 是工具箱能力。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。

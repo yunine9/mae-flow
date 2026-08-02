@@ -15,9 +15,17 @@ from mae_flow_core.orchestration import (  # noqa: E402
     AttemptContext,
     CapabilityAttempt,
     CapabilityKind,
+    CommitPace,
+    DeliveryPath,
+    FlowState,
     automatic_attempt_allowed,
     record_attempt,
+    record_flow_attempt,
     retry_options,
+)
+from mae_flow_core.orchestration.capability_registry import (  # noqa: E402
+    DEFAULT_CAPABILITY_REGISTRY,
+    match_capability,
 )
 
 
@@ -127,6 +135,48 @@ class LeanCapabilityTests(unittest.TestCase):
             "build", "production-1", "environment-1")
         self.assertFalse(
             automatic_attempt_allowed(attempts, after_test_change))
+
+    def test_next_real_attempt_consumes_retry_choice_even_after_context_change(self):
+        state = FlowState.new(
+            "REQ-42", DeliveryPath.FOCUSED, CommitPace.CONTINUOUS)
+        state = record_flow_attempt(
+            state, self.build, "timed-out")
+        state = state.with_decision(
+            "capability.retry.build",
+            "用户决定在环境恢复后再试一次。",
+        )
+
+        changed = AttemptContext(
+            "build", "production-2", "environment-2")
+        state = record_flow_attempt(state, changed, "returned")
+
+        self.assertIn(
+            (
+                "capability.retry.used.build",
+                "用户决定在环境恢复后再试一次。",
+            ),
+            state.decisions,
+        )
+        with self.assertRaisesRegex(ValueError, "自然语言重试决定"):
+            record_flow_attempt(state, changed, "returned")
+
+    def test_production_registry_uses_thin_capabilities_not_legacy_fixers(self):
+        cases = (
+            ("compile-agent", None),
+            ("codecheck-fix-agent", None),
+            ("codecheck-advisor-agent", "codecheck"),
+            ("ut-generator-agent", "ut"),
+            ("grill-critic-agent", "grill"),
+            ("story-generator-agent", "story"),
+            ("craft-reviewer-agent", "reviewer"),
+        )
+        for identity, expected in cases:
+            with self.subTest(identity=identity):
+                match = match_capability({
+                    "tool_name": "Task",
+                    "tool_input": {"subagent_type": identity},
+                }, DEFAULT_CAPABILITY_REGISTRY)
+                self.assertEqual(expected, None if match is None else match.kind)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,9 @@ Define WHAT observable outcome is required and what is out of scope.
 
 ## Inspect
 Read the request, current behavior, constraints, acceptance boundaries, and
-unresolved product risks. Run the lightweight, read-only Grill critic exactly once.
+unresolved product risks. After the main Agent drafts the candidate Spec, run
+`grill-critic-agent` exactly once as the read-only requirements critic. It finds
+material ambiguity but never edits the Spec or makes the product decision.
 
 ## Stop for the user
 Stop for genuine product ambiguity or approval of the observable scope.

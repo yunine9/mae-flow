@@ -223,7 +223,9 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         for concept in (
                 "startup", "spec", "story", "construction", "quality",
                 "delivery", "full", "focused", "moonlight", "lightcheck",
-                "codecheck-advisor-agent", "build-fix", "exact files",
+                "grill-critic-agent", "story-generator-agent",
+                "craft-reviewer-agent", "codecheck-advisor-agent",
+                "build-fix", "ut-generator-agent", "exact files",
                 "one final push"):
             self.assertIn(concept, combined)
         for forbidden in (
@@ -244,6 +246,22 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertNotIn("自动预留", quality)
         self.assertNotIn("自动完成", quality)
         self.assertNotIn("capability-record", quality)
+
+    def test_phase_guidance_names_every_required_agent_and_skill(self):
+        skill = read_text(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
+        phases = {
+            name: read_text(os.path.join(ROOT, "flow", "phases", name + ".md"))
+            for name in ("spec", "story", "construction", "quality")
+        }
+        self.assertIn("`grill-critic-agent`", phases["spec"])
+        self.assertIn("`story-generator-agent`", phases["story"])
+        self.assertIn("`craft-reviewer-agent`", phases["story"])
+        self.assertIn("`craft-reviewer-agent`", phases["construction"])
+        for capability in (
+                "`codecheck-advisor-agent`", "`build-fix`",
+                "`ut-generator-agent`"):
+            self.assertIn(capability, phases["quality"])
+        self.assertGreaterEqual(skill.count("`craft-reviewer-agent`"), 2)
 
     def test_thin_role_prompts_have_no_report_or_delivery_protocol(self):
         prompts = {

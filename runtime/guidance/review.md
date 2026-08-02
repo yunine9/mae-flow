@@ -13,6 +13,6 @@ For final conformance, compare the final implementation and final diff with the 
 - Correctness: behavior and accepted scenarios match the confirmed WHAT.
 - Coherence: code structure and dependencies follow the reviewed design decisions, or an explicit deviation is surfaced.
 
-The Design Reviewer runs exactly once per Full Story. The CODE Reviewer runs at most once per CP and inspects that CP's diff plus direct integration boundaries. Accepted fixes do not schedule another reviewer pass.
+Use `craft-reviewer-agent` for both review roles. Run it exactly once per Full Story with the Design Reviewer role. Run it at most once per CP with the CODE Reviewer role over that CP's diff plus direct integration boundaries. Accepted fixes do not schedule another reviewer pass.
 
 Run an integration review only for cross-module coupling, shared state, interface change, or late design change. This choice is based on semantic risk, not file or line count.

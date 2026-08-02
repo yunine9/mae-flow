@@ -4,6 +4,8 @@ Implement the approved outcome in coherent checkpoints and create testability se
 ## Inspect
 Read the current checkpoint, approved story or focused scope, changed interfaces,
 planned testability seams, cumulative UT handoff, and repository state.
+After implementing each checkpoint, run `craft-reviewer-agent` once with the
+CODE Reviewer role over that checkpoint diff and direct integration boundary.
 
 ## Stop for the user
 Stop for a real ambiguity, a meaningful design deviation, an irreversible risk,

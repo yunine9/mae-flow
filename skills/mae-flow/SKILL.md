@@ -46,17 +46,17 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 ### Spec
 
-Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 在呈审前调用 `grill-critic-agent` 做 one read-only pass；CLEAR 直接继续，只有真实待决分支交用户。Spec 位于 `docs/mae-flow/requirements/<ticket>/spec.md`。
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。主 Agent 先形成候选 Spec，再在呈审前调用 `grill-critic-agent` 做 one read-only pass；它只找歧义、遗漏和隐藏取舍，不编辑 Spec、不替用户决定。主 Agent直接吸收明确修正，CLEAR 直接继续，只有真实待决分支交用户。Spec 位于 `docs/mae-flow/requirements/<ticket>/spec.md`。
 
 ### Design
 
-Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点、类/接口、依赖与数据流、错误和资源语义、CP、验证意图及可测性 seam。调用 `story-generator-agent` 一次，再调用 Design Reviewer 一次。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 durable 路径。
+Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点、类/接口、依赖与数据流、错误和资源语义、CP、验证意图及可测性 seam。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 默认写本地 `.mae-flow-work/<ticket>/story.md`，用户明确要求纳入版本库时才选 durable 路径。
 
 ### Construction
 
 按用户确认的 Story 或 Focused 范围完成业务代码。编码时就创建测试所需的生产语义 seam，把稳定框架编排与可变业务判断分开；CP 只累计自然语言 UT handoff，不正式写或跑 UT。
 
-每个 CP 的 CODE Reviewer at most once per CP，只读本 CP diff 和直接集成边界，不形成复查循环。用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
+每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。用 `advance cp-ready --key <CP>` 打开下一 CP，每个 CP 的用户确认独立保存。对本 CP 的 exact changed code 运行一次 `lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 触发编译或再次检查。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
 
 ### Quality
 

@@ -107,6 +107,20 @@ class LeanGuidanceTests(unittest.TestCase):
             self.assertIn("without automatic retry", guidance)
             self.assertIn("real reviewer tradeoff", guidance)
 
+    def test_recovery_guidance_names_exact_phase_capabilities(self):
+        expected = {
+            Phase.SPEC: ("grill-critic-agent",),
+            Phase.STORY: ("story-generator-agent", "craft-reviewer-agent"),
+            Phase.CONSTRUCTION: ("craft-reviewer-agent",),
+            Phase.QUALITY: (
+                "codecheck-advisor-agent", "build-fix", "ut-generator-agent"),
+        }
+        for phase, names in expected.items():
+            with self.subTest(phase=phase):
+                guidance = render_guidance(state_for(phase))
+                for name in names:
+                    self.assertIn(name, guidance)
+
     def test_construction_plans_testability_without_running_formal_ut(self):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
         self.assertIn("testability seams early", construction)

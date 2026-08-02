@@ -3,7 +3,8 @@ Define HOW the approved behavior will be implemented without reopening the speci
 
 ## Inspect
 Read the approved spec, affected architecture, interfaces, test strategy, and
-delivery constraints. Run the lightweight Design Reviewer exactly once.
+delivery constraints. Run `story-generator-agent` exactly once, then run
+`craft-reviewer-agent` exactly once with the Design Reviewer role.
 
 ## Stop for the user
 Stop for a meaningful design deviation or approval of the construction story.

@@ -3,6 +3,9 @@ Assess the complete constructed change with the selected expensive quality capab
 
 ## Inspect
 Read the cumulative UT handoff, full diff, selected capabilities, prior attempts, environment revision, and unresolved risks.
+For selected capabilities, call `codecheck-advisor-agent`, the configured
+`build-fix` Skill, and `ut-generator-agent` by these exact names, each at most
+once for the current slot.
 
 ## Stop for the user
 Stop for a reviewer tradeoff, an irreversible risk, or when any capability

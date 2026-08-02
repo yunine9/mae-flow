@@ -121,7 +121,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertNotIn("需要用户介入", construction.stdout)
 
         upgraded = self.run_cli(
-            "advance", "upgrade-to-full", "--decision",
+            "decision", "upgrade-to-full",
             "发现跨模块兼容性风险，升级完整开发。")
         self.assert_success(upgraded)
         self.assertIn("Path: full", upgraded.stdout)
@@ -317,17 +317,36 @@ class LeanCliTests(unittest.TestCase):
         for key in (
                 "moonlight.allow_push",
                 "delivery.cp.CP1.file",
+                "delivery.commit_message",
+                "delivery.receipt",
                 "delivery.adopted_dirty",
+                "startup.confirmation",
+                "focused.scope_approved",
+                "construction.repair",
+                "quality.selection",
                 "capability.retry.used.build"):
             with self.subTest(key=key):
                 result = self.run_cli(
                     "decision", key, "用户普通说明不能伪造保留事实。")
                 self.assertEqual(2, result.returncode)
                 self.assertIn("保留", result.stderr)
-        allowed = self.run_cli(
-            "decision", "delivery.commit_message",
-            "[REQ-AUTH][fix]修复授权边界")
-        self.assert_success(allowed)
+
+    def test_advance_cannot_self_sign_a_user_owned_transition(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-OWNER", "--path", "focused",
+            "--pace", "continuous"))
+        before = self.state()
+
+        rejected = self.run_cli(
+            "advance", "startup-confirmed", "--decision",
+            "This must not self-sign the user stop.")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("decision", rejected.stderr.lower())
+        self.assertEqual(before, self.state())
+        accepted = self.run_cli(
+            "decision", "startup-confirmed", "用户确认精确修改范围。")
+        self.assert_success(accepted)
 
     def test_semantic_confirmation_rejects_reserved_key_override(self):
         self.assert_success(self.run_cli(
@@ -395,6 +414,40 @@ class LeanCliTests(unittest.TestCase):
         self.assertNotIn("delivery.confirmation", keys)
         self.assertNotIn("delivery.confirmed_file", keys)
         self.assertNotIn("delivery.result", keys)
+
+    def test_manifest_binds_commit_and_explicit_push_target_before_confirmation(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-RECEIPT", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "用户确认局部修改范围。"))
+        state = self.state()
+        state["phase"] = "delivery"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        planned = self.run_cli(
+            "manifest", "--file", "src/a.cpp", "--commit-message",
+            "[REQ-RECEIPT][fix]绑定交付票据", "--remote", "origin",
+            "--destination-ref", "refs/heads/fix/receipt",
+            "--expected-destination-sha", "a" * 40)
+        self.assert_success(planned)
+        confirmed = self.run_cli(
+            "decision", "delivery-confirmed",
+            "用户确认精确文件、提交信息和远端目标。")
+        self.assert_success(confirmed)
+
+        decisions = {
+            item["key"]: item["value"]
+            for item in self.state()["decisions"]
+        }
+        receipt = json.loads(decisions["delivery.receipt"])
+        self.assertEqual("origin", receipt["remote"])
+        self.assertEqual(
+            "refs/heads/fix/receipt", receipt["destination_ref"])
+        self.assertEqual(["add", "commit", "push"],
+                         receipt["requested_actions"])
 
     def test_toolbox_alias_is_stateless_and_never_calls_external_capability(self):
         result = self.run_cli(
@@ -636,23 +689,21 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
-        self.assert_success(self.run_cli(
-            "decision", "cp-confirmed", "用户检视并确认 CP1。"))
         cp1 = self.run_cli(
             "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
-            "--commit-message", "[REQ-STAGE][feat]完成查询入口",
-            "--decision", "用户检视并确认 CP1。")
+            "--commit-message", "[REQ-STAGE][feat]完成查询入口")
         self.assert_success(cp1)
         self.assert_success(self.run_cli(
-            "advance", "cp-ready", "--key", "CP2"))
+            "decision", "cp-confirmed", "用户检视并确认 CP1。"))
         self.assert_success(self.run_cli(
-            "decision", "cp-confirmed", "用户检视并确认 CP2。"))
+            "advance", "cp-ready", "--key", "CP2"))
         cp2 = self.run_cli(
             "manifest", "--checkpoint", "CP2", "--file", "src/a.cpp",
             "--file", "src/b.cpp",
-            "--commit-message", "[REQ-STAGE][feat]完成结果映射",
-            "--decision", "用户检视并确认 CP2。")
+            "--commit-message", "[REQ-STAGE][feat]完成结果映射")
         self.assert_success(cp2)
+        self.assert_success(self.run_cli(
+            "decision", "cp-confirmed", "用户检视并确认 CP2。"))
         bad_final = self.run_cli(
             "manifest", "--final", "--file", "src/a.cpp")
         self.assertEqual(2, bad_final.returncode)
@@ -673,6 +724,9 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
+        self.assert_success(self.run_cli(
+            "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
+            "--commit-message", "[REQ-CP][feat]完成 CP1"))
         first = self.run_cli(
             "decision", "cp-confirmed", "CP1 已检视。")
         self.assert_success(first)
@@ -683,6 +737,9 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(second_ready)
         self.assertIn("需要用户介入: CP", second_ready.stdout)
         self.assertEqual("CP2", self.state()["current_cp"])
+        self.assert_success(self.run_cli(
+            "manifest", "--checkpoint", "CP2", "--file", "src/b.cpp",
+            "--commit-message", "[REQ-CP][feat]完成 CP2"))
         second = self.run_cli(
             "decision", "cp-confirmed", "CP2 已检视。")
         self.assert_success(second)
@@ -696,7 +753,7 @@ class LeanCliTests(unittest.TestCase):
             "value": "CP2 已检视。",
         }, decisions)
 
-    def test_staged_manifest_requires_confirmation_of_the_current_checkpoint(self):
+    def test_staged_manifest_precedes_independent_checkpoint_confirmation(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-CP-MANIFEST", "--path", "full",
             "--pace", "staged"))
@@ -709,21 +766,21 @@ class LeanCliTests(unittest.TestCase):
         arguments = (
             "manifest", "--checkpoint", "CP1", "--file", "src/a.cpp",
             "--commit-message", "[REQ-CP-MANIFEST][feat]完成 CP1",
-            "--decision", "用户检视 CP1 范围。",
         )
 
-        unconfirmed = self.run_cli(*arguments)
-        self.assertEqual(2, unconfirmed.returncode)
-        self.assertIn("当前 CP", unconfirmed.stderr)
+        planned = self.run_cli(*arguments)
+        self.assert_success(planned)
         self.assert_success(self.run_cli(
             "decision", "cp-confirmed", "用户确认 CP1 结果。"))
+        decisions = self.state()["decisions"]
+        self.assertTrue(any(
+            item["key"] == "delivery.cp.CP1.receipt"
+            for item in decisions))
         wrong_cp = self.run_cli(
             "manifest", "--checkpoint", "CP2", "--file", "src/a.cpp",
-            "--commit-message", "[REQ-CP-MANIFEST][feat]完成 CP2",
-            "--decision", "用户检视 CP2 范围。")
+            "--commit-message", "[REQ-CP-MANIFEST][feat]完成 CP2")
         self.assertEqual(2, wrong_cp.returncode)
         self.assertIn("当前 CP", wrong_cp.stderr)
-        self.assert_success(self.run_cli(*arguments))
 
     def test_delivery_card_uses_effective_moonlight_authorization(self):
         self.assert_success(self.run_cli(

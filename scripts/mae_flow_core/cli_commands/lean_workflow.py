@@ -8,7 +8,6 @@ import subprocess
 import sys
 import time
 
-from mae_flow_core.foundation.commit_message import valid_business_commit_message
 from mae_flow_core.orchestration import (
     AdvanceRequest,
     AttemptContext,
@@ -43,6 +42,11 @@ STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
 _KEYED_SEMANTIC_EVENTS = {"risk-resolved", "cp-ready", "cp-progress"}
+_USER_OWNED_EVENTS = {
+    "startup-confirmed", "spec-confirmed", "story-confirmed",
+    "cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
+    "risk-resolved", "upgrade-to-full", "quality-defect-repair",
+}
 
 
 def _die(message):
@@ -291,10 +295,16 @@ def _semantic_request(event, key, decision):
 
 
 def cmd_lean_advance(root, args):
-    def execute():
+    def operation(current):
+        if args.event.strip().lower() in _USER_OWNED_EVENTS:
+            raise ValueError(
+                "该用户决定事件只能使用 decision 与自然语言确认")
         request = _semantic_request(args.event, args.key, args.decision)
+        return _advance_state(current, request)
+
+    def execute():
         state, reason = _mutate(
-            root, lambda current: _advance_state(current, request))
+            root, operation)
         _render(state, reason)
     return _run(execute)
 
@@ -303,17 +313,16 @@ def _validate_natural_decision(state, key, text):
     """Keep user prose separate from facts owned by semantic commands."""
     if not key:
         raise ValueError("自然语言决定的 key 不能为空")
-    if key == "delivery.commit_message":
-        if not valid_business_commit_message(state.ticket, text):
-            raise ValueError("commit message 必须是 [单号][feat|fix]描述")
-        return
     retry_prefix = "capability.retry."
     if key.startswith(retry_prefix):
         kind = key[len(retry_prefix):]
         if kind in _RETRY_KINDS:
             return
         raise ValueError("该 capability key 是流程保留事实，不能直接写入")
-    if key.startswith(("capability.", "moonlight.", "delivery.", "review.")):
+    if key.startswith((
+            "capability.", "moonlight.", "delivery.", "review.",
+            "startup.", "spec.", "story.", "focused.", "construction.",
+            "quality.", "risk.")) or key == "workflow.path":
         raise ValueError("该 key 是流程保留事实，请使用对应语义命令")
 
 

@@ -14,9 +14,18 @@ _CONDITIONAL_DECISION = "delivery.conditional_document"
 _DELIVERY_BINDING_KEYS = {
     "delivery.confirmation",
     "delivery.confirmed_file",
+    "delivery.receipt",
     "delivery.result",
+    "delivery.git.commit_observation",
+    "delivery.git.push_observation",
 }
 _STAGED_FINAL_FILE = "delivery.staged_final_file"
+_TARGET_FACTS = {
+    "delivery.plan.remote",
+    "delivery.plan.destination_ref",
+    "delivery.plan.expected_destination_sha",
+    "delivery.plan.new_branch",
+}
 
 
 def _identity(files):
@@ -96,23 +105,16 @@ def _record_checkpoint(state, manifest, args):
     prefix = _checkpoint_prefix(args.checkpoint)
     if state.phase != Phase.CONSTRUCTION or state.current_cp != args.checkpoint:
         raise ValueError("Staged manifest 只能记录当前 CP 的精确文件")
-    confirmation_key = "construction.cp.%s.confirmation" % state.current_cp
-    if not any(key == confirmation_key for key, unused in state.decisions):
-        raise ValueError("当前 CP 必须先完成独立用户检视确认")
     message = (args.commit_message or "").strip()
-    decision = (args.decision or "").strip()
     if not valid_business_commit_message(state.ticket, message):
         raise ValueError("CP commit message 必须是 [单号][feat|fix]描述")
-    if not decision:
-        raise ValueError("CP manifest 需要用户的自然语言检视决定")
+    if args.decision:
+        raise ValueError("CP manifest 只声明计划；请另用 decision 确认")
     decisions = tuple(
         item for item in state.decisions
         if not item[0].startswith(prefix) and item[0] != _STAGED_FINAL_FILE)
     decisions += tuple((prefix + "file", path) for path in manifest.files)
-    decisions += (
-        (prefix + "message", message),
-        (prefix + "confirmation", decision),
-    )
+    decisions += ((prefix + "message", message),)
     return replace(state, decisions=decisions, current_cp=args.checkpoint)
 
 
@@ -135,6 +137,9 @@ def _staged_state(state, manifest, args, root):
         raise ValueError(
             "Staged manifest 必须二选一: --checkpoint <CP> 或 --final")
     if checkpoint:
+        if any((args.remote, args.destination_ref,
+                args.expected_destination_sha, args.new_branch)):
+            raise ValueError("CP 本地提交不能声明最终 push 目标")
         return _record_checkpoint(state, manifest, args)
     expected = DeliveryManifest.from_paths(
         _checkpoint_union(state), repository_root=root).files
@@ -150,14 +155,58 @@ def _staged_state(state, manifest, args, root):
 
 
 def _invalidate_delivery_binding(state, manifest):
-    if _identity(state.delivery_files) == _identity(manifest.files):
-        return state
     return replace(
         state,
         decisions=tuple(
             item for item in state.decisions
             if item[0] not in _DELIVERY_BINDING_KEYS),
     )
+
+
+def _record_continuous_message(state, args, has_target):
+    decisions = tuple(
+        item for item in state.decisions
+        if item[0] != "delivery.commit_message")
+    message = (args.commit_message or "").strip()
+    if message and not valid_business_commit_message(state.ticket, message):
+        raise ValueError("commit message 必须是 [单号][feat|fix]描述")
+    if has_target and not message:
+        raise ValueError("Git delivery requires one exact commit message")
+    if message:
+        decisions += (("delivery.commit_message", message),)
+    return replace(state, decisions=decisions)
+
+
+def _record_target(state, args):
+    supplied = any((
+        args.remote, args.destination_ref, args.expected_destination_sha,
+        args.new_branch,
+    ))
+    decisions = tuple(
+        item for item in state.decisions if item[0] not in _TARGET_FACTS)
+    if not supplied:
+        return replace(state, decisions=decisions), False
+    remote = (args.remote or "").strip()
+    destination = (args.destination_ref or "").strip()
+    expected = (args.expected_destination_sha or "").strip().casefold()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", remote):
+        raise ValueError("remote 必须是一个显式安全名称")
+    if (not destination.startswith("refs/heads/")
+            or not re.fullmatch(r"refs/heads/[A-Za-z0-9._/-]+", destination)
+            or ".." in destination or destination.endswith("/")):
+        raise ValueError("destination ref 必须是显式 refs/heads/... 引用")
+    if args.new_branch:
+        if expected:
+            raise ValueError("新分支的 expected destination SHA 必须为空")
+    elif not re.fullmatch(r"[0-9a-f]{40}", expected):
+        raise ValueError("已有分支需要 40 位 expected destination SHA")
+    decisions += (
+        ("delivery.plan.remote", remote),
+        ("delivery.plan.destination_ref", destination),
+        ("delivery.plan.expected_destination_sha", expected),
+        ("delivery.plan.new_branch", "true" if args.new_branch else "false"),
+    )
+    return replace(state, decisions=decisions), True
 
 
 def prepare_manifest_state(state, args, root):
@@ -171,9 +220,12 @@ def prepare_manifest_state(state, args, root):
     state = _invalidate_delivery_binding(state, manifest)
     if state.commit_pace == CommitPace.STAGED:
         state = _staged_state(state, manifest, args, root)
-    elif (args.checkpoint or args.final or args.commit_message
+    elif (args.checkpoint or args.final
           or (args.decision and not args.moonlight_refresh)):
         raise ValueError("Continuous 只记录一次最终精确 manifest")
+    state, has_target = _record_target(state, args)
+    if state.commit_pace == CommitPace.CONTINUOUS:
+        state = _record_continuous_message(state, args, has_target)
     updated = authorize_delivery(state, manifest)
     decisions = tuple(
         item for item in updated.decisions

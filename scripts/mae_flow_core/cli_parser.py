@@ -72,6 +72,10 @@ def parse_args(argv=None):
     manifest.add_argument("--final", action="store_true")
     manifest.add_argument("--commit-message")
     manifest.add_argument("--decision")
+    manifest.add_argument("--remote")
+    manifest.add_argument("--destination-ref")
+    manifest.add_argument("--expected-destination-sha")
+    manifest.add_argument("--new-branch", action="store_true")
 
     for toolbox_kind in ("ut", "codecheck", "grill", "story", "chain"):
         toolbox = sub.add_parser(toolbox_kind)

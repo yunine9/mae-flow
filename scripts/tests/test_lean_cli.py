@@ -271,6 +271,45 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(returned)
         self.assertEqual([], self.state()["risks"])
 
+    def test_successful_review_retry_clears_both_old_failure_risks(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-REVIEW-RETRY", "--path", "full",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "用户确认进入 Full Spec。"))
+        self.assert_success(self.run_cli(
+            "capability-record", "grill", "timed-out",
+            "--source", "ignored", "--environment", "ignored"))
+        self.assert_success(self.run_cli(
+            "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
+        risks = self.state()["risks"]
+        self.assertEqual(2, len(risks))
+        self.assertTrue(any(
+            risk.startswith("Capability grill did not return in slot")
+            for risk in risks))
+        self.assertTrue(any(
+            risk.startswith("Review capability grill did not return in slot")
+            for risk in risks))
+
+        self.assert_success(self.run_cli(
+            "decision", "capability.retry.grill",
+            "用户确认环境恢复，授权 Grill 再尝试一次。"))
+        self.assert_success(self.run_cli(
+            "capability-record", "grill", "returned",
+            "--source", "still-ignored", "--environment", "still-ignored"))
+        self.assert_success(self.run_cli(
+            "decision", "grill-clear", "Grill 已返回，未发现待决分支。"))
+
+        self.assertEqual([], self.state()["risks"])
+        state = self.state()
+        state["phase"] = "quality"
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+        quality = self.run_cli("advance", "quality-complete")
+        self.assert_success(quality)
+        self.assertEqual("delivery", self.state()["phase"])
+
     def test_generic_decisions_cannot_forge_reserved_authorization_facts(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-AUTH", "--path", "focused",

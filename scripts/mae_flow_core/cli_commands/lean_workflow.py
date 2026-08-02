@@ -362,8 +362,13 @@ def cmd_lean_capability_record(root, args):
         updated = record_flow_attempt(
             state, context, args.outcome, summary=args.summary)
         prefix = _attempt_risk_prefix(args.kind, slot)
+        review_prefix = "Review capability %s did not return in slot %s:" % (
+            args.kind, slot)
         risks = tuple(
-            risk for risk in updated.risks if not risk.startswith(prefix))
+            risk for risk in updated.risks
+            if (not risk.startswith(prefix)
+                and (args.outcome != "returned"
+                     or not risk.startswith(review_prefix))))
         if args.outcome != "returned":
             risks += (("%s %s." % (prefix, args.outcome)),)
         updated = replace(updated, risks=risks)

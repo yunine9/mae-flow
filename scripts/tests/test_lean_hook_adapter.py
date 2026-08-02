@@ -334,6 +334,8 @@ class LeanHookAdapterTests(unittest.TestCase):
             events = json.load(stream)
         self.assertEqual("UserPromptSubmit", events[-1]["event"])
         self.assertEqual(payload, events[-1]["payload"])
+        self.assertRegex(events[-1]["event_id"], r"^[0-9a-f]{64}$")
+        self.assertRegex(events[-1]["state_sha256"], r"^[0-9a-f]{64}$")
 
     def test_corrupt_active_state_does_not_lose_raw_user_prompt(self):
         with open(self.state_path, "wb") as stream:

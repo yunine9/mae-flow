@@ -113,7 +113,10 @@ def is_protected_control(path):
         path, case_insensitive=True).casefold()
     first = lowered.split("/", 1)[0]
     if first == ".mae-flow-work":
-        return lowered == ".mae-flow-work/moonlight-report.md"
+        return lowered in {
+            ".mae-flow-work/lean-hook-user-events.json",
+            ".mae-flow-work/moonlight-report.md",
+        } or lowered.startswith(".mae-flow-work/.lean-hook-sessions/")
     return (
         first == ".mae-flow"
         or first.startswith(".mae-flow.")

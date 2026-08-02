@@ -1,6 +1,7 @@
 """Thin production CLI adapter for the schema-v3 lean workflow."""
 
 from dataclasses import replace
+import hashlib
 import json
 import os
 import re
@@ -51,6 +52,9 @@ _USER_OWNED_EVENTS = {
     "cp-confirmed", "delivery-confirmed", "reviewer-tradeoff-resolved",
     "risk-resolved", "upgrade-to-full", "quality-defect-repair",
 }
+_USER_EVENT_LEDGER = os.path.join(
+    ".mae-flow-work", "lean-hook-user-events.json")
+_USER_EVENT_CONSUMED = "user.event.consumed"
 
 
 def _die(message):
@@ -114,6 +118,72 @@ def _mutate(root, operation, allow_inactive=False):
             raise TypeError("lean command must return a FlowState")
         atomic_write_json(path, updated.to_dict())
     return updated, reason
+
+
+def _state_sha256(root):
+    try:
+        with open(_state_path(root), "rb") as stream:
+            return hashlib.sha256(stream.read()).hexdigest()
+    except OSError as exc:
+        raise ValueError("无法绑定当前流程状态与用户事件") from exc
+
+
+def _consumed_user_event_ids(state):
+    consumed = set()
+    for key, raw in state.decisions:
+        if key != _USER_EVENT_CONSUMED:
+            continue
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict) and isinstance(value.get("event_id"), str):
+            consumed.add(value["event_id"])
+    return consumed
+
+
+def _matching_user_event(root, state, text):
+    path = os.path.join(root, _USER_EVENT_LEDGER)
+    rows, error = safe_read_json(path)
+    if error or not isinstance(rows, list):
+        raise ValueError(
+            "未捕获到本轮 CodeAgent UserPromptSubmit 用户原话")
+    wanted = text.strip()
+    state_sha256 = _state_sha256(root)
+    consumed = _consumed_user_event_ids(state)
+    for row in reversed(rows):
+        if not isinstance(row, dict):
+            continue
+        event_id = row.get("event_id")
+        payload = row.get("payload")
+        prompt = payload.get("prompt") if isinstance(payload, dict) else None
+        if (isinstance(event_id, str)
+                and re.fullmatch(r"[0-9a-f]{64}", event_id)
+                and event_id not in consumed
+                and row.get("state_sha256") == state_sha256
+                and isinstance(prompt, str)
+                and prompt.strip() == wanted):
+            return event_id
+    raise ValueError(
+        "该决定必须逐字使用本轮尚未消费的 UserPromptSubmit 用户原话")
+
+
+def _bind_user_event(state, event_id, semantic_event):
+    value = json.dumps(
+        {"event_id": event_id, "semantic_event": semantic_event},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return replace(
+        state, decisions=state.decisions + ((_USER_EVENT_CONSUMED, value),))
+
+
+def _requires_user_event(event):
+    normalized = event.strip().lower()
+    return (
+        normalized in _USER_OWNED_EVENTS
+        or normalized.startswith("capability.retry."))
 
 
 def _git_names(root, arguments):
@@ -376,7 +446,7 @@ def _validate_natural_decision(state, key, text):
     if key.startswith((
             "capability.", "moonlight.", "delivery.", "review.",
             "startup.", "spec.", "story.", "focused.", "construction.",
-            "quality.", "risk.")) or key == "workflow.path":
+            "quality.", "risk.", "user.")) or key == "workflow.path":
         raise ValueError("该 key 是流程保留事实，请使用对应语义命令")
     return key
 
@@ -386,12 +456,20 @@ def cmd_lean_decision(root, args):
         text = args.text.strip()
         if not text:
             raise ValueError("自然语言决定不能为空")
+        event_id = (
+            _matching_user_event(root, state, text)
+            if _requires_user_event(args.event) else "")
         if "." in args.event:
             key = args.key.strip() or args.event.strip()
             key = _validate_natural_decision(state, key, text)
-            return state.with_decision(key, text), "已记录自然语言决定。"
-        request = _semantic_request(args.event, args.key, text)
-        return _advance_state(root, state, request)
+            updated = state.with_decision(key, text)
+            reason = "已记录自然语言决定。"
+        else:
+            request = _semantic_request(args.event, args.key, text)
+            updated, reason = _advance_state(root, state, request)
+        if event_id and updated != state:
+            updated = _bind_user_event(updated, event_id, args.event.strip())
+        return updated, reason
 
     def execute():
         state, reason = _mutate(root, operation)
@@ -401,11 +479,15 @@ def cmd_lean_decision(root, args):
 
 def cmd_lean_manifest(root, args):
     def operation(state):
+        event_id = ""
+        authorization_decision = (args.decision or "").strip()
+        if args.moonlight_refresh and authorization_decision:
+            event_id = _matching_user_event(
+                root, state, authorization_decision)
         updated, manifest = prepare_manifest_state(state, args, root)
         if args.moonlight_refresh:
             if not _moonlight_enabled(updated):
                 raise ValueError("当前流程未启用 Moonlight，不能刷新不可逆权限")
-            authorization_decision = (args.decision or "").strip()
             if not authorization_decision:
                 raise ValueError("Moonlight 权限刷新需要自然语言用户决定")
             requested = MoonlightAuthorization(
@@ -426,6 +508,9 @@ def cmd_lean_manifest(root, args):
         elif args.allow_commit or args.allow_push:
             raise ValueError(
                 "Moonlight 权限刷新需要显式 --moonlight-refresh")
+        if event_id:
+            updated = _bind_user_event(
+                updated, event_id, "moonlight-refresh")
         return updated, "已记录精确交付清单；尚未执行 Git。"
 
     def execute():

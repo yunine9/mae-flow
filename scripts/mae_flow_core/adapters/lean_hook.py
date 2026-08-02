@@ -247,14 +247,29 @@ class LeanHookAdapter:
         return HookResponse(stdout=summary)
 
     def _append_user_event(self, event, payload):
-        row = {
-            "event": event,
-            "payload": dict(payload),
-            "captured_at_ns": self.clock_ns(),
-        }
+        captured_at_ns = self.clock_ns()
+        try:
+            with open(self.state_path, "rb") as stream:
+                state_sha256 = hashlib.sha256(stream.read()).hexdigest()
+        except OSError:
+            state_sha256 = ""
 
         def append(current):
             rows = current if isinstance(current, list) else []
+            identity = {
+                "captured_at_ns": captured_at_ns,
+                "event": event,
+                "ordinal": len(rows),
+                "payload": dict(payload),
+                "state_sha256": state_sha256,
+            }
+            event_id = hashlib.sha256(json.dumps(
+                identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8", errors="strict")).hexdigest()
+            row = dict(identity, event_id=event_id)
             rows.append(row)
             return rows[-20:]
 

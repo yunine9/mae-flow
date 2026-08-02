@@ -506,6 +506,10 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         state = _state(phase=Phase.CONSTRUCTION)
         cases = (
             ("printf x > .MAE-FLOW.JSON", "/repo"),
+            (
+                "printf x > .mae-flow-work/lean-hook-user-events.json",
+                "/repo",
+            ),
             ("tee .CODECHECKCLI/result.json", "/repo"),
             (
                 r"pwsh -Command Set-Content -Path C:\REPO\.Mae-Flow.Json -Value x",

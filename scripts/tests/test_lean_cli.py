@@ -38,6 +38,17 @@ class LeanCliTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_cli(self, *arguments):
+        if len(arguments) >= 3 and arguments[0] == "decision":
+            self.submit_user_prompt(arguments[2])
+        if (arguments and arguments[0] == "manifest"
+                and "--moonlight-refresh" in arguments
+                and "--decision" in arguments):
+            index = arguments.index("--decision")
+            if index + 1 < len(arguments):
+                self.submit_user_prompt(arguments[index + 1])
+        return self.run_cli_raw(*arguments)
+
+    def run_cli_raw(self, *arguments):
         return subprocess.run(
             [sys.executable, CLI] + list(arguments),
             cwd=self.root,
@@ -48,6 +59,14 @@ class LeanCliTests(unittest.TestCase):
             capture_output=True,
             timeout=20,
         )
+
+    def submit_user_prompt(self, text, session_id="cli-user-session"):
+        result = LeanHookAdapter(self.root).handle(
+            "UserPromptSubmit",
+            {"session_id": session_id, "prompt": text},
+        )
+        self.assertEqual(0, result.exit_code, result.stderr)
+        return result
 
     def run_statusline(self):
         return subprocess.run(
@@ -66,6 +85,33 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   encoding="utf-8") as stream:
             return json.load(stream)
+
+    def test_user_owned_decision_consumes_one_exact_codeagent_prompt(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-USER-EVENT", "--path", "focused",
+            "--pace", "continuous"))
+        decision = "用户确认只修改已展示的解析边界。"
+
+        fabricated = self.run_cli_raw(
+            "decision", "startup-confirmed", decision)
+
+        self.assertEqual(2, fabricated.returncode)
+        self.assertEqual("startup", self.state()["phase"])
+
+        self.submit_user_prompt(decision)
+        accepted = self.run_cli_raw(
+            "decision", "startup-confirmed", decision)
+        reused = self.run_cli_raw(
+            "decision", "upgrade-to-full", decision)
+
+        self.assert_success(accepted)
+        self.assertEqual("construction", self.state()["phase"])
+        self.assertEqual(2, reused.returncode)
+        consumed = [
+            item for item in self.state()["decisions"]
+            if item["key"] == "user.event.consumed"
+        ]
+        self.assertEqual(1, len(consumed))
 
     def run_capability(self, kind, outcome="returned"):
         identities = {
@@ -584,6 +630,12 @@ class LeanCliTests(unittest.TestCase):
             "--allow-commit", "--allow-push")
         self.assertEqual(2, missing_decision.returncode)
         self.assertIn("自然语言", missing_decision.stderr)
+
+        fabricated = self.run_cli_raw(
+            "manifest", "--file", "src/a.cpp", "--moonlight-refresh",
+            "--allow-commit", "--allow-push", "--decision",
+            "用户授权当前精确清单的提交与推送。")
+        self.assertEqual(2, fabricated.returncode)
 
         accepted = self.run_cli(
             "manifest", "--file", "src/a.cpp", "--moonlight-refresh",

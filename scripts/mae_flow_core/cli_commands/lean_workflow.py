@@ -29,6 +29,7 @@ from mae_flow_core.orchestration import (
 )
 from mae_flow_core.orchestration.documents import DocumentPaths
 from mae_flow_core.orchestration.guidance import (
+    render_capability_facts,
     render_guidance,
     render_user_card,
 )
@@ -50,7 +51,11 @@ from .user_events import (
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
-_KEYED_SEMANTIC_EVENTS = {"risk-resolved", "cp-ready", "cp-progress"}
+_KEYED_SEMANTIC_EVENTS = {
+    "risk-resolved", "cp-ready", "cp-progress",
+    "capability-returned", "capability-failed-to-start",
+    "capability-timed-out", "capability-not-observed",
+}
 def _die(message):
     print("[mae-flow] " + message, file=sys.stderr)
     raise SystemExit(2)
@@ -258,11 +263,7 @@ def _render(state, reason):
     if card:
         print(card)
     print(render_guidance(state), end="")
-    if state.capabilities:
-        print("能力尝试（只记录返回事实，不解释工具输出）:")
-        for attempt in state.capabilities:
-            print("- %s | %s | %s" % (
-                attempt.kind, attempt.outcome, attempt.summary or "无摘要"))
+    print(render_capability_facts(state), end="")
 
 
 def _run(command):
@@ -321,7 +322,9 @@ def _moonlight_enabled(state):
 
 
 def _advance_state(root, state, request):
-    if _moonlight_enabled(state):
+    if request.kind.strip().lower().startswith("capability-"):
+        result = advance_flow(state, request)
+    elif _moonlight_enabled(state):
         result = apply_moonlight_policy(state, request)
     else:
         result = advance_flow(state, request)

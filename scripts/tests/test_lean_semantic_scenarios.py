@@ -242,7 +242,7 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
         )
         self.assertEqual("returned", attempts[0].outcome)
 
-    def test_hook_persists_only_a_reserved_synchronous_host_return(self):
+    def test_workflow_records_one_opaque_synchronous_host_return(self):
         with tempfile.TemporaryDirectory() as root:
             initialized = subprocess.run(
                 ["git", "init", "-q"], cwd=root,
@@ -254,20 +254,14 @@ class FocusedAndOpaqueCapabilityScenarioTests(unittest.TestCase):
                 "--path", "focused", "--pace", "continuous",
             )
             self.assertEqual(0, started.returncode)
-            adapter = LeanHookAdapter(
-                root, marker_root=os.path.join(root, "markers"))
-            payload = {
-                "tool_name": "Skill",
-                "tool_use_id": "build-return-1",
-                "tool_input": {"skill": "build-fix"},
-            }
+            recorded = run_cli(
+                root,
+                "advance", "capability-returned",
+                "--key", "build",
+                "--decision", "host returned opaque data",
+            )
 
-            reserved = adapter.handle("PreToolUse", payload)
-            recorded = adapter.handle("PostToolUse", dict(
-                payload, tool_response="host returned opaque data"))
-
-            self.assertEqual(0, reserved.exit_code)
-            self.assertEqual(0, recorded.exit_code)
+            self.assertEqual(0, recorded.returncode, recorded.stderr)
             with open(os.path.join(root, ".mae-flow.json"),
                       encoding="utf-8") as stream:
                 persisted = json.load(stream)
@@ -529,7 +523,7 @@ class ProductDocumentationContractTests(unittest.TestCase):
                 for term in required:
                     self.assertIn(term, text)
 
-    def test_current_docs_define_one_shot_capabilities_four_hooks_and_local_docs(self):
+    def test_current_docs_define_one_shot_capabilities_hooks_and_local_docs(self):
         text = "\n".join(self.read(path) for path in self.CURRENT_DOCS)
         for capability in (
                 "Build", "UT", "CodeCheck", "Grill", "Story", "Reviewer"):
@@ -537,7 +531,7 @@ class ProductDocumentationContractTests(unittest.TestCase):
         for event in (
                 "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"):
             self.assertIn(event, text)
-        self.assertIn("Host Hook 是唯一写者", text)
+        self.assertIn("工作流命令是 capability 事实的唯一写者", text)
         self.assertIn("默认保留在本地", text)
         self.assertIn("[ticket][feat|fix]description", text)
 

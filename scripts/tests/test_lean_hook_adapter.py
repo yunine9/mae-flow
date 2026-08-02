@@ -32,6 +32,9 @@ from mae_flow_core.orchestration import (  # noqa: E402
     FlowState,
     Phase,
     advance_flow,
+    flow_attempt_context,
+    record_flow_attempt,
+    retry_decision_key,
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
@@ -267,6 +270,25 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertIn("Phase: startup", first.stdout)
         self.assertEqual("", second.stdout)
         self.assertEqual(1, len(os.listdir(self.marker_root)))
+
+    def test_resume_summary_exposes_unconsumed_capability_retry(self):
+        state = FlowState.new(
+            "REQ-RETRY-RECOVERY", DeliveryPath.FULL,
+            CommitPace.CONTINUOUS)
+        context = flow_attempt_context(state, "build")
+        state = record_flow_attempt(
+            state, context, "timed-out", "opaque timeout")
+        state = state.with_decision(
+            retry_decision_key(context),
+            "用户确认环境恢复，授权再尝试一次。",
+        )
+        self.write_state(state)
+
+        response = LeanHookAdapter(
+            self.root, marker_root=self.marker_root).handle(
+                "SessionStart", {"session_id": "retry-recovery"})
+
+        self.assertIn("retry=authorized-once-unconsumed", response.stdout)
 
     def test_resume_summary_has_total_budget_and_omission_counts(self):
         long_text = "长字段" * 400
@@ -987,7 +1009,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(2, reset.exit_code)
         self.assertEqual(0, ordinary.exit_code)
 
-    def test_posttool_records_only_reserved_opaque_capability_return(self):
+    def test_capability_callbacks_do_not_write_workflow_facts(self):
         self.write_state()
         unknown = self.invoke("PostToolUse", {
             "tool_name": "Bash",
@@ -999,35 +1021,22 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual((), unchanged.capabilities)
 
         invocation = "tool-opaque-build-return"
-        reserved = self.invoke("PreToolUse", {
+        pretool = self.invoke("PreToolUse", {
             "tool_name": "Skill",
             "tool_use_id": invocation,
             "tool_input": {"skill": "build-fix"},
         })
-        self.assertEqual(0, reserved.returncode, reserved.stderr.decode("utf-8"))
-        summary = "host returned opaque data without output parsing"
-        recorded = self.invoke("PostToolUse", {
+        self.assertEqual(0, pretool.returncode, pretool.stderr.decode("utf-8"))
+        posttool = self.invoke("PostToolUse", {
             "tool_name": "Skill",
             "tool_use_id": invocation,
             "tool_input": {"skill": "build-fix"},
-            "tool_response": summary,
+            "tool_response": "host returned opaque data",
         })
-        self.assertEqual(0, recorded.returncode, recorded.stderr.decode("utf-8"))
+        self.assertEqual(0, posttool.returncode, posttool.stderr.decode("utf-8"))
         with open(self.state_path, encoding="utf-8") as stream:
             state = FlowState.from_dict(json.load(stream))
-        self.assertEqual({
-            "kind": "build",
-            "source_revision": "build:startup:-",
-            "environment_revision": "lean-workflow-v1",
-            "outcome": "returned",
-            "summary": summary,
-        }, {
-            "kind": state.capabilities[-1].kind,
-            "source_revision": state.capabilities[-1].source_revision,
-            "environment_revision": state.capabilities[-1].environment_revision,
-            "outcome": state.capabilities[-1].outcome,
-            "summary": state.capabilities[-1].summary,
-        })
+        self.assertEqual((), state.capabilities)
 
 
 if __name__ == "__main__":

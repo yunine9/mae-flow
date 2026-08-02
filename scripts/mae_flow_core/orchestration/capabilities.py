@@ -222,3 +222,21 @@ def flow_attempt_context(state, kind):
         capability_slot(state, kind),
         "lean-workflow-v1",
     )
+
+
+def flow_retry_options(state, kind):
+    """Expose whether one current user retry authorization is unconsumed."""
+    context = flow_attempt_context(state, kind)
+    retry_key = retry_decision_key(context)
+    used_key = _retry_used_key(context)
+    authorized = sum(
+        1 for key, unused_value in state.decisions if key == retry_key)
+    consumed = sum(
+        1 for key, unused_value in state.decisions if key == used_key)
+    effective = AttemptContext(
+        context.kind,
+        context.source_revision,
+        context.environment_revision,
+        user_authorized=authorized > consumed,
+    )
+    return retry_options(state.capabilities, effective)

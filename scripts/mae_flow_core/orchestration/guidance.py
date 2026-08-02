@@ -2,6 +2,7 @@
 
 import os
 
+from .capabilities import flow_retry_options
 from .models import CommitPace, DeliveryPath, FlowState, Phase
 from .moonlight_policy import moonlight_authorization_view
 
@@ -60,6 +61,33 @@ def render_guidance(state):
         _items("Unresolved risks", state.risks),
     )
     return "%s\n\n%s\n" % (context, phase_guidance)
+
+
+def render_capability_facts(state):
+    """Render opaque attempts and the current retry authorization cursor."""
+    if not state.capabilities:
+        return ""
+    lines = ["能力尝试（只记录返回事实，不解释工具输出）:"]
+    lines.extend(
+        "- %s | %s | %s" % (
+            attempt.kind, attempt.outcome, attempt.summary or "无摘要")
+        for attempt in state.capabilities)
+    lines.append("能力重试授权:")
+    seen = set()
+    for attempt in state.capabilities:
+        if attempt.kind in seen:
+            continue
+        seen.add(attempt.kind)
+        try:
+            option = flow_retry_options(state, attempt.kind)
+        except (TypeError, ValueError):
+            label = "状态未知；不要猜测或自动重试"
+        else:
+            label = (
+                "已授权一次重试（尚未消费）"
+                if option.allowed else "再次调用前需要用户决定")
+        lines.append("- %s: %s" % (attempt.kind, label))
+    return "\n".join(lines) + "\n"
 
 
 def _delivery_message_lines(state, decisions):

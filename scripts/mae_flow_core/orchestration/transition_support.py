@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from .capabilities import flow_attempt_context, record_flow_attempt
 from .models import Phase
 
 
@@ -46,3 +47,15 @@ def latest_review_attempt(state):
         attempt for attempt in state.capabilities
         if attempt.kind == kind and attempt.source_revision == slot)
     return matches[-1] if matches else None
+
+
+def record_capability_observation(state, kind, outcome, summary):
+    """Store one Agent-owned CodeAgent call fact without parsing its return."""
+    context = flow_attempt_context(state, kind)
+    updated = record_flow_attempt(state, context, outcome, summary=summary)
+    prefix = "Capability %s did not return in slot " % context.kind.value
+    risks = tuple(risk for risk in updated.risks if not risk.startswith(prefix))
+    if outcome != "returned" and context.kind.value not in {"grill", "reviewer"}:
+        risks += ("%s%s: %s." % (
+            prefix, context.source_revision, outcome),)
+    return replace(updated, risks=risks)

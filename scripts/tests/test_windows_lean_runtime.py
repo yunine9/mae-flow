@@ -212,30 +212,28 @@ class WindowsProcessBoundaryTests(unittest.TestCase):
             self.assertIsNotNone(discovered)
             self.assertEqual(name.casefold(), os.path.basename(discovered).casefold())
 
-    def test_fake_host_capability_return_is_synchronous_and_opaque(self):
+    def test_capability_return_fact_is_recorded_without_output_parsing(self):
         with tempfile.TemporaryDirectory() as root:
             state_path = os.path.join(root, ".mae-flow.json")
             with open(state_path, "w", encoding="utf-8") as stream:
                 json.dump(FlowState.new(
                     "REQ-SYNC", DeliveryPath.FULL,
                     CommitPace.CONTINUOUS).to_dict(), stream)
-            payload = {
-                "tool_name": "Skill",
-                "tool_use_id": "fake-host-build",
-                "tool_input": {"skill": "build-fix"},
-            }
-
-            reserved = self.invoke(root, "PreToolUse", payload)
-            returned = self.invoke(
-                root,
-                "PostToolUse",
-                dict(payload, tool_response={
-                    "private": "UNKNOWN",
-                    "returncode": 0,
-                }),
+            returned = subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(SCRIPTS, "mae-flow.py"),
+                    "advance", "capability-returned",
+                    "--key", "build",
+                    "--decision",
+                    '{"private":"UNKNOWN","returncode":0}',
+                ],
+                cwd=root,
+                capture_output=True,
+                check=False,
+                timeout=10,
             )
 
-            self.assertEqual(0, reserved.returncode, reserved.stderr)
             self.assertEqual(0, returned.returncode, returned.stderr)
             with open(state_path, encoding="utf-8") as stream:
                 state = FlowState.from_dict(json.load(stream))

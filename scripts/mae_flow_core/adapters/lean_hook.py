@@ -17,7 +17,6 @@ from ..application.hooks.lean_events import (
 )
 from ..application.hooks.capability_observation import (
     complete_git_posttool,
-    handle_capability_posttool,
     reserve_git_pretool,
 )
 from ..application.hooks.models import HookResponse
@@ -27,8 +26,7 @@ from ..guard.safety_kernel import (
     decide_pretool,
     decide_stateless_pretool,
 )
-from ..orchestration import FlowState
-from ..orchestration.capability_registry import load_capability_registry
+from ..orchestration import FlowState, flow_retry_options
 from ..state_store import (
     ProjectStateLock,
     _replace_with_retry,
@@ -36,7 +34,6 @@ from ..state_store import (
     safe_read_json,
     update_json,
 )
-from .hook_capabilities import LeanCapabilityGate
 from .hook_tool_inputs import apply_patch_targets
 from .lean_exit import (
     effective_exit_pointer,
@@ -155,8 +152,6 @@ class LeanHookAdapter:
         self.move_state = move_state or _replace_with_retry
         self.snapshot_writer = snapshot_writer
         self.pointer_writer = pointer_writer or atomic_write_json
-        self.capabilities = LeanCapabilityGate(
-            self.root, lambda mutate: self._update_state(mutate))
 
     def _valid_pointer(self):
         return effective_exit_pointer(
@@ -239,14 +234,25 @@ class LeanHookAdapter:
         ]
         if state.capabilities:
             fact = state.capabilities[-1]
+            try:
+                retry = flow_retry_options(state, fact.kind)
+            except (TypeError, ValueError):
+                retry_label = "unknown-do-not-retry"
+            else:
+                retry_label = (
+                    "authorized-once-unconsumed"
+                    if retry.allowed
+                    else "needs-current-user-decision"
+                )
             lines.append(
                 "Last capability: %s | source=%s | environment=%s | "
-                "outcome=%s | summary=%s" % (
+                "outcome=%s | summary=%s | retry=%s" % (
                     _clip(fact.kind, 30),
                     _clip(fact.source_revision, 50),
                     _clip(fact.environment_revision, 50),
                     _clip(fact.outcome, 50),
                     _clip(fact.summary, 130),
+                    retry_label,
                 ))
         else:
             lines.append("Last capability: none")
@@ -359,7 +365,7 @@ class LeanHookAdapter:
                 payload, state, self._git_facts(payload), self._update_state)
             if reservation is not None:
                 return reservation
-            return self.capabilities.reserve(state, payload)
+            return HookResponse()
         return HookResponse(exit_code=2, stderr=(
             "[mae-flow] %s\n" % (decision.message or decision.rule)))
 
@@ -378,12 +384,7 @@ class LeanHookAdapter:
             payload, self._git_facts(payload), self._update_state)
         if git_result is not None:
             return git_result
-        return handle_capability_posttool(
-            payload,
-            load_capability_registry(self.root),
-            self._record_event,
-            self.capabilities.complete,
-        )
+        return HookResponse()
 
     def _inactive(self, runtime, event, state):
         if event != "sessionstart":

@@ -42,19 +42,20 @@ class HookProtocolTests(unittest.TestCase):
     def setUpClass(cls):
         cls.dispatch = load_dispatch()
 
-    def test_production_registration_is_exactly_the_four_lean_events(self):
+    def test_production_registration_preserves_the_codeagent_host_events(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:
             raw = stream.read()
         config = json.loads(raw)["hooks"]
 
         self.assertEqual(
-            {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"},
+            {
+                "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                "SubagentStop", "Stop",
+            },
             set(config),
         )
-        self.assertNotIn("Stop", raw)
-        self.assertNotIn("SubagentStop", raw)
 
-    def test_registration_covers_write_and_capability_boundaries(self):
+    def test_registration_preserves_codeagent_safety_boundaries(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:
             config = json.load(stream)["hooks"]
 
@@ -63,11 +64,14 @@ class HookProtocolTests(unittest.TestCase):
         self.assertEqual(
             {
                 "Edit", "Write", "MultiEdit", "Bash", "WriteStdin",
-                "Agent", "Task", "Skill",
+                "AskUserQuestion", "Task",
             },
             pretool,
         )
-        self.assertEqual({"Bash", "Agent", "Task", "Skill"}, posttool)
+        self.assertEqual(
+            {"Write", "Edit", "MultiEdit", "AskUserQuestion", "Bash"},
+            posttool,
+        )
 
     def test_real_registration_dispatch_blocks_cross_platform_writers(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:

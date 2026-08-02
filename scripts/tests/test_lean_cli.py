@@ -129,34 +129,12 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual("startup", self.state()["phase"])
 
     def run_capability(self, kind, outcome="returned"):
-        identities = {
-            "build": ("Skill", "skill", "build-fix"),
-            "ut": ("Agent", "subagent_type", "ut-generator-agent"),
-            "codecheck": (
-                "Agent", "subagent_type", "codecheck-advisor-agent"),
-            "reviewer": (
-                "Agent", "subagent_type", "craft-reviewer-agent"),
-            "grill": ("Agent", "subagent_type", "grill-critic-agent"),
-            "story": ("Agent", "subagent_type", "story-generator-agent"),
-        }
-        tool_name, field, identity = identities[kind]
         self.capability_invocations += 1
-        payload = {
-            "tool_name": tool_name,
-            "tool_use_id": "test-capability-%d" % self.capability_invocations,
-            "tool_input": {field: identity},
-        }
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"))
-        response = adapter.handle("PreToolUse", payload)
-        if response.exit_code == 0 and outcome == "returned":
-            response = adapter.handle("PostToolUse", dict(
-                payload, tool_response="opaque synchronous host return"))
-        return subprocess.CompletedProcess(
-            args=(kind, outcome),
-            returncode=response.exit_code,
-            stdout=response.stdout,
-            stderr=response.stderr,
+        return self.run_cli_raw(
+            "advance", "capability-" + outcome,
+            "--key", kind,
+            "--decision", "opaque synchronous CodeAgent return %d" %
+            self.capability_invocations,
         )
 
     def assert_success(self, result):
@@ -313,15 +291,23 @@ class LeanCliTests(unittest.TestCase):
             "decision", "capability.retry.build",
             "构建环境已恢复，用户决定再尝试一次。")
         self.assert_success(authorized)
+        recovered = self.run_cli("current")
+        self.assert_success(recovered)
+        self.assertIn(
+            "build: 已授权一次重试（尚未消费）", recovered.stdout)
         retried = self.run_capability("build")
         self.assert_success(retried)
         self.assertEqual(2, len(self.state()["capabilities"]))
+        consumed_status = self.run_cli("current")
+        self.assert_success(consumed_status)
+        self.assertIn(
+            "build: 再次调用前需要用户决定", consumed_status.stdout)
 
         consumed = self.run_capability("build")
         self.assertEqual(2, consumed.returncode)
         self.assertEqual(2, len(self.state()["capabilities"]))
 
-    def test_capability_slot_is_derived_from_state_by_the_hook(self):
+    def test_capability_slot_is_derived_from_workflow_state(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-SLOT", "--path", "focused",
             "--pace", "continuous"))
@@ -404,7 +390,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(returned)
         self.assertEqual([], self.state()["risks"])
 
-    def test_successful_review_retry_clears_capability_risk_without_duplicate(self):
+    def test_review_nonreturn_is_visible_without_blocking_progress(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-REVIEW-RETRY", "--path", "full",
             "--pace", "continuous"))
@@ -413,11 +399,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_capability("grill", "not-observed"))
         self.assert_success(self.run_cli(
             "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
-        risks = self.state()["risks"]
-        self.assertEqual(1, len(risks))
-        self.assertTrue(any(
-            risk.startswith("Capability grill did not return in slot")
-            for risk in risks))
+        self.assertEqual([], self.state()["risks"])
 
         self.assert_success(self.run_cli(
             "decision", "capability.retry.grill",

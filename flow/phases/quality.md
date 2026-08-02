@@ -10,7 +10,7 @@ retry needs a current user decision. Changed source, phase, CP, or environment
 changes the authorization key but never auto-authorizes another call.
 
 ## Outputs
-Record each selected expensive capability at most once, its outcome, remaining risks, and delivery readiness.
+Attempt each selected expensive capability at most once for its current slot. After each actual synchronous call, record exactly one lightweight capability fact with `advance capability-<outcome> --key <kind> --decision <opaque summary>`. Do not parse private output or rerun a capability merely because recording failed. Record remaining risks and delivery readiness.
 
 ## Next
 Proceed to Delivery after quality is complete. The next meaningful action is the next selected capability not yet attempted.

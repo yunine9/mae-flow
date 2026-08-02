@@ -9,7 +9,6 @@
     "scripts/mae-flow.py",
     "scripts/mae_flow_core/__init__.py",
     "scripts/mae_flow_core/adapters/__init__.py",
-    "scripts/mae_flow_core/adapters/hook_capabilities.py",
     "scripts/mae_flow_core/adapters/hook_git_facts.py",
     "scripts/mae_flow_core/adapters/hook_tool_inputs.py",
     "scripts/mae_flow_core/adapters/lean_exit.py",

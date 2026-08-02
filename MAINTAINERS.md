@@ -10,7 +10,7 @@
 2. **只在高价值点找人。** Full 停在 Intake、Spec、Design、每个 CP、Delivery；Focused 停在 Intake、Delivery。真实歧义、设计偏差、用户级 Reviewer 取舍、昂贵能力再次调用、不可逆动作和 manifest 变化可以增加条件停点。
 3. **能力一次调用。** Build、UT、CodeCheck、Grill、Story、Reviewer 是一次性 opaque capabilities。Host 同步返回后记录事实，不解析私有输出，不后台等待，不自动重试。
 4. **状态是最小恢复游标。** 只保留当前路径、阶段、CP、产物路径、自然语言决定、风险、能力尝试、Delivery 文件和初始脏文件；不把过程报告扩成第二套工作流。
-5. **Hook 单写。** Host Hook 是唯一写者；所有读改写走项目锁和原子替换。Agent、capability 和文档渲染器不直接写活动状态。
+5. **写入边界单一。** 工作流命令是 capability 事实的唯一写者；Hooks 只写用户事件和 Git 副作用观察。所有读改写走项目锁和原子替换，专业 Skill/Agent 与文档渲染器不直接写活动状态。
 6. **Git 精确授权。** 每次提交只使用用户审阅的逐文件 manifest；提交说明为 `[ticket][feat|fix]description`；最终只推送一次。
 7. **条件文档默认本地。** Story、决策、工程笔记、链路、走读、CodeCheck 和 Delivery 笔记默认保留在本地，用户明确选择后才能加入精确 manifest。
 8. **安装不是授权。** 没有活动状态时 Hooks fail-open；明确退出在任何阶段生效，保留现场并释放控制。
@@ -79,7 +79,7 @@ Focused 中的普通走读修复不创建新模式，也不预声明 Spec、Stor
 
 首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。决定绑定 kind、语义 phase/CP slot 和 environment；旧 slot 的决定不能被新 slot 消费。不要从 summary 中寻找 `PASS`、`CLEAN`、数字、测试框架字段或未来工具格式。
 
-Build 和其他 capability 必须由 Host 同步调用。完成信号是工具调用返回本身；没有后台 worker、进度文件探测或自动再次执行。超时由 Host 边界报告 `timed-out`，工作流保留可恢复事实并按风险决定是否找人。
+Build 和其他 capability 必须由 Host 同步调用。调用前，主 Agent 先读当前尝试；同 kind 已有记录而没有当前用户重试决定时不得再次调用。这是 Agent 行为合同，不增加能力 Hook 门禁。调用真实返回后，主 Agent 立即通过 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"` 记录一条轻量恢复事实；启动失败、超时或返回不可观察时使用对应的 `capability-failed-to-start`、`capability-timed-out` 或 `capability-not-observed`。这不是质量凭证，不解析专业工具输出，也不要求固定报告。若事实写入失败，不得为补写状态而重新执行昂贵能力。没有后台 worker、进度文件探测或自动再次执行。
 
 ## 文档模型
 
@@ -108,16 +108,18 @@ Moonlight 只在普通 `FlowState` 上保存四类预授权事实：enabled、bu
 
 Moonlight 可以压缩常规等待，但 Delivery 卡始终透明地分别显示 requested/effective 权限和 block reason。风险、未拥有脏文件、capability 非正常结果、manifest 变化、推送失败或缺少真实 adapter observation 都安全停下；明确 exit 不受这些风险阻挡。
 
-## 四个生产 Hooks
+## 生产 Hook 边界
 
 | 事件 | 当前职责 | 写入 |
 |---|---|---|
 | `SessionStart` | 每会话至多一次最小恢复摘要 | session marker |
 | `UserPromptSubmit` | 原样记录用户事件；明确退出时原子移交状态 | 用户事件或退出 snapshot/pointer |
-| `PreToolUse` | 安全裁决；对匹配 capability 原子预留一次 slot | pending capability + attempt |
-| `PostToolUse` | 按 tool-use identity 完成已预留 slot | opaque return summary |
+| `PreToolUse` | 危险动作、交互会话复用、业务源码边界和精确 Git 清单裁决 | 必要的 Git 副作用预留 |
+| `PostToolUse` | 完成已预留的 Git 副作用观察 | Git observation |
+| `SubagentStop` | 兼容已安装 CodeAgent 的历史事件 | 无；直接放行 |
+| `Stop` | 兼容已安装 CodeAgent 的历史事件 | 无；直接放行 |
 
-生产注册不得加入其他事件。旧 Host 发来的停止类事件只短路放行，不恢复任何状态机。普通 Hook payload 异常、未知工具或可选事实端口失败时 fail-open；已识别的 Git 危险副作用仍按安全内核拒绝。
+注册事件与 matcher 只按真实 CodeAgent 宿主需要调整，不能为了证明 Build/UT/CodeCheck 已执行而扩大监听。`WriteStdin` 必须经过 `PreToolUse`，防止复用交互会话绕过逐命令安全裁决。停止类事件只短路放行，不恢复任何状态机。普通 Hook payload 异常、未知工具或可选事实端口失败时 fail-open；已识别的 Git 危险副作用仍按安全内核拒绝。
 
 ## Windows 规则
 

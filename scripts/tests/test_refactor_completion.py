@@ -133,7 +133,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertEqual(
             0, contract["final_targets"]["private_monolith_test_imports"])
         self.assertEqual(
-            69,
+            68,
             contract["final_targets"]["production_reachable_python_files"],
         )
         self.assertEqual(
@@ -199,12 +199,12 @@ class RefactorCompletionContractTests(unittest.TestCase):
         errors = validate_contract(root, contract)
         self.assertIn(
             "production reachability baseline count 70 does not match "
-            "contract target 69",
+            "contract target 68",
             errors,
         )
         self.assertIn(
             "production reachability actual count 70 does not match "
-            "contract target 69",
+            "contract target 68",
             errors,
         )
 

@@ -66,7 +66,7 @@ Story 按 `skills/mae-flow/assets/STORY-TEMPLATE.md` 定义 HOW：代码落点�
 - Build：直接调用配置的 `build-fix` Skill 一次。该 Skill 对自己的编译负责；Mae-Flow 不再另派编译角色，也不猜内部 Maven/g++ 封装的输出。
 - UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
 
-生产 Host Hook 是正常能力调用的单一写入者：PreToolUse 自动预留由当前阶段和 exact CP 派生的 `not-observed` attempt slot，匹配同一 `tool_use_id` 和真实返回的 PostToolUse 自动完成 `returned` 观察及不透明摘要。主 Agent 返回后不再手工记录第二次；未观察到返回时保留 `not-observed`。Design Reviewer 和每个 CP Reviewer 是不同 slot。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
+调用能力前先看 `current` 中该 kind 的已有尝试；已有记录且没有本轮用户重试决定就不要调用。该规则由主 Agent 遵守，Hook 不拦截或证明能力调用。真实能力调用同步结束后，主 Agent 只记录一次轻量恢复事实：正常返回执行 `advance capability-returned --key <kind> --decision "<简短不透明摘要>"`；启动失败、超时或无法观察返回时分别使用 `capability-failed-to-start`、`capability-timed-out`、`capability-not-observed`。这条事实不是质量报告，不解析返回值，也不要求固定格式；记录失败时不得为了补状态而重跑昂贵能力。Design Reviewer 和每个 CP Reviewer 是不同 slot。首次调用后，任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化只改变授权键，不自动授权。确需再试，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
 
 ### Delivery
 

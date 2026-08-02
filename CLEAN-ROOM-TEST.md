@@ -25,7 +25,7 @@ python --version
 
 - [ ] `git status --short` 为空。
 - [ ] `python` 可发现并启动；流程、文档和 CI 不要求其他解释器命令名。
-- [ ] 仓库中不存在活动 `.mae-flow.json` 时，四个生产 Hooks 全部 fail-open。
+- [ ] 仓库中不存在活动 `.mae-flow.json` 时，所有已注册生产 Hooks 全部 fail-open。
 
 ## 2. 模型烟测
 
@@ -34,7 +34,8 @@ python --version
 - [ ] Focused 用户卡只出现在 Intake、Delivery；启动时无 Full 产物，语义风险可以升级 Full/Spec 并补入产物路径。
 - [ ] 文档和 UI 都显示唯一六阶段序列 Intake → Spec → Design → Construction → Quality → Delivery。
 - [ ] Build、UT、CodeCheck、Grill、Story、Reviewer 被描述为一次性 opaque capabilities。
-- [ ] Host Hook 是唯一写者；生产只有 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`。
+- [ ] 工作流命令是 capability 事实的唯一写者；Hook 不解析 Agent/Skill 返回。
+- [ ] `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse` 承担当前职责；兼容注册的 `SubagentStop`、`Stop` 直接放行。
 
 ## 3. 文件与交付烟测
 
@@ -50,7 +51,7 @@ python --version
 - [ ] UTF-8 BOM JSON、GB18030 Hook input 和 CRLF resource 通过。
 - [ ] drive、UNC、反斜杠与大小写 identity 通过。
 - [ ] locked replace/delete 在固定 attempt 内成功或明确失败；验收过程不实际等待。
-- [ ] fake Host capability 同步返回；timeout 使用短 subprocess 边界，不依赖 POSIX signal。
+- [ ] fake Host capability 同步返回后只写一条轻量事实；timeout 使用短 subprocess 边界，不依赖 POSIX signal。
 - [ ] 首次调用后任何再次调用都需要当前用户决定；源码、阶段、CP 或环境变化不自动授权，也不后台轮询。
 
 ## 5. 发布门

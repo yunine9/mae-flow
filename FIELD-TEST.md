@@ -63,13 +63,15 @@
 - [ ] 未点名条件文档、manifest 变化、能力失败、未拥有脏文件和 push 失败会安全停下。
 - [ ] Moonlight 下 Delivery 卡仍完整显示精确文件与副作用。
 
-## 6. 四个生产 Hooks
+## 6. 生产 Hook 边界
 
 - [ ] `SessionStart`：每会话最多一次最小恢复摘要。
 - [ ] `UserPromptSubmit`：原始自然语言与扩展字段保留；明确 exit 原子保存现场。
-- [ ] `PreToolUse`：危险动作在副作用前裁决；匹配 capability 时原子预留一次 slot。
-- [ ] `PostToolUse`：只完成相同 tool-use identity 的 slot，返回同步且 opaque。
-- [ ] Host Hook 是唯一写者；并发写通过项目锁串行，没有丢失更新。
+- [ ] `PreToolUse`：危险动作在副作用前裁决；`WriteStdin` 复用会话被阻止；不会为能力调用预留等待中的 slot。
+- [ ] `PostToolUse`：只记录已授权 Git 副作用，不解析 Agent/Skill 返回。
+- [ ] `SubagentStop`、`Stop` 保持兼容注册并直接放行，不恢复旧状态机。
+- [ ] 真实 capability 同步返回后，主 Agent 用一次 `advance capability-<outcome> --key <kind>` 保存轻量事实；记录失败不重跑能力。
+- [ ] 工作流命令与 Hook 写入都通过项目锁串行，没有丢失更新。
 
 ## 7. Windows 专项
 

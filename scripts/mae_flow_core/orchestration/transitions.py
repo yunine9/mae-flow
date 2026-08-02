@@ -15,6 +15,9 @@ from .transition_facts import (
     latest_review_attempt as _latest_review_attempt,
     staged_checkpoint_receipts_valid as _staged_checkpoint_receipts_valid,
 )
+from .transition_support import (
+    record_capability_observation as _record_capability_observation,
+)
 
 @dataclass(frozen=True)
 class AdvanceRequest:
@@ -104,6 +107,12 @@ _NON_BLOCKING_EVENTS = {
     "capability-success": "The capability completed successfully.",
     "cp-progress": "Ordinary checkpoint progress continues.",
     "reviewer-clear": "The reviewer found no user-level tradeoff.",
+}
+_CAPABILITY_OUTCOMES = {
+    "capability-returned": "returned",
+    "capability-failed-to-start": "failed-to-start",
+    "capability-timed-out": "timed-out",
+    "capability-not-observed": "not-observed",
 }
 _RISK_RESOLUTION = "risk.resolution"
 _USER_DECISION_EVENTS = frozenset(
@@ -250,6 +259,20 @@ def advance_flow(state, request):
         return AdvanceResult(
             replace(completed, status="complete"), False,
             "The authorized delivery side effects completed.",
+        )
+
+    capability_outcome = _CAPABILITY_OUTCOMES.get(kind)
+    if capability_outcome is not None:
+        observed = _record_capability_observation(
+            state,
+            request.decision_key.strip(),
+            capability_outcome,
+            request.decision_value,
+        )
+        return AdvanceResult(
+            observed,
+            False,
+            "Recorded one opaque CodeAgent capability call fact.",
         )
 
     stop_reason = _CONDITIONAL_USER_STOPS.get(kind)

@@ -20,12 +20,9 @@ from mae_flow_core.application.hooks.capability_observation import (  # noqa: E4
     observe_return,
 )
 from mae_flow_core.orchestration import (  # noqa: E402
-    CapabilityKind,
     CommitPace,
     DeliveryPath,
     FlowState,
-    flow_attempt_context,
-    retry_decision_key,
 )
 from mae_flow_core.orchestration.capability_registry import (  # noqa: E402
     CapabilitySelector,
@@ -285,17 +282,12 @@ class ReturnObservationTests(unittest.TestCase):
         self.assertEqual(raw[:SUMMARY_LIMIT], observation.summary)
 
 
-class LeanCapabilityObservationTests(unittest.TestCase):
+class LeanCapabilityHookBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = self.temporary.name
         self.state_path = os.path.join(self.root, ".mae-flow.json")
-        self.audit_path = os.path.join(
-            self.root, ".mae-flow-work", "lean-hook-user-events.json")
-        self.write_state()
-
-    def write_state(self):
         state = FlowState.new(
             "REQ-OBSERVE", DeliveryPath.FULL, CommitPace.CONTINUOUS)
         with open(self.state_path, "w", encoding="utf-8") as stream:
@@ -305,110 +297,24 @@ class LeanCapabilityObservationTests(unittest.TestCase):
         with open(self.state_path, encoding="utf-8") as stream:
             return FlowState.from_dict(json.load(stream))
 
-    def read_audit(self):
-        with open(self.audit_path, encoding="utf-8") as stream:
-            return json.load(stream)
-
-    def save_state(self, state):
-        with open(self.state_path, "w", encoding="utf-8") as stream:
-            json.dump(state.to_dict(), stream)
-
-    def test_real_pre_and_post_payload_reserve_one_slot_and_consume_retry(self):
+    def test_capability_tool_callbacks_are_noops_at_the_hook_boundary(self):
         adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"),
-            clock_ns=lambda: 321,
-        )
-        first_payload = {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-1",
-            "tool_input": {"skill": "build-fix"},
-        }
-        first = adapter.handle("PreToolUse", first_payload)
-        duplicate = adapter.handle("PreToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-duplicate",
-            "tool_input": {"skill": "build-fix"},
-        })
-
-        self.assertEqual(0, first.exit_code)
-        self.assertEqual(2, duplicate.exit_code)
-        self.assertIn("自然语言", duplicate.stderr)
-        attempts = self.read_state().capabilities
-        self.assertEqual(1, len(attempts))
-        self.assertEqual(
-            ("build", "build:startup:-", "lean-workflow-v1", "not-observed"),
-            (
-                attempts[0].kind,
-                attempts[0].source_revision,
-                attempts[0].environment_revision,
-                attempts[0].outcome,
-            ),
-        )
-
-        context = flow_attempt_context(
-            self.read_state(), CapabilityKind.BUILD)
-        retry_key = retry_decision_key(context)
-        authorized = self.read_state().with_decision(
-            retry_key,
-            "用户确认构建环境恢复，授权同一阶段再调用一次。",
-        )
-        self.save_state(authorized)
-        retry = adapter.handle("PreToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-2",
-            "tool_input": {"skill": "build-fix"},
-        })
-        self.assertEqual(0, retry.exit_code, retry.stderr)
-        self.assertIn(
-            (
-                retry_key.replace(".retry.", ".retry.used."),
-                "用户确认构建环境恢复，授权同一阶段再调用一次。",
-            ),
-            self.read_state().decisions,
-        )
-
-        raw = "PASS CLEAN warnings=41 disabled=7 count=900"
-        post = adapter.handle("PostToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-2",
-            "tool_input": {"skill": "build-fix"},
-            "tool_response": raw,
-        })
-        self.assertEqual(0, post.exit_code)
-        attempts = self.read_state().capabilities
-        self.assertEqual(2, len(attempts))
-        self.assertEqual(("returned", raw), (
-            attempts[-1].outcome, attempts[-1].summary))
-
-    def test_normal_host_hook_sequence_records_exactly_one_attempt(self):
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"),
-        )
+            self.root, marker_root=os.path.join(self.root, "markers"))
         payload = {
             "tool_name": "Skill",
-            "tool_use_id": "tool-normal-build",
+            "tool_use_id": "tool-build-1",
             "tool_input": {"skill": "build-fix"},
         }
 
         pre = adapter.handle("PreToolUse", payload)
         post = adapter.handle("PostToolUse", dict(
-            payload, tool_response="opaque build return"))
+            payload, tool_response="opaque synchronous host return"))
 
         self.assertEqual(0, pre.exit_code)
         self.assertEqual(0, post.exit_code)
-        state = self.read_state()
-        self.assertEqual(1, len(state.capabilities))
-        self.assertEqual(
-            ("build", "returned", "opaque build return"),
-            (
-                state.capabilities[0].kind,
-                state.capabilities[0].outcome,
-                state.capabilities[0].summary,
-            ),
-        )
-        self.assertFalse(any(
-            key.startswith("capability.pending.")
-            for key, unused_value in state.decisions))
+        self.assertEqual((), self.read_state().capabilities)
+        self.assertFalse(os.path.exists(os.path.join(
+            self.root, ".mae-flow-work", "lean-hook-user-events.json")))
 
     def test_fictional_capability_fields_do_not_create_attempts(self):
         response = LeanHookAdapter(
@@ -417,137 +323,14 @@ class LeanCapabilityObservationTests(unittest.TestCase):
             "tool_name": "Bash",
             "tool_input": {"command": "echo ordinary"},
             "tool_response": "ordinary",
-            "capability_context": {
-                "source_revision": "invented-source",
-                "environment_revision": "invented-environment",
-            },
             "capability_record": {
                 "kind": "build",
-                "identity": "invented-tool",
-                "source_revision": "invented-source",
-                "environment_revision": "invented-environment",
                 "outcome": "returned",
                 "summary": "invented",
             },
         })
 
         self.assertEqual(0, response.exit_code)
-        self.assertEqual((), self.read_state().capabilities)
-        self.assertFalse(os.path.exists(self.audit_path))
-
-    def test_matching_posttool_records_return_without_quality_parsing(self):
-        raw = "PASS CLEAN warnings=41 disabled=7 count=900"
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"),
-            clock_ns=lambda: 123,
-        )
-        reserved = adapter.handle("PreToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-opaque",
-            "tool_input": {"skill": "build-fix"},
-        })
-        response = adapter.handle("PostToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-build-opaque",
-            "tool_input": {"skill": "build-fix"},
-            "tool_response": raw,
-        })
-
-        self.assertEqual(0, reserved.exit_code)
-        self.assertEqual(0, response.exit_code)
-        attempt = self.read_state().capabilities[-1]
-        self.assertEqual(
-            ("build", "build:startup:-", "lean-workflow-v1", "returned", raw),
-            (
-                attempt.kind,
-                attempt.source_revision,
-                attempt.environment_revision,
-                attempt.outcome,
-                attempt.summary,
-            ),
-        )
-        with open(self.state_path, encoding="utf-8") as stream:
-            persisted = json.load(stream)
-        self.assertEqual(3, persisted["schema_version"])
-        self.assertEqual({
-            "kind", "source_revision", "environment_revision", "outcome",
-            "summary",
-        }, set(persisted["capabilities"][-1]))
-        audit = self.read_audit()[0]
-        self.assertEqual({
-            "event": "CapabilityObservation",
-            "captured_at_ns": 123,
-            "payload": {
-                "kind": "build",
-                "tool_name": "Skill",
-                "identity_field": "skill",
-                "identity": "build-fix",
-                "return_present": True,
-                "summary": raw,
-            },
-        }, {key: audit[key] for key in (
-            "event", "captured_at_ns", "payload")})
-        self.assertEqual(0, audit["ordinal"])
-        self.assertRegex(audit["event_id"], r"^[0-9a-f]{64}$")
-        self.assertRegex(audit["state_sha256"], r"^[0-9a-f]{64}$")
-
-    def test_missing_context_is_audited_without_fabricating_attempt(self):
-        response = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"),
-            clock_ns=lambda: 456,
-        ).handle("PostToolUse", {
-            "tool_name": "Task",
-            "tool_input": {"subagent_type": "ut-generator-agent"},
-            "tool_response": {"opaque": ["shape"]},
-        })
-
-        self.assertEqual(0, response.exit_code)
-        self.assertEqual((), self.read_state().capabilities)
-        observation = self.read_audit()[0]["payload"]
-        self.assertEqual("ut-generator-agent", observation["identity"])
-        self.assertTrue(observation["return_present"])
-
-    def test_post_observation_errors_fail_open_but_reservation_fails_closed(self):
-        def unavailable(*unused):
-            raise OSError("audit unavailable")
-
-        audit_failure = LeanHookAdapter(
-            self.root,
-            marker_root=os.path.join(self.root, "markers"),
-            event_sink=unavailable,
-        ).handle("PostToolUse", {
-            "tool_name": "Skill",
-            "tool_input": {"skill": "build-fix"},
-            "tool_response": "opaque",
-        })
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"))
-        adapter._update_state = unavailable
-        persistence_failure = adapter.handle("PreToolUse", {
-            "tool_name": "Skill",
-            "tool_use_id": "tool-persistence-failure",
-            "tool_input": {"skill": "build-fix"},
-        })
-
-        self.assertEqual(0, audit_failure.exit_code)
-        self.assertEqual(2, persistence_failure.exit_code)
-        self.assertIn("failed closed", persistence_failure.stderr)
-
-    def test_async_spawn_ack_never_reserves_or_completes_a_capability(self):
-        adapter = LeanHookAdapter(
-            self.root, marker_root=os.path.join(self.root, "markers"))
-        payload = {
-            "tool_name": "spawn_agent",
-            "tool_use_id": "spawn-ut-1",
-            "tool_input": {"task_name": "ut_generator_agent"},
-        }
-
-        pre = adapter.handle("PreToolUse", payload)
-        post = adapter.handle("PostToolUse", dict(
-            payload, tool_response={"agent_id": "agent-123"}))
-
-        self.assertEqual(0, pre.exit_code)
-        self.assertEqual(0, post.exit_code)
         self.assertEqual((), self.read_state().capabilities)
 
 

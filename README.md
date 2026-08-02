@@ -103,18 +103,20 @@ Moonlight 是同一工作流上的精确预授权，不是第三条路径。用�
 
 Delivery 卡始终可见，并同时展示 Moonlight requested 权限、effective 权限和被撤销时的 block reason。Moonlight 可以授权卡片所描述的精确副作用，但不会把交付信息藏起来，也不会自动纳入未点名的 Story 或其他条件文档。
 
-## 四个生产 Hooks
+## 生产 Hook 边界
 
-生产只注册四个事件：
+CodeAgent 保留六个兼容注册事件；只有前四类承担当前职责：
 
 | Hook | 职责 |
 |---|---|
 | `SessionStart` | 注入一次最小恢复摘要 |
 | `UserPromptSubmit` | 保留原始用户事件并识别明确退出 |
-| `PreToolUse` | 在副作用发生前执行安全与能力单次调用裁决 |
-| `PostToolUse` | 记录已预留 capability 的不透明同步返回 |
+| `PreToolUse` | 在副作用发生前执行安全与精确 Git 裁决；`WriteStdin` 也必须经过该边界 |
+| `PostToolUse` | 记录已预留 Git 副作用的实际结果，不解析 Agent/Skill 返回 |
+| `SubagentStop` | 兼容历史 CodeAgent 事件，直接放行 |
+| `Stop` | 兼容历史 CodeAgent 事件，直接放行 |
 
-Host Hook 是唯一写者。Agent 和能力本身不直接改恢复状态；Hook 失败时普通开发 fail-open，Git 危险动作仍由安全内核按当前事实裁决。
+能力真实同步返回后，主 Agent 使用一次 `advance capability-<outcome> --key <kind>` 保存轻量恢复事实；工作流命令是 capability 事实的唯一写者。该记录不是质量凭证，不能触发重跑。Hook 失败时普通开发 fail-open，Git 危险动作仍由安全内核按当前事实裁决。
 
 ## 本地验证
 

@@ -21,6 +21,10 @@ from mae_flow_core.orchestration import (  # noqa: E402
     Phase,
     advance_flow,
 )
+from mae_flow_core.orchestration.delivery import (  # noqa: E402
+    DELIVERY_RECEIPT_KEY,
+    valid_delivery_receipt,
+)
 
 
 def flow(path=DeliveryPath.FULL, phase=Phase.STARTUP, status="active"):
@@ -46,6 +50,62 @@ def with_returned_review(state):
 
 
 class FullTransitionTests(unittest.TestCase):
+    def test_user_confirmation_requires_real_prose_and_issues_bound_receipt(self):
+        startup = flow()
+        blank = advance_flow(startup, AdvanceRequest("startup-confirmed"))
+        self.assertIs(startup, blank.state)
+        self.assertTrue(blank.needs_user)
+
+        delivery = replace(
+            flow(phase=Phase.DELIVERY),
+            commit_pace=CommitPace.CONTINUOUS,
+            delivery_files=("src/a.cpp",),
+        )
+        confirmed = advance_flow(delivery, AdvanceRequest(
+            "delivery-confirmed",
+            decision_value="Deliver these exact files without Git.",
+        ))
+        values = [value for key, value in confirmed.state.decisions
+                  if key == DELIVERY_RECEIPT_KEY]
+        self.assertEqual(1, len(values))
+        self.assertTrue(valid_delivery_receipt(confirmed.state, values[0]))
+
+    def test_material_exception_is_persisted_and_blocks_phase_progression(self):
+        state = flow(phase=Phase.CONSTRUCTION)
+        stopped = advance_flow(state, AdvanceRequest(
+            "meaningful-design-deviation",
+            decision_value="The public behavior differs from Story.",
+        ))
+        advanced = advance_flow(
+            stopped.state, AdvanceRequest("construction-complete"))
+
+        self.assertTrue(stopped.needs_user)
+        self.assertEqual(1, len(stopped.state.risks))
+        self.assertEqual(Phase.CONSTRUCTION, advanced.state.phase)
+        self.assertTrue(advanced.needs_user)
+
+    def test_quality_defect_repair_returns_to_construction_and_clears_downstream(self):
+        state = replace(
+            flow(phase=Phase.QUALITY),
+            decisions=(
+                ("review.design", "clear"),
+                ("quality.selection", "UT and CodeCheck"),
+                ("delivery.receipt", "stale"),
+            ),
+            delivery_files=("src/a.cpp",),
+        )
+
+        result = advance_flow(state, AdvanceRequest(
+            "quality-defect-repair",
+            decision_value="Repair the reproduced defect in CP2.",
+        ))
+
+        self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
+        self.assertFalse(result.state.delivery_files)
+        self.assertFalse(any(
+            key.startswith(("quality.", "delivery."))
+            for key, unused in result.state.decisions))
+
     def test_review_fact_requires_matching_returned_capability_attempt(self):
         cases = (
             (Phase.SPEC, "grill-clear", "grill", "grill:spec:-",
@@ -116,6 +176,9 @@ class FullTransitionTests(unittest.TestCase):
         for phase, event, expected in cases:
             with self.subTest(phase=phase, event=event):
                 original = flow(phase=phase)
+                if phase == Phase.CONSTRUCTION:
+                    original = replace(
+                        original, commit_pace=CommitPace.CONTINUOUS)
                 if phase == Phase.SPEC:
                     original = with_returned_review(original)
                     original = advance_flow(
@@ -143,7 +206,8 @@ class FullTransitionTests(unittest.TestCase):
         for phase, event in cases:
             with self.subTest(phase=phase):
                 state = flow(phase=phase)
-                result = advance_flow(state, AdvanceRequest(event))
+                result = advance_flow(state, AdvanceRequest(
+                    event, decision_value="Confirm after review."))
                 self.assertIs(state, result.state)
                 self.assertEqual(phase, result.state.phase)
                 self.assertFalse(result.needs_user)
@@ -165,7 +229,8 @@ class FullTransitionTests(unittest.TestCase):
                     with_returned_review(flow(phase=phase)),
                     AdvanceRequest(review_event))
                 result = advance_flow(
-                    reviewed.state, AdvanceRequest(confirmation))
+                    reviewed.state, AdvanceRequest(
+                        confirmation, decision_value="Confirm after review."))
                 self.assertFalse(reviewed.needs_user)
                 self.assertEqual(expected, result.state.phase)
 
@@ -200,7 +265,8 @@ class FullTransitionTests(unittest.TestCase):
                     "The user selected the documented reviewer tradeoff.",
                 ))
                 advanced = advance_flow(
-                    second.state, AdvanceRequest(confirmation))
+                    second.state, AdvanceRequest(
+                        confirmation, decision_value="Confirm after review."))
                 self.assertTrue(tradeoff.needs_user)
                 self.assertFalse(first.needs_user)
                 self.assertEqual(first.state, second.state)
@@ -227,7 +293,13 @@ class FullTransitionTests(unittest.TestCase):
                 self.assertEqual(state.phase, result.state.phase)
 
     def test_cp_confirmation_records_pace_decision_without_changing_phase(self):
-        state = flow(phase=Phase.CONSTRUCTION)
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+            ),
+        )
         result = advance_flow(state, AdvanceRequest(
             "cp-confirmed",
             "construction.commit_pace",
@@ -244,6 +316,12 @@ class FullTransitionTests(unittest.TestCase):
         state = replace(
             flow(phase=Phase.CONSTRUCTION),
             current_cp="CP1",
+            decisions=(
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
+                ("delivery.cp.CP2.file", "src/b.cpp"),
+                ("delivery.cp.CP2.message", "[REQ-42][fix]complete CP2"),
+            ),
         )
         cp1 = advance_flow(
             state,
@@ -272,6 +350,7 @@ class FullTransitionTests(unittest.TestCase):
     def test_delivery_confirmation_authorizes_without_completing_full_flow(self):
         state = replace(
             flow(phase=Phase.DELIVERY),
+            commit_pace=CommitPace.CONTINUOUS,
             delivery_files=("src/a.cpp",),
         )
         result = advance_flow(
@@ -336,15 +415,17 @@ class FullTransitionTests(unittest.TestCase):
         )
 
         self.assertEqual("active", result.state.status)
-        self.assertIn("manifest", result.reason.lower())
+        self.assertIn("receipt", result.reason.lower())
 
     def test_staged_completion_requires_recorded_final_checkpoint_union(self):
         state = replace(
-            flow(phase=Phase.DELIVERY),
+            flow(path=DeliveryPath.FOCUSED, phase=Phase.DELIVERY),
             delivery_files=("src/a.cpp", "src/b.cpp"),
             decisions=(
                 ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("delivery.cp.CP1.message", "[REQ-42][fix]complete CP1"),
                 ("delivery.cp.CP2.file", "src/b.cpp"),
+                ("delivery.cp.CP2.message", "[REQ-42][fix]complete CP2"),
             ),
         )
         confirmed = advance_flow(
@@ -380,7 +461,8 @@ class FullTransitionTests(unittest.TestCase):
         premature = advance_flow(
             state, AdvanceRequest("delivery-completed"))
         authorized = advance_flow(
-            state, AdvanceRequest("delivery-confirmed"))
+            state, AdvanceRequest(
+                "delivery-confirmed", decision_value="Deliver without Git."))
         completed = advance_flow(
             authorized.state,
             AdvanceRequest(
@@ -390,7 +472,7 @@ class FullTransitionTests(unittest.TestCase):
             ),
         )
         self.assertEqual("active", premature.state.status)
-        self.assertIn("authorization", premature.reason.lower())
+        self.assertIn("receipt", premature.reason.lower())
         self.assertEqual("active", authorized.state.status)
         self.assertEqual("complete", completed.state.status)
         self.assertIn((
@@ -479,12 +561,28 @@ class FullTransitionTests(unittest.TestCase):
 
 
 class FocusedTransitionTests(unittest.TestCase):
+    def test_startup_confirmation_atomically_authorizes_focused_scope(self):
+        result = advance_flow(
+            flow(path=DeliveryPath.FOCUSED),
+            AdvanceRequest(
+                "startup-confirmed",
+                decision_value="Modify only the reviewed parser boundary.",
+            ),
+        )
+
+        self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
+        self.assertIn((
+            "focused.scope_approved",
+            "Modify only the reviewed parser boundary.",
+        ), result.state.decisions)
+
     def test_focused_uses_only_startup_and_delivery_confirmation_stops(self):
         startup = advance_flow(
             flow(path=DeliveryPath.FOCUSED), AdvanceRequest("startup-ready"))
         construction = advance_flow(
             flow(path=DeliveryPath.FOCUSED),
-            AdvanceRequest("startup-confirmed"),
+            AdvanceRequest(
+                "startup-confirmed", decision_value="Confirm focused scope."),
         )
         cp = advance_flow(
             flow(path=DeliveryPath.FOCUSED, phase=Phase.CONSTRUCTION),
@@ -509,7 +607,7 @@ class FocusedTransitionTests(unittest.TestCase):
             with self.subTest(phase=phase):
                 result = advance_flow(
                     flow(path=DeliveryPath.FOCUSED, phase=phase),
-                    AdvanceRequest(event),
+                    AdvanceRequest(event, decision_value="Resume migrated work."),
                 )
                 self.assertEqual(Phase.CONSTRUCTION, result.state.phase)
                 self.assertFalse(result.needs_user)
@@ -517,15 +615,30 @@ class FocusedTransitionTests(unittest.TestCase):
 
     def test_focused_delivery_confirmation_only_authorizes_flow(self):
         result = advance_flow(
-            flow(path=DeliveryPath.FOCUSED, phase=Phase.DELIVERY),
-            AdvanceRequest("delivery-confirmed"),
+            replace(
+                flow(path=DeliveryPath.FOCUSED, phase=Phase.DELIVERY),
+                commit_pace=CommitPace.CONTINUOUS,
+                delivery_files=("src/a.cpp",),
+            ),
+            AdvanceRequest(
+                "delivery-confirmed", decision_value="Deliver without Git."),
         )
         self.assertEqual("active", result.state.status)
         self.assertFalse(result.needs_user)
 
     def test_focused_can_upgrade_semantically_to_full_specification(self):
-        result = advance_flow(
+        original = replace(
             flow(path=DeliveryPath.FOCUSED, phase=Phase.CONSTRUCTION),
+            decisions=(
+                ("focused.scope_approved", "small scope"),
+                ("delivery.cp.CP1.file", "src/a.cpp"),
+                ("quality.selection", "Lightcheck"),
+                ("delivery.receipt", "stale"),
+            ),
+            delivery_files=("src/a.cpp",),
+        )
+        result = advance_flow(
+            original,
             AdvanceRequest(
                 "upgrade-to-full",
                 "workflow.path",
@@ -534,6 +647,11 @@ class FocusedTransitionTests(unittest.TestCase):
         )
         self.assertEqual(DeliveryPath.FULL, result.state.path)
         self.assertEqual(Phase.SPEC, result.state.phase)
+        self.assertFalse(result.state.delivery_files)
+        self.assertFalse(any(
+            key.startswith(("focused.", "construction.", "quality.",
+                            "delivery."))
+            for key, unused in result.state.decisions))
         self.assertFalse(result.needs_user)
 
 
@@ -794,7 +912,9 @@ class TerminalTransitionTests(unittest.TestCase):
                         delivery_files=("src/a.cpp",),
                     )
                     state = advance_flow(
-                        state, AdvanceRequest("delivery-confirmed")).state
+                        state, AdvanceRequest(
+                            "delivery-confirmed",
+                            decision_value="Deliver without Git.")).state
                 result = advance_flow(state, AdvanceRequest("complete"))
                 expected = "complete" if phase == Phase.DELIVERY else "active"
                 self.assertEqual(expected, result.state.status)

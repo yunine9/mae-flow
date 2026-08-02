@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from ..foundation import git_intent
 from ..foundation.commit_message import valid_business_commit_message
 from ..foundation.source_paths import repository_path_identity
-from ..orchestration import DeliveryPath, FlowState, Phase
+from ..orchestration.models import DeliveryPath, FlowState, Phase
 from .command_policy import (
     classify_command_mutation,
     dangerous_bash_result,

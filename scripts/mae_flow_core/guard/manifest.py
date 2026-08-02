@@ -6,7 +6,7 @@ import ntpath
 import os
 import re
 
-from ..orchestration import FlowState
+from ..orchestration.models import FlowState
 
 
 _GLOB_CHARACTERS = re.compile(r"[*?\[\]]")

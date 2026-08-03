@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+
+MAE_FLOW_BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+exec python "$MAE_FLOW_BIN_DIR/../scripts/mae-flow.py" "$@"

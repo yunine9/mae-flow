@@ -28,6 +28,13 @@ class MFParser(argparse.ArgumentParser):
         self.exit(2)
 
 
+def _add_grill_metadata(parser):
+    parser.add_argument("--parent")
+    parser.add_argument("--evidence")
+    parser.add_argument("--impact")
+    parser.add_argument("--recommendation")
+
+
 def parse_args(argv=None):
     parser = MFParser(prog="mae-flow")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -75,11 +82,13 @@ def parse_args(argv=None):
     advance.add_argument("event")
     advance.add_argument("--decision", default="")
     advance.add_argument("--key", default="")
+    _add_grill_metadata(advance)
 
     decision = sub.add_parser("decision")
     decision.add_argument("event")
     decision.add_argument("text")
     decision.add_argument("--key", default="")
+    _add_grill_metadata(decision)
 
     manifest = sub.add_parser("manifest")
     manifest.add_argument("--file", action="append", required=True)

@@ -7,14 +7,14 @@
 所有 Mae-Flow CLI 调用都必须使用：
 
 ```text
-python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" <command>
+mae-flow <command>
 ```
 
-下文省略入口的命令名只是协议后缀，不能脱离上述入口直接执行。禁止猜测或搜索插件安装目录；禁止使用旧式 skill 目录、版本化缓存路径或 `find` 定位入口。两个插件根变量都不可用时，报告“插件根目录环境变量缺失”并停止，不执行目录扫描。
+CodeAgent 通过插件 `bin/` 提供该命令。禁止猜测或搜索插件安装目录，禁止使用版本化缓存路径、`find`、`python -c`/`importlib` 反射加载入口脚本，或 Main Agent 中可能为空的插件根变量。命令不可用时报告“Mae-Flow 插件 bin 未进入 CodeAgent Bash PATH”并停止。
 
 ## 分流
 
-- 无参数或需求描述：已有 `.mae-flow.json` 就执行 `python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" current`；没有状态时，读取仓库预设和相关领域基线，向用户展示唯一一次完整配置卡。Build 必须按项目确认精确路由：C++ 可用配置的 `build-fix` Skill，Java/Maven 用确认的 Maven 命令，其他语言用仓库准确 Skill/命令。用户自然语言确认或修改后，一次执行 `start --ticket <单号> --ticket-type <feat|fix> --worker <工号> --requirement <需求来源> --base-branch <基线> --working-branch <工作分支> --build-method <精确Build路由> --ut-method <UT生成> --ut-command <UT入口> --quality-plan <自然语言质量组合> --path <full|focused> --pace <continuous|staged> --decision "<用户对完整配置卡的自然语言确认>"`；该命令创建/切换到确认的工作分支，原子记录 Startup 确认并进入下一阶段，不再重复询问。
+- 无参数或需求描述：已有 `.mae-flow.json` 就执行 `mae-flow current`；没有状态时，先执行 `mae-flow start ...` 持久化并展示完整配置卡。用户修改时执行 `mae-flow configure ... --decision "<修改语义>"` 并重新展示；用户对当前卡确认后执行 `mae-flow decision startup-confirmed "<确认语义>"`。不得把 `start --decision` 当成未展示配置卡的确认。
 - `exit`：立即执行 `exit --reason "用户选择直接开发"`。不再追问，不回滚业务文件。
 - `ut|codecheck|grill|story`：执行同名 one-shot toolbox 命令；不启动完整流程，不提交，不推送。
 - `chain` / 跨仓：Chain 是可恢复的跨仓流程；新任务执行 `chain start`，存在 `.mae-flow-work/chain-current.json` 时执行 `chain current`，不得退回 one-shot。
@@ -28,7 +28,7 @@ python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" <com
 2. 完成当前阶段最有价值的工作。调用所选 Grill、Story、Reviewer、CodeCheck、Build、UT 能力时，同一相关上下文至多一次，返回只记观察事实。
 3. 用 `decision <event> "<用户自然语言>"` 或 `advance <event> --decision "<事实或依据>"` 推进。
 
-Full Spec 必须先逐题执行 Interactive Grill，把质询树和确认结果写入本地 `grill.md`；全部收敛后才生成含“Grill 决策追溯”的 `spec.md`，随后调用一次 `grill-critic-agent` 检查两份文件的输入覆盖。质询结果是 Spec 的关键输入，不能用只读 Critic 或 `grill-clear` 替代。Focused 发现未决需求时先升级 Full。
+Full Spec 必须完整执行 `flow/steps/grill.md` 的旧 Grill：先写当前单据的 `survey.md` 和八维 `grill-prep.md`，逐维形成候选题或带定位的不适用依据，再让问题树随每个答案生长。旧 Grill/Spec 文件只作历史线索；没有当前状态收据时不得当作本轮已确认内容。每题先用 `mae-flow advance grill-question --key <GQ-ID> --parent <ROOT|父题> --evidence "<证据>" --impact "<影响>" --recommendation "<推荐>"` 登记，再 AskUserQuestion；若答案先到，使用带相同元数据的 `mae-flow decision grill-answer ...` 原子补登记并消费。全部候选题和衍生题关闭后才写 `grill.md`、收敛并生成含“Grill 决策追溯”的 `spec.md`，随后调用一次 `grill-critic-agent` 检查两份文件的输入覆盖。质询结果是 Spec 的关键输入，不能用只读 Critic 或 `grill-clear` 替代。Focused 发现未决需求时先升级 Full。
 
 不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 或 `AskUserQuestion` 回答只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
 

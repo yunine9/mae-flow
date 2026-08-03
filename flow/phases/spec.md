@@ -4,22 +4,37 @@ must establish shared understanding through Interactive Grill before producing
 the candidate Spec.
 
 ## Interactive Grill
-Read the request, selected behavior baseline, current behavior, constraints, and
-directly relevant code facts. Use the internal checklist for state transitions,
-boundaries, ordering, concurrency, partial failure, cleanup, consistency,
-compatibility, scale, performance, and observability.
+Read `flow/steps/grill.md` and
+`skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md` completely. Survey
+the request, selected behavior baseline, current behavior, constraints, and
+directly relevant code facts into the current ticket's `survey.md`. Copy and
+complete the eight-dimension template as `grill-prep.md`; every dimension must
+contain either candidate questions with evidence/recommendation/impact or a
+specific code/document reason why it is not applicable. Placeholders block both
+questioning and convergence. There is no two-question shortcut or default
+question limit; after 15 questions report the scale and let the user decide.
+
+Existing Grill or Spec drafts are historical clues only. A decision is current
+only when the current flow state contains its matching question and answer
+receipt. Never infer this run's confirmation from leftover files.
 
 Open one stable `GQ-*` question at a time with evidence, impact, and a recommended
-answer. Record it with `advance grill-question --key <GQ-ID> --decision
-"<structured question>"`; bind the user's natural-language answer with `decision
-grill-answer --key <GQ-ID> "<semantic answer>"`. Inspect each answer for vague
+answer. Before asking, record it with `mae-flow advance grill-question --key
+<GQ-ID> --parent <ROOT|answered-GQ-ID> --evidence "<fact>" --impact "<effect>"
+--recommendation "<answer and reason>"`; bind the user's natural-language answer
+with `mae-flow decision grill-answer --key <GQ-ID> "<semantic answer>"`. If the
+host delivered the answer before registration, add the same four metadata flags
+to that decision command so registration and answer consumption are atomic.
+Inspect each answer for vague
 terms, contradictions, new states, and derived requirement branches before
 opening the next question. Ask only for decisions; verify discoverable facts.
 
 Write the evidence, question tree, answers, derived branches, confirmed WHAT,
 boundaries, compatibility, failure behavior, and non-goals to the ticket's local
-`grill.md`. Full requires at least one real answer. When all questions are
-closed, run `advance grill-converged`; the CLI binds the current file digest.
+`grill.md`. It must preserve all eight preparation conclusions and derived EARS
+behaviors. When every candidate and derived branch is closed, run
+`mae-flow advance grill-converged`; the CLI validates preparation and binds the
+current file digest.
 
 ## Candidate Spec
 Generate `spec.md` only after convergence. The request, selected behavior

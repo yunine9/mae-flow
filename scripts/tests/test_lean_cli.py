@@ -177,6 +177,24 @@ class LeanCliTests(unittest.TestCase):
             timeout=20,
         )
 
+    def write_grill_preparation(self, ticket):
+        local = os.path.join(self.root, ".mae-flow-work", ticket)
+        os.makedirs(local, exist_ok=True)
+        with open(os.path.join(local, "survey.md"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("# Survey\n\nRelevant code and requirement facts.\n")
+        headings = (
+            "## 1 状态机完备性", "## 2 边界值", "## 3 并发时序",
+            "## 4 失败路径与残留清理", "## 5 数据一致性",
+            "## 6 存量升级兼容", "## 7 规格性能", "## 8 可观测",
+            "## 9 结论汇总",
+        )
+        with open(os.path.join(local, "grill-prep.md"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("# Grill preparation\n\n")
+            for heading in headings:
+                stream.write(heading + "\n\n结论：依据当前测试场景完成检查。\n\n")
+
     def submit_user_prompt(self, text, session_id="cli-user-session"):
         result = LeanHookAdapter(self.root).handle(
             "UserPromptSubmit",
@@ -620,6 +638,7 @@ class LeanCliTests(unittest.TestCase):
             "decision", "startup-confirmed", "按完整开发和一次交付继续。")
         self.assert_success(startup)
         self.assertIn("需要用户介入: Spec", startup.stdout)
+        self.write_grill_preparation("REQ-42")
 
         artifact_paths = {
             item["kind"]: os.path.join(
@@ -698,12 +717,49 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(1, len(story_paths))
         self.assertIn(".mae-flow-work", story_paths[0].replace("\\", "/"))
 
+    def test_grill_answer_can_atomically_register_an_answered_question(self):
+        self.assert_success(self.run_cli_raw(
+            "start", "--ticket", "REQ-GRILL-ATOMIC", "--path", "full",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "按 Full 继续。"))
+        self.write_grill_preparation("REQ-GRILL-ATOMIC")
+        answer = "TYPE_1"
+        captured = LeanHookAdapter(self.root).handle(
+            "PostToolUse",
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{
+                    "question": "SUL+N98 应映射到哪个频段类型？"}]},
+                "tool_response": answer,
+            },
+        )
+        self.assertEqual(0, captured.exit_code, captured.stderr)
+
+        recorded = self.run_cli_raw(
+            "decision", "grill-answer", answer, "--key", "GQ-01",
+            "--parent", "ROOT", "--evidence", "N95 已映射 TYPE_2。",
+            "--impact", "N98 的 SUL 选择会影响频段分类。",
+            "--recommendation", "TYPE_1",
+        )
+
+        self.assert_success(recorded)
+        decisions = {
+            item["key"]: item["value"] for item in self.state()["decisions"]
+        }
+        self.assertIn("grill.question.GQ-01", decisions)
+        self.assertEqual(answer, decisions["grill.answer.GQ-01"])
+        metadata = json.loads(decisions["grill.question.GQ-01"])
+        self.assertEqual("", metadata["parent"])
+        self.assertEqual("TYPE_1", metadata["recommendation"])
+
     def test_full_spec_cli_binds_grill_and_spec_bytes(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-GRILL-BYTES", "--path", "full",
             "--pace", "continuous"))
         self.assert_success(self.run_cli(
             "decision", "startup-confirmed", "按 Full 继续。"))
+        self.write_grill_preparation("REQ-GRILL-BYTES")
         artifacts = {
             item["kind"]: os.path.join(
                 self.root, *item["path"].split("/"))

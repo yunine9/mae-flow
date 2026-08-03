@@ -100,11 +100,8 @@ class ArchitectureTests(unittest.TestCase):
                 self.assertLessEqual(
                     line_count(os.path.join(ROOT, relative)), maximum)
 
-    def test_production_prompts_use_host_plugin_root_for_cli(self):
-        launcher = (
-            'python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}'
-            '/scripts/mae-flow.py"'
-        )
+    def test_production_prompts_use_stable_codeagent_bin_launcher(self):
+        launcher = "mae-flow current"
         for relative in ("commands/mae-flow.md", "skills/mae-flow/SKILL.md"):
             with open(os.path.join(ROOT, relative), encoding="utf-8") as stream:
                 source = stream.read()
@@ -113,7 +110,14 @@ class ArchitectureTests(unittest.TestCase):
                 self.assertNotIn('python "<插件', source)
                 self.assertNotIn(".cac/skills/mae-flow", source)
                 self.assertIn("禁止猜测或搜索插件安装目录", source)
-                self.assertIn("插件根目录环境变量缺失", source)
+                self.assertIn("插件 bin 未进入 CodeAgent Bash PATH", source)
+                self.assertNotIn("CLAUDE_PLUGIN_ROOT", source)
+        with open(os.path.join(ROOT, "bin", "mae-flow"),
+                  encoding="utf-8") as stream:
+            bin_source = stream.read()
+        self.assertTrue(bin_source.startswith("#!/usr/bin/env sh\n"))
+        self.assertIn('exec python "$MAE_FLOW_BIN_DIR/../scripts/mae-flow.py"',
+                      bin_source)
 
     def test_production_spec_does_not_demote_grill_to_post_draft_critic(self):
         with open(os.path.join(ROOT, "flow", "phases", "spec.md"),

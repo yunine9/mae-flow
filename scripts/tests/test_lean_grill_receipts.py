@@ -43,6 +43,20 @@ class LeanGrillReceiptTests(unittest.TestCase):
         os.makedirs(self.paths.local_root)
         self.write(self.paths.local_grill, "# Grill\n\nGQ-001 已确认。\n")
         self.write(self.paths.local_spec, "# Spec\n\nGQ-001 -> AC-001\n")
+        self.write(
+            os.path.join(self.paths.local_root, "survey.md"),
+            "# Survey\n\nRelevant code facts.\n")
+        sections = (
+            "## 1 状态机完备性", "## 2 边界值", "## 3 并发时序",
+            "## 4 失败路径与残留清理", "## 5 数据一致性",
+            "## 6 存量升级兼容", "## 7 规格性能", "## 8 可观测",
+            "## 9 结论汇总",
+        )
+        self.write(
+            os.path.join(self.paths.local_root, "grill-prep.md"),
+            "# Grill preparation\n\n" + "\n\n".join(
+                section + "\n\n结论：已基于代码证据检查。"
+                for section in sections) + "\n")
         self.state = FlowState(
             ticket="REQ-RECEIPT",
             path=DeliveryPath.FULL,

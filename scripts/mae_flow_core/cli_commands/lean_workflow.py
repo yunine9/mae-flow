@@ -273,14 +273,63 @@ def _advance_state(root, state, request):
     return advanced, result.reason
 
 
+_GRILL_METADATA_FIELDS = (
+    "parent", "evidence", "impact", "recommendation")
+
+
+def _grill_metadata_values(args):
+    values = {
+        field: getattr(args, field, None)
+        for field in _GRILL_METADATA_FIELDS
+    }
+    return values, any(value is not None for value in values.values())
+
+
+def _grill_question_request(event, key, legacy_value, args):
+    values, supplied = _grill_metadata_values(args)
+    normalized = event.strip().lower()
+    if not supplied:
+        return _semantic_request(event, key, legacy_value)
+    if normalized not in {"grill-question", "grill-answer"}:
+        raise ValueError("Grill 元数据参数只适用于 grill-question/grill-answer")
+    if normalized == "grill-question" and legacy_value.strip():
+        raise ValueError("grill-question 不能同时使用 --decision 和显式元数据参数")
+    missing = [
+        field for field in ("evidence", "impact", "recommendation")
+        if not isinstance(values[field], str) or not values[field].strip()
+    ]
+    if missing:
+        raise ValueError(
+            "Grill 元数据缺少非空参数: "
+            + ", ".join("--" + field for field in missing))
+    parent = (values["parent"] or "ROOT").strip()
+    metadata = {
+        "parent": "" if parent.casefold() == "root" else parent,
+        "evidence": values["evidence"].strip(),
+        "impact": values["impact"].strip(),
+        "recommendation": values["recommendation"].strip(),
+    }
+    return AdvanceRequest(
+        "grill-question", key.strip(),
+        json.dumps(
+            metadata, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")))
+
+
 def cmd_lean_advance(root, args):
     def operation(current):
         if args.event.strip().lower() in _USER_OWNED_EVENTS:
             raise ValueError(
                 "该用户决定事件只能使用 decision 与自然语言确认")
-        request = _semantic_request(args.event, args.key, args.decision)
+        request = _grill_question_request(
+            args.event, args.key, args.decision, args)
+        if request.kind.strip().lower() == "grill-question":
+            grill_receipts.validate_grill_preparation(root, current)
         request = grill_receipts.prepare_grill_request(root, current, request)
-        return _advance_state(root, current, request)
+        updated, reason = _advance_state(root, current, request)
+        if request.kind.strip().lower() == "grill-question" and updated == current:
+            raise ValueError(reason)
+        return updated, reason
 
     def execute():
         state, reason = _mutate(
@@ -319,16 +368,35 @@ def cmd_lean_decision(root, args):
         event_id = (
             _matching_user_event(root, state)
             if _requires_user_event(args.event) else "")
+        _, grill_metadata_supplied = _grill_metadata_values(args)
+        normalized_event = args.event.strip().lower()
+        if grill_metadata_supplied and normalized_event != "grill-answer":
+            raise ValueError("decision 的 Grill 元数据只适用于 grill-answer")
         if "." in args.event:
             key = args.key.strip() or args.event.strip()
             key = _validate_natural_decision(state, key, text)
             updated = state.with_decision(key, text)
             reason = "已记录自然语言决定。"
         else:
-            if args.event.strip().lower() == "startup-confirmed":
+            if normalized_event == "startup-confirmed":
                 state = place_startup_branch(root, state)
-            request = _semantic_request(args.event, args.key, text)
-            updated, reason = _advance_state(root, state, request)
+            if normalized_event == "grill-answer" and grill_metadata_supplied:
+                grill_receipts.validate_grill_preparation(root, state)
+                question = _grill_question_request(
+                    args.event, args.key, "", args)
+                questioned, question_reason = _advance_state(
+                    root, state, question)
+                if questioned == state:
+                    raise ValueError(question_reason)
+                request = _semantic_request(args.event, args.key, text)
+                updated, reason = _advance_state(root, questioned, request)
+                if updated == questioned:
+                    raise ValueError(reason)
+            else:
+                request = _semantic_request(args.event, args.key, text)
+                updated, reason = _advance_state(root, state, request)
+                if normalized_event == "grill-answer" and updated == state:
+                    raise ValueError(reason)
         if event_id and updated != state:
             updated = _bind_user_event(updated, event_id, args.event.strip())
         return updated, reason

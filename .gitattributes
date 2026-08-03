@@ -8,3 +8,4 @@ docs/share/ export-ignore
 # 全部对不上 manifest——完好的插件被 envcheck 误判"源码损坏"。
 runtime/vendor/** -whitespace -text
 runtime/bin/openspec -text
+bin/mae-flow -text

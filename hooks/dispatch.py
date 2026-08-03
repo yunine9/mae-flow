@@ -5,6 +5,7 @@
 import json
 import locale
 import os
+import shlex
 import sys
 import tempfile
 import threading
@@ -73,6 +74,22 @@ def _arm_watchdog():
     timer = threading.Timer(WATCHDOG_SECS, force_allow)
     timer.daemon = True
     timer.start()
+
+
+def _persist_codeagent_plugin_root():
+    """Expose the Hook-only plugin root to later CodeAgent Bash calls."""
+    target = os.environ.get("CODEAGENT3_ENV_FILE", "").strip()
+    if not target:
+        _log("CODEAGENT3_ENV_FILE unavailable; bin launcher remains primary")
+        return
+    root = os.environ.get("CODEAGENT3_PLUGIN_ROOT", "").strip() or os.path.abspath(
+        os.path.join(HERE, ".."))
+    try:
+        with open(target, "a", encoding="utf-8", newline="\n") as stream:
+            stream.write(
+                "export CODEAGENT3_PLUGIN_ROOT=%s\n" % shlex.quote(root))
+    except (OSError, UnicodeError) as exc:
+        _log("CODEAGENT3_ENV_FILE write failed: %s" % type(exc).__name__)
 
 
 def _decode_hook_json(raw):
@@ -180,6 +197,8 @@ def main(argv=None):
     ).casefold()
     if normalized in {"stop", "subagentstop"}:
         raise SystemExit(0)
+    if normalized == "sessionstart":
+        _persist_codeagent_plugin_root()
     _arm_watchdog()
     _log("start " + event)
     exit_code = 0

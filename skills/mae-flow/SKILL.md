@@ -11,24 +11,24 @@ Mae-Flow 只管理交付语义和恢复游标，专业能力由配置的 Skill/A
 
 ## 入口
 
-插件命令统一用 Windows 可用的 `python`，并通过宿主提供的插件根目录变量定位：
+CodeAgent 会把插件 `bin/` 放入 Bash PATH，统一使用稳定命令：
 
 ```text
-python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" current
+mae-flow current
 ```
 
-所有后续 CLI 调用都必须沿用同一入口前缀。下文省略入口的命令名只是协议后缀，不能脱离该前缀直接执行。禁止猜测或搜索插件安装目录；禁止使用旧式 skill 目录、版本化缓存路径或 `find` 定位入口。两个插件根变量都不可用时，报告“插件根目录环境变量缺失”并停止，不执行目录扫描。
+所有后续 CLI 调用都使用 `mae-flow`。禁止猜测或搜索插件安装目录，禁止使用版本化缓存路径、`find`、`python -c`/`importlib` 反射加载入口脚本，或依赖 Main Agent 中可能为空的插件根变量。命令不可用时报告“Mae-Flow 插件 bin 未进入 CodeAgent Bash PATH”并停止。
 
 已有状态先 `current`。新需求由用户确认推荐路线后启动：
 
 ```text
-python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>"
+mae-flow start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>"
 ```
 
 用户可直接用自然语言改方案。把决定一次写入并推进；命令中的文字可以是忠实的语义摘要，不必逐字复制用户原话，例如：
 
 ```text
-python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"
+mae-flow decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"
 ```
 
 机器事实或普通阶段事件用 `advance`。遇到用户明确退出，立即执行 `exit --reason "<自然语言>"`；退出不回滚业务文件，也不要求再次确认。
@@ -52,7 +52,11 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 ### Spec
 
-Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 必须先完成 Interactive Grill：从需求、行为基线和代码查事实，按状态、边界、并发时序、失败清理、一致性、兼容、规模性能和可观测性展开决策树。每次只用 `advance grill-question --key <GQ-ID> --decision "<证据、影响、推荐答案、父问题>"` 打开一个问题，通过自然对话或 AskUserQuestion 一次问一个；拿到真实回答后执行 `decision grill-answer --key <GQ-ID> "<用户结论的忠实语义摘要>"`。回答出现模糊词、新状态、矛盾或派生场景时继续追问，所有问题关闭且至少有一次真实回答后，把证据、问题树和确认的 WHAT 写入 `.mae-flow-work/<ticket>/grill.md`，再执行 `advance grill-converged`。
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 必须恢复完整 Interactive Grill，不得用两三个临时问题代替。先完整读取 `flow/steps/grill.md` 和 `assets/GRILL-PREP-TEMPLATE.md`，定向查需求、行为基线和相关代码，把共享代码地图写到 `.mae-flow-work/<ticket>/survey.md`，把模板复制为 `.mae-flow-work/<ticket>/grill-prep.md`。状态机、边界值、并发时序、失败清理、数据一致性、存量兼容、规模性能、可观测性八维必须逐项写出“有缺口的候选题”或“有代码/文档定位的不适用依据”；任何占位残留都不得开始或收敛质询。问题数量由真实缺口和回答衍生分支决定，不设两问之类的默认上限；超过 15 题只向用户报告规模并由用户选择是否继续。
+
+旧 `grill.md`、`grill-prep.md`、Spec 草稿只能作为历史线索。只有当前 `.mae-flow.json` 中已有且与当前问题/回答收据匹配的 `GQ-*` 才算本轮已确认；新流程状态没有对应收据时必须重新查证和质询，禁止把旧文档当本轮答案或收敛依据。
+
+每题必须先持久化，再向用户提问：`mae-flow advance grill-question --key <GQ-ID> --parent <ROOT|已回答GQ-ID> --evidence "<代码或文档证据>" --impact "<实现/验收影响>" --recommendation "<推荐答案及理由>"`。随后通过自然对话或 AskUserQuestion 一次问一个，拿到真实回答后执行 `mae-flow decision grill-answer --key <GQ-ID> "<忠实语义摘要>"`。如果宿主已经先返回了 AskUserQuestion 答案，用同一条 `decision grill-answer` 加上上述四个元数据参数，原子补登记问题并消费答案，不重问用户。每个答案都必须执行旧 Grill 的衍生检查：模糊词追到具体条件；新名词、新状态、新场景追问定义与边界；矛盾当场对质；被推翻的维度重新打开。所有候选题及衍生题关闭后，把八维证据、问题树、EARS 行为答案、确认的 WHAT 和留给设计的技术分歧写入 `.mae-flow-work/<ticket>/grill.md`，再执行 `mae-flow advance grill-converged`。
 
 质询结果是下游 Spec 生成的关键输入，不是可选审计材料。只有收敛后才能生成 `.mae-flow-work/<ticket>/spec.md`；Spec 必须包含“Grill 决策追溯”，把每个 `GQ-*` 映射到 Spec 章节或可观察验收标准。随后为当前 Grill/Spec 内容版本调用 `grill-critic-agent` one read-only pass；它同时读取两份文件，检查输入覆盖、语义未被弱化、遗漏分支和 WHAT/HOW 混杂，不编辑、不提问、不替用户决定。CLEAR 后记录 capability 事实并执行 `advance grill-clear` 绑定两份文件摘要；任何文件再变化都必须重新复核。只有真实待决分支交用户，回到 Interactive Grill。Spec 最终仍由用户确认。用户明确要求保留时才选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
 

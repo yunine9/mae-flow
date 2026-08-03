@@ -434,6 +434,37 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(confirmed)
         self.assertEqual("spec", self.state()["phase"])
 
+    def test_startup_configure_consumes_current_askuser_answer(self):
+        self.assert_success(self.run_cli_raw(
+            "start", "--ticket", "REQ-CONFIGURE-ASKUSER",
+            "--path", "focused", "--pace", "continuous",
+        ))
+        captured = LeanHookAdapter(self.root).handle(
+            "PostToolUse",
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {
+                    "questions": [{"question": "是否改为 Full？"}],
+                },
+                "tool_response": "改为 Full，并使用 Staged。",
+            },
+        )
+
+        configured = self.run_cli_raw(
+            "configure", "--path", "full", "--pace", "staged",
+            "--decision", "用户选择 Full 和 Staged。",
+        )
+
+        self.assertEqual(0, captured.exit_code, captured.stderr)
+        self.assert_success(configured)
+        self.assertEqual("full", self.state()["path"])
+        consumed = [
+            json.loads(item["value"])
+            for item in self.state()["decisions"]
+            if item["key"] == "user.event.consumed"
+        ]
+        self.assertEqual("startup-configured", consumed[-1]["semantic_event"])
+
     def test_repository_defaults_prefill_startup_and_cli_values_override_them(self):
         with open(os.path.join(self.root, ".mae-flow-defaults.json"),
                   "w", encoding="utf-8-sig") as stream:

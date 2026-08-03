@@ -48,6 +48,8 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 先用 `start` 持久化 Startup 草稿并向用户展示一张完整配置卡：工号、单号及 `feat/fix` 类型、需求来源、Full/Focused、Continuous/Staged、基线分支、按 `{基线分支}_{工号}_{单号}` 派生的工作分支、精确 Build 路由、UT 生成方式、UT 运行入口和自然语言质量组合。Build 路由按项目确认：C++ 可选择配置好的 `build-fix` Skill；Java/Maven 使用确认的 Maven 命令（通常为 `mvn compile -q`）；其他语言使用仓库的准确 Skill 或命令，禁止把 `build-fix` 当通用方案。用户一次确认并可自然语言修改；不要求固定话术。`start --decision` 会被拒绝，因为配置卡尚未绑定当前用户输入；拿到对已展示卡片的真实确认后，使用 `decision startup-confirmed "<忠实语义摘要>"` 消费该输入，随后才创建或切换到精确工作分支并进入下一阶段。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`。Moonlight 的显式启动授权是唯一免常规 Startup 问询的例外。
 
+如果用户修改卡片，使用 `configure` 加上被修改的字段和 `--decision "<用户修改决定的忠实摘要>"`；该命令只接受绑定当前 Startup 状态的真实 UserPromptSubmit 或 AskUserQuestion 回答，并重新展示完整卡片。工号或基线分支改变而未显式指定工作分支时会重新派生分支；Full/Focused 改变时会同步重建草稿文档清单。修改后必须等待一条针对新卡片的新用户输入，再执行 `decision startup-confirmed`，不能复用修改配置时的输入。
+
 ### Spec
 
 Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 必须先完成 Interactive Grill：从需求、行为基线和代码查事实，按状态、边界、并发时序、失败清理、一致性、兼容、规模性能和可观测性展开决策树。每次只用 `advance grill-question --key <GQ-ID> --decision "<证据、影响、推荐答案、父问题>"` 打开一个问题，通过自然对话或 AskUserQuestion 一次问一个；拿到真实回答后执行 `decision grill-answer --key <GQ-ID> "<用户结论的忠实语义摘要>"`。回答出现模糊词、新状态、矛盾或派生场景时继续追问，所有问题关闭且至少有一次真实回答后，把证据、问题树和确认的 WHAT 写入 `.mae-flow-work/<ticket>/grill.md`，再执行 `advance grill-converged`。

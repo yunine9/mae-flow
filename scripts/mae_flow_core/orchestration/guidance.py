@@ -240,6 +240,8 @@ def render_user_card(state):
             "- Build: %s" % (config.build_method or "未配置"),
             "- UT 生成: %s" % (config.ut_method or "未配置"),
             "- UT 运行入口: %s" % (config.ut_command or "未配置"),
+            "- 需求摘要: %s" % (
+                decisions.get("request.summary", "未配置")),
             "- 质量组合: %s" % (
                 decisions.get("startup.quality_plan", "未配置")),
         ) + (("- 预设读取提示: %s" % defaults_warning,)

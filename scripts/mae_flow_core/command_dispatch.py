@@ -12,6 +12,7 @@ class CommandRoute:
 
 LEAN_ROUTES = MappingProxyType({
     "start": CommandRoute("cmd_lean_start", ("root", "args")),
+    "configure": CommandRoute("cmd_lean_configure", ("root", "args")),
     "current": CommandRoute("cmd_lean_current", ("root", "args")),
     "advance": CommandRoute("cmd_lean_advance", ("root", "args")),
     "decision": CommandRoute("cmd_lean_decision", ("root", "args")),

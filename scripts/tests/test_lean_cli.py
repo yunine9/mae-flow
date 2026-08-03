@@ -368,6 +368,72 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("Confirmed startup configuration", confirmed.stdout)
         self.assertNotIn("需要用户介入: Intake", confirmed.stdout)
 
+    def test_startup_configure_requires_current_input_and_renders_fresh_card(self):
+        base = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        self.assert_success(self.run_cli_raw(
+            "start", "--ticket", "REQ-CONFIGURE", "--worker", "alice",
+            "--base-branch", base, "--path", "focused",
+            "--pace", "continuous", "--request", "原始范围",
+        ))
+        before = self.state()
+
+        fabricated = self.run_cli_raw(
+            "configure", "--worker", "bob", "--path", "full",
+            "--pace", "staged", "--decision", "用户要求修改配置。",
+        )
+
+        self.assertEqual(2, fabricated.returncode)
+        self.assertEqual(before, self.state())
+
+        self.submit_user_prompt("改为 bob，走 Full 和 Staged，并更新质量方案。")
+        configured = self.run_cli_raw(
+            "configure", "--worker", "bob", "--ticket-type", "fix",
+            "--requirement", "requirements/change.md",
+            "--build-method", "mvn compile -q",
+            "--ut-method", "ut-generator-agent",
+            "--ut-command", "mvn test", "--path", "full",
+            "--pace", "staged", "--request", "更新后的范围",
+            "--quality-plan", "每个 CP Build，最终 UT。",
+            "--decision", "用户要求按展示内容修改配置。",
+        )
+
+        self.assert_success(configured)
+        state = self.state()
+        self.assertEqual("startup", state["phase"])
+        self.assertEqual("full", state["path"])
+        self.assertEqual("staged", state["commit_pace"])
+        self.assertEqual("bob", state["startup_config"]["worker"])
+        self.assertEqual("fix", state["startup_config"]["ticket_type"])
+        self.assertEqual(
+            "%s_bob_REQ-CONFIGURE" % base,
+            state["startup_config"]["working_branch"],
+        )
+        self.assertTrue(state["artifacts"])
+        for expected in (
+                "完整启动配置", "bob", "fix", "requirements/change.md",
+                "full", "staged", "mvn compile -q", "mvn test",
+                "更新后的范围", "每个 CP Build，最终 UT。"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, configured.stdout)
+        consumed = [
+            json.loads(item["value"]) for item in state["decisions"]
+            if item["key"] == "user.event.consumed"
+        ]
+        self.assertEqual("startup-configured", consumed[-1]["semantic_event"])
+
+        stale = self.run_cli_raw(
+            "decision", "startup-confirmed", "用户确认修改后的配置。")
+        self.assertEqual(2, stale.returncode)
+        self.assertEqual("startup", self.state()["phase"])
+
+        confirmed = self.run_cli(
+            "decision", "startup-confirmed", "用户确认修改后的配置。")
+        self.assert_success(confirmed)
+        self.assertEqual("spec", self.state()["phase"])
+
     def test_repository_defaults_prefill_startup_and_cli_values_override_them(self):
         with open(os.path.join(self.root, ".mae-flow-defaults.json"),
                   "w", encoding="utf-8-sig") as stream:

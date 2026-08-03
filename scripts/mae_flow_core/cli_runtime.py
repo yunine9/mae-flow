@@ -14,6 +14,7 @@ _HANDLERS = {
     name: getattr(lean_workflow, name)
     for name in (
         "cmd_lean_start",
+        "cmd_lean_configure",
         "cmd_lean_current",
         "cmd_lean_advance",
         "cmd_lean_decision",

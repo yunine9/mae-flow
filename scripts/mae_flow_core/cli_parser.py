@@ -19,7 +19,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" decision startup-confirmed "用户的自然语言决定"\n'
             "公共阶段: Intake→Spec→Design→Construction→Quality→Delivery；"
             "startup/story 仅是稳定恢复值。\n"
-            "其余生产命令: advance|manifest|exit|"
+            "其余生产命令: configure|advance|manifest|exit|"
             "ut|codecheck|grill|story；跨仓流程: chain <action>；"
             "内部轻量建议: lightcheck。\n"
             "旧状态只用 migrate-flow 单向迁移。" % (me, me, me),
@@ -55,6 +55,21 @@ def parse_args(argv=None):
     start.add_argument("--business-file", action="append", default=[])
     start.add_argument("--allow-commit", action="store_true")
     start.add_argument("--allow-push", action="store_true")
+
+    configure = sub.add_parser("configure")
+    configure.add_argument("--ticket-type", choices=["feat", "fix"])
+    configure.add_argument("--worker")
+    configure.add_argument("--requirement")
+    configure.add_argument("--base-branch")
+    configure.add_argument("--working-branch")
+    configure.add_argument("--build-method")
+    configure.add_argument("--ut-method")
+    configure.add_argument("--ut-command")
+    configure.add_argument("--quality-plan")
+    configure.add_argument("--path", choices=["full", "focused"])
+    configure.add_argument("--pace", choices=["continuous", "staged"])
+    configure.add_argument("--request")
+    configure.add_argument("--decision", required=True)
 
     advance = sub.add_parser("advance")
     advance.add_argument("event")

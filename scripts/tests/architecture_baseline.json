@@ -25,6 +25,7 @@
     "scripts/mae_flow_core/cli_commands/lean_lightcheck.py",
     "scripts/mae_flow_core/cli_commands/lean_manifest.py",
     "scripts/mae_flow_core/cli_commands/lean_migration.py",
+    "scripts/mae_flow_core/cli_commands/lean_startup.py",
     "scripts/mae_flow_core/cli_commands/lean_workflow.py",
     "scripts/mae_flow_core/cli_commands/user_events.py",
     "scripts/mae_flow_core/cli_parser.py",

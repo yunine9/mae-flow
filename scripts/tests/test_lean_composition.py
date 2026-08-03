@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Cross-module composition contract for migrated lean workflow recovery."""
 
+import json
 import os
 import sys
 import unittest
@@ -56,7 +57,8 @@ class LeanCompositionTests(unittest.TestCase):
         cases = (
             (
                 "full", "grill", DeliveryPath.FULL, Phase.SPEC,
-                ("grill-clear", "spec-confirmed"), Phase.STORY,
+                ("grill-question", "grill-answer", "grill-converged",
+                 "grill-clear", "spec-confirmed"), Phase.STORY,
             ),
             (
                 "hotfix", "hf_open", DeliveryPath.FOCUSED, Phase.SPEC,
@@ -78,16 +80,38 @@ class LeanCompositionTests(unittest.TestCase):
                 guidance = render_guidance(recovered)
                 advanced = recovered
                 for event in events:
+                    key = ""
+                    value = "用户确认迁移后的语义恢复步骤。"
+                    if event == "grill-question":
+                        key = "GQ-001"
+                        value = json.dumps({
+                            "parent": "",
+                            "evidence": "迁移状态缺少 SUL 边界。",
+                            "impact": "行为无法形成可测 Spec。",
+                            "recommendation": "沿用确认的兼容边界。",
+                        }, sort_keys=True, separators=(",", ":"))
+                    elif event == "grill-answer":
+                        key = "GQ-001"
+                    elif event == "grill-converged":
+                        value = json.dumps({
+                            "answer_count": 1,
+                            "grill_sha256": "a" * 64,
+                        }, sort_keys=True, separators=(",", ":"))
                     if event == "grill-clear":
                         advanced = record_flow_attempt(
                             advanced,
                             flow_attempt_context(advanced, "grill"),
                             "returned",
                         )
+                        value = json.dumps({
+                            "grill_sha256": "a" * 64,
+                            "input_coverage": "complete",
+                            "spec_sha256": "b" * 64,
+                        }, sort_keys=True, separators=(",", ":"))
                     advanced = satisfy_new_completion_facts(advanced, event)
                     advanced = advance_flow(
                         advanced, AdvanceRequest(
-                            event, "", "用户确认迁移后的语义恢复步骤。"),
+                            event, key, value),
                     ).state
 
                 self.assertEqual(path, recovered.path)

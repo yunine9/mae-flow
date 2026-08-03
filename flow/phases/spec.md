@@ -28,20 +28,22 @@ table mapping every confirmed `GQ-*` decision to a Spec section or observable
 acceptance criterion. Keep HOW in Story.
 
 ## Read-only critic
-Run `grill-critic-agent` once for the current Grill/Spec content revision. It
+Run `grill-critic-agent` exactly once for the current Grill/Spec content
+revision. It
 reads both files and verifies complete input coverage, unchanged decision
 meaning, observable acceptance, unique terminology, and no WHAT/HOW mixing. It
 never edits files, asks the user, or makes a product decision. A real unresolved
 branch returns to Interactive Grill. A material correction creates a new content
-revision and permits one new critic pass; never retry automatically.
+revision and permits one new critic pass; continue without automatic retry.
 
 After a clear return, record the capability fact and run `advance grill-clear`.
 The CLI binds both current file digests. Any later change invalidates the critic
 receipt and must be reviewed again.
 
 ## Stop for the user
-Stop for each Interactive Grill decision, genuine product ambiguity, a real
-critic tradeoff, and final approval of the reviewed observable scope. Ask one
+Stop for each Interactive Grill decision, genuine product ambiguity, a real reviewer tradeoff,
+and final approval of the reviewed observable scope. A clear critic result
+continues without a user stop. Ask one
 question at a time and accept natural-language changes; never expose internal
 CLI commands as user work.
 

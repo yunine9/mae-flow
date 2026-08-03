@@ -286,6 +286,8 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             "scripts/tests/test_capability_observation.py",
             "scripts/tests/test_codecheck_advisory.py",
             "scripts/tests/test_delivery_receipt.py",
+            "scripts/tests/test_lean_grill_receipts.py",
+            "scripts/tests/test_lean_grill_session.py",
             "scripts/tests/test_quality_selection.py",
             "scripts/tests/test_ut_handoff.py",
         }
@@ -296,7 +298,7 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             if filename.startswith("test_") and filename.endswith(".py")
         }
 
-        self.assertEqual(32, len(expected))
+        self.assertEqual(34, len(expected))
         self.assertEqual(expected, actual)
         self.assertTrue(os.path.isfile(os.path.join(
             ROOT, "scripts", "tests", "reference_specengine_diagnostic.py")))

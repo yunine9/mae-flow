@@ -22,6 +22,7 @@ EXPECTED_RELEASE_SUITE_COMMANDS = (
     "python scripts/tests/test_lean_migration.py",
     "python scripts/tests/test_lean_migration_cli.py",
     "python scripts/tests/test_lean_transitions.py",
+    "python scripts/tests/test_lean_grill_session.py",
     "python scripts/tests/test_lean_guidance.py",
     "python scripts/tests/test_native_guidance.py",
     "python scripts/tests/test_lean_composition.py",
@@ -29,6 +30,7 @@ EXPECTED_RELEASE_SUITE_COMMANDS = (
     "python scripts/tests/test_windows_lean_runtime.py",
     "python scripts/tests/test_lean_delivery.py",
     "python scripts/tests/test_lean_documents.py",
+    "python scripts/tests/test_lean_grill_receipts.py",
     "python scripts/tests/test_lean_moonlight.py",
     "python scripts/tests/test_lean_toolbox.py",
     "python scripts/tests/test_delivery_manifest.py",
@@ -133,7 +135,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertEqual(
             0, contract["final_targets"]["private_monolith_test_imports"])
         self.assertEqual(
-            71,
+            73,
             contract["final_targets"]["production_reachable_python_files"],
         )
         self.assertEqual(
@@ -191,20 +193,20 @@ class RefactorCompletionContractTests(unittest.TestCase):
 
     def test_contract_rejects_baseline_and_actual_both_above_reachability_cap(self):
         root = self._write_reachability_fixture(
-            ["module_%02d" % index for index in range(72)],
-            ["module_%02d" % index for index in range(72)],
+            ["module_%02d" % index for index in range(73)],
+            ["module_%02d" % index for index in range(73)],
         )
         contract = load_contract(os.path.join(
             TESTS, "refactor_completion_contract.json"))
         errors = validate_contract(root, contract)
         self.assertIn(
-            "production reachability baseline count 73 does not match "
-            "contract target 71",
+            "production reachability baseline count 74 does not match "
+            "contract target 73",
             errors,
         )
         self.assertIn(
-            "production reachability actual count 73 does not match "
-            "contract target 71",
+            "production reachability actual count 74 does not match "
+            "contract target 73",
             errors,
         )
 

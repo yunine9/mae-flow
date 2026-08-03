@@ -14,7 +14,7 @@ APPROVED_FINAL_TARGETS = {
     "max_business_module_lines": 500,
     "max_policy_complexity": 15,
     "private_monolith_test_imports": 0,
-    "production_reachable_python_files": 71,
+    "production_reachable_python_files": 73,
 }
 
 APPROVED_RELEASE_SUITE_COMMANDS = [
@@ -22,6 +22,7 @@ APPROVED_RELEASE_SUITE_COMMANDS = [
     "python scripts/tests/test_lean_migration.py",
     "python scripts/tests/test_lean_migration_cli.py",
     "python scripts/tests/test_lean_transitions.py",
+    "python scripts/tests/test_lean_grill_session.py",
     "python scripts/tests/test_lean_guidance.py",
     "python scripts/tests/test_native_guidance.py",
     "python scripts/tests/test_lean_composition.py",
@@ -29,6 +30,7 @@ APPROVED_RELEASE_SUITE_COMMANDS = [
     "python scripts/tests/test_windows_lean_runtime.py",
     "python scripts/tests/test_lean_delivery.py",
     "python scripts/tests/test_lean_documents.py",
+    "python scripts/tests/test_lean_grill_receipts.py",
     "python scripts/tests/test_lean_moonlight.py",
     "python scripts/tests/test_lean_toolbox.py",
     "python scripts/tests/test_delivery_manifest.py",

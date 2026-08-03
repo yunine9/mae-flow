@@ -113,6 +113,16 @@ class LeanSafetyKernelFixtureTests(unittest.TestCase):
         with open(FIXTURE_PATH, "r", encoding="utf-8") as fixture_file:
             self.fixture = json.load(fixture_file)
 
+    def test_read_only_diagnostics_may_redirect_stderr_to_null(self):
+        decision = decide_pretool(
+            _context(_state(phase=Phase.STORY)),
+            "Bash",
+            {"command": (
+                "ls skills/mae-flow 2>/dev/null && "
+                "cat skills/mae-flow/SKILL.md 2>/dev/null | head -100")},
+        )
+        self.assertTrue(decision.allow, decision.message)
+
     def public_call(self, item):
         raw = item["context"]
         root = raw["working_directory"]

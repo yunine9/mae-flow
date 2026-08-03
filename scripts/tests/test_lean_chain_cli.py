@@ -158,6 +158,26 @@ class LeanChainCliTests(unittest.TestCase):
         ]
         self.assertEqual(["CQ-001"], [item["key"] for item in answers])
 
+    def test_answer_can_atomically_register_a_question_when_answer_arrives_first(self):
+        self.assert_success(self.start())
+        self.submit_user_prompt("统一为显式错误枚举")
+
+        answered = self.run_cli(
+            "chain", "answer", "--key", "CQ-ATOMIC",
+            "统一为显式错误枚举", "--parent", "ROOT",
+            "--evidence", "两个仓库对错误码定义不同",
+            "--impact", "调用方无法稳定重试",
+            "--recommendation", "统一为显式错误枚举",
+        )
+
+        self.assert_success(answered)
+        records = self.state()["records"]
+        self.assertEqual(
+            ["question", "answer"],
+            [item["kind"] for item in records])
+        question = json.loads(records[0]["value"])
+        self.assertEqual("", question["parent"])
+
     def test_complete_chain_verifies_renders_confirms_and_exits(self):
         self.assert_success(self.start())
         os.makedirs(os.path.join(self.root, "repo-b"))

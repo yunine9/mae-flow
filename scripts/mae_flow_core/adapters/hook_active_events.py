@@ -46,7 +46,8 @@ _ACTION_BASH_BLOCKED = (
 )
 _STOP_BLOCKED = (
     "[mae-flow] 月光宝盒仍在执行，当前步骤 %s，禁止提前结束回复或等待用户。"
-    "继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，"
+    "继续执行 python \".mae-flow-work/bin/mae-flow.py\" current 给出的动作；"
+    "质量问题尽力后用 moonlight defer，"
     "确实缺少需求/权限/外部条件而无法继续时用 moonlight blocked --reason "
     "留痕后再停止。\n"
 )

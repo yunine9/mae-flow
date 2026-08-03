@@ -134,7 +134,8 @@ def _source_edit_decision(context):
     if not context.allow_source_edit:
         return _block(
             "edit-source",
-            "当前步骤 %s(%s)禁止修改源码;先 mae-flow current 查看该做什么。"
+            "当前步骤 %s(%s)禁止修改源码;先执行 python "
+            "\".mae-flow-work/bin/mae-flow.py\" current 查看该做什么。"
             % (context.step, context.step_title),
         )
     if (
@@ -249,7 +250,8 @@ def _bash_source_decision(context):
         return _block(
             "bash-source",
             "当前步骤 %s 禁止经 Bash 写源码文件(命中: %s);"
-            "先 mae-flow current 查看该做什么。"
+            "先执行 python \".mae-flow-work/bin/mae-flow.py\" current "
+            "查看该做什么。"
             % (context.step, "、".join(context.offenders[:3])),
         )
     if (

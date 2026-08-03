@@ -21,6 +21,9 @@ _CMD_NAMES = {"cmd", "cmd.exe"}
 _PYTHON_NAME = re.compile(r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?", re.I)
 _WRITE_REDIRECTIONS = {">", ">>", ">|", "<>", "&>", "&>>", ">&"}
 _DYNAMIC_PATH = re.compile(r"[$`%]|\{\{|\}\}")
+_NULL_REDIRECTIONS = frozenset({
+    "/dev/null", "/dev/stdout", "/dev/stderr", "nul", "nul:",
+})
 
 
 @dataclass(frozen=True)
@@ -354,6 +357,8 @@ def _redirection_targets(tokens):
             continue
         target = tokens[operand_index]
         if operator == ">&" and re.fullmatch(r"[0-9]+|-", target):
+            continue
+        if target.casefold() in _NULL_REDIRECTIONS:
             continue
         if target and not _DYNAMIC_PATH.search(target):
             targets.append(target)

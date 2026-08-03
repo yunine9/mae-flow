@@ -4,11 +4,13 @@ must establish shared understanding through Interactive Grill before producing
 the candidate Spec.
 
 ## Interactive Grill
-Read `flow/steps/grill.md` and
-`skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md` completely. Survey
+Read `runtime/guidance/grill.md` and
+`skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md` completely. Never load retired
+legacy step resources as production instructions. Survey
 the request, selected behavior baseline, current behavior, constraints, and
-directly relevant code facts into the current ticket's `survey.md`. Copy and
-complete the eight-dimension template as `grill-prep.md`; every dimension must
+directly relevant code facts. Use the exact safe directory shown beside the
+current `grill.md` artifact; write `survey.md` and `grill-prep.md` beside it,
+never by interpolating the raw ticket. Every dimension in the preparation must
 contain either candidate questions with evidence/recommendation/impact or a
 specific code/document reason why it is not applicable. Placeholders block both
 questioning and convergence. There is no two-question shortcut or default
@@ -19,10 +21,12 @@ only when the current flow state contains its matching question and answer
 receipt. Never infer this run's confirmation from leftover files.
 
 Open one stable `GQ-*` question at a time with evidence, impact, and a recommended
-answer. Before asking, record it with `mae-flow advance grill-question --key
+answer. Before asking, record it with `python ".mae-flow-work/bin/mae-flow.py"
+advance grill-question --key
 <GQ-ID> --parent <ROOT|answered-GQ-ID> --evidence "<fact>" --impact "<effect>"
 --recommendation "<answer and reason>"`; bind the user's natural-language answer
-with `mae-flow decision grill-answer --key <GQ-ID> "<semantic answer>"`. If the
+with `python ".mae-flow-work/bin/mae-flow.py" decision grill-answer --key <GQ-ID>
+"<semantic answer>"`. If the
 host delivered the answer before registration, add the same four metadata flags
 to that decision command so registration and answer consumption are atomic.
 Inspect each answer for vague
@@ -33,7 +37,7 @@ Write the evidence, question tree, answers, derived branches, confirmed WHAT,
 boundaries, compatibility, failure behavior, and non-goals to the ticket's local
 `grill.md`. It must preserve all eight preparation conclusions and derived EARS
 behaviors. When every candidate and derived branch is closed, run
-`mae-flow advance grill-converged`; the CLI validates preparation and binds the
+`python ".mae-flow-work/bin/mae-flow.py" advance grill-converged`; the CLI validates preparation and binds the
 current file digest.
 
 ## Candidate Spec
@@ -51,7 +55,8 @@ never edits files, asks the user, or makes a product decision. A real unresolved
 branch returns to Interactive Grill. A material correction creates a new content
 revision and permits one new critic pass; continue without automatic retry.
 
-After a clear return, record the capability fact and run `advance grill-clear`.
+After a clear return, record the capability fact and run the complete
+`python ".mae-flow-work/bin/mae-flow.py" advance grill-clear` command.
 The CLI binds both current file digests. Any later change invalidates the critic
 receipt and must be reviewed again.
 

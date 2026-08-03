@@ -22,8 +22,9 @@ new CP or phase slot is ordinary planned work and needs no retry confirmation.
 Attempt each selected expensive capability at most once for its current slot.
 Give `ut-generator-agent` the final Spec, final Story, final diff, and ordered
 cumulative CP UT intents in one action. After each actual synchronous call,
-record exactly one lightweight capability fact with `advance capability-<outcome>
---key <kind> --decision <opaque summary>`. Do not parse private output or rerun
+record exactly one lightweight capability fact with `python
+".mae-flow-work/bin/mae-flow.py" advance capability-<outcome> --key <kind>
+--decision "<opaque summary>"`. Do not parse private output or rerun
 a capability merely because recording failed. Record remaining risks and
 delivery readiness. Before Delivery, record one short final Spec/Story/scope ↔
 code/coverage conformance conclusion. If Construction recorded semantic

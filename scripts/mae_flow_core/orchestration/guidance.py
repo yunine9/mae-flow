@@ -1,6 +1,7 @@
 """Minimal phase guidance for recovering a lean workflow."""
 
 import os
+import posixpath
 
 from .capabilities import flow_attempt_context, flow_retry_options
 from .behavior_baseline import domain_actions, selected_domains
@@ -57,6 +58,15 @@ def render_guidance(state):
 
     artifacts = tuple(
         "%s: %s" % (kind, path) for kind, path in state.artifacts)
+    grill_path = next((
+        path for kind, path in state.artifacts if kind == "grill"), "")
+    grill_work = ()
+    if grill_path:
+        directory = posixpath.dirname(grill_path)
+        grill_work = (
+            posixpath.join(directory, "survey.md"),
+            posixpath.join(directory, "grill-prep.md"),
+        )
     config = state.startup_config
     defaults_warning = _latest_decision(state, "startup.defaults_warning")
     startup_title = (
@@ -100,6 +110,7 @@ def render_guidance(state):
         "%s\n"
         "%s\n"
         "%s\n"
+        "%s\n"
         "%s"
     ) % (
         state.ticket,
@@ -108,6 +119,7 @@ def render_guidance(state):
         state.current_cp or "none",
         _items(startup_title, startup),
         _items("Artifacts", artifacts),
+        _items("Exact Grill preparation files", grill_work),
         _items("Selected behavior domains", domains),
         _items("Behavior reconciliation", actions),
         _items("Checkpoint context", checkpoints),

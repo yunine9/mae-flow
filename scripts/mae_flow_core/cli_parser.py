@@ -28,7 +28,7 @@ class MFParser(argparse.ArgumentParser):
         self.exit(2)
 
 
-def _add_grill_metadata(parser):
+def _add_question_metadata(parser):
     parser.add_argument("--parent")
     parser.add_argument("--evidence")
     parser.add_argument("--impact")
@@ -82,13 +82,13 @@ def parse_args(argv=None):
     advance.add_argument("event")
     advance.add_argument("--decision", default="")
     advance.add_argument("--key", default="")
-    _add_grill_metadata(advance)
+    _add_question_metadata(advance)
 
     decision = sub.add_parser("decision")
     decision.add_argument("event")
     decision.add_argument("text")
     decision.add_argument("--key", default="")
-    _add_grill_metadata(decision)
+    _add_question_metadata(decision)
 
     manifest = sub.add_parser("manifest")
     manifest.add_argument("--file", action="append", required=True)
@@ -128,10 +128,12 @@ def parse_args(argv=None):
     chain_record.add_argument("--value", required=True)
     chain_question = chain_actions.add_parser("question")
     chain_question.add_argument("--key", required=True)
-    chain_question.add_argument("--value", required=True)
+    chain_question.add_argument("--value", default="")
+    _add_question_metadata(chain_question)
     chain_answer = chain_actions.add_parser("answer")
     chain_answer.add_argument("--key", required=True)
     chain_answer.add_argument("text")
+    _add_question_metadata(chain_answer)
     chain_actions.add_parser("verify")
     chain_actions.add_parser("rendered")
     chain_confirm = chain_actions.add_parser("confirm")

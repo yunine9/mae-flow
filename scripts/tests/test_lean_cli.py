@@ -178,7 +178,11 @@ class LeanCliTests(unittest.TestCase):
         )
 
     def write_grill_preparation(self, ticket):
-        local = os.path.join(self.root, ".mae-flow-work", ticket)
+        grill = next(
+            item["path"] for item in self.state()["artifacts"]
+            if item["kind"] == "grill")
+        local = os.path.dirname(os.path.join(
+            self.root, *grill.split("/")))
         os.makedirs(local, exist_ok=True)
         with open(os.path.join(local, "survey.md"), "w",
                   encoding="utf-8") as stream:
@@ -673,10 +677,26 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("需要用户介入: Design（Story", spec.stdout)
 
         self.assert_success(self.run_capability("story"))
+        story_source = "# Story\n\nReviewed implementation design.\n"
+        with open(artifact_paths["story"], "w", encoding="utf-8") as stream:
+            stream.write(story_source)
         self.assert_success(self.run_capability("reviewer"))
         self.assert_success(self.run_cli(
             "decision", "design-review-approved", "设计检视无待裁决项。"))
-        story = self.run_cli(
+        review_receipt = next(
+            item["value"] for item in self.state()["decisions"]
+            if item["key"] == "review.design")
+        self.assertRegex(
+            json.loads(review_receipt)["story_sha256"], r"^[0-9a-f]{64}$")
+        with open(artifact_paths["story"], "a", encoding="utf-8") as stream:
+            stream.write("\nUnreviewed design change.\n")
+        changed_story = self.run_cli(
+            "decision", "story-confirmed", "实现边界和可测性设计已确认。")
+        self.assertEqual(2, changed_story.returncode)
+        self.assertIn("重新执行一次 Design Review", changed_story.stderr)
+        with open(artifact_paths["story"], "w", encoding="utf-8") as stream:
+            stream.write(story_source)
+        story = self.run_cli_raw(
             "decision", "story-confirmed", "实现边界和可测性设计已确认。")
         self.assert_success(story)
         self.assertNotIn("需要用户介入: CP", story.stdout)
@@ -716,6 +736,18 @@ class LeanCliTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(story_paths))
         self.assertIn(".mae-flow-work", story_paths[0].replace("\\", "/"))
+
+    def test_unknown_or_wrong_phase_mutations_return_nonzero(self):
+        self.assert_success(self.run_cli_raw(
+            "start", "--ticket", "REQ-NOOP", "--path", "focused",
+            "--pace", "continuous"))
+        unknown = self.run_cli_raw("advance", "made-up-event")
+        wrong_phase = self.run_cli(
+            "decision", "story-confirmed", "错误阶段确认。")
+
+        self.assertEqual(2, unknown.returncode)
+        self.assertEqual(2, wrong_phase.returncode)
+        self.assertEqual("startup", self.state()["phase"])
 
     def test_grill_answer_can_atomically_register_an_answered_question(self):
         self.assert_success(self.run_cli_raw(
@@ -995,6 +1027,26 @@ class LeanCliTests(unittest.TestCase):
             "--pace", "continuous"))
         self.assert_success(self.run_cli(
             "decision", "startup-confirmed", "用户确认进入 Full Spec。"))
+        self.write_grill_preparation("REQ-REVIEW-RETRY")
+        artifact_paths = {
+            item["kind"]: os.path.join(
+                self.root, *item["path"].split("/"))
+            for item in self.state()["artifacts"]
+        }
+        with open(artifact_paths["grill"], "w", encoding="utf-8") as stream:
+            stream.write("# Grill\n\nGQ-001 已确认。\n")
+        with open(artifact_paths["spec"], "w", encoding="utf-8") as stream:
+            stream.write("# Spec\n\nGQ-001 -> AC-001\n")
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-question", "--key", "GQ-001",
+            "--parent", "ROOT", "--evidence", "当前行为只覆盖主载波。",
+            "--impact", "SUL 资源选择仍不明确。",
+            "--recommendation", "仅在配置 SUL 时使用 SUL 资源。"))
+        self.assert_success(self.run_cli(
+            "decision", "grill-answer", "用户确认推荐的 SUL 边界。",
+            "--key", "GQ-001"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-converged"))
         self.assert_success(self.run_capability("grill", "not-observed"))
         self.assert_success(self.run_cli(
             "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
@@ -1004,8 +1056,7 @@ class LeanCliTests(unittest.TestCase):
             "decision", "capability.retry.grill",
             "用户确认环境恢复，授权 Grill 再尝试一次。"))
         self.assert_success(self.run_capability("grill"))
-        self.assert_success(self.run_cli(
-            "decision", "grill-clear", "Grill 已返回，未发现待决分支。"))
+        self.assert_success(self.run_cli_raw("advance", "grill-clear"))
 
         self.assertEqual([], self.state()["risks"])
         state = self.state()

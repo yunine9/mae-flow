@@ -253,6 +253,7 @@ def _moonlight_enabled(state):
 
 
 def _advance_state(root, state, request):
+    request = grill_receipts.prepare_phase_request(root, state, request)
     if request.kind.strip().lower().startswith("capability-"):
         result = advance_flow(state, request)
     elif _moonlight_enabled(state):
@@ -327,7 +328,13 @@ def cmd_lean_advance(root, args):
             grill_receipts.validate_grill_preparation(root, current)
         request = grill_receipts.prepare_grill_request(root, current, request)
         updated, reason = _advance_state(root, current, request)
-        if request.kind.strip().lower() == "grill-question" and updated == current:
+        normalized = request.kind.strip().lower()
+        harmless_noops = (
+            normalized in {"capability-success", "cp-progress"}
+            or (normalized == "reviewer-clear"
+                and current.phase == Phase.QUALITY)
+        )
+        if updated == current and not harmless_noops:
             raise ValueError(reason)
         return updated, reason
 
@@ -397,7 +404,9 @@ def cmd_lean_decision(root, args):
                 updated, reason = _advance_state(root, state, request)
                 if normalized_event == "grill-answer" and updated == state:
                     raise ValueError(reason)
-        if event_id and updated != state:
+        if updated == state:
+            raise ValueError(reason)
+        if event_id:
             updated = _bind_user_event(updated, event_id, args.event.strip())
         return updated, reason
 

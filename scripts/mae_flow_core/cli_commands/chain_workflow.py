@@ -147,15 +147,63 @@ def _mutate(root, request):
         root, lambda state, unused_path: advance_chain(state, request))
 
 
-def _mutate_user(root, request, semantic_event):
+def _question_request(args):
+    legacy_value = getattr(args, "value", "")
+    fields = {
+        name: getattr(args, name, None)
+        for name in ("parent", "evidence", "impact", "recommendation")
+    }
+    supplied = any(value is not None for value in fields.values())
+    if not supplied:
+        if not legacy_value.strip():
+            raise ValueError(
+                "Chain question 需要 --evidence/--impact/--recommendation")
+        return ChainRequest("question", args.key, legacy_value)
+    if legacy_value.strip():
+        raise ValueError("Chain question 不能同时使用 --value 和显式元数据")
+    missing = [
+        name for name in ("evidence", "impact", "recommendation")
+        if not isinstance(fields[name], str) or not fields[name].strip()
+    ]
+    if missing:
+        raise ValueError(
+            "Chain question 缺少非空参数: "
+            + ", ".join("--" + name for name in missing))
+    parent = (fields["parent"] or "ROOT").strip()
+    value = {
+        "parent": "" if parent.casefold() == "root" else parent,
+        "evidence": fields["evidence"].strip(),
+        "impact": fields["impact"].strip(),
+        "recommendation": fields["recommendation"].strip(),
+    }
+    return ChainRequest(
+        "question", args.key,
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":")))
+
+
+def _answer(root, args):
+    fields_supplied = any(
+        getattr(args, name, None) is not None
+        for name in ("parent", "evidence", "impact", "recommendation"))
+    question = _question_request(args) if fields_supplied else None
+
     def operation(state, path):
         event_id = matching_user_event(root, state, state_path=path)
-        result = advance_chain(state, request)
-        if result.state == state:
-            return result
+        current = state
+        if question is not None:
+            opened = advance_chain(current, question)
+            if opened.state == current:
+                raise ValueError(opened.reason)
+            current = opened.state
+        result = advance_chain(
+            current, ChainRequest("answer", args.key, args.text))
+        if result.state == current:
+            raise ValueError(result.reason)
         return replace(
             result,
-            state=bind_user_event(result.state, event_id, semantic_event),
+            state=bind_user_event(result.state, event_id, "chain-answer"),
         )
     return _mutate_with(root, operation)
 
@@ -336,12 +384,9 @@ def cmd_lean_chain(root, args):
             state, reason = _mutate(
                 root, ChainRequest(args.kind, args.key, args.value))
         elif action == "question":
-            state, reason = _mutate(
-                root, ChainRequest("question", args.key, args.value))
+            state, reason = _mutate(root, _question_request(args))
         elif action == "answer":
-            state, reason = _mutate_user(
-                root, ChainRequest("answer", args.key, args.text),
-                "chain-answer")
+            state, reason = _answer(root, args)
         elif action == "verify":
             state, reason = _verify(root)
         elif action == "rendered":

@@ -6,6 +6,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -72,6 +73,36 @@ class HookProtocolTests(unittest.TestCase):
             {"Write", "Edit", "MultiEdit", "AskUserQuestion", "Bash"},
             posttool,
         )
+
+    def test_sessionstart_installs_project_local_launcher_from_hook_root(self):
+        with tempfile.TemporaryDirectory() as root:
+            plugin = os.path.join(root, "plugin root")
+            project = os.path.join(root, "project")
+            os.makedirs(os.path.join(plugin, "scripts"))
+            os.makedirs(project)
+            with open(os.path.join(plugin, "scripts", "mae-flow.py"), "w",
+                      encoding="utf-8") as stream:
+                stream.write(
+                    "import sys\nprint('launcher:' + ','.join(sys.argv[1:]))\n")
+            previous = os.getcwd()
+            try:
+                os.chdir(project)
+                with mock.patch.dict(
+                        os.environ,
+                        {"CODEAGENT3_PLUGIN_ROOT": plugin}, clear=False):
+                    self.dispatch._install_project_launcher()
+            finally:
+                os.chdir(previous)
+            launcher = os.path.join(
+                project, ".mae-flow-work", "bin", "mae-flow.py")
+            with open(launcher, encoding="utf-8") as stream:
+                source = stream.read()
+            self.assertIn("subprocess.call", source)
+            self.assertIn("plugin root/scripts/mae-flow.py", source)
+            executed = subprocess.run(
+                [sys.executable, launcher, "current"], cwd=project,
+                text=True, encoding="utf-8", capture_output=True, check=True)
+            self.assertEqual("launcher:current", executed.stdout.strip())
 
     def test_real_registration_dispatch_blocks_cross_platform_writers(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:

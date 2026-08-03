@@ -5,7 +5,9 @@ import json
 import os
 
 from mae_flow_core.orchestration.documents import DocumentPaths
+from mae_flow_core.orchestration.capabilities import flow_attempt_context
 from mae_flow_core.orchestration.grill_session import grill_status
+from mae_flow_core.orchestration.models import Phase
 from mae_flow_core.orchestration.transitions import AdvanceRequest
 
 
@@ -20,6 +22,12 @@ _PREP_SECTIONS = (
     "## 8 可观测",
     "## 9 结论汇总",
 )
+
+_DESIGN_REVIEW_EVENTS = frozenset({
+    "design-review-approved", "design-review-clear",
+    "reviewer-clear", "reviewer-tradeoff-resolved",
+    "design-review-failed", "reviewer-failed",
+})
 
 
 def _file_sha256(path, label):
@@ -97,3 +105,54 @@ def validate_spec_confirmation(root, state):
     if critic.get("input_coverage") != "complete":
         return "Grill 到 Spec 的输入覆盖尚未完成。"
     return ""
+
+
+def _object(value):
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _latest_design_review(state):
+    for key, value in reversed(state.decisions):
+        if key in {"review.design", "review.design.attempted"}:
+            return _object(value)
+    return {}
+
+
+def _has_current_story_attempt(state):
+    context = flow_attempt_context(state, "story")
+    return any(
+        attempt.kind == context.kind.value
+        and attempt.source_revision == context.source_revision
+        and attempt.environment_revision == context.environment_revision
+        for attempt in state.capabilities
+    )
+
+
+def prepare_phase_request(root, state, request):
+    """Attach or validate the exact Story bytes at Design review."""
+    kind = request.kind.strip().lower()
+    if kind not in _DESIGN_REVIEW_EVENTS | {"story-confirmed"}:
+        return request
+    if state.phase != Phase.STORY:
+        return request
+    paths = DocumentPaths.for_ticket(root, state.ticket)
+    story_sha = _file_sha256(paths.local_story, "story.md")
+    if kind == "story-confirmed":
+        review = _latest_design_review(state)
+        if review.get("story_sha256") != story_sha:
+            raise ValueError(
+                "Story 在 Design Reviewer 后发生变化或缺少内容收据，"
+                "必须对当前 Story 重新执行一次 Design Review")
+        return request
+    if not _has_current_story_attempt(state):
+        raise ValueError(
+            "当前 Story 阶段尚未记录 story-generator-agent 调用事实")
+    value = _compact({
+        "story_sha256": story_sha,
+        "summary": request.decision_value.strip(),
+    })
+    return AdvanceRequest(request.kind, request.decision_key, value)

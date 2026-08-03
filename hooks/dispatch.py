@@ -5,7 +5,6 @@
 import json
 import locale
 import os
-import shlex
 import sys
 import tempfile
 import threading
@@ -76,20 +75,29 @@ def _arm_watchdog():
     timer.start()
 
 
-def _persist_codeagent_plugin_root():
-    """Expose the Hook-only plugin root to later CodeAgent Bash calls."""
-    target = os.environ.get("CODEAGENT3_ENV_FILE", "").strip()
-    if not target:
-        _log("CODEAGENT3_ENV_FILE unavailable; bin launcher remains primary")
-        return
+def _install_project_launcher():
+    """Bridge Hook-only plugin discovery into a stable project-local command."""
     root = os.environ.get("CODEAGENT3_PLUGIN_ROOT", "").strip() or os.path.abspath(
         os.path.join(HERE, ".."))
+    script = os.path.join(root, "scripts", "mae-flow.py")
+    target = os.path.join(
+        os.getcwd(), ".mae-flow-work", "bin", "mae-flow.py")
     try:
-        with open(target, "a", encoding="utf-8", newline="\n") as stream:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        temporary = target + ".tmp-%s" % os.getpid()
+        with open(temporary, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write("import subprocess\nimport sys\n\n")
+            stream.write("ENTRY = %r\n" % script)
             stream.write(
-                "export CODEAGENT3_PLUGIN_ROOT=%s\n" % shlex.quote(root))
+                "raise SystemExit(subprocess.call("
+                "[sys.executable, ENTRY] + sys.argv[1:]))\n")
+        os.replace(temporary, target)
+        try:
+            os.chmod(target, 0o755)
+        except OSError:
+            pass
     except (OSError, UnicodeError) as exc:
-        _log("CODEAGENT3_ENV_FILE write failed: %s" % type(exc).__name__)
+        _log("project launcher install failed: %s" % type(exc).__name__)
 
 
 def _decode_hook_json(raw):
@@ -197,14 +205,14 @@ def main(argv=None):
     ).casefold()
     if normalized in {"stop", "subagentstop"}:
         raise SystemExit(0)
-    if normalized == "sessionstart":
-        _persist_codeagent_plugin_root()
     _arm_watchdog()
     _log("start " + event)
     exit_code = 0
     try:
         payload = read_input()
         _chdir_root(payload)
+        if normalized == "sessionstart":
+            _install_project_launcher()
         response = _lean_adapter().handle(event, payload)
         if response.stdout:
             print(response.stdout, end="")

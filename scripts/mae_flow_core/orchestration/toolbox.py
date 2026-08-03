@@ -17,7 +17,7 @@ from mae_flow_core.quality import (
 from .native_guidance import load_native_guidance
 
 
-_KINDS = {"ut", "codecheck", "grill", "story", "chain"}
+_KINDS = {"ut", "codecheck", "grill", "story"}
 
 
 def _files(values):
@@ -155,20 +155,6 @@ def _story_guidance(request):
     ))
 
 
-def _chain_guidance(request):
-    return "\n\n".join((
-        "Cross-repository Chain design. Read the supplied requirement and "
-        "repository facts, identify each repository's responsibility, exact "
-        "interface contract, dependency order, compatibility risk, and a "
-        "self-contained handoff for each repository. Do not start delivery in "
-        "any repository.",
-        load_native_guidance("story-design").strip(),
-        _request_section(request.request),
-        _file_section(request.files, "Source documents"),
-        _one_shot_boundary(),
-    ))
-
-
 def _scope_risks(request, artifacts):
     if request.kind in {"ut", "codecheck"} and not artifacts:
         return (
@@ -198,8 +184,8 @@ def run_toolbox_request(request):
         guidance = _grill_guidance(request)
     elif request.kind == "story":
         guidance = _story_guidance(request)
-    else:
-        guidance = _chain_guidance(request)
+    else:  # pragma: no cover - ToolboxRequest closes this branch.
+        raise ValueError("unsupported toolbox kind: %s" % request.kind)
 
     return ToolboxResult(
         guidance=guidance,

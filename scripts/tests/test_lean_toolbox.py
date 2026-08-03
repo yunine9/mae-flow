@@ -118,33 +118,27 @@ class LeanToolboxTests(unittest.TestCase):
             result.artifacts,
         )
 
-    def test_story_and_chain_accept_source_documents_without_git_effects(self):
-        cases = (
-            (
-                "story",
-                "形成实现设计",
-                (r"docs\requirements\REQ-42.md",),
-                "standalone software detailed design and test handoff",
-            ),
-            (
-                "chain",
-                "梳理跨仓依赖",
-                (r"docs\requirements\REQ-42.md",),
-                "Cross-repository",
-            ),
+    def test_story_accepts_source_documents_without_git_effects(self):
+        result = self.run_without_lifecycle_files(ToolboxRequest(
+            "story",
+            "形成实现设计",
+            (r"docs\requirements\REQ-42.md",),
+        ))
+        self.assertEqual(
+            ("docs/requirements/REQ-42.md",), result.artifacts)
+        self.assertIn(
+            "standalone software detailed design and test handoff",
+            result.guidance,
         )
-        for kind, request, files, expected in cases:
-            with self.subTest(kind=kind):
-                result = self.run_without_lifecycle_files(
-                    ToolboxRequest(kind, request, files))
-                self.assertEqual(
-                    ("docs/requirements/REQ-42.md",), result.artifacts)
-                self.assertIn(expected, result.guidance)
-                self.assertIn("never auto-committed", result.guidance)
-                self.assertNotIn("push command", result.guidance.lower())
+        self.assertIn("never auto-committed", result.guidance)
+        self.assertNotIn("push command", result.guidance.lower())
+
+    def test_chain_is_not_a_stateless_toolbox_action(self):
+        with self.assertRaisesRegex(ValueError, "unsupported toolbox kind"):
+            ToolboxRequest("chain", "梳理跨仓依赖", ("requirements.md",))
 
     def test_unknown_scope_is_an_advisory_risk_not_a_rejection(self):
-        for kind in ("ut", "codecheck", "grill", "story", "chain"):
+        for kind in ("ut", "codecheck", "grill", "story"):
             with self.subTest(kind=kind):
                 result = self.run_without_lifecycle_files(
                     ToolboxRequest(kind, "", ()))

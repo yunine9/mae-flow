@@ -57,7 +57,7 @@ from .user_events import (
 )
 
 STATE_NAME = ".mae-flow.json"
-_TOOLBOX = {"ut", "codecheck", "grill", "story", "chain"}
+_TOOLBOX = {"ut", "codecheck", "grill", "story"}
 _RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
 def _die(message):
     print("[mae-flow] " + message, file=sys.stderr)

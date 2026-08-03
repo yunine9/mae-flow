@@ -21,7 +21,7 @@ LEAN_ROUTES = MappingProxyType({
     "codecheck": CommandRoute("cmd_lean_toolbox", ("root", "args")),
     "grill": CommandRoute("cmd_lean_toolbox", ("root", "args")),
     "story": CommandRoute("cmd_lean_toolbox", ("root", "args")),
-    "chain": CommandRoute("cmd_lean_toolbox", ("root", "args")),
+    "chain": CommandRoute("cmd_lean_chain", ("root", "args")),
     "lightcheck": CommandRoute("cmd_lean_lightcheck", ("root", "args")),
 })
 

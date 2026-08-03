@@ -20,7 +20,8 @@ class MFParser(argparse.ArgumentParser):
             "公共阶段: Intake→Spec→Design→Construction→Quality→Delivery；"
             "startup/story 仅是稳定恢复值。\n"
             "其余生产命令: advance|manifest|exit|"
-            "ut|codecheck|grill|story|chain；内部轻量建议: lightcheck。\n"
+            "ut|codecheck|grill|story；跨仓流程: chain <action>；"
+            "内部轻量建议: lightcheck。\n"
             "旧状态只用 migrate-flow 单向迁移。" % (me, me, me),
             file=sys.stderr,
         )
@@ -78,10 +79,38 @@ def parse_args(argv=None):
     manifest.add_argument("--expected-destination-sha")
     manifest.add_argument("--new-branch", action="store_true")
 
-    for toolbox_kind in ("ut", "codecheck", "grill", "story", "chain"):
+    for toolbox_kind in ("ut", "codecheck", "grill", "story"):
         toolbox = sub.add_parser(toolbox_kind)
         toolbox.add_argument("--request", default="")
         toolbox.add_argument("--file", action="append", default=[])
+
+    chain = sub.add_parser("chain")
+    chain_actions = chain.add_subparsers(dest="chain_cmd", required=True)
+    chain_start = chain_actions.add_parser("start")
+    chain_start.add_argument("--ticket", required=True)
+    chain_start.add_argument("--request", required=True)
+    chain_start.add_argument("--requirement", required=True)
+    chain_actions.add_parser("current")
+    chain_record = chain_actions.add_parser("record")
+    chain_record.add_argument(
+        "kind", choices=(
+            "repository", "touchpoint", "contract", "dependency",
+            "reverse-check",
+        ))
+    chain_record.add_argument("--key", required=True)
+    chain_record.add_argument("--value", required=True)
+    chain_question = chain_actions.add_parser("question")
+    chain_question.add_argument("--key", required=True)
+    chain_question.add_argument("--value", required=True)
+    chain_answer = chain_actions.add_parser("answer")
+    chain_answer.add_argument("--key", required=True)
+    chain_answer.add_argument("text")
+    chain_actions.add_parser("verify")
+    chain_actions.add_parser("rendered")
+    chain_confirm = chain_actions.add_parser("confirm")
+    chain_confirm.add_argument("text")
+    chain_exit = chain_actions.add_parser("exit")
+    chain_exit.add_argument("--reason", required=True)
 
     lightcheck = sub.add_parser("lightcheck")
     lightcheck.add_argument("--file", action="append", default=[])

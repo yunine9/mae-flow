@@ -4,7 +4,7 @@ import os
 import sys
 
 from . import command_dispatch
-from .cli_commands import lean_migration, lean_workflow
+from .cli_commands import chain_workflow, lean_migration, lean_workflow
 from .cli_parser import parse_args
 from .runtime import find_project_root
 from .state_store import safe_read_json
@@ -23,6 +23,7 @@ _HANDLERS = {
         "cmd_lean_lightcheck",
     )
 }
+_HANDLERS["cmd_lean_chain"] = chain_workflow.cmd_lean_chain
 
 
 def _state_schema(root):

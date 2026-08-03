@@ -306,10 +306,13 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
             "story-generator-agent.md"].lower())
         story = prompts["story-generator-agent.md"].lower()
         for concept in (
-                "standalone", "customer scenario", "business specification",
+                "standalone", "customer scenario", "performance specification",
                 "functional acceptance criteria", "software detailed design",
                 "test handoff", "not a coding plan"):
             self.assertIn(concept, story)
+        self.assertNotIn("business specification", story)
+        self.assertIn("external interface", story)
+        self.assertIn("function or method design", story)
         self.assertIn("at most once per cp", prompts[
             "craft-reviewer-agent.md"].lower())
         ut = prompts["ut-generator-agent.md"].lower()
@@ -317,6 +320,17 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
                 "write", "compile", "run", "final spec", "final story",
                 "current diff", "cumulative"):
             self.assertIn(concept, ut)
+
+    def test_story_template_keeps_performance_interfaces_and_functions_separate(self):
+        template = read_text(os.path.join(
+            ROOT, "skills", "mae-flow", "assets", "STORY-TEMPLATE.md"))
+
+        self.assertIn("#### 2.1.2 性能规格（必选）", template)
+        self.assertIn("容量、最大并发、时延、吞吐", template)
+        self.assertIn("不得复制 Mae-Flow Spec 的业务行为规格", template)
+        self.assertIn("REST、CORBA、RPC", template)
+        self.assertIn("普通内部函数或方法不得放在本节", template)
+        self.assertIn("#### 2.2.7 关键函数/方法设计（按需必选）", template)
 
     def test_codecheck_advisor_is_single_pass_advisory_not_a_fixer_chain(self):
         path = os.path.join(ROOT, "agents", "codecheck-advisor-agent.md")

@@ -122,7 +122,7 @@ UT capability 自己负责写测试、编译测试和运行测试；弱 C++/gtes
 
 领域行为基线是默认上库的当前真相源：`docs/specs/<domain>.md` 按稳定业务能力划分，`docs/specs/index.md` 只做轻量路由。复杂存量领域第一次只记录本次有证据的覆盖，未写到的行为仍是未知，不要求一次补全。
 
-Spec 是本轮确认的 WHAT 变更契约；Story 按模板合并客户场景、业务规格、功能验收标准、软件详细设计和测试交接。二者以及决策、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择 `docs/specs/requirements/<ticket>/` 下某一份 durable copy 入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。工作流生成的 Spec、Story 和领域 Markdown 使用 `<!-- generated-by: mae-flow -->` 标记来源，但 Hook 和 parser 不校验该水印。
+Spec 是本轮确认的 WHAT 变更契约；Story 按模板合并客户场景、性能规格、功能验收标准、软件详细设计和测试交接。Story 的性能规格指容量、最大并发、时延、吞吐、资源和兼容限制，不重复业务行为 Spec；接口设计只放对外或跨组件公开契约，内部函数/方法另列设计小节。二者以及决策、链路说明、走读记录、CodeCheck 记录和 Delivery 笔记默认保留在本地。只有用户明确选择 `docs/specs/requirements/<ticket>/` 下某一份 durable copy 入库后，它才会进入本轮精确 manifest；“生成了”不等于“应该提交”。工作流生成的 Spec、Story 和领域 Markdown 使用 `<!-- generated-by: mae-flow -->` 标记来源，但 Hook 和 parser 不校验该水印。
 
 Delivery 将每个相关领域对账为 `new`、`updated` 或 `unchanged`。只有真实变化的领域文档以及新领域需要的 `index.md` 更新进入精确 manifest；不扫描、不暂存无关领域，也不物理归档历史 Spec。
 

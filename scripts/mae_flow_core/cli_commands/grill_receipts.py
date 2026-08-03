@@ -172,11 +172,20 @@ def prepare_phase_request(root, state, request):
         _artifact_path(root, state, "story"), "story.md")
     if kind == "story-confirmed":
         review = _latest_design_review(state)
-        if review.get("story_sha256") != story_sha:
+        reviewed_story_sha = review.get("story_sha256")
+        if not reviewed_story_sha:
             raise ValueError(
-                "Story 在 Design Reviewer 后发生变化或缺少内容收据，"
-                "必须对当前 Story 重新执行一次 Design Review")
-        return request
+                "当前 Story 缺少 Design Reviewer 内容收据；"
+                "请先完成本阶段唯一一次 Design Review")
+        return AdvanceRequest(
+            request.kind,
+            request.decision_key,
+            _compact({
+                "reviewed_story_sha256": reviewed_story_sha,
+                "story_sha256": story_sha,
+                "summary": request.decision_value.strip(),
+            }),
+        )
     if not _has_current_story_attempt(state):
         raise ValueError(
             "当前 Story 阶段尚未记录 story-generator-agent 调用事实")

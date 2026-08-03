@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Production CLI contracts for the lean Mae-Flow workflow."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -733,17 +734,26 @@ class LeanCliTests(unittest.TestCase):
         self.assertRegex(
             json.loads(review_receipt)["story_sha256"], r"^[0-9a-f]{64}$")
         with open(artifact_paths["story"], "a", encoding="utf-8") as stream:
-            stream.write("\nUnreviewed design change.\n")
+            stream.write("\nAccepted reviewer correction shown to the user.\n")
         changed_story = self.run_cli(
             "decision", "story-confirmed", "实现边界和可测性设计已确认。")
-        self.assertEqual(2, changed_story.returncode)
-        self.assertIn("重新执行一次 Design Review", changed_story.stderr)
-        with open(artifact_paths["story"], "w", encoding="utf-8") as stream:
-            stream.write(story_source)
-        story = self.run_cli_raw(
-            "decision", "story-confirmed", "实现边界和可测性设计已确认。")
-        self.assert_success(story)
-        self.assertNotIn("需要用户介入: 开发批次", story.stdout)
+        self.assert_success(changed_story)
+        self.assertNotIn("需要用户介入: 开发批次", changed_story.stdout)
+        confirmation = next(
+            item["value"] for item in self.state()["decisions"]
+            if item["key"] == "story.confirmation")
+        confirmation_receipt = json.loads(confirmation)
+        self.assertEqual(
+            hashlib.sha256(
+                (story_source + "\nAccepted reviewer correction shown to the user.\n")
+                .encode("utf-8")
+            ).hexdigest(),
+            confirmation_receipt["story_sha256"],
+        )
+        self.assertEqual(
+            "实现边界和可测性设计已确认。",
+            confirmation_receipt["summary"],
+        )
 
         for event, text in (
                 ("cp-brief", "完成缓存删除边界。"),

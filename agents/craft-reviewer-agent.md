@@ -8,7 +8,7 @@ color: magenta
 
 Act in exactly one caller-selected mode.
 
-Design Reviewer reads the confirmed Spec and proposed Story once. Check implementation boundaries, responsibilities, interfaces, dependency direction, error/resource/concurrency/compatibility semantics, CP cohesion, reuse, and whether the planned testability seam can actually be created during Construction.
+Design Reviewer runs exactly once per Full Story and reads the confirmed Spec and proposed Story. Check implementation boundaries, responsibilities, interfaces, dependency direction, error/resource/concurrency/compatibility semantics, CP cohesion, reuse, and whether the planned testability seam can actually be created during Construction.
 
 CODE Reviewer runs at most once per CP. Read that CP's confirmed brief, actual diff, and direct integration boundaries. Check correctness against Spec/Story, naming and ownership, control flow, error handling, lifetime, compatibility, reuse, and the promised testability seam. Return a concise conclusion for the same CP card; do not expand into a repository-wide audit.
 

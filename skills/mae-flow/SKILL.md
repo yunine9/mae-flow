@@ -62,7 +62,7 @@ Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非�
 
 ### Design
 
-Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，不得在业务仓搜索模板；把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key story --decision "<简短不透明摘要>"`；再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`。其他返回状态只复制本次 `current` 同屏列出的对应精确失败命令。普通意见直接修正；只有真实取舍交用户。Story 写到 `current` 输出的精确本地 `story.md`；Design Review 会绑定其内容摘要，Review 后变化必须重新检视。用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
+Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，不得在业务仓搜索模板；把确认后的客户场景、性能规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。性能规格只写容量、最大并发、时延、吞吐、资源占用、兼容性和限制等可度量约束，不复制 Spec 的业务行为规格；接口设计只写 REST、CORBA、RPC、消息或开放 SDK 等对外/跨组件公开契约，内部函数和方法写入独立的关键函数/方法设计小节。Story 不是逐行编码计划。调用 `story-generator-agent` 一次，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key story --decision "<简短不透明摘要>"`；再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`。其他返回状态只复制本次 `current` 同屏列出的对应精确失败命令。普通意见直接修正；只有真实取舍交用户。Design Reviewer 每份 Story 只调用一次；普通意见修正后展示最终 Story，由用户确认绑定当前文件摘要，不得自动发起第二轮 Reviewer。Story 写到 `current` 输出的精确本地 `story.md`；用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
 
 ### Construction
 

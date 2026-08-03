@@ -2,8 +2,9 @@
 
 Treat the approved Spec as the WHAT authority. Story carries the reviewed HOW while serving as the standalone software detailed design and test handoff consumed by developers and testers; do not reopen confirmed product decisions unless code evidence exposes a real contradiction.
 
-- Consolidate the confirmed customer scenarios, business specifications, and functional acceptance criteria so the handoff is understandable without reading Mae-Flow's internal Spec.
-- Preserve the existing Story template. Business specification means measurable limits and constraints; acceptance criteria means the functional outcomes this request must achieve.
+- Consolidate the confirmed customer scenarios, performance specifications, and functional acceptance criteria so the handoff is understandable without reading Mae-Flow's internal Spec.
+- Preserve the existing Story template. Performance specification means measurable capacity, concurrency, latency, throughput, resource, compatibility, and limit constraints; never copy the business behavior Spec into that section. Acceptance criteria means the functional outcomes this request must achieve.
+- Keep interface design for external or cross-component published contracts such as REST, CORBA, RPC, messaging, and SDKs. Put internal function or method design in the template's dedicated key-function section.
 
 - Identify the implementation boundary, main code locations, interfaces, dependencies, and data flow.
 - Make ownership, error semantics, resource lifetime, concurrency, compatibility, and cleanup explicit.

@@ -54,10 +54,13 @@ document, or per-repository launch cards.
 Chain uses a dedicated local state instead of `.mae-flow.json`:
 
 ```text
+.mae-flow-work/chain-current.json
 .mae-flow-work/<safe-ticket>/chain-state.json
 ```
 
-The state records the anchor root, ticket, requirement source, repository
+The first file is a narrow recovery pointer to the exact active state file; it
+prevents directory scanning and contains no business decisions. The state
+records the anchor root, ticket, requirement source, repository
 inventory, evidence touchpoints, question tree, contracts, dependencies,
 reverse-check results, document digest, confirmation receipt, and launch-card
 digest. Internal commands support start, current, fact recording, question,
@@ -66,6 +69,11 @@ answer, convergence, confirmation, and exit.
 Only one Chain action may be active in an anchor repository. It cannot start
 while an active Full or Focused flow owns that repository. Exiting archives the
 state without touching any referenced repository.
+
+While Chain is active, Hooks record both `UserPromptSubmit` and
+`AskUserQuestion` answers against the Chain state digest. Direct file writes are
+limited to its exact local `chain.md`; repository inspection stays read-only,
+and Git commit or push remains forbidden.
 
 Changing repositories, touchpoints, questions, contracts, dependencies, or the
 rendered document after confirmation invalidates the confirmation and launch
@@ -117,4 +125,3 @@ the contract.
   fields, citation verification, review, and launch-card rendering.
 - Architecture tests ensure Chain is no longer routed through the stateless
   toolbox and cannot gain code-write, commit, or push effects.
-

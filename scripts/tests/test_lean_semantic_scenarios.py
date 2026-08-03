@@ -458,14 +458,14 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             adapter = LeanHookAdapter(root, marker_root=marker_root)
             resumed = adapter.handle(
                 "SessionStart", {"session_id": "semantic-resume"})
-            self.assertIn("Phase: quality", resumed.stdout)
-            self.assertIn("CP: CP2", resumed.stdout)
+            self.assertIn("当前阶段: 质量验证（Quality）", resumed.stdout)
+            self.assertIn("当前开发批次: CP2", resumed.stdout)
 
             with open(state_path, "wb") as stream:
                 stream.write(b"corrupt-flow-state")
             corrupt = adapter.handle(
                 "SessionStart", {"session_id": "corrupt-resume"})
-            self.assertIn("corrupt", corrupt.stdout.casefold())
+            self.assertIn("状态损坏", corrupt.stdout)
 
             exited = adapter.handle(
                 "UserPromptSubmit",
@@ -534,9 +534,9 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             "- src/a.cpp",
             "- %s" % story,
             "提交说明: %s" % message,
-            "Moonlight requested: allow_commit=true, allow_push=false",
-            "Moonlight effective: allow_commit=true, allow_push=false",
-            "Moonlight block reason: none",
+            "月光宝盒请求权限: 提交=允许，推送=不允许",
+            "月光宝盒当前权限: 提交=允许，推送=不允许",
+            "月光宝盒阻断原因: 无",
         ))
         self.assertIn(expected_card, current.stdout)
 
@@ -583,9 +583,9 @@ class WorkspaceRecoveryAndDeliveryScenarioTests(unittest.TestCase):
             "提交说明（按 CP 顺序）:",
             "- CP1: %s" % first_message,
             "- CP2: %s" % second_message,
-            "Moonlight requested: allow_commit=true, allow_push=true",
-            "Moonlight effective: allow_commit=true, allow_push=true",
-            "Moonlight block reason: none",
+            "月光宝盒请求权限: 提交=允许，推送=允许",
+            "月光宝盒当前权限: 提交=允许，推送=允许",
+            "月光宝盒阻断原因: 无",
         ))
         self.assertIn(expected_card, current.stdout)
         self.assertNotIn("尚未选择", current.stdout)
@@ -653,10 +653,10 @@ class ProductDocumentationContractTests(unittest.TestCase):
                 self.assertIn("新的阶段", text)
         cli_source = self.read(
             "scripts/mae_flow_core/orchestration/guidance.py")
-        self.assertIn("需要用户介入: Intake（启动选择", cli_source)
-        self.assertIn("需要用户介入: Design（Story", cli_source)
-        self.assertNotIn("需要用户介入: 启动选择", cli_source)
-        self.assertNotIn("需要用户介入: Story（", cli_source)
+        self.assertIn("需要用户介入: 启动确认", cli_source)
+        self.assertIn("需要用户介入: 详细设计", cli_source)
+        self.assertNotIn("需要用户介入: Intake", cli_source)
+        self.assertNotIn("需要用户介入: Design", cli_source)
 
     def test_public_ci_is_fake_host_proof_not_internal_tool_execution(self):
         workflow = self.read(".github/workflows/selftest.yml")

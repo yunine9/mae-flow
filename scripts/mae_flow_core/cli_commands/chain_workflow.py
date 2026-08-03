@@ -28,6 +28,15 @@ from .user_events import bind_user_event, matching_user_event
 
 
 POINTER_RELATIVE = ".mae-flow-work/chain-current.json"
+_RECORD_LABELS = {
+    "repository": "仓库",
+    "touchpoint": "代码触点",
+    "question": "待确认问题",
+    "answer": "用户回答",
+    "contract": "接口契约",
+    "dependency": "依赖关系",
+    "reverse-check": "独立开工检查",
+}
 
 
 def _die(message):
@@ -119,9 +128,19 @@ def _active_flow(root):
 
 def _render(state, reason):
     if reason:
-        print("[mae-flow] " + reason)
-    print("Chain 工单: %s" % state.ticket)
-    print("状态: %s" % state.status)
+        if any("\u4e00" <= char <= "\u9fff" for char in reason):
+            visible = reason
+        elif "started" in reason.casefold():
+            visible = "跨仓流程已启动。"
+        elif "recovery context" in reason.casefold():
+            visible = "当前跨仓流程恢复信息。"
+        else:
+            visible = "跨仓流程状态已更新。"
+        print("[mae-flow] " + visible)
+    print("跨仓工单: %s" % state.ticket)
+    print("状态: %s" % ({
+        "active": "进行中", "confirmed": "已确认", "exited": "已退出",
+    }.get(state.status, state.status)))
     print("需求来源: %s" % state.requirement_source)
     print("Chain 文档: %s" % state.document_path)
     print(
@@ -132,7 +151,8 @@ def _render(state, reason):
         counts[item.kind] = counts.get(item.kind, 0) + 1
     if counts:
         print("记录: " + ", ".join(
-            "%s=%s" % item for item in sorted(counts.items())))
+            "%s=%s" % (_RECORD_LABELS.get(kind, kind), count)
+            for kind, count in sorted(counts.items())))
 
 
 def _mutate_with(root, operation):

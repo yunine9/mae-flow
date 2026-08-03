@@ -73,7 +73,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual("startup", self.state()["phase"])
         for expected in (
                 "完整启动配置", "alice", "REQ-DRAFT-CARD", "fix",
-                "requirements/fix.md", "full", "staged", base,
+                "requirements/fix.md", "完整流程（Full）", "按批次提交（Staged）", base,
                 base + "_alice_REQ-DRAFT-CARD", "mvn compile -q",
                 "ut-generator-agent", "mvn test", "Build → UT"):
             with self.subTest(expected=expected):
@@ -357,8 +357,8 @@ class LeanCliTests(unittest.TestCase):
                 "main_zhangsan_REQ-CONFIG", "build-fix",
                 "ut-generator-agent", "ctest --test-dir build"):
             self.assertIn(expected, started.stdout)
-        self.assertIn("Proposed startup configuration", started.stdout)
-        self.assertNotIn("Confirmed startup configuration", started.stdout)
+        self.assertIn("待确认的启动配置", started.stdout)
+        self.assertNotIn("已确认的启动配置", started.stdout)
 
     def test_startup_confirmation_consumes_a_current_user_event_after_card(self):
         started = self.run_cli_raw(
@@ -387,8 +387,8 @@ class LeanCliTests(unittest.TestCase):
              "value": "用户确认这张完整配置卡并进入 Spec。"},
             state["decisions"],
         )
-        self.assertIn("Confirmed startup configuration", confirmed.stdout)
-        self.assertNotIn("需要用户介入: Intake", confirmed.stdout)
+        self.assertIn("已确认的启动配置", confirmed.stdout)
+        self.assertNotIn("需要用户介入: 启动确认", confirmed.stdout)
 
     def test_startup_configure_requires_current_input_and_renders_fresh_card(self):
         base = subprocess.run(
@@ -436,7 +436,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertTrue(state["artifacts"])
         for expected in (
                 "完整启动配置", "bob", "fix", "requirements/change.md",
-                "full", "staged", "mvn compile -q", "mvn test",
+                "完整流程（Full）", "按批次提交（Staged）", "mvn compile -q", "mvn test",
                 "更新后的范围", "每个 CP Build，最终 UT。"):
             with self.subTest(expected=expected):
                 self.assertIn(expected, configured.stdout)
@@ -555,9 +555,9 @@ class LeanCliTests(unittest.TestCase):
         current = self.run_cli_raw("current")
 
         self.assert_success(current)
-        self.assertIn("Selected behavior domains", current.stdout)
+        self.assertIn("相关业务领域", current.stdout)
         self.assertIn(domain, current.stdout)
-        self.assertIn("updated", current.stdout)
+        self.assertIn("更新", current.stdout)
         self.assertIn("查询过滤规则", current.stdout)
 
     def test_full_spec_and_story_artifacts_are_grouped_locally_by_default(self):
@@ -675,12 +675,12 @@ class LeanCliTests(unittest.TestCase):
             "start", "--ticket", "REQ-42", "--path", "full",
             "--pace", "continuous")
         self.assert_success(started)
-        self.assertIn("需要用户介入: Intake（启动选择", started.stdout)
+        self.assertIn("需要用户介入: 启动确认", started.stdout)
 
         startup = self.run_cli(
             "decision", "startup-confirmed", "按完整开发和一次交付继续。")
         self.assert_success(startup)
-        self.assertIn("需要用户介入: Spec", startup.stdout)
+        self.assertIn("需要用户介入: 需求澄清", startup.stdout)
         self.write_grill_preparation("REQ-42")
 
         artifact_paths = {
@@ -713,7 +713,7 @@ class LeanCliTests(unittest.TestCase):
         spec = self.run_cli(
             "decision", "spec-confirmed", "可观察行为和范围已确认。")
         self.assert_success(spec)
-        self.assertIn("需要用户介入: Design（Story", spec.stdout)
+        self.assertIn("需要用户介入: 详细设计", spec.stdout)
 
         self.assert_success(self.run_capability("story"))
         story_source = "# Story\n\nReviewed implementation design.\n"
@@ -738,7 +738,7 @@ class LeanCliTests(unittest.TestCase):
         story = self.run_cli_raw(
             "decision", "story-confirmed", "实现边界和可测性设计已确认。")
         self.assert_success(story)
-        self.assertNotIn("需要用户介入: CP", story.stdout)
+        self.assertNotIn("需要用户介入: 开发批次", story.stdout)
 
         for event, text in (
                 ("cp-brief", "完成缓存删除边界。"),
@@ -750,7 +750,7 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(self.run_capability("build"))
         ready = self.run_cli_raw("advance", "cp-ready", "--key", "CP1")
         self.assert_success(ready)
-        self.assertIn("需要用户介入: CP", ready.stdout)
+        self.assertIn("需要用户介入: 开发批次", ready.stdout)
 
         cp = self.run_cli(
             "decision", "cp-confirmed", "本 CP 的结果和后续节奏已确认。")
@@ -876,16 +876,16 @@ class LeanCliTests(unittest.TestCase):
         construction = self.run_cli(
             "decision", "startup-confirmed", "已定位局部修复，直接实现。")
         self.assert_success(construction)
-        self.assertIn("Phase: construction", construction.stdout)
+        self.assertIn("当前阶段: 编码实现（Construction）", construction.stdout)
         self.assertNotIn("需要用户介入", construction.stdout)
 
         upgraded = self.run_cli(
             "decision", "upgrade-to-full",
             "发现跨模块兼容性风险，升级完整开发。")
         self.assert_success(upgraded)
-        self.assertIn("Path: full", upgraded.stdout)
-        self.assertIn("Phase: spec", upgraded.stdout)
-        self.assertIn("需要用户介入: Spec", upgraded.stdout)
+        self.assertIn("交付路径: 完整流程（Full）", upgraded.stdout)
+        self.assertIn("当前阶段: 需求澄清（Spec）", upgraded.stdout)
+        self.assertIn("需要用户介入: 需求澄清", upgraded.stdout)
         artifacts = self.state()["artifacts"]
         self.assertEqual(
             ["spec", "grill", "story", "ut-handoff"],
@@ -921,8 +921,8 @@ class LeanCliTests(unittest.TestCase):
                 )
                 current = self.run_cli("current")
                 self.assert_success(current)
-                self.assertIn("Focused 恢复路径", current.stdout)
-                self.assertIn("Construction", current.stdout)
+                self.assertIn("聚焦流程恢复说明", current.stdout)
+                self.assertIn("编码实现", current.stdout)
                 self.assertIn("upgrade-to-full", current.stdout)
                 self.assertNotIn("exactly once", current.stdout)
                 self.assertNotIn("必须确认", current.stdout)
@@ -1192,7 +1192,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertRegex(pointer["state_sha256"], r"^[0-9a-f]{64}$")
         current = self.run_cli("current")
         self.assert_success(current)
-        self.assertIn("状态: exited", current.stdout)
+        self.assertIn("状态: 已退出", current.stdout)
         blocked = self.run_cli("advance", "startup-confirmed")
         self.assertEqual(2, blocked.returncode)
         self.assertIn("已退出", blocked.stderr)
@@ -1294,7 +1294,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual("true", decisions["moonlight.enabled"])
         self.assertEqual("false", decisions["moonlight.allow_commit"])
         self.assertEqual("false", decisions["moonlight.allow_push"])
-        self.assertNotIn("需要用户介入: Intake（启动选择", started.stdout)
+        self.assertNotIn("需要用户介入: 启动确认", started.stdout)
 
         refreshed = self.run_cli(
             "manifest", "--file", "src/service.cpp",
@@ -1603,14 +1603,14 @@ class LeanCliTests(unittest.TestCase):
         first = self.run_cli(
             "decision", "cp-confirmed", "CP1 已检视。")
         self.assert_success(first)
-        self.assertNotIn("需要用户介入: CP", first.stdout)
+        self.assertNotIn("需要用户介入: 开发批次", first.stdout)
         self.observe_checkpoint_commit("CP1")
 
         second_opened = self.run_cli(
             "advance", "cp-opened", "--key", "CP2")
 
         self.assert_success(second_opened)
-        self.assertNotIn("需要用户介入: CP", second_opened.stdout)
+        self.assertNotIn("需要用户介入: 开发批次", second_opened.stdout)
         self.assertEqual("CP2", self.state()["current_cp"])
         self.assert_success(self.run_capability("build"))
         self.assert_success(self.run_cli(
@@ -1619,7 +1619,7 @@ class LeanCliTests(unittest.TestCase):
         second_ready = self.run_cli_raw(
             "advance", "cp-ready", "--key", "CP2")
         self.assert_success(second_ready)
-        self.assertIn("需要用户介入: CP", second_ready.stdout)
+        self.assertIn("需要用户介入: 开发批次", second_ready.stdout)
         self.assertIn("本批精确提交计划", second_ready.stdout)
         self.assertIn("src/b.cpp", second_ready.stdout)
         self.assertIn("[REQ-CP][feat]完成 CP2", second_ready.stdout)
@@ -1688,14 +1688,14 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("需要用户介入: 交付", authorized.stdout)
         self.assertIn("src/a.cpp", authorized.stdout)
         self.assertIn(
-            "Moonlight requested: allow_commit=true, allow_push=true",
+            "月光宝盒请求权限: 提交=允许，推送=允许",
             authorized.stdout,
         )
         self.assertIn(
-            "Moonlight effective: allow_commit=true, allow_push=true",
+            "月光宝盒当前权限: 提交=允许，推送=允许",
             authorized.stdout,
         )
-        self.assertIn("Moonlight block reason: none", authorized.stdout)
+        self.assertIn("月光宝盒阻断原因: 无", authorized.stdout)
 
         state["risks"] = ["远端权限仍不明确"]
         with open(state_path, "w", encoding="utf-8") as stream:
@@ -1704,16 +1704,15 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(blocked)
         self.assertIn("需要用户介入: 交付", blocked.stdout)
         self.assertIn(
-            "Moonlight requested: allow_commit=true, allow_push=true",
+            "月光宝盒请求权限: 提交=允许，推送=允许",
             blocked.stdout,
         )
         self.assertIn(
-            "Moonlight effective: allow_commit=false, allow_push=false",
+            "月光宝盒当前权限: 提交=不允许，推送=不允许",
             blocked.stdout,
         )
         self.assertIn(
-            "Moonlight block reason: Unresolved workflow risk requires a "
-            "safe stop.",
+            "月光宝盒阻断原因: 仍有未解决风险",
             blocked.stdout,
         )
 

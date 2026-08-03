@@ -1,26 +1,27 @@
-## Objective
-Produce a standalone software detailed design and test handoff from the approved behavior without reopening the specification.
+## 目标
 
-## Inspect
-Read the approved Spec, confirmed customer scenarios, business specifications,
-functional acceptance criteria, affected architecture, interfaces, test strategy,
-and delivery constraints. Read and preserve the exact project-local
-`.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`; never search the
-business repository for a plugin template. Story is not a line-by-line coding
-plan. Run `story-generator-agent` exactly once, then run
-`craft-reviewer-agent` exactly once with the Design Reviewer role.
+把已确认需求整理成可独立交给开发和测试的软件详细设计，不重新打开需求范围。
 
-## Stop for the user
-Stop for a meaningful design deviation or approval of the construction story.
-Stop for a real reviewer tradeoff. CLEAR or approval continues without a user stop.
+## 当前要做
 
-## Outputs
-Produce the reviewed standalone Story with confirmed business context, software
-detailed design, coherent checkpoints, verification intent, and known risks.
-Keep it local unless the user explicitly selects its exact durable copy under
-`docs/specs/requirements/<ticket>/`. Generated Markdown starts with
-`<!-- generated-by: mae-flow -->`; this is provenance, not a format gate.
-Record reviewer failure without automatic retry.
+读取已确认 Spec、客户场景、业务规格、验收标准、相关架构、接口、测试策略和交付
+约束。严格沿用 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，禁止在
+业务仓搜索插件模板。
 
-## Next
-Proceed to Construction. The next meaningful action is to confirm the reviewed HOW.
+调用一次 `story-generator-agent` 生成 Story，再调用一次 `craft-reviewer-agent`
+并指定为设计检视角色。Story 说明实现边界、接口与依赖方向、数据流、错误语义、
+资源生命周期、并发兼容性、可测性设计和连贯的开发批次；不要写成逐行编码计划。
+
+## 何时询问用户
+
+详细设计偏离已确认需求、存在真实设计取舍，或需要确认完整 Story 时询问用户。
+普通设计检视通过不会新增停点；失败只记录，不自动重试。
+
+## 本阶段产出
+
+经检视的本地 Story，包含业务上下文、软件详细设计、开发批次、验证意图和已知风险。
+只有用户明确要求时，才复制到 `docs/specs/requirements/<ticket>/story.md`。
+
+## 下一步
+
+用户确认详细设计后进入编码实现。

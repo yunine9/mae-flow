@@ -119,7 +119,7 @@ class LeanHookAdapterTests(unittest.TestCase):
                 "SessionStart", {"session_id": "chain-session"})
 
         self.assertEqual(0, response.exit_code, response.stderr)
-        self.assertIn("Chain recovery context", response.stdout)
+        self.assertIn("跨仓流程恢复信息", response.stdout)
         self.assertIn("REQ-CHAIN", response.stdout)
 
     def test_chain_askuser_answer_is_bound_to_chain_state_digest(self):
@@ -253,9 +253,10 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(0, first.returncode, first.stderr.decode("utf-8"))
         text = first.stdout.decode("utf-8")
         for fact in (
-                "Ticket: REQ-5", "Request: 修复订单查询边界，并保持旧接口兼容。",
-                "Mode: full", "Phase: quality", "CP: CP-2",
-                "spec=docs/specs/requirements/REQ-5/spec.md",
+                "工单: REQ-5", "需求: 修复订单查询边界，并保持旧接口兼容。",
+                "交付路径: 完整流程（Full）", "当前阶段: 质量验证（Quality）",
+                "当前开发批次: CP-2",
+                "需求规格=docs/specs/requirements/REQ-5/spec.md",
                 "database compatibility", "build", "opaque-return",
                 "latest"):
             self.assertIn(fact, text)
@@ -281,7 +282,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         first = adapter.handle("SessionStart", payload)
         second = adapter.handle("SessionStart", payload)
 
-        self.assertIn("Phase: %s" % state.phase.value, first.stdout)
+        self.assertIn("当前阶段:", first.stdout)
         self.assertEqual("", second.stdout)
         self.assertEqual(1, len(os.listdir(fallback)))
 
@@ -309,7 +310,7 @@ class LeanHookAdapterTests(unittest.TestCase):
             first = adapter.handle("SessionStart", payload)
             second = adapter.handle("SessionStart", payload)
 
-        self.assertIn("Phase: %s" % state.phase.value, first.stdout)
+        self.assertIn("当前阶段:", first.stdout)
         self.assertEqual("", second.stdout)
         self.assertEqual(1, len(os.listdir(fallback)))
 
@@ -341,7 +342,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         first = adapter.handle("SessionStart", {})
         second = adapter.handle("SessionStart", {})
 
-        self.assertIn("Phase: startup", first.stdout)
+        self.assertIn("当前阶段: 启动确认（Intake）", first.stdout)
         self.assertEqual("", second.stdout)
         self.assertEqual(1, len(os.listdir(self.marker_root)))
 
@@ -362,7 +363,7 @@ class LeanHookAdapterTests(unittest.TestCase):
             self.root, marker_root=self.marker_root).handle(
                 "SessionStart", {"session_id": "retry-recovery"})
 
-        self.assertIn("retry=authorized-once-unconsumed", response.stdout)
+        self.assertIn("重试=已授权一次，尚未消费", response.stdout)
 
     def test_resume_summary_has_total_budget_and_omission_counts(self):
         long_text = "长字段" * 400
@@ -394,11 +395,11 @@ class LeanHookAdapterTests(unittest.TestCase):
                 "SessionStart", {"session_id": "budget-session"})
 
         self.assertLessEqual(len(response.stdout), 1200)
-        self.assertIn("Phase: delivery", response.stdout)
-        self.assertIn("CP: CP-FINAL-", response.stdout)
+        self.assertIn("当前阶段: 交付确认（Delivery）", response.stdout)
+        self.assertIn("当前开发批次: CP-FINAL-", response.stdout)
         self.assertEqual(2, response.stdout.count("另有 18 项"))
-        self.assertIn("Last capability: build-opaque-", response.stdout)
-        self.assertIn("outcome=returned-opaque-", response.stdout)
+        self.assertIn("最近能力调用: build-opaque-", response.stdout)
+        self.assertIn("结果=returned-opaque-", response.stdout)
 
     def test_session_resume_distinguishes_complete_and_corrupt(self):
         adapter = LeanHookAdapter(
@@ -413,13 +414,13 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.write_state(complete)
         completed = adapter.handle(
             "SessionStart", {"session_id": "complete-session"})
-        self.assertIn("complete", completed.stdout.casefold())
+        self.assertIn("已完成", completed.stdout)
 
         with open(self.state_path, "wb") as stream:
             stream.write(b"corrupt-v3-state")
         corrupt = adapter.handle(
             "SessionStart", {"session_id": "corrupt-session"})
-        self.assertIn("corrupt", corrupt.stdout.casefold())
+        self.assertIn("状态损坏", corrupt.stdout)
 
     def test_prompt_is_recorded_raw_without_ack_or_choice_validation(self):
         self.write_state()
@@ -527,7 +528,7 @@ class LeanHookAdapterTests(unittest.TestCase):
             self.assertEqual(original, stream.read())
         resumed = adapter.handle(
             "SessionStart", {"session_id": "after-exit"})
-        self.assertIn("exited", resumed.stdout.casefold())
+        self.assertIn("已退出", resumed.stdout)
         with open(self.events_path, encoding="utf-8") as stream:
             captured_before = json.load(stream)
         adapter.handle("UserPromptSubmit", {"prompt": "普通开发继续"})

@@ -281,7 +281,7 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         for capability in (
                 "`codecheck-advisor-agent`", "`ut-generator-agent`"):
             self.assertIn(capability, phases["quality"])
-        self.assertIn("confirmed build", phases["construction"].lower())
+        self.assertIn("启动时确认的构建方式", phases["construction"])
         self.assertIn("maven", phases["construction"].lower())
         self.assertGreaterEqual(skill.count("`craft-reviewer-agent`"), 2)
 
@@ -373,12 +373,12 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
             os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
 
         for concept in (
-                "interactive grill", "grill.md", "gq-*", "traceability"):
+                "interactive grill", "grill.md", "gq-*", "追溯"):
             self.assertIn(concept, phase)
         self.assertLess(
-            phase.index("interactive grill"), phase.index("candidate spec"))
+            phase.index("interactive grill"), phase.index("候选 spec"))
         self.assertLess(
-            phase.index("candidate spec"), phase.index("read-only critic"))
+            phase.index("候选 spec"), phase.index("只读检查"))
         for concept in (
                 "grill.md", "spec.md", "input coverage", "traceability"):
             self.assertIn(concept, critic)

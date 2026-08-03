@@ -1,31 +1,25 @@
-## Objective
-Confirm one complete operational card and choose Full or Focused delivery with a commit pace that fits the work.
+## 目标
 
-## Inspect
-Read the requirement source, repository defaults, current Git branch, initial
-dirty files, affected boundaries, and known risks. Read
-`docs/specs/index.md` when it exists, select only relevant
-business capability domains, and read only their behavior documents. A missing index is
-valid and does not block first use.
+确认一张完整启动配置卡，选择完整流程或聚焦流程，并确定提交节奏。
 
-## Stop for the user
-Present worker, ticket and type, requirement source, Full/Focused,
-Continuous/Staged, base and derived working branches, exact Build route, UT
-generation, UT run entry, and the natural-language quality combination in one
-card. For C++, the Build route may be the configured `build-fix` Skill; for
-Java/Maven use the confirmed Maven command (normally `mvn compile -q`); for any
-other project record the exact repository Skill or command. Stop once for natural-language
-confirmation or modification. Ask separately only for genuine domain ambiguity
-or an irreversible action.
+## 当前要做
 
-## Outputs
-Record the complete configuration, selected business domains, path, pace,
-initial dirty files, and unresolved risks. Derive the working branch as
-`{base}_{worker}_{ticket}` unless the confirmed card supplies another exact
-branch. Immediately create or switch to that confirmed working branch after
-Intake; do not postpone branch placement until Delivery. Declare local Spec,
-Story, and UT-handoff paths only for Full; Focused
-adds them only if it upgrades to Full.
+读取需求来源、仓库预设、当前分支、启动前已有改动、影响边界和已知风险。
+`docs/specs/index.md` 存在时，只读取本需求相关的业务领域文档；首次使用时没有
+该文件属于正常情况。
 
-## Next
-Full proceeds to Spec; Focused proceeds to Construction. The next meaningful action is to confirm the selected route.
+## 何时询问用户
+
+一次展示并确认：工号、单号和类型、需求来源、交付路径、提交节奏、基线与工作
+分支、构建方式、UT 生成与运行入口、质量组合。只有真实的领域歧义或不可逆操作
+才增加问题。
+
+## 本阶段产出
+
+保存完整配置、相关业务领域、启动前已有改动和风险。工作分支默认按
+`{基线分支}_{工号}_{单号}` 派生，确认后立即创建或切换。完整流程生成本地 Spec、
+Story 和 UT 交接路径；聚焦流程只有升级后才生成。
+
+## 下一步
+
+完整流程进入需求澄清；聚焦流程进入编码实现。

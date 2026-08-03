@@ -1,39 +1,31 @@
-## Objective
-Implement the approved outcome in coherent checkpoints and create testability seams early for the later formal UT chain.
+## 目标
 
-## Inspect
-Read the current CP brief, approved Story or Focused scope, selected behavior
-baseline, changed interfaces, planned testability seams, cumulative UT handoff,
-and repository state.
-After implementing each checkpoint, run `craft-reviewer-agent` once with the
-CODE Reviewer role over that checkpoint diff and direct integration boundary.
-Give every supplied review item one clear disposition: fixed, unsupported with
-evidence, design tradeoff, or out of scope. Then synchronously invoke the exact
-confirmed Build route once for that CP. A C++ route may use
-`build-fix`; a Java route uses the confirmed Maven command; other languages use
-their confirmed repository Skill or command. Do not use delay loops, repeated
-status probes, detached execution, or
-automatically retry while waiting for Build.
+按已确认范围分批完成代码，并提前建立后续正式 UT 所需的可测性边界。
 
-## Stop for the user
-Stop for a real ambiguity, a meaningful design deviation, an irreversible risk,
-or an agreed Full-flow checkpoint confirmation.
+## 当前要做
 
-## Outputs
-Record the current CP brief, actual result, one-pass Reviewer conclusion,
-incremental UT intent, changed files, unresolved risks, and the next CP brief.
-The same user card compares the completed CP with the next design. These are
-natural-language recovery facts, not a separate detailed coding-plan document.
-CP Construction does not write or run formal UT. Its one configured Build is
-the CP compile fact and is recorded as one opaque capability outcome; Mae-Flow
-does not parse its output.
+读取当前开发批次简报、已确认 Story 或聚焦范围、相关行为基线、接口变化、可测性
+设计、累计 UT 交接和仓库现场。完成每个批次后：
 
-After Build, record the current CP exact manifest proposal and mark that same CP
-ready. Only then show the Full review card. A user revision revokes any pending
-receipt and returns this CP to editable work; confirmation freezes source until
-the exact Staged commit is observed. Open the next CP afterward without showing
-an empty review card.
+1. 调用一次 `craft-reviewer-agent` 做代码检视，并明确处理每条意见；
+2. 对本批精确改动运行一次 Lightcheck；
+3. 同步调用一次启动时确认的构建方式。
 
-## Next
-Proceed to Quality when construction and its cumulative UT handoff are complete.
-The next meaningful action is the current checkpoint.
+C++ 可使用已配置的 `build-fix`，Java 使用已确认的 Maven 命令，其他语言使用仓库
+确认的 Skill 或命令。禁止等待轮询、后台执行或自动重试。
+
+## 何时询问用户
+
+出现真实歧义、明显设计偏离、不可逆风险，或完整流程的开发批次确认时询问用户。
+
+## 本阶段产出
+
+记录本批简报、实际结果、一次代码检视结论、UT 增量、改动文件、风险和下一批简报。
+本阶段不正式编写或运行 UT；本批构建只记录不透明返回事实。
+
+构建完成后先生成本批精确提交计划，再标记当前批次就绪并展示确认卡。用户要求修改
+会撤销待执行收据并重新开放代码；确认后冻结本批源码，直到对应分批提交被观察到。
+
+## 下一步
+
+所有开发批次和累计 UT 交接完成后进入质量验证。

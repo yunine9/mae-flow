@@ -25,11 +25,7 @@ from mae_flow_core.orchestration import (
     run_toolbox_request,
 )
 from mae_flow_core.orchestration.documents import local_full_artifacts
-from mae_flow_core.orchestration.guidance import (
-    render_capability_facts,
-    render_guidance,
-    render_user_card,
-)
+from mae_flow_core.orchestration import guidance as ui_guidance
 from mae_flow_core.orchestration.moonlight_policy import apply_moonlight_policy
 from mae_flow_core.state_store import (
     ProjectStateLock,
@@ -136,17 +132,17 @@ def _render_exited(root, pointer, reason):
         _render(replace(state, status="exited"), reason)
         return
     if reason:
-        print("[mae-flow] " + reason)
-    print("状态: exited")
+        print("[mae-flow] " + ui_guidance.reason_label(reason))
+    print("状态: 已退出")
     print("快照: %s" % pointer["snapshot"])
 
 
 def _render(state, reason):
     if reason:
-        print("[mae-flow] " + reason)
-    print("阶段: %s" % state.phase.value)
-    print("路径: %s" % state.path.value)
-    print("状态: %s" % state.status)
+        print("[mae-flow] " + ui_guidance.reason_label(reason))
+    print("阶段: %s" % ui_guidance.phase_label(state.phase))
+    print("路径: %s" % ui_guidance.path_label(state.path))
+    print("状态: %s" % ui_guidance.status_label(state.status))
     if state.delivery_files:
         print("精确交付清单:")
         for path in state.delivery_files:
@@ -170,11 +166,11 @@ def _render(state, reason):
                     path, reasons.get(identity, "用户已确认归属")))
             else:
                 print("- %s: 默认不属于本单" % path)
-    card = render_user_card(state)
+    card = ui_guidance.render_user_card(state)
     if card:
         print(card)
-    print(render_guidance(state), end="")
-    print(render_capability_facts(state), end="")
+    print(ui_guidance.render_guidance(state), end="")
+    print(ui_guidance.render_capability_facts(state), end="")
 
 
 def _run(command):
@@ -222,7 +218,7 @@ def cmd_lean_start(root, args):
             if os.path.isfile(pointer_path):
                 archive_file_exclusive(
                     pointer_path, "exited-backup", backup_base=path)
-        _render(state, "Lean workflow started.")
+        _render(state, "流程已启动。")
     return _run(execute)
 
 
@@ -231,10 +227,10 @@ def cmd_lean_current(root, unused_args):
         pointer = _exit_pointer(root)
         if pointer is not None:
             _render_exited(
-                root, pointer, "Current lean recovery context.")
+                root, pointer, "当前流程恢复信息。")
             return
         state = _load_state(root)
-        _render(state, "Current lean recovery context.")
+        _render(state, "当前流程恢复信息。")
     return _run(execute)
 
 

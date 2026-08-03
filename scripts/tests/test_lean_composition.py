@@ -116,9 +116,9 @@ class LeanCompositionTests(unittest.TestCase):
 
                 self.assertEqual(path, recovered.path)
                 self.assertEqual(phase, recovered.phase)
-                self.assertIn("Ticket: REQ-COMPOSE", guidance)
-                self.assertIn("Path: %s" % path.value, guidance)
-                self.assertIn("Phase: %s" % phase.value, guidance)
+                self.assertIn("工单: REQ-COMPOSE", guidance)
+                self.assertIn("交付路径:", guidance)
+                self.assertIn("当前阶段:", guidance)
                 self.assertEqual(target, advanced.phase)
 
     def test_every_focused_migration_phase_has_a_safe_semantic_next_event(self):

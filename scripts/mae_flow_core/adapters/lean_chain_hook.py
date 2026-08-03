@@ -45,12 +45,14 @@ def resume_chain(
         1 for item in state.records if item.kind == "repository")
     questions = sum(1 for item in state.records if item.kind == "question")
     return HookResponse(stdout="\n".join((
-        "[mae-flow] Chain recovery context",
-        "Ticket: %s" % _clip(state.ticket, 100),
-        "Request: %s" % _clip(state.request, 240),
-        "Status: %s" % state.status,
-        "Repositories: %s" % repositories,
-        "Questions: %s" % questions,
-        "Document: %s" % _clip(state.document_path, 200),
+        "[mae-flow] 跨仓流程恢复信息",
+        "工单: %s" % _clip(state.ticket, 100),
+        "需求: %s" % _clip(state.request, 240),
+        "状态: %s" % ({
+            "active": "进行中", "confirmed": "已确认", "exited": "已退出",
+        }.get(state.status, state.status)),
+        "涉及仓库: %s" % repositories,
+        "质询问题: %s" % questions,
+        "跨仓文档: %s" % _clip(state.document_path, 200),
         "",
     )))

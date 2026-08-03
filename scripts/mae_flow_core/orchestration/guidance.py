@@ -25,10 +25,106 @@ _PLUGIN_RESOURCES = (
     ".mae-flow-work/plugin-resources/assets/REVIEW-TEMPLATE.md",
 )
 
+_PHASE_LABELS = {
+    "startup": "启动确认（Intake）",
+    "spec": "需求澄清（Spec）",
+    "story": "详细设计（Design）",
+    "construction": "编码实现（Construction）",
+    "quality": "质量验证（Quality）",
+    "delivery": "交付确认（Delivery）",
+}
+_PATH_LABELS = {
+    "full": "完整流程（Full）",
+    "focused": "聚焦流程（Focused）",
+}
+_PACE_LABELS = {
+    "continuous": "最终一次提交（Continuous）",
+    "staged": "按批次提交（Staged）",
+}
+_STATUS_LABELS = {
+    "active": "进行中",
+    "complete": "已完成",
+    "exited": "已退出",
+}
+_ARTIFACT_LABELS = {
+    "request": "需求说明",
+    "spec": "需求规格",
+    "grill": "质询记录",
+    "story": "详细设计",
+    "ut-handoff": "UT 交接",
+    "chain": "跨仓方案",
+}
+_ACTION_LABELS = {
+    "new": "新增",
+    "updated": "更新",
+    "unchanged": "不变",
+}
+_OUTCOME_LABELS = {
+    "returned": "已正常返回",
+    "failed-to-start": "启动失败",
+    "timed-out": "已超时",
+    "not-observed": "未观察到返回",
+}
+
+
+def phase_label(value):
+    key = value.value if isinstance(value, Phase) else str(value)
+    return _PHASE_LABELS.get(key, key)
+
+
+def path_label(value):
+    key = value.value if isinstance(value, DeliveryPath) else str(value)
+    return _PATH_LABELS.get(key, key)
+
+
+def status_label(value):
+    return _STATUS_LABELS.get(str(value), str(value))
+
+
+def artifact_label(value):
+    return _ARTIFACT_LABELS.get(str(value), str(value))
+
+
+def outcome_label(value):
+    return _OUTCOME_LABELS.get(str(value), str(value))
+
+
+def reason_label(reason, recovery="当前流程恢复信息。", updated="流程状态已更新。"):
+    if not reason:
+        return ""
+    if any("\u4e00" <= char <= "\u9fff" for char in reason):
+        return reason
+    return recovery if "recovery context" in reason.casefold() else updated
+
+
+def _moonlight_reason_label(reason):
+    if not reason:
+        return "无"
+    exact = {
+        "Moonlight is disabled.": "月光宝盒未启用",
+        "Unresolved workflow risk requires a safe stop.": "仍有未解决风险",
+        "No exact delivery manifest is available yet.": "尚未形成精确交付清单",
+        "The current exact manifest is preauthorized.": "当前精确清单已预授权",
+    }
+    if reason in exact:
+        return exact[reason]
+    prefixes = (
+        ("The exact delivery manifest is unavailable: ", "精确交付清单不可用："),
+        ("Unowned dirty files prevent automatic commit and push: ",
+         "存在未确认归属的已有改动："),
+        ("The manifest includes files outside exact Moonlight preauthorization, "
+         "including any conditional document not explicitly named: ",
+         "交付清单包含未明确授权的文件："),
+    )
+    for source, target in prefixes:
+        if reason.startswith(source):
+            return target + reason[len(source):]
+    return "权限尚未满足安全条件"
+
 
 def _items(title, values):
     if not values:
-        return "%s: none" % title
+        return "%s: 无" % title
     return "%s:\n%s" % (
         title,
         "\n".join("- %s" % value for value in values),
@@ -50,13 +146,13 @@ def render_guidance(state):
             state.path == DeliveryPath.FOCUSED
             and state.phase in {Phase.SPEC, Phase.STORY}):
         phase_guidance = "\n".join((
-            "## Focused 恢复路径",
-            "这是由旧流程迁移留下的 Full 专属阶段，不补做 Full 的 Grill、Story "
-            "或 Design Reviewer 仪式。",
+            "## 聚焦流程恢复说明",
+            "这是旧状态遗留的完整流程专属阶段，不补做完整流程的质询、详细设计"
+            "或设计检视。",
             "若工作仍是已定位的局部修改，按当前恢复说明直接进入 "
-            "Construction；若发现真实的跨模块、兼容性、数据、安全、接口、"
+            "编码实现；若发现真实的跨模块、兼容性、数据、安全、接口、"
             "共享状态或并发风险，执行 `advance upgrade-to-full --decision "
-            "\"<自然语言依据>\"` 进入 Full。",
+            "\"<自然语言依据>\"` 进入完整流程。",
             "恢复选择只看语义风险，不看文件数或行数。",
         ))
     else:
@@ -65,7 +161,8 @@ def render_guidance(state):
             phase_guidance = stream.read().strip()
 
     artifacts = tuple(
-        "%s: %s" % (kind, path) for kind, path in state.artifacts)
+        "%s: %s" % (_ARTIFACT_LABELS.get(kind, kind), path)
+        for kind, path in state.artifacts)
     grill_path = next((
         path for kind, path in state.artifacts if kind == "grill"), "")
     grill_work = ()
@@ -78,41 +175,39 @@ def render_guidance(state):
     config = state.startup_config
     defaults_warning = _latest_decision(state, "startup.defaults_warning")
     startup_title = (
-        "Confirmed startup configuration"
+        "已确认的启动配置"
         if _latest_decision(state, "startup.confirmation")
-        else "Proposed startup configuration")
+        else "待确认的启动配置")
     startup = (
-        "worker: %s" % (config.worker or "not configured"),
-        "ticket type: %s" % (config.ticket_type or "not configured"),
-        "requirement source: %s" % (
-            config.requirement_source or "not configured"),
-        "base branch: %s" % (config.base_branch or "not configured"),
-        "working branch: %s" % (
-            config.working_branch or "not configured"),
-        "Build: %s" % (config.build_method or "not configured"),
-        "UT generation: %s" % (config.ut_method or "not configured"),
-        "UT run entry: %s" % (config.ut_command or "not configured"),
-        "Quality plan: %s" % (
+        "工号: %s" % (config.worker or "未配置"),
+        "单号类型: %s" % (config.ticket_type or "未配置"),
+        "需求来源: %s" % (config.requirement_source or "未配置"),
+        "基线分支: %s" % (config.base_branch or "未配置"),
+        "工作分支: %s" % (config.working_branch or "未配置"),
+        "构建方式: %s" % (config.build_method or "未配置"),
+        "UT 生成方式: %s" % (config.ut_method or "未配置"),
+        "UT 运行入口: %s" % (config.ut_command or "未配置"),
+        "质量组合: %s" % (
             _latest_decision(state, "startup.quality_plan")
-            or "not configured"),
-    ) + (("repository defaults warning: %s" % defaults_warning,)
+            or "未配置"),
+    ) + (("仓库预设提示: %s" % defaults_warning,)
          if defaults_warning else ())
     domains = selected_domains(state)
     actions = tuple(
         "%s: %s%s" % (
-            item.path, item.action,
+            item.path, _ACTION_LABELS.get(item.action, item.action),
             " — " + item.summary if item.summary else "")
         for item in domain_actions(state))
     checkpoints = tuple(
-        "%s: brief=%s | result=%s | review=%s | UT=%s" % (
-            item.name, item.brief or "none", item.result or "none",
-            item.review or "none", item.ut_intent or "none")
+        "%s: 简报=%s | 结果=%s | 检视=%s | UT=%s" % (
+            item.name, item.brief or "无", item.result or "无",
+            item.review or "无", item.ut_intent or "无")
         for item in checkpoint_facts(state))
     context = (
-        "Ticket: %s\n"
-        "Path: %s\n"
-        "Phase: %s\n"
-        "CP: %s\n"
+        "工单: %s\n"
+        "交付路径: %s\n"
+        "当前阶段: %s\n"
+        "当前开发批次: %s\n"
         "%s\n"
         "%s\n"
         "%s\n"
@@ -123,17 +218,17 @@ def render_guidance(state):
         "%s"
     ) % (
         state.ticket,
-        state.path.value,
-        state.phase.value,
-        state.current_cp or "none",
+        path_label(state.path),
+        phase_label(state.phase),
+        state.current_cp or "无",
         _items(startup_title, startup),
-        _items("Artifacts", artifacts),
-        _items("Exact bundled plugin resources", _PLUGIN_RESOURCES),
-        _items("Exact Grill preparation files", grill_work),
-        _items("Selected behavior domains", domains),
-        _items("Behavior reconciliation", actions),
-        _items("Checkpoint context", checkpoints),
-        _items("Unresolved risks", state.risks),
+        _items("流程产物", artifacts),
+        _items("插件本地资源", _PLUGIN_RESOURCES),
+        _items("质询准备文件", grill_work),
+        _items("相关业务领域", domains),
+        _items("行为基线处理", actions),
+        _items("开发批次上下文", checkpoints),
+        _items("未解决风险", state.risks),
     )
     return "%s\n\n%s\n" % (context, phase_guidance)
 
@@ -145,7 +240,9 @@ def render_capability_facts(state):
     lines = ["能力尝试（只记录返回事实，不解释工具输出）:"]
     lines.extend(
         "- %s | %s | %s" % (
-            attempt.kind, attempt.outcome, attempt.summary or "无摘要")
+            attempt.kind,
+            _OUTCOME_LABELS.get(attempt.outcome, attempt.outcome),
+            attempt.summary or "无摘要")
         for attempt in state.capabilities)
     lines.append("能力重试授权:")
     seen = set()
@@ -205,26 +302,26 @@ def _delivery_user_card(state):
     if actions:
         lines.append("领域行为基线:")
         lines.extend("- %s: %s%s" % (
-            item.path, item.action,
+            item.path, _ACTION_LABELS.get(item.action, item.action),
             " — " + item.summary if item.summary else "")
             for item in actions)
     if state.delivery_files:
         lines.append("精确文件:")
         lines.extend("- %s" % path for path in state.delivery_files)
     else:
-        lines.append("精确文件: none")
+        lines.append("精确文件: 无")
     lines.extend(_delivery_message_lines(state, decisions))
     lines.extend((
-        "Moonlight requested: allow_commit=%s, allow_push=%s" % (
-            str(moonlight.requested.allow_commit).lower(),
-            str(moonlight.requested.allow_push).lower(),
+        "月光宝盒请求权限: 提交=%s，推送=%s" % (
+            "允许" if moonlight.requested.allow_commit else "不允许",
+            "允许" if moonlight.requested.allow_push else "不允许",
         ),
-        "Moonlight effective: allow_commit=%s, allow_push=%s" % (
-            str(moonlight.effective.allow_commit).lower(),
-            str(moonlight.effective.allow_push).lower(),
+        "月光宝盒当前权限: 提交=%s，推送=%s" % (
+            "允许" if moonlight.effective.allow_commit else "不允许",
+            "允许" if moonlight.effective.allow_push else "不允许",
         ),
-        "Moonlight block reason: %s" % (
-            moonlight.block_reason or "none"),
+        "月光宝盒阻断原因: %s" % (
+            _moonlight_reason_label(moonlight.block_reason)),
     ))
     return "\n".join(lines)
 
@@ -249,14 +346,15 @@ def render_user_card(state):
         defaults_warning = _latest_decision(
             state, "startup.defaults_warning")
         lines = (
-            "需要用户介入: Intake（启动选择、完整配置一次确认）",
+            "需要用户介入: 启动确认（完整配置一次确认）",
             "完整启动配置:",
             "- 工号: %s" % (config.worker or "未配置"),
             "- 单号: %s" % state.ticket,
             "- 单号类型: %s" % (config.ticket_type or "未配置"),
             "- 需求来源: %s" % (config.requirement_source or "未配置"),
-            "- 交付路径: %s" % state.path.value,
-            "- 提交节奏: %s" % state.commit_pace.value,
+            "- 交付路径: %s" % path_label(state.path),
+            "- 提交节奏: %s" % _PACE_LABELS.get(
+                state.commit_pace.value, state.commit_pace.value),
             "- 基线分支: %s" % (config.base_branch or "未配置"),
             "- 工作分支: %s" % (config.working_branch or "未配置"),
             "- Build: %s" % (config.build_method or "未配置"),
@@ -276,10 +374,10 @@ def render_user_card(state):
         return ""
     if state.phase == Phase.SPEC:
         return "" if moonlight else (
-            "需要用户介入: Spec（可观察行为和范围）")
+            "需要用户介入: 需求澄清（可观察行为和范围）")
     if state.phase == Phase.STORY:
         return "" if moonlight else (
-            "需要用户介入: Design（Story 实现边界、设计和可测性）")
+            "需要用户介入: 详细设计（实现边界、方案和可测性）")
     if (
             state.phase == Phase.CONSTRUCTION
             and decisions.get("construction.cp.%s.ready" % (
@@ -292,11 +390,11 @@ def render_user_card(state):
         current = checkpoint_context(state, checkpoint)
         following = next_checkpoint_context(state, checkpoint)
         lines = [
-            "需要用户介入: CP（本批实际结果与下一批设计）",
+            "需要用户介入: 开发批次（本批结果与下一批设计）",
             "- 当前 CP: %s" % checkpoint,
             "- 原简报: %s" % (current.brief or "未记录"),
             "- 实际结果: %s" % (current.result or "未记录"),
-            "- Reviewer: %s" % (current.review or "未记录"),
+            "- 代码检视: %s" % (current.review or "未记录"),
             "- 累计 UT 增量: %s" % (current.ut_intent or "未记录"),
         ]
         plan_prefix = "delivery.cp.%s." % checkpoint

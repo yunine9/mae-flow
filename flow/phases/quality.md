@@ -1,35 +1,30 @@
-## Objective
-Assess the complete constructed change with the selected expensive quality capabilities.
+## 目标
 
-## Inspect
-Read the final local Spec and Story when present, ordered cumulative CP UT
-intents, full diff, selected capabilities, the last CP Build outcome, confirmed
-UT routes, prior
-attempts, environment revision, and unresolved risks.
-For selected capabilities, call `codecheck-advisor-agent` and
-`ut-generator-agent` by these exact names, each at most once for the current
-slot. Do not repeat Build when the last CP Build still covers the final source.
-If later repair changes source after that Build, show the user the stale fact
-and let the user choose whether to invoke the configured Build route once more.
+用已选择的质量能力检查完整实现，并形成可交付结论。
 
-## Stop for the user
-Stop for a reviewer tradeoff, an irreversible risk, or when any capability
-retry needs a current user decision. Changed source or environment does not
-authorize retrying the same semantic slot. A first call in a genuinely
-new CP or phase slot is ordinary planned work and needs no retry confirmation.
+## 当前要做
 
-## Outputs
-Attempt each selected expensive capability at most once for its current slot.
-Give `ut-generator-agent` the final Spec, final Story, final diff, and ordered
-cumulative CP UT intents in one action. After each actual synchronous call,
-record exactly one lightweight capability fact with `python
-".mae-flow-work/bin/mae-flow.py" advance capability-<outcome> --key <kind>
---decision "<opaque summary>"`. Do not parse private output or rerun
-a capability merely because recording failed. Record remaining risks and
-delivery readiness. Before Delivery, record one short final Spec/Story/scope ↔
-code/coverage conformance conclusion. If Construction recorded semantic
-cross-CP coupling, call `craft-reviewer-agent` once with the integration-review
-role and record one natural-language conclusion; otherwise do not add this pass.
+读取最终 Spec、Story、累计开发批次 UT 意图、完整 diff、已选能力、最后一次构建结果、
+UT 路由、已有能力调用和风险。按配置分别调用 `codecheck-advisor-agent` 和
+`ut-generator-agent`，当前语义位置每项最多一次。
 
-## Next
-Proceed to Delivery after quality is complete. The next meaningful action is the next selected capability not yet attempted.
+如果最后一次批次构建仍覆盖最终源码，不重复构建；若后续修复使它失效，向用户说明
+事实，由用户决定是否再调用一次已配置构建方式。
+
+每次能力同步返回后，立即用完整命令记录一次 `capability-<outcome>` 事实。不得解析
+私有输出，不得因记录失败而重跑能力。正式 UT 一次接收最终 Spec、Story、diff 和
+按顺序累计的 UT 意图。
+
+## 何时询问用户
+
+只有检视取舍、不可逆风险或同一能力需要重试时询问用户。新的阶段或开发批次首次
+调用不是重试，不需要重复授权。
+
+## 本阶段产出
+
+记录能力调用事实、剩余风险、交付就绪状态，以及一条 Spec/Story/范围与代码、覆盖
+的一致性结论。只有编码阶段记录了跨批次语义耦合时，才追加一次集成边界检视。
+
+## 下一步
+
+质量完成后进入交付确认。

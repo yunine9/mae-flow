@@ -1,27 +1,26 @@
-## Objective
-Deliver only the reviewed change through the destination chosen by the user.
+## 目标
 
-## Inspect
-Read the final diff, quality outcomes, unresolved risks, initial dirty files,
-selected behavior domains, conditional-document choices, and exact delivery
-file manifest. Read the final conformance conclusion and the conditional
-integration conclusion when one was required.
+只交付已检视并由用户确认的精确文件。
 
-## Stop for the user
-Reconcile each selected domain exactly once as `new`, `updated`, or `unchanged`.
-Stop for a baseline contradiction, changed manifest, irreversible action,
-unresolved delivery risk, or final delivery confirmation. Faithful
-reconciliation adds no separate user stop.
+## 当前要做
 
-## Outputs
-Show every domain action and exact file. Add changed behavior documents and a
-new domain's `index.md` entry to the exact manifest; never scan or stage unrelated
-domains. Domain truth lives at `docs/specs/<domain>.md`. Spec and Story durable
-copies live under `docs/specs/requirements/<ticket>/` and enter the exact
-manifest only after the user explicitly
-selects their durable copies. Record the reviewed manifest, confirmed
-`[ticket][type]description`, destination decision, delivery result, and any
-remaining follow-up.
+读取最终 diff、质量结果、剩余风险、启动前已有改动、相关业务领域、条件文档、精确
+交付清单和最终一致性结论。
 
-## Next
-Complete or exit the flow. The next meaningful action is to confirm the reviewed delivery.
+每个相关业务领域只对账一次：新增、更新或不变。行为真相位于
+`docs/specs/<domain>.md`；只有发生变化的领域文档进入精确清单。Spec 和 Story 的
+长期副本只有用户明确选择后，才进入 `docs/specs/requirements/<ticket>/` 和清单。
+
+## 何时询问用户
+
+行为基线矛盾、交付清单变化、不可逆操作、未解决风险或最终交付确认时询问用户。
+正常的领域对账不增加停点。
+
+## 本阶段产出
+
+展示领域处理、精确文件、启动前改动归属、质量观察、提交说明和目标分支。记录用户
+确认的 `[单号][类型]描述`、交付目标、执行结果和遗留事项。
+
+## 下一步
+
+按确认结果完成提交与推送，或退出流程。

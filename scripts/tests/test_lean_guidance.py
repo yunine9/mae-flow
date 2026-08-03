@@ -68,7 +68,7 @@ class LeanGuidanceTests(unittest.TestCase):
         text = render_guidance(state)
 
         for expected in (
-                "Confirmed startup configuration", "zhangsan", "fix",
+                "已确认的启动配置", "zhangsan", "fix",
                 "requirements/query.md", "main_zhangsan_REQ-42",
                 "build-fix", "ut-generator-agent", "ctest --test-dir build"):
             self.assertIn(expected, text)
@@ -80,27 +80,27 @@ class LeanGuidanceTests(unittest.TestCase):
         delivery = render_guidance(state_for(Phase.DELIVERY))
 
         self.assertIn("docs/specs/index.md", startup)
-        self.assertIn("business capability", startup)
-        self.assertIn("selected behavior baseline", spec)
+        self.assertIn("业务领域", startup)
+        self.assertIn("相关行为基线", spec)
         self.assertIn(".mae-flow-work", spec)
-        self.assertIn("standalone", story)
-        for action in ("new", "updated", "unchanged"):
+        self.assertIn("独立交给开发和测试", story)
+        for action in ("新增", "更新", "不变"):
             self.assertIn(action, delivery)
-        self.assertIn("exact manifest", delivery)
+        self.assertIn("精确清单", delivery)
 
     def test_each_phase_renders_outcome_focused_recovery_guidance(self):
         for phase in Phase:
             with self.subTest(phase=phase):
                 text = render_guidance(state_for(phase))
-                self.assertIn("Ticket: REQ-42", text)
-                self.assertIn("Path: full", text)
-                self.assertIn("Phase: %s" % phase.value, text)
-                self.assertIn("CP: CP2", text)
-                self.assertIn("Objective", text)
-                self.assertIn("Inspect", text)
-                self.assertIn("Stop for the user", text)
-                self.assertIn("Outputs", text)
-                self.assertIn("Next", text)
+                self.assertIn("工单: REQ-42", text)
+                self.assertIn("交付路径: 完整流程（Full）", text)
+                self.assertIn("当前阶段:", text)
+                self.assertIn("当前开发批次: CP2", text)
+                self.assertIn("## 目标", text)
+                self.assertIn("## 当前要做", text)
+                self.assertIn("## 何时询问用户", text)
+                self.assertIn("## 本阶段产出", text)
+                self.assertIn("## 下一步", text)
                 self.assertIn("docs/requests/REQ-42.md", text)
                 self.assertIn("database migration remains unresolved", text)
 
@@ -127,26 +127,26 @@ class LeanGuidanceTests(unittest.TestCase):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
         quality = render_guidance(state_for(Phase.QUALITY))
         self.assertIn("WHAT", spec)
-        self.assertIn("HOW", story)
-        self.assertIn("cumulative UT handoff", construction)
-        self.assertIn("at most once", quality)
-        self.assertIn("current user decision", quality)
-        self.assertIn("same semantic slot", quality)
-        self.assertIn("new CP or phase slot", quality)
+        self.assertIn("实现边界", story)
+        self.assertIn("累计 UT 交接", construction)
+        self.assertIn("最多一次", quality)
+        self.assertIn("用户决定", quality)
+        self.assertIn("当前语义位置", quality)
+        self.assertIn("新的阶段或开发批次", quality)
 
     def test_empty_artifacts_render_as_none(self):
         text = render_guidance(FlowState.new(
             "REQ-EMPTY", DeliveryPath.FULL, CommitPace.CONTINUOUS))
-        self.assertIn("Artifacts: none", text)
+        self.assertIn("流程产物: 无", text)
 
     def test_spec_and_story_render_one_shot_review_policy(self):
         spec = render_guidance(state_for(Phase.SPEC))
         story = render_guidance(state_for(Phase.STORY))
-        for guidance in (spec, story):
-            self.assertIn("exactly once", guidance)
-            self.assertIn("without a user stop", guidance)
-            self.assertIn("without automatic retry", guidance)
-            self.assertIn("real reviewer tradeoff", guidance)
+        self.assertIn("调用一次 `grill-critic-agent`", spec)
+        self.assertIn("CLEAR 不增加", spec)
+        self.assertIn("调用一次 `story-generator-agent`", story)
+        self.assertIn("失败只记录，不自动重试", story)
+        self.assertIn("真实设计取舍", story)
 
     def test_recovery_guidance_names_exact_phase_capabilities(self):
         expected = {
@@ -163,10 +163,10 @@ class LeanGuidanceTests(unittest.TestCase):
 
     def test_construction_plans_testability_without_running_formal_ut(self):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
-        self.assertIn("testability seams early", construction)
-        self.assertIn("cumulative UT handoff", construction)
-        self.assertIn("does not write or run formal UT", construction)
-        self.assertIn("configured Build", construction)
+        self.assertIn("可测性边界", construction)
+        self.assertIn("累计 UT 交接", construction)
+        self.assertIn("不正式编写或运行 UT", construction)
+        self.assertIn("已配置的 `build-fix`", construction)
         self.assertNotIn("tests leading each behavior change", construction)
 
     def test_focused_recovery_from_full_only_phases_never_demands_full_reviews(self):
@@ -179,11 +179,11 @@ class LeanGuidanceTests(unittest.TestCase):
                     commit_pace=CommitPace.CONTINUOUS,
                 )
                 text = render_guidance(state)
-                self.assertIn("Focused 恢复路径", text)
-                self.assertIn("Construction", text)
+                self.assertIn("聚焦流程恢复说明", text)
+                self.assertIn("编码实现", text)
                 self.assertIn("upgrade-to-full", text)
                 self.assertNotIn("exactly once", text)
-                self.assertNotIn("approval of", text)
+                self.assertNotIn("完整 Story", text)
 
 
 class LeanHarnessTests(unittest.TestCase):
@@ -215,7 +215,7 @@ class LeanHarnessTests(unittest.TestCase):
             self.assertEqual(0, decided.returncode, decided.stderr)
             self.assertEqual(0, current.returncode, current.stderr)
             self.assertEqual(0, exited.returncode, exited.stderr)
-            self.assertIn("Phase: construction", current.stdout)
+            self.assertIn("当前阶段: 编码实现（Construction）", current.stdout)
             with open(path, encoding="utf-8") as stream:
                 persisted = json.load(stream)
             self.assertEqual("exited", persisted["status"])

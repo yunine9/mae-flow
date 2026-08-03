@@ -19,7 +19,7 @@ from ..guard.command_policy import recursive_delete_facts
 from ..guard.chain_safety import decide_chain_pretool
 from ..guard.safety_kernel import (
     SafetyContext, decide_pretool, decide_stateless_pretool)
-from ..orchestration import ChainState, FlowState, flow_retry_options
+from ..orchestration import ChainState, FlowState, flow_retry_options, guidance as ui_guidance
 from ..state_store import (
     ProjectStateLock,
     _replace_with_retry,
@@ -135,7 +135,7 @@ def _brief_list(values, maximum, render):
     omitted = len(values) - len(rendered)
     if omitted:
         rendered.append("另有 %s 项" % omitted)
-    return "；".join(rendered) or "none"
+    return "；".join(rendered) or "无"
 
 
 class LeanHookAdapter:
@@ -225,7 +225,8 @@ class LeanHookAdapter:
             state.artifacts,
             2,
             lambda item: "%s=%s" % (
-                _clip(item[0], 24), _clip(item[1], 100)),
+                ui_guidance.artifact_label(_clip(item[0], 24)),
+                _clip(item[1], 100)),
         )
         risks = _brief_list(
             state.risks, 2, lambda risk: _clip(risk, 100))
@@ -233,43 +234,43 @@ class LeanHookAdapter:
             _clip(value, 240)
             for key, value in reversed(state.decisions)
             if key == "request.summary"
-        ), "none")
+        ), "无")
         core_lines = [
-            "[mae-flow] Recovery context",
-            "Ticket: %s" % _clip(state.ticket, 100),
-            "Request: %s" % request,
-            "Mode: %s" % state.path.value,
-            "Phase: %s" % state.phase.value,
-            "CP: %s" % (_clip(state.current_cp, 100) or "none"),
+            "[mae-flow] 流程恢复信息",
+            "工单: %s" % _clip(state.ticket, 100),
+            "需求: %s" % request,
+            "交付路径: %s" % ui_guidance.path_label(state.path),
+            "当前阶段: %s" % ui_guidance.phase_label(state.phase),
+            "当前开发批次: %s" % (_clip(state.current_cp, 100) or "无"),
         ]
         lines = core_lines + [
-            "Artifacts: %s" % artifacts,
-            "Unresolved risks: %s" % risks,
+            "流程产物: %s" % artifacts,
+            "未解决风险: %s" % risks,
         ]
         if state.capabilities:
             fact = state.capabilities[-1]
             try:
                 retry = flow_retry_options(state, fact.kind)
             except (TypeError, ValueError):
-                retry_label = "unknown-do-not-retry"
+                retry_label = "状态未知，不要自动重试"
             else:
                 retry_label = (
-                    "authorized-once-unconsumed"
+                    "已授权一次，尚未消费"
                     if retry.allowed
-                    else "needs-current-user-decision"
+                    else "再次调用前需要当前用户决定"
                 )
             lines.append(
-                "Last capability: %s | source=%s | environment=%s | "
-                "outcome=%s | summary=%s | retry=%s" % (
+                "最近能力调用: %s | 源版本=%s | 环境版本=%s | "
+                "结果=%s | 摘要=%s | 重试=%s" % (
                     _clip(fact.kind, 30),
                     _clip(fact.source_revision, 50),
                     _clip(fact.environment_revision, 50),
-                    _clip(fact.outcome, 50),
+                    ui_guidance.outcome_label(_clip(fact.outcome, 50)),
                     _clip(fact.summary, 130),
                     retry_label,
                 ))
         else:
-            lines.append("Last capability: none")
+            lines.append("最近能力调用: 无")
         summary = "\n".join(lines) + "\n"
         if len(summary) > SUMMARY_BUDGET:
             summary = "\n".join(core_lines + lines[-1:]) + "\n"
@@ -422,17 +423,16 @@ class LeanHookAdapter:
             return HookResponse()
         if runtime.mode == "direct":
             return HookResponse(stdout=(
-                "[mae-flow] Workflow exited; ordinary development is active.\n"))
+                "[mae-flow] 流程已退出，当前为普通开发模式。\n"))
         if runtime.mode == "corrupt":
             owner = getattr(runtime, "owner", "flow")
             return HookResponse(stdout=(
-                "[mae-flow] %s state is corrupt; safety gates fail open. "
-                "Run current before recovery.\n"
-                % ("Chain" if owner == "chain" else "Workflow")))
+                "[mae-flow] %s状态损坏，安全门禁已放行；恢复前先执行 current。\n"
+                % ("跨仓流程" if owner == "chain" else "流程")))
         if state is not None and state.status in {"complete", "exited"}:
             return HookResponse(stdout=(
-                "[mae-flow] Workflow %s for ticket %s; no active gates.\n"
-                % (state.status, state.ticket)))
+                "[mae-flow] 工单 %s 的流程%s，当前没有活动门禁。\n"
+                % (state.ticket, ui_guidance.status_label(state.status))))
         return HookResponse()
 
     def _release_takeover(self, reason=""):

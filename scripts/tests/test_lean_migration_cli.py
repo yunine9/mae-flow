@@ -333,7 +333,7 @@ class LeanMigrationCliTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(raw, self.read_state_bytes())
         self.assertEqual([], self.backups())
-        self.assertIn("阶段: startup", result.stdout)
+        self.assertIn("阶段: 启动确认（Intake）", result.stdout)
 
     def test_corrupt_json_is_backed_up_and_never_overwritten(self):
         original = b'{"schema_version": 2, "current": "build", broken'

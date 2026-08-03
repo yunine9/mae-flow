@@ -1,81 +1,54 @@
-## Objective
-Define WHAT observable outcome is required and what is out of scope. Full Spec
-must establish shared understanding through Interactive Grill before producing
-the candidate Spec.
+## 目标
 
-## Interactive Grill
-Read the exact project-local copies printed by `current`:
-`.mae-flow-work/plugin-resources/guidance/grill.md` and
-`.mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md`. Never search
-the business repository for plugin `runtime/`, `skills/`, or `flow/` paths, and
-never load retired legacy step resources as production instructions. Survey
-the request, selected behavior baseline, current behavior, constraints, and
-directly relevant code facts. Use the exact safe directory shown beside the
-current `grill.md` artifact; write `survey.md` and `grill-prep.md` beside it,
-never by interpolating the raw ticket. Every dimension in the preparation must
-contain either candidate questions with evidence/recommendation/impact or a
-specific code/document reason why it is not applicable. Placeholders block both
-questioning and convergence. There is no two-question shortcut or default
-question limit; after 15 questions report the scale and let the user decide.
+通过交互式质询（Interactive Grill）确认“系统必须表现成什么样”，包括可观察行为、
+边界、失败语义、兼容性和非目标；本阶段不决定具体实现方式。
 
-Existing Grill or Spec drafts are historical clues only. A decision is current
-only when the current flow state contains its matching question and answer
-receipt. Never infer this run's confirmation from leftover files.
+## 当前要做：完整质询
 
-Open one stable `GQ-*` question at a time with evidence, impact, and a recommended
-answer. Before asking, record it with `python ".mae-flow-work/bin/mae-flow.py"
-advance grill-question --key
-<GQ-ID> --parent <ROOT|answered-GQ-ID> --evidence "<fact>" --impact "<effect>"
---recommendation "<answer and reason>"`; bind the user's natural-language answer
-with `python ".mae-flow-work/bin/mae-flow.py" decision grill-answer --key <GQ-ID>
-"<semantic answer>"`. If the
-host delivered the answer before registration, add the same four metadata flags
-to that decision command so registration and answer consumption are atomic.
-Inspect each answer for vague
-terms, contradictions, new states, and derived requirement branches before
-opening the next question. Ask only for decisions; verify discoverable facts.
+读取 `current` 输出的精确本地资源：
 
-Write the evidence, question tree, answers, derived branches, confirmed WHAT,
-boundaries, compatibility, failure behavior, and non-goals to the ticket's local
-`grill.md`. It must preserve all eight preparation conclusions and derived EARS
-behaviors. When every candidate and derived branch is closed, run
-`python ".mae-flow-work/bin/mae-flow.py" advance grill-converged`; the CLI validates preparation and binds the
-current file digest.
+- `.mae-flow-work/plugin-resources/guidance/grill.md`
+- `.mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md`
 
-## Candidate Spec
-Generate `spec.md` only after convergence. The request, selected behavior
-baseline, and `grill.md` are required key inputs. Include a Grill traceability
-table mapping every confirmed `GQ-*` decision to a Spec section or observable
-acceptance criterion. Keep HOW in Story.
+禁止在业务仓搜索插件的 `runtime/`、`skills/` 或 `flow/`。调查需求、相关行为基线、
+当前代码与约束，在 `current` 给出的安全目录写 `survey.md` 和 `grill-prep.md`。
+八个维度都必须有带证据的候选问题或明确的不适用依据；有占位内容时不能开始或
+结束质询。问题数量由真实缺口决定，超过 15 题时告知用户并由用户决定是否继续。
 
-## Read-only critic
-Run `grill-critic-agent` exactly once for the current Grill/Spec content
-revision. It
-reads both files and verifies complete input coverage, unchanged decision
-meaning, observable acceptance, unique terminology, and no WHAT/HOW mixing. It
-never edits files, asks the user, or makes a product decision. A real unresolved
-branch returns to Interactive Grill. A material correction creates a new content
-revision and permits one new critic pass; continue without automatic retry.
+旧 Grill 或 Spec 只能作为历史线索。只有当前状态中有对应问题与回答收据的决定，
+才属于本轮确认结果。
 
-After a clear return, record the capability fact and run the complete
-`python ".mae-flow-work/bin/mae-flow.py" advance grill-clear` command.
-The CLI binds both current file digests. Any later change invalidates the critic
-receipt and must be reviewed again.
+每次只问一个 `GQ-*` 问题。提问前先执行：
 
-## Stop for the user
-Stop for each Interactive Grill decision, genuine product ambiguity, a real reviewer tradeoff,
-and final approval of the reviewed observable scope. A clear critic result
-continues without a user stop. Ask one
-question at a time and accept natural-language changes; never expose internal
-CLI commands as user work.
+`python ".mae-flow-work/bin/mae-flow.py" advance grill-question --key <GQ-ID> --parent <ROOT|已回答GQ-ID> --evidence "<证据>" --impact "<影响>" --recommendation "<推荐及理由>"`
 
-## Outputs
-Keep `grill.md` and the confirmed `spec.md` under the ticket's local
-`.mae-flow-work` directory. Only copy the Spec to
-`docs/specs/requirements/<ticket>/spec.md` when the user explicitly selects that
-exact durable document. Put `<!-- generated-by: mae-flow -->` at the start of
-generated Markdown as provenance only; never validate it in a Hook or parser.
+用户回答后执行完整 `decision grill-answer` 命令。若答案先于问题登记到达，在该
+decision 命令上附同一组元数据，原子补登记并消费答案。每个回答都要检查模糊词、
+矛盾、新状态和衍生分支。
 
-## Next
-After `spec-confirmed` verifies the unchanged Grill and Spec receipts, proceed to
-Design (stable recovery value `story`).
+全部问题关闭后，将证据、问题树、回答、边界、兼容性、失败行为和非目标写入精确
+`grill.md`，再执行 `advance grill-converged`。
+
+## 生成候选 Spec
+
+收敛后才生成 `spec.md`。需求、相关行为基线和 `grill.md` 都是关键输入；Spec 必须
+包含“Grill 决策追溯”，把每个 `GQ-*` 映射到章节或可观察验收标准。实现方式留给
+详细设计阶段。
+
+随后为当前 Grill/Spec 内容调用一次 `grill-critic-agent`。它只读检查输入覆盖、
+决定是否被弱化、术语一致性、可验收性和 WHAT/HOW 混杂；不编辑文件、不替用户
+决定。CLEAR 后记录能力事实并执行 `advance grill-clear`。文件变化后必须重新检查。
+
+## 何时询问用户
+
+逐题询问真实产品决定；最终请用户确认完整的可观察范围。普通 Critic CLEAR 不增加
+用户停点。
+
+## 本阶段产出
+
+本地 `grill.md` 和已确认 `spec.md`。只有用户明确要求时，才复制 Spec 到
+`docs/specs/requirements/<ticket>/spec.md`。
+
+## 下一步
+
+确认收据未变化后进入详细设计。

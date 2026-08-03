@@ -74,7 +74,10 @@ def _runtime_status(runtime):
     flow = _field(runtime, "flow")
     if mode == "flow":
         return "" if flow in (_MISSING, None) else _flow_status(flow)
-    if flow not in (_MISSING, None):
+    chain = _field(runtime, "chain")
+    if mode == "chain":
+        return "" if chain in (_MISSING, None) else _flow_status(chain)
+    if flow not in (_MISSING, None) or chain not in (_MISSING, None):
         return ""
     if mode in ("inactive", "direct"):
         return "inactive"

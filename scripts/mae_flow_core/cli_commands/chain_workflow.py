@@ -24,6 +24,7 @@ from mae_flow_core.state_store import (
     remove_with_retry,
     safe_read_json,
 )
+from .user_events import bind_user_event, matching_user_event
 
 
 POINTER_RELATIVE = ".mae-flow-work/chain-current.json"
@@ -94,9 +95,14 @@ def _read_state(root):
     if raw is None:
         raise ValueError("Chain 状态缺失；拒绝扫描猜测恢复路径")
     state = decode_chain_state(raw)
-    if os.path.abspath(state.anchor_root) != os.path.abspath(root):
+    if os.path.realpath(state.anchor_root) != os.path.realpath(root):
         raise ValueError("Chain 状态不属于当前锚点仓库")
     return path, state
+
+
+def load_active_chain(root):
+    """Resolve the single exact Chain pointer for Hook recovery."""
+    return _read_state(root)
 
 
 def _active_flow(root):
@@ -129,7 +135,7 @@ def _render(state, reason):
 def _mutate_with(root, operation):
     with ProjectStateLock(root):
         path, state = _read_state(root)
-        result = operation(state)
+        result = operation(state, path)
         if result.state == state:
             raise ValueError(result.reason)
         atomic_write_json(path, encode_chain_state(result.state))
@@ -137,7 +143,21 @@ def _mutate_with(root, operation):
 
 
 def _mutate(root, request):
-    return _mutate_with(root, lambda state: advance_chain(state, request))
+    return _mutate_with(
+        root, lambda state, unused_path: advance_chain(state, request))
+
+
+def _mutate_user(root, request, semantic_event):
+    def operation(state, path):
+        event_id = matching_user_event(root, state, state_path=path)
+        result = advance_chain(state, request)
+        if result.state == state:
+            return result
+        return replace(
+            result,
+            state=bind_user_event(result.state, event_id, semantic_event),
+        )
+    return _mutate_with(root, operation)
 
 
 def _start(root, args):
@@ -225,7 +245,7 @@ def _citation_facts(root, state):
 
 
 def _verify(root):
-    def operation(state):
+    def operation(state, unused_path):
         count, digest = _citation_facts(root, state)
         return advance_chain(state, ChainRequest(
             "citations-verified",
@@ -254,7 +274,7 @@ def _latest_value(state, kind):
 
 
 def _confirm(root, text):
-    def operation(state):
+    def operation(state, path):
         count, digest = _citation_facts(root, state)
         if _latest_value(state, "citations-verified") != {
                 "count": count, "digest": digest}:
@@ -262,12 +282,19 @@ def _confirm(root, text):
         if _latest_value(state, "rendered").get(
                 "sha256") != _document_digest(root, state):
             raise ValueError("Chain 文档在摘要后发生变化；请重新执行 chain rendered")
-        return advance_chain(state, ChainRequest("confirmed", value=text))
+        event_id = matching_user_event(root, state, state_path=path)
+        result = advance_chain(state, ChainRequest("confirmed", value=text))
+        if result.state == state:
+            return result
+        return replace(
+            result,
+            state=bind_user_event(result.state, event_id, "chain-confirmed"),
+        )
     return _mutate_with(root, operation)
 
 
 def _rendered(root):
-    def operation(state):
+    def operation(state, unused_path):
         return advance_chain(state, ChainRequest(
             "rendered", value=json.dumps({
                 "sha256": _document_digest(root, state),
@@ -312,8 +339,9 @@ def cmd_lean_chain(root, args):
             state, reason = _mutate(
                 root, ChainRequest("question", args.key, args.value))
         elif action == "answer":
-            state, reason = _mutate(
-                root, ChainRequest("answer", args.key, args.text))
+            state, reason = _mutate_user(
+                root, ChainRequest("answer", args.key, args.text),
+                "chain-answer")
         elif action == "verify":
             state, reason = _verify(root)
         elif action == "rendered":

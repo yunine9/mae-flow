@@ -12,6 +12,11 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CLI = os.path.join(ROOT, "scripts", "mae-flow.py")
+SCRIPTS = os.path.join(ROOT, "scripts")
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+from mae_flow_core.adapters.lean_hook import LeanHookAdapter  # noqa: E402
 
 
 class LeanChainCliTests(unittest.TestCase):
@@ -64,6 +69,19 @@ class LeanChainCliTests(unittest.TestCase):
             "--request", "梳理两个仓库的接口变更",
             "--requirement", "requirements/chain.md",
         )
+
+    def submit_user_prompt(self, text):
+        result = LeanHookAdapter(self.root).handle(
+            "UserPromptSubmit", {"prompt": text, "session_id": "chain-cli"})
+        self.assertEqual(0, result.exit_code, result.stderr)
+        with open(os.path.join(
+                self.root, ".mae-flow-work", "lean-hook-user-events.json"),
+                encoding="utf-8") as stream:
+            captured = json.load(stream)[-1]
+        self.assertEqual(text, captured["payload"]["prompt"])
+        with open(self.state_path(), "rb") as stream:
+            expected = __import__("hashlib").sha256(stream.read()).hexdigest()
+        self.assertEqual(expected, captured["state_sha256"])
 
     def record(self, kind, key, value):
         return self.run_cli(
@@ -127,6 +145,7 @@ class LeanChainCliTests(unittest.TestCase):
         )
         wrong = self.run_cli(
             "chain", "answer", "--key", "CQ-999", "不是这个问题")
+        self.submit_user_prompt("采用统一错误枚举")
         answered = self.run_cli(
             "chain", "answer", "--key", "CQ-001", "采用统一错误枚举")
 
@@ -191,6 +210,7 @@ class LeanChainCliTests(unittest.TestCase):
         with open(absolute_document, "w", encoding="utf-8") as stream:
             stream.write("# Chain\n\nComplete launch cards.\n")
         rendered = self.run_cli("chain", "rendered")
+        self.submit_user_prompt("确认触点完整且错误语义准确")
         confirmed = self.run_cli(
             "chain", "confirm", "确认触点完整且错误语义准确")
         exited = self.run_cli("chain", "exit", "--reason", "handoff complete")
@@ -202,6 +222,57 @@ class LeanChainCliTests(unittest.TestCase):
         archive = os.path.join(
             self.root, ".mae-flow-work", "chain-exited")
         self.assertEqual(1, len(os.listdir(archive)))
+
+    def test_answer_requires_one_current_unconsumed_user_input(self):
+        self.assert_success(self.start())
+        question = json.dumps({
+            "evidence": "e", "impact": "i", "recommendation": "r",
+            "parent": "",
+        })
+        self.assert_success(self.run_cli(
+            "chain", "question", "--key", "CQ-001", "--value", question))
+
+        fabricated = self.run_cli(
+            "chain", "answer", "--key", "CQ-001", "伪造回答")
+        self.submit_user_prompt("真实回答")
+        accepted = self.run_cli(
+            "chain", "answer", "--key", "CQ-001", "真实回答")
+        self.assert_success(self.run_cli(
+            "chain", "question", "--key", "CQ-002", "--value",
+            json.dumps({
+                "evidence": "e2", "impact": "i2", "recommendation": "r2",
+                "parent": "CQ-001",
+            })))
+        reused = self.run_cli(
+            "chain", "answer", "--key", "CQ-002", "复用旧回答")
+
+        self.assertEqual(2, fabricated.returncode)
+        self.assert_success(accepted)
+        self.assertEqual(2, reused.returncode)
+        consumed = [
+            item for item in self.state()["decisions"]
+            if item["key"] == "user.event.consumed"
+        ]
+        self.assertEqual(1, len(consumed))
+
+    def test_answer_rejects_user_input_bound_to_an_older_chain_state(self):
+        self.assert_success(self.start())
+        self.assert_success(self.run_cli(
+            "chain", "question", "--key", "CQ-001", "--value",
+            json.dumps({
+                "evidence": "e", "impact": "i", "recommendation": "r",
+                "parent": "",
+            })))
+        self.submit_user_prompt("这个输入将变旧")
+        self.assert_success(self.record("repository", "anchor", {
+            "path": ".", "language_build": "Python",
+            "responsibility": "anchor",
+        }))
+
+        stale = self.run_cli(
+            "chain", "answer", "--key", "CQ-001", "这个输入将变旧")
+        self.assertEqual(2, stale.returncode)
+        self.assertIn("用户输入", stale.stderr)
 
 
 if __name__ == "__main__":

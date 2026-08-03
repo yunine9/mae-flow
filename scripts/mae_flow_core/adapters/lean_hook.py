@@ -11,22 +11,15 @@ import tempfile
 import time
 from types import SimpleNamespace
 
-from ..application.hooks.lean_events import (
-    LeanHookPorts,
-    handle_lean_hook_event,
-)
+from ..application.hooks.lean_events import LeanHookPorts, handle_lean_hook_event
 from ..application.hooks.capability_observation import (
-    complete_git_posttool,
-    reserve_git_pretool,
-)
+    complete_git_posttool, reserve_git_pretool)
 from ..application.hooks.models import HookResponse
 from ..guard.command_policy import recursive_delete_facts
+from ..guard.chain_safety import decide_chain_pretool
 from ..guard.safety_kernel import (
-    SafetyContext,
-    decide_pretool,
-    decide_stateless_pretool,
-)
-from ..orchestration import FlowState, flow_retry_options
+    SafetyContext, decide_pretool, decide_stateless_pretool)
+from ..orchestration import ChainState, FlowState, flow_retry_options
 from ..state_store import (
     ProjectStateLock,
     _replace_with_retry,
@@ -35,6 +28,7 @@ from ..state_store import (
     update_json,
 )
 from .hook_tool_inputs import apply_patch_targets
+from .lean_chain_hook import load_chain_runtime, resume_chain
 from .lean_exit import (
     effective_exit_pointer,
     explicit_exit,
@@ -156,6 +150,7 @@ class LeanHookAdapter:
         self.pointer_path = os.path.join(self.root, ".mae-flow.json.exited")
         self.events_path = os.path.join(
             self.root, ".mae-flow-work", "lean-hook-user-events.json")
+        self._event_owner_state_path = self.state_path
         self.snapshot_dir = os.path.join(
             self.root, ".mae-flow-work", "exited")
         self.marker_root = marker_root or os.path.join(
@@ -185,6 +180,9 @@ class LeanHookAdapter:
             except (TypeError, ValueError):
                 return SimpleNamespace(mode="corrupt"), None
             return SimpleNamespace(mode="flow", flow=state), state
+        chain_runtime, chain = load_chain_runtime(self.root)
+        if chain_runtime is not None:
+            return chain_runtime, chain
         return SimpleNamespace(mode="inactive"), None
 
     def _claim_session_marker(self, root, identity):
@@ -280,7 +278,7 @@ class LeanHookAdapter:
     def _append_user_event(self, event, payload):
         captured_at_ns = self.clock_ns()
         try:
-            with open(self.state_path, "rb") as stream:
+            with open(self._event_owner_state_path, "rb") as stream:
                 state_sha256 = hashlib.sha256(stream.read()).hexdigest()
         except OSError:
             state_sha256 = ""
@@ -359,7 +357,10 @@ class LeanHookAdapter:
             tool_input = dict(tool_input)
             tool_input["recursive_delete_targets"] = delete_targets
         task_temp = self._fact_text(self.facts.task_owned_temp_dir, payload)
-        if state is None:
+        if isinstance(state, ChainState):
+            decision = decide_chain_pretool(
+                self.root, state, tool, tool_input)
+        elif state is None:
             decision = decide_stateless_pretool(
                 self.root, tool, tool_input, task_temp)
         else:
@@ -378,11 +379,13 @@ class LeanHookAdapter:
                     self.facts.current_branch, payload),
             )
             decision = decide_pretool(context, tool, tool_input)
-        if decision.allow:
+        if decision.allow and isinstance(state, FlowState):
             reservation = reserve_git_pretool(
                 payload, state, self._git_facts(payload), self._update_state)
             if reservation is not None:
                 return reservation
+            return HookResponse()
+        if decision.allow:
             return HookResponse()
         return HookResponse(exit_code=2, stderr=(
             "[mae-flow] %s\n" % (decision.message or decision.rule)))
@@ -397,7 +400,7 @@ class LeanHookAdapter:
             atomic_write_json(self.state_path, updated.to_dict())
             return updated
 
-    def _posttool(self, payload):
+    def _posttool(self, payload, mode="flow"):
         if payload.get("tool_name") == "AskUserQuestion":
             answer = _askuser_answer(payload.get("tool_response"))
             if answer:
@@ -405,6 +408,8 @@ class LeanHookAdapter:
                     "AskUserQuestion",
                     dict(payload, prompt=answer),
                 )
+            return HookResponse()
+        if mode != "flow":
             return HookResponse()
         git_result = complete_git_posttool(
             payload, self._git_facts(payload), self._update_state)
@@ -419,9 +424,11 @@ class LeanHookAdapter:
             return HookResponse(stdout=(
                 "[mae-flow] Workflow exited; ordinary development is active.\n"))
         if runtime.mode == "corrupt":
+            owner = getattr(runtime, "owner", "flow")
             return HookResponse(stdout=(
-                "[mae-flow] Workflow state is corrupt; safety gates fail "
-                "open. Run current before recovery.\n"))
+                "[mae-flow] %s state is corrupt; safety gates fail open. "
+                "Run current before recovery.\n"
+                % ("Chain" if owner == "chain" else "Workflow")))
         if state is not None and state.status in {"complete", "exited"}:
             return HookResponse(stdout=(
                 "[mae-flow] Workflow %s for ticket %s; no active gates.\n"
@@ -467,15 +474,24 @@ class LeanHookAdapter:
 
         try:
             runtime, state = self._runtime()
-            if _prompt_event(event) and runtime.mode in ("flow", "corrupt"):
+            self._event_owner_state_path = getattr(
+                runtime, "state_path", self.state_path)
+            if _prompt_event(event) and runtime.mode in (
+                    "flow", "chain", "corrupt"):
                 self._record_event(event, payload)
             if runtime.mode == "corrupt" and _session_event(event):
                 return self._inactive(runtime, "sessionstart", state)
             ports = LeanHookPorts(
-                resume=lambda value: self._resume(state, value),
+                resume=lambda value: (
+                    resume_chain(
+                        self.root, state, value, self.marker_root,
+                        self.local_marker_root, self._claim_session_marker)
+                    if runtime.mode == "chain"
+                    else self._resume(state, value)
+                ),
                 prompt=lambda unused_value: HookResponse(),
                 pretool=lambda value: self._pretool(state, value),
-                posttool=self._posttool,
+                posttool=lambda value: self._posttool(value, runtime.mode),
                 inactive=lambda routed_event, unused_payload: self._inactive(
                     runtime, routed_event, state),
             )

@@ -28,9 +28,10 @@ _KEYED_SEMANTIC_EVENTS = {
 }
 
 
-def _state_sha256(root):
+def _state_sha256(root, state_path=None):
+    path = state_path or os.path.join(root, ".mae-flow.json")
     try:
-        with open(os.path.join(root, ".mae-flow.json"), "rb") as stream:
+        with open(path, "rb") as stream:
             return hashlib.sha256(stream.read()).hexdigest()
     except OSError as exc:
         raise ValueError("无法绑定当前流程状态与用户事件") from exc
@@ -50,13 +51,13 @@ def _consumed_ids(state):
     return consumed
 
 
-def matching_user_event(root, state):
+def matching_user_event(root, state, state_path=None):
     rows, error = safe_read_json(os.path.join(root, _LEDGER))
     if error or not isinstance(rows, list):
         raise ValueError(
             "未捕获到本轮 CodeAgent 用户输入"
             "（UserPromptSubmit 或 AskUserQuestion 回答）")
-    state_sha = _state_sha256(root)
+    state_sha = _state_sha256(root, state_path=state_path)
     consumed = _consumed_ids(state)
     for row in reversed(rows):
         if not isinstance(row, dict):

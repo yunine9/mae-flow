@@ -36,6 +36,8 @@ from mae_flow_core.orchestration import (  # noqa: E402
     flow_attempt_context,
     record_flow_attempt,
     retry_decision_key,
+    ChainState,
+    encode_chain_state,
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
@@ -88,6 +90,77 @@ class LeanHookAdapterTests(unittest.TestCase):
         with open(self.state_path, "w", encoding="utf-8") as stream:
             json.dump(state.to_dict(), stream, ensure_ascii=False)
         return state
+
+    def write_chain_state(self):
+        work = os.path.join(self.root, ".mae-flow-work", "REQ-CHAIN")
+        os.makedirs(work, exist_ok=True)
+        state_path = os.path.join(work, "chain-state.json")
+        state = ChainState(
+            ticket="REQ-CHAIN", request="梳理跨仓接口",
+            requirement_source="requirements.md", anchor_root=self.root,
+            document_path=".mae-flow-work/REQ-CHAIN/chain.md",
+        )
+        with open(state_path, "w", encoding="utf-8") as stream:
+            json.dump(encode_chain_state(state), stream, ensure_ascii=False)
+        with open(os.path.join(
+                self.root, ".mae-flow-work", "chain-current.json"),
+                "w", encoding="utf-8") as stream:
+            json.dump({
+                "schema_version": 1,
+                "state": ".mae-flow-work/REQ-CHAIN/chain-state.json",
+            }, stream)
+        return state_path, state
+
+    def test_chain_session_resumes_without_flow_state(self):
+        self.write_chain_state()
+
+        response = LeanHookAdapter(
+            self.root, marker_root=self.marker_root).handle(
+                "SessionStart", {"session_id": "chain-session"})
+
+        self.assertEqual(0, response.exit_code, response.stderr)
+        self.assertIn("Chain recovery context", response.stdout)
+        self.assertIn("REQ-CHAIN", response.stdout)
+
+    def test_chain_askuser_answer_is_bound_to_chain_state_digest(self):
+        state_path, unused_state = self.write_chain_state()
+        response = LeanHookAdapter(self.root).handle(
+            "PostToolUse", {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {"questions": [{"question": "采用哪个契约？"}]},
+                "tool_response": "采用显式错误枚举",
+            })
+
+        self.assertEqual(0, response.exit_code, response.stderr)
+        with open(self.events_path, encoding="utf-8") as stream:
+            event = json.load(stream)[-1]
+        with open(state_path, "rb") as stream:
+            expected = __import__("hashlib").sha256(stream.read()).hexdigest()
+        self.assertEqual(expected, event["state_sha256"])
+        self.assertEqual("采用显式错误枚举", event["payload"]["prompt"])
+
+    def test_chain_pretool_routes_to_exact_document_safety(self):
+        unused_path, state = self.write_chain_state()
+        adapter = LeanHookAdapter(self.root)
+
+        document = adapter.handle("PreToolUse", {
+            "tool_name": "Write",
+            "tool_input": {"file_path": state.document_path},
+        })
+        source = adapter.handle("PreToolUse", {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/service.py"},
+        })
+        commit = adapter.handle("PreToolUse", {
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m update"},
+        })
+
+        self.assertEqual(0, document.exit_code, document.stderr)
+        self.assertEqual(2, source.exit_code)
+        self.assertIn("chain.md", source.stderr)
+        self.assertEqual(2, commit.exit_code)
+        self.assertIn("Git commit", commit.stderr)
 
     def receipt_state(self):
         state = FlowState(

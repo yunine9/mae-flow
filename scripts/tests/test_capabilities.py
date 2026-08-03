@@ -282,6 +282,8 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             for unused_label, command, unused_timeout, unused_limit
             in REFACTOR_SAFETY_SUITES
         }
+        self.assertIn(
+            "scripts/tests/test_capability_cli_contract.py", registered)
         raw_only_current = {
             "scripts/tests/test_capability_observation.py",
             "scripts/tests/test_codecheck_advisory.py",
@@ -301,7 +303,7 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             if filename.startswith("test_") and filename.endswith(".py")
         }
 
-        self.assertEqual(38, len(expected))
+        self.assertEqual(39, len(expected))
         self.assertEqual(expected, actual)
         self.assertTrue(os.path.isfile(os.path.join(
             ROOT, "scripts", "tests", "reference_specengine_diagnostic.py")))

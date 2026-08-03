@@ -28,6 +28,33 @@ _DESIGN_REVIEW_EVENTS = frozenset({
     "reviewer-clear", "reviewer-tradeoff-resolved",
     "design-review-failed", "reviewer-failed",
 })
+_FALLBACK_FIELDS = {
+    "grill": "local_grill",
+    "spec": "local_spec",
+    "story": "local_story",
+}
+
+
+def _artifact_path(root, state, kind):
+    """Resolve persisted local artifacts before deriving paths for old state."""
+    repository = os.path.abspath(root)
+    for artifact_kind, raw_path in state.artifacts:
+        if artifact_kind != kind:
+            continue
+        candidate = os.path.abspath(os.path.join(repository, raw_path))
+        try:
+            inside = os.path.commonpath((repository, candidate)) == repository
+        except ValueError:
+            inside = False
+        if not inside:
+            raise ValueError("流程产物路径越出仓库: %s" % raw_path)
+        return candidate
+    paths = DocumentPaths.for_ticket(root, state.ticket)
+    return getattr(paths, _FALLBACK_FIELDS[kind])
+
+
+def _local_work_root(root, state):
+    return os.path.dirname(_artifact_path(root, state, "grill"))
 
 
 def _file_sha256(path, label):
@@ -49,9 +76,9 @@ def _compact(value):
 
 def validate_grill_preparation(root, state):
     """Require the original eight-dimension Grill preparation before asking."""
-    paths = DocumentPaths.for_ticket(root, state.ticket)
-    survey = os.path.join(paths.local_root, "survey.md")
-    prep = os.path.join(paths.local_root, "grill-prep.md")
+    work_root = _local_work_root(root, state)
+    survey = os.path.join(work_root, "survey.md")
+    prep = os.path.join(work_root, "grill-prep.md")
     _file_sha256(survey, "survey.md")
     _file_sha256(prep, "grill-prep.md")
     with open(prep, encoding="utf-8") as stream:
@@ -68,9 +95,9 @@ def prepare_grill_request(root, state, request):
     kind = request.kind.strip().lower()
     if kind not in {"grill-converged", "grill-clear"}:
         return request
-    paths = DocumentPaths.for_ticket(root, state.ticket)
     status = grill_status(state)
-    grill_sha = _file_sha256(paths.local_grill, "grill.md")
+    grill_sha = _file_sha256(
+        _artifact_path(root, state, "grill"), "grill.md")
     if kind == "grill-converged":
         validate_grill_preparation(root, state)
         value = _compact({
@@ -81,7 +108,8 @@ def prepare_grill_request(root, state, request):
         value = _compact({
             "grill_sha256": grill_sha,
             "input_coverage": "complete",
-            "spec_sha256": _file_sha256(paths.local_spec, "spec.md"),
+            "spec_sha256": _file_sha256(
+                _artifact_path(root, state, "spec"), "spec.md"),
         })
     return AdvanceRequest(request.kind, request.decision_key, value)
 
@@ -92,10 +120,11 @@ def validate_spec_confirmation(root, state):
     critic = status.critic
     if not critic:
         return "Grill Critic 尚未形成可验证的覆盖结论。"
-    paths = DocumentPaths.for_ticket(root, state.ticket)
     try:
-        grill_sha = _file_sha256(paths.local_grill, "grill.md")
-        spec_sha = _file_sha256(paths.local_spec, "spec.md")
+        grill_sha = _file_sha256(
+            _artifact_path(root, state, "grill"), "grill.md")
+        spec_sha = _file_sha256(
+            _artifact_path(root, state, "spec"), "spec.md")
     except ValueError as exc:
         return str(exc)
     if grill_sha != critic.get("grill_sha256"):
@@ -139,8 +168,8 @@ def prepare_phase_request(root, state, request):
         return request
     if state.phase != Phase.STORY:
         return request
-    paths = DocumentPaths.for_ticket(root, state.ticket)
-    story_sha = _file_sha256(paths.local_story, "story.md")
+    story_sha = _file_sha256(
+        _artifact_path(root, state, "story"), "story.md")
     if kind == "story-confirmed":
         review = _latest_design_review(state)
         if review.get("story_sha256") != story_sha:

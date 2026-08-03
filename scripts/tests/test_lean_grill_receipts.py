@@ -15,6 +15,7 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.cli_commands.grill_receipts import (  # noqa: E402
+    prepare_phase_request,
     prepare_grill_request,
     validate_spec_confirmation,
 )
@@ -148,6 +149,70 @@ class LeanGrillReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "empty"):
             prepare_grill_request(
                 self.root, self.state, AdvanceRequest("grill-converged"))
+
+    def test_persisted_legacy_artifacts_remain_authoritative(self):
+        ticket = "REQ-LEGACY"
+        old_segment = ticket + "-" + hashlib.sha256(
+            ticket.encode("utf-8")).hexdigest()
+        old_root = os.path.join(self.root, ".mae-flow-work", old_segment)
+        os.makedirs(old_root)
+        relative_root = ".mae-flow-work/" + old_segment
+        artifacts = (
+            ("grill", relative_root + "/grill.md"),
+            ("spec", relative_root + "/spec.md"),
+            ("story", relative_root + "/story.md"),
+            ("ut-handoff", relative_root + "/ut-handoff.md"),
+        )
+        legacy = replace(self.state, ticket=ticket, artifacts=artifacts)
+        grill = os.path.join(old_root, "grill.md")
+        spec = os.path.join(old_root, "spec.md")
+        story = os.path.join(old_root, "story.md")
+        self.write(grill, "# Legacy Grill\n\nGQ-001 已确认。\n")
+        self.write(spec, "# Legacy Spec\n\nGQ-001 -> AC-001\n")
+        self.write(story, "# Legacy Story\n\nCP1 implements AC-001.\n")
+        self.write(os.path.join(old_root, "survey.md"), "# Survey\n\n事实。\n")
+        self.write(
+            os.path.join(old_root, "grill-prep.md"),
+            "# Grill preparation\n\n" + "\n\n".join(
+                section + "\n\n结论：已检查。"
+                for section in (
+                    "## 1 状态机完备性", "## 2 边界值", "## 3 并发时序",
+                    "## 4 失败路径与残留清理", "## 5 数据一致性",
+                    "## 6 存量升级兼容", "## 7 规格性能", "## 8 可观测",
+                    "## 9 结论汇总",
+                )) + "\n",
+        )
+
+        convergence = prepare_grill_request(
+            self.root, legacy, AdvanceRequest("grill-converged"))
+        self.assertEqual(
+            self.digest(grill),
+            json.loads(convergence.decision_value)["grill_sha256"],
+        )
+        converged = advance_flow(legacy, convergence).state
+        converged = replace(
+            converged,
+            capabilities=(CapabilityAttempt(
+                "grill", "grill:spec:-", "lean-workflow-v1", "returned"),),
+        )
+        critic = prepare_grill_request(
+            self.root, converged, AdvanceRequest("grill-clear"))
+        reviewed = advance_flow(converged, critic).state
+        self.assertEqual("", validate_spec_confirmation(self.root, reviewed))
+
+        story_state = replace(
+            reviewed,
+            phase=Phase.STORY,
+            capabilities=(CapabilityAttempt(
+                "story", "story:story:-", "lean-workflow-v1", "returned"),),
+        )
+        design = prepare_phase_request(
+            self.root,
+            story_state,
+            AdvanceRequest("reviewer-clear", decision_value="设计检视通过。"),
+        )
+        self.assertEqual(
+            self.digest(story), json.loads(design.decision_value)["story_sha256"])
 
 
 if __name__ == "__main__":

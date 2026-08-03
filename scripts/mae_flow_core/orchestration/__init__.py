@@ -28,6 +28,12 @@ from .models import (
     Phase,
     StartupConfig,
 )
+from .grill_session import (
+    GrillStatus,
+    apply_grill_event,
+    grill_confirmation_gap,
+    grill_status,
+)
 from .migration import MigrationResult, migrate_legacy_flow
 from .state_schema import decode_flow_state, encode_flow_state
 from .toolbox import ToolboxRequest, ToolboxResult, run_toolbox_request
@@ -43,6 +49,7 @@ __all__ = [
     "DeliveryPath",
     "DeliveryPlan",
     "FlowState",
+    "GrillStatus",
     "MigrationResult",
     "MoonlightAuthorization",
     "Phase",
@@ -53,12 +60,15 @@ __all__ = [
     "AdvanceRequest",
     "AdvanceResult",
     "advance_flow",
+    "apply_grill_event",
     "automatic_attempt_allowed",
     "capability_slot",
     "decode_flow_state",
     "encode_flow_state",
     "flow_attempt_context",
     "flow_retry_options",
+    "grill_confirmation_gap",
+    "grill_status",
     "migrate_legacy_flow",
     "plan_delivery",
     "record_attempt",

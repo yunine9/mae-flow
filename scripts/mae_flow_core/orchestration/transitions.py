@@ -25,6 +25,7 @@ from .transition_support import (
     return_to_repair_checkpoint as _return_to_repair_checkpoint,
 )
 from .grill_session import apply_grill_event, grill_confirmation_gap
+from .capabilities import capability_command_hint, capability_usage
 
 @dataclass(frozen=True)
 class AdvanceRequest:
@@ -153,6 +154,16 @@ def advance_flow(state, request):
         raise ValueError("request kind must be a non-empty string")
 
     kind = request.kind.strip().lower()
+
+    capability_hint = capability_command_hint(kind, request.decision_key)
+    known_capability_events = (
+        set(_CAPABILITY_OUTCOMES)
+        | set(_NON_BLOCKING_EVENTS)
+        | set(_CONDITIONAL_USER_STOPS)
+    )
+    if capability_hint and kind not in known_capability_events:
+        return AdvanceResult(
+            state, False, capability_usage(capability_hint))
 
     if kind == "exit":
         return AdvanceResult(

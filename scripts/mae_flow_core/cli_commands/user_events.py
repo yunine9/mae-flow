@@ -8,6 +8,8 @@ import re
 
 from mae_flow_core.state_store import safe_read_json
 from mae_flow_core.orchestration.transitions import AdvanceRequest
+from mae_flow_core.orchestration.capabilities import (
+    capability_command_hint, capability_usage)
 
 
 _LEDGER = os.path.join(".mae-flow-work", "lean-hook-user-events.json")
@@ -98,5 +100,8 @@ def requires_user_event(event):
 def semantic_request(event, key, decision):
     normalized = event.strip().lower()
     if key.strip() and normalized not in _KEYED_SEMANTIC_EVENTS:
+        hint = capability_command_hint(normalized, key)
+        if hint:
+            raise ValueError(capability_usage(hint))
         raise ValueError("语义事件 %s 不接受 --key" % normalized)
     return AdvanceRequest(event, key, decision)

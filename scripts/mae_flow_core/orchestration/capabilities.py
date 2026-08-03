@@ -15,6 +15,15 @@ _OUTCOMES = {
     "timed-out",
     "not-observed",
 }
+_CAPABILITY_IDENTITIES = {
+    "build-fix": "build",
+    "ut-generator-agent": "ut",
+    "codecheck-advisor-agent": "codecheck",
+    "craft-reviewer-agent": "reviewer",
+    "grill-critic-agent": "grill",
+    "grill-critic": "grill",
+    "story-generator-agent": "story",
+}
 
 
 class CapabilityKind(str, Enum):
@@ -28,6 +37,54 @@ class CapabilityKind(str, Enum):
     REVIEWER = "reviewer"
     GRILL = "grill"
     STORY = "story"
+
+
+def capability_record_command(
+        kind, outcome="returned", summary="<简短不透明摘要>"):
+    """Return the one copyable CLI command for an opaque capability fact."""
+    capability = _kind(kind).value
+    if outcome not in _OUTCOMES:
+        raise ValueError("unsupported opaque capability outcome")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("summary must be non-empty text")
+    escaped = summary.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        'python ".mae-flow-work/bin/mae-flow.py" advance '
+        'capability-%s --key %s --decision "%s"'
+        % (outcome, capability, escaped)
+    )
+
+
+def capability_command_hint(*values):
+    """Infer a stable kind only from an explicitly capability-like spelling."""
+    text = " ".join(str(value or "") for value in values).casefold()
+    related = "capability" in text or any(
+        identity in text for identity in _CAPABILITY_IDENTITIES)
+    if not related:
+        return ""
+    for identity, kind in _CAPABILITY_IDENTITIES.items():
+        if identity in text:
+            return kind
+    for kind in CapabilityKind:
+        if kind.value in text.split():
+            return kind.value
+    return "grill"
+
+
+def capability_usage(kind="grill"):
+    """Explain the complete capability fact protocol after an invalid command."""
+    try:
+        selected = _kind(kind or "grill").value
+    except ValueError:
+        selected = "grill"
+    return "\n".join((
+        "能力事实事件只接受 capability-returned、"
+        "capability-failed-to-start、capability-timed-out、"
+        "capability-not-observed。",
+        "能力 key 只接受 build、ut、codecheck、reviewer、grill、story。",
+        "请直接复制正确命令：",
+        capability_record_command(selected),
+    ))
 
 
 def _kind(value):

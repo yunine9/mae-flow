@@ -4,6 +4,9 @@ import argparse
 import os
 import sys
 
+from .orchestration.capabilities import (
+    capability_command_hint, capability_usage)
+
 
 class MFParser(argparse.ArgumentParser):
     """Turn argument errors into copyable lean-runtime guidance."""
@@ -25,6 +28,9 @@ class MFParser(argparse.ArgumentParser):
             "旧状态只用 migrate-flow 单向迁移。" % (me, me, me),
             file=sys.stderr,
         )
+        hint = capability_command_hint(*sys.argv[1:])
+        if hint:
+            print(capability_usage(hint), file=sys.stderr)
         self.exit(2)
 
 

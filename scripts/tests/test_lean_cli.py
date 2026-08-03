@@ -572,6 +572,45 @@ class LeanCliTests(unittest.TestCase):
         self.assertTrue(artifacts["story"].startswith(".mae-flow-work/"))
         self.assertTrue(artifacts["story"].endswith("/story.md"))
 
+    def test_cli_materializes_and_refreshes_exact_local_plugin_resources(self):
+        started = self.run_cli(
+            "start", "--ticket", "REQ-LOCAL-RESOURCES", "--path", "full",
+            "--pace", "continuous")
+        self.assert_success(started)
+        resource_root = os.path.join(
+            self.root, ".mae-flow-work", "plugin-resources")
+        pairs = (
+            ("runtime/guidance/grill.md", "guidance/grill.md"),
+            ("skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
+             "assets/GRILL-PREP-TEMPLATE.md"),
+            ("skills/mae-flow/assets/STORY-TEMPLATE.md",
+             "assets/STORY-TEMPLATE.md"),
+            ("skills/mae-flow/assets/CHAIN-TEMPLATE.md",
+             "assets/CHAIN-TEMPLATE.md"),
+        )
+        for source_relative, target_relative in pairs:
+            with self.subTest(target=target_relative):
+                source = os.path.join(ROOT, *source_relative.split("/"))
+                target = os.path.join(
+                    resource_root, *target_relative.split("/"))
+                with open(source, "rb") as stream:
+                    expected = stream.read()
+                with open(target, "rb") as stream:
+                    self.assertEqual(expected, stream.read())
+                self.assertIn(
+                    ".mae-flow-work/plugin-resources/" + target_relative,
+                    started.stdout)
+
+        grill = os.path.join(resource_root, "guidance", "grill.md")
+        with open(grill, "w", encoding="utf-8") as stream:
+            stream.write("tampered")
+        self.assert_success(self.run_cli_raw("current"))
+        with open(os.path.join(ROOT, "runtime", "guidance", "grill.md"),
+                  "rb") as stream:
+            expected = stream.read()
+        with open(grill, "rb") as stream:
+            self.assertEqual(expected, stream.read())
+
     def test_cp_card_combines_actual_review_ut_intent_and_next_brief(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-CP-CARD", "--path", "full",

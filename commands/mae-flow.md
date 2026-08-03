@@ -1,6 +1,7 @@
 # /mae-flow:mae-flow
 
-使用 Mae-Flow 时全程用简体中文，并先读取 `skills/mae-flow/SKILL.md`。
+使用 Mae-Flow 时全程用简体中文，并遵循本命令随插件加载的 Mae-Flow Skill；
+不得在业务仓中搜索插件的 `skills/`、`runtime/` 或 `flow/` 目录。
 
 ## CLI 入口
 
@@ -28,7 +29,7 @@ SessionStart 利用 Hook 中真实可用的 `CODEAGENT3_PLUGIN_ROOT` 在当前�
 2. 完成当前阶段最有价值的工作。调用所选 Grill、Story、Reviewer、CodeCheck、Build、UT 能力时，同一相关上下文至多一次，返回只记观察事实。
 3. 用带项目启动器前缀的完整 decision 或 advance 命令推进。
 
-Full Spec 必须执行 `runtime/guidance/grill.md` 的完整 Grill，禁止读取已退休的旧步骤资源：在 current 输出的精确 Grill 目录写 `survey.md` 和八维 `grill-prep.md`，逐维形成候选题或带定位的不适用依据，再让问题树随每个答案生长。旧 Grill/Spec 文件只作历史线索；没有当前状态收据时不得当作本轮已确认内容。每题先用完整 `advance grill-question` 命令登记，再 AskUserQuestion；若答案先到，使用带相同元数据的完整 `decision grill-answer` 命令原子补登记并消费。全部候选题和衍生题关闭后才写精确 `grill.md`、收敛并生成含“Grill 决策追溯”的 `spec.md`，随后调用一次 `grill-critic-agent` 检查两份文件的输入覆盖。质询结果是 Spec 的关键输入，不能用只读 Critic 或 `grill-clear` 替代。Focused 发现未决需求时先升级 Full。
+Full Spec 必须读取 `current` 输出的精确 `.mae-flow-work/plugin-resources/guidance/grill.md` 和 `.mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md`，执行完整 Grill；禁止在业务仓搜索同名资源，也禁止读取已退休的旧步骤资源。在 current 输出的精确 Grill 目录写 `survey.md` 和八维 `grill-prep.md`，逐维形成候选题或带定位的不适用依据，再让问题树随每个答案生长。旧 Grill/Spec 文件只作历史线索；没有当前状态收据时不得当作本轮已确认内容。每题先用完整 `advance grill-question` 命令登记，再 AskUserQuestion；若答案先到，使用带相同元数据的完整 `decision grill-answer` 命令原子补登记并消费。全部候选题和衍生题关闭后才写精确 `grill.md`、收敛并生成含“Grill 决策追溯”的 `spec.md`，随后调用一次 `grill-critic-agent` 检查两份文件的输入覆盖。质询结果是 Spec 的关键输入，不能用只读 Critic 或 `grill-clear` 替代。Focused 发现未决需求时先升级 Full。
 
 不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 或 `AskUserQuestion` 回答只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
 

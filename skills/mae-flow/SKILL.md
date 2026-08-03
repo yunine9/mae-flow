@@ -52,7 +52,7 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 ### Spec
 
-Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 必须执行 `runtime/guidance/grill.md` 的完整 Interactive Grill，不得读取已退休的旧步骤资源，也不得用两三个临时问题代替。先读取 `assets/GRILL-PREP-TEMPLATE.md`，定向查需求、行为基线和相关代码。`current` 会输出经过 Windows 安全编码的精确 Grill 工作目录；把共享代码地图写为该目录中 `survey.md`，把模板复制为同目录 `grill-prep.md`，禁止按原始单号自行拼路径。状态机、边界值、并发时序、失败清理、数据一致性、存量兼容、规模性能、可观测性八维必须逐项写出“有缺口的候选题”或“有代码/文档定位的不适用依据”；任何占位残留都不得开始或收敛质询。问题数量由真实缺口和回答衍生分支决定，不设两问之类的默认上限；超过 15 题只向用户报告规模并由用户选择是否继续。
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。每次 CLI 调用都会把插件只读资源同步到 `.mae-flow-work/plugin-resources/`，`current` 会列出精确路径。Full 必须完整读取 `.mae-flow-work/plugin-resources/guidance/grill.md` 和 `.mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md`，执行完整 Interactive Grill；不得在业务仓搜索 `runtime/`、`skills/`、`flow/` 或同名模板，不得读取已退休的旧步骤资源，也不得用两三个临时问题代替。定向查需求、行为基线和相关代码。`current` 还会输出经过 Windows 安全编码的精确 Grill 工作目录；把共享代码地图写为该目录中 `survey.md`，把本地资源模板复制为同目录 `grill-prep.md`，禁止按原始单号自行拼路径。状态机、边界值、并发时序、失败清理、数据一致性、存量兼容、规模性能、可观测性八维必须逐项写出“有缺口的候选题”或“有代码/文档定位的不适用依据”；任何占位残留都不得开始或收敛质询。问题数量由真实缺口和回答衍生分支决定，不设两问之类的默认上限；超过 15 题只向用户报告规模并由用户选择是否继续。
 
 旧 `grill.md`、`grill-prep.md`、Spec 草稿只能作为历史线索。只有当前 `.mae-flow.json` 中已有且与当前问题/回答收据匹配的 `GQ-*` 才算本轮已确认；新流程状态没有对应收据时必须重新查证和质询，禁止把旧文档当本轮答案或收敛依据。
 
@@ -62,7 +62,7 @@ Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非�
 
 ### Design
 
-Story 严格沿用 `skills/mae-flow/assets/STORY-TEMPLATE.md`，把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 写到 `current` 输出的精确本地 `story.md`；Design Review 会绑定其内容摘要，Review 后变化必须重新检视。用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
+Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，不得在业务仓搜索模板；把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 写到 `current` 输出的精确本地 `story.md`；Design Review 会绑定其内容摘要，Review 后变化必须重新检视。用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
 
 ### Construction
 
@@ -125,7 +125,7 @@ Chain 是可恢复的跨仓需求调查、接口契约、依赖编排和启动�
 
 用完整 chain record 命令固化接口契约、依赖方向、可并行范围、合入顺序和联调时点。随后对每个仓反向检查：只给该仓职责和契约，新的交付会话能否独立启动和验证；通过后用完整 chain record reverse-check 命令记录，不能独立启动就重新打开问题。
 
-文档严格使用 `skills/mae-flow/assets/CHAIN-TEMPLATE.md` 的七节，写入 chain current 输出的精确文档路径；同路径旧文件没有当前 rendered 收据时只作历史线索。先执行完整 chain verify 命令逐一验证所有引用的仓路径、文件和符号，再执行完整 chain rendered 命令绑定当前文档摘要；向用户呈现触点完整性、接口形态、字段和错误语义并取得自然语言确认后，才执行完整 chain confirm 命令。任何仓、触点、问题、契约、依赖、引用文件或文档变化都要重新校验、渲染和确认。
+文档严格使用 chain current 输出的精确 `.mae-flow-work/plugin-resources/assets/CHAIN-TEMPLATE.md` 七节结构，不得在业务仓搜索模板；写入 chain current 输出的精确文档路径。同路径旧文件没有当前 rendered 收据时只作历史线索。先执行完整 chain verify 命令逐一验证所有引用的仓路径、文件和符号，再执行完整 chain rendered 命令绑定当前文档摘要；向用户呈现触点完整性、接口形态、字段和错误语义并取得自然语言确认后，才执行完整 chain confirm 命令。任何仓、触点、问题、契约、依赖、引用文件或文档变化都要重新校验、渲染和确认。
 
 第 7 节为每个仓生成自包含启动卡：精确本地路径、精确启动话术、建议 Full/Focused 路径及依据、职责、契约 ID、上游依赖、下游消费者、合入/联调时点和仓内验证边界。Chain 只产生本地设计与交接，不改业务代码、不启动仓内交付、不 commit/push。用户明确要求持久化时才复制到 `docs/specs/requirements/<ticket>/chain.md`；退出用完整 chain exit 命令，只归档本地 Chain 状态。
 

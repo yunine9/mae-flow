@@ -128,6 +128,27 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("Interactive Grill", phase)
         self.assertIn("Grill 决策追溯", skill)
 
+    def test_production_prompts_never_resolve_plugin_resources_in_business_repo(self):
+        relatives = (
+            "commands/mae-flow.md", "skills/mae-flow/SKILL.md",
+            "flow/phases/spec.md", "flow/phases/story.md",
+            "agents/story-generator-agent.md",
+        )
+        forbidden = (
+            "`runtime/guidance/grill.md`",
+            "`skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md`",
+            "`skills/mae-flow/assets/STORY-TEMPLATE.md`",
+            "`skills/mae-flow/assets/CHAIN-TEMPLATE.md`",
+            "`assets/GRILL-PREP-TEMPLATE.md`",
+        )
+        for relative in relatives:
+            with open(os.path.join(ROOT, relative), encoding="utf-8") as stream:
+                source = stream.read()
+            with self.subTest(relative=relative):
+                self.assertIn(".mae-flow-work/plugin-resources/", source)
+                for value in forbidden:
+                    self.assertNotIn(value, source)
+
     def test_chain_is_not_reachable_through_the_stateless_toolbox(self):
         with open(os.path.join(
                 ROOT, "scripts", "mae_flow_core", "orchestration",

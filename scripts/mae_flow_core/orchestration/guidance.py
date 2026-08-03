@@ -16,6 +16,14 @@ from .moonlight_policy import moonlight_authorization_view
 
 _PHASE_ROOT = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "flow", "phases"))
+_PLUGIN_RESOURCES = (
+    ".mae-flow-work/plugin-resources/guidance/grill.md",
+    ".mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md",
+    ".mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md",
+    ".mae-flow-work/plugin-resources/assets/CHAIN-TEMPLATE.md",
+    ".mae-flow-work/plugin-resources/assets/BEHAVIOR-TEMPLATE.md",
+    ".mae-flow-work/plugin-resources/assets/REVIEW-TEMPLATE.md",
+)
 
 
 def _items(title, values):
@@ -111,6 +119,7 @@ def render_guidance(state):
         "%s\n"
         "%s\n"
         "%s\n"
+        "%s\n"
         "%s"
     ) % (
         state.ticket,
@@ -119,6 +128,7 @@ def render_guidance(state):
         state.current_cp or "none",
         _items(startup_title, startup),
         _items("Artifacts", artifacts),
+        _items("Exact bundled plugin resources", _PLUGIN_RESOURCES),
         _items("Exact Grill preparation files", grill_work),
         _items("Selected behavior domains", domains),
         _items("Behavior reconciliation", actions),

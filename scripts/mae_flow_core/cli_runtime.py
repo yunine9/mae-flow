@@ -10,6 +10,27 @@ from .runtime import find_project_root
 from .state_store import safe_read_json
 
 
+_PLUGIN_ROOT = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", ".."))
+_RESOURCE_FILES = (
+    ("runtime/guidance/grill.md", "guidance/grill.md"),
+    ("runtime/guidance/construction.md", "guidance/construction.md"),
+    ("runtime/guidance/quality.md", "guidance/quality.md"),
+    ("runtime/guidance/review.md", "guidance/review.md"),
+    ("runtime/guidance/story-design.md", "guidance/story-design.md"),
+    ("skills/mae-flow/assets/BEHAVIOR-TEMPLATE.md",
+     "assets/BEHAVIOR-TEMPLATE.md"),
+    ("skills/mae-flow/assets/CHAIN-TEMPLATE.md",
+     "assets/CHAIN-TEMPLATE.md"),
+    ("skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md",
+     "assets/GRILL-PREP-TEMPLATE.md"),
+    ("skills/mae-flow/assets/REVIEW-TEMPLATE.md",
+     "assets/REVIEW-TEMPLATE.md"),
+    ("skills/mae-flow/assets/STORY-TEMPLATE.md",
+     "assets/STORY-TEMPLATE.md"),
+)
+
+
 _HANDLERS = {
     name: getattr(lean_workflow, name)
     for name in (
@@ -41,6 +62,42 @@ def _state_schema(root):
     return "unsupported"
 
 
+def _materialize_plugin_resources(root):
+    """Expose immutable plugin guidance without leaking its install path."""
+    target_root = os.path.join(
+        root, ".mae-flow-work", "plugin-resources")
+    for source_relative, target_relative in _RESOURCE_FILES:
+        source = os.path.join(
+            _PLUGIN_ROOT, *source_relative.split("/"))
+        target = os.path.join(
+            target_root, *target_relative.split("/"))
+        try:
+            with open(source, "rb") as stream:
+                content = stream.read()
+        except OSError as exc:
+            raise RuntimeError(
+                "插件资源缺失，请刷新或重装 Mae-Flow: %s"
+                % source_relative) from exc
+        try:
+            with open(target, "rb") as stream:
+                if stream.read() == content:
+                    continue
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        temporary = target + ".tmp-%s" % os.getpid()
+        try:
+            with open(temporary, "wb") as stream:
+                stream.write(content)
+            os.replace(temporary, target)
+        finally:
+            try:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            except OSError:
+                pass
+
+
 def main(argv=None):
     """Dispatch only lean commands, with one explicit schema-v2 reader."""
     args = parse_args(argv)
@@ -51,6 +108,11 @@ def main(argv=None):
             "[mae-flow] 调用目录非项目根,已定位到: %s" % root,
             file=sys.stderr,
         )
+    try:
+        _materialize_plugin_resources(root)
+    except (OSError, RuntimeError) as exc:
+        print("[mae-flow] %s" % exc, file=sys.stderr)
+        raise SystemExit(2)
 
     schema = _state_schema(root)
     if args.cmd == "migrate-flow":

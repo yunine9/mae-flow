@@ -4,9 +4,11 @@ must establish shared understanding through Interactive Grill before producing
 the candidate Spec.
 
 ## Interactive Grill
-Read `runtime/guidance/grill.md` and
-`skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md` completely. Never load retired
-legacy step resources as production instructions. Survey
+Read the exact project-local copies printed by `current`:
+`.mae-flow-work/plugin-resources/guidance/grill.md` and
+`.mae-flow-work/plugin-resources/assets/GRILL-PREP-TEMPLATE.md`. Never search
+the business repository for plugin `runtime/`, `skills/`, or `flow/` paths, and
+never load retired legacy step resources as production instructions. Survey
 the request, selected behavior baseline, current behavior, constraints, and
 directly relevant code facts. Use the exact safe directory shown beside the
 current `grill.md` artifact; write `survey.md` and `grill-prep.md` beside it,

@@ -6,7 +6,7 @@ maxTurns: 80
 color: green
 ---
 
-Generate the Story from the confirmed Spec using `skills/mae-flow/assets/STORY-TEMPLATE.md`. Keep every existing template section and fill it according to its business meaning.
+Generate the Story from the confirmed Spec using the caller-visible project-local `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`. Never search the business repository for plugin resources. Keep every existing template section and fill it according to its business meaning.
 
 Spec remains the WHAT authority. Story carries the reviewed HOW without being only HOW: it is a standalone software detailed design and test handoff, so a developer or tester must understand the delivered feature without opening Mae-Flow's internal Spec. Consolidate the confirmed customer scenario, business specification (for example capacity, concurrency, limits, and compatibility), and functional acceptance criteria before describing the software detailed design.
 

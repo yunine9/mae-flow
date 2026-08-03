@@ -97,6 +97,9 @@ class LeanChainCliTests(unittest.TestCase):
         self.assert_success(started)
         self.assert_success(current)
         self.assertIn("REQ:CHAIN", current.stdout)
+        self.assertIn(
+            ".mae-flow-work/plugin-resources/assets/CHAIN-TEMPLATE.md",
+            current.stdout)
         self.assertEqual(1, self.pointer()["schema_version"])
         self.assertFalse(os.path.isabs(self.pointer()["state"]))
         self.assertEqual(2, duplicate.returncode)

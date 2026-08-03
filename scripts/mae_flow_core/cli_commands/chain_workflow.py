@@ -124,6 +124,9 @@ def _render(state, reason):
     print("状态: %s" % state.status)
     print("需求来源: %s" % state.requirement_source)
     print("Chain 文档: %s" % state.document_path)
+    print(
+        "Chain 模板: "
+        ".mae-flow-work/plugin-resources/assets/CHAIN-TEMPLATE.md")
     counts = {}
     for item in state.records:
         counts[item.kind] = counts.get(item.kind, 0) + 1

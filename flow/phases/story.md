@@ -4,8 +4,10 @@ Produce a standalone software detailed design and test handoff from the approved
 ## Inspect
 Read the approved Spec, confirmed customer scenarios, business specifications,
 functional acceptance criteria, affected architecture, interfaces, test strategy,
-and delivery constraints. Preserve `STORY-TEMPLATE.md`; Story is not a line-by-line
-coding plan. Run `story-generator-agent` exactly once, then run
+and delivery constraints. Read and preserve the exact project-local
+`.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`; never search the
+business repository for a plugin template. Story is not a line-by-line coding
+plan. Run `story-generator-agent` exactly once, then run
 `craft-reviewer-agent` exactly once with the Design Reviewer role.
 
 ## Stop for the user

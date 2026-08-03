@@ -3,7 +3,8 @@
 import os
 import posixpath
 
-from .capabilities import flow_attempt_context, flow_retry_options
+from .capabilities import (
+    capability_record_command, flow_attempt_context, flow_retry_options)
 from .behavior_baseline import domain_actions, selected_domains
 from .checkpoints import (
     checkpoint_context,
@@ -65,6 +66,19 @@ _OUTCOME_LABELS = {
     "timed-out": "已超时",
     "not-observed": "未观察到返回",
 }
+_PHASE_CAPABILITIES = {
+    Phase.SPEC: (("Grill Critic", "grill"),),
+    Phase.STORY: (("Story 生成", "story"), ("设计检视", "reviewer")),
+    Phase.CONSTRUCTION: (("代码检视", "reviewer"), ("构建", "build")),
+    Phase.QUALITY: (
+        ("CodeCheck", "codecheck"),
+        ("正式 UT", "ut"),
+        ("条件触发的集成边界检视", "reviewer"),
+        ("失效后经用户确认的补充构建", "build"),
+    ),
+}
+_CAPABILITY_OUTCOMES = (
+    "returned", "failed-to-start", "timed-out", "not-observed")
 
 
 def phase_label(value):
@@ -95,6 +109,29 @@ def reason_label(reason, recovery="当前流程恢复信息。", updated="流程
     if any("\u4e00" <= char <= "\u9fff" for char in reason):
         return reason
     return recovery if "recovery context" in reason.casefold() else updated
+
+
+def render_capability_commands(state):
+    """Render exact fact commands for capabilities planned in this phase."""
+    capabilities = _PHASE_CAPABILITIES.get(state.phase, ())
+    if (
+            state.path == DeliveryPath.FOCUSED
+            and state.phase in {Phase.SPEC, Phase.STORY}):
+        capabilities = ()
+    if not capabilities:
+        return ""
+    lines = ["能力事实记录命令（真实调用结束后只执行匹配结果的一条）:"]
+    for label, kind in capabilities:
+        lines.append("%s（能力 key: %s）:" % (label, kind))
+        lines.extend(
+            capability_record_command(kind, outcome)
+            for outcome in _CAPABILITY_OUTCOMES)
+    if state.phase == Phase.SPEC:
+        lines.extend((
+            "Grill Critic 正常返回并记录后，继续执行:",
+            'python ".mae-flow-work/bin/mae-flow.py" advance grill-clear',
+        ))
+    return "\n".join(lines)
 
 
 def _moonlight_reason_label(reason):
@@ -230,7 +267,9 @@ def render_guidance(state):
         _items("开发批次上下文", checkpoints),
         _items("未解决风险", state.risks),
     )
-    return "%s\n\n%s\n" % (context, phase_guidance)
+    capability_commands = render_capability_commands(state)
+    suffix = "\n\n" + capability_commands if capability_commands else ""
+    return "%s\n\n%s%s\n" % (context, phase_guidance, suffix)
 
 
 def render_capability_facts(state):

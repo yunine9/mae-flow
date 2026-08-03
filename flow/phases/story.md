@@ -12,6 +12,13 @@
 并指定为设计检视角色。Story 说明实现边界、接口与依赖方向、数据流、错误语义、
 资源生命周期、并发兼容性、可测性设计和连贯的开发批次；不要写成逐行编码计划。
 
+两个能力正常返回后分别执行本次 `current` 同屏列出的完整命令，其固定 key 为：
+
+- Story 生成：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key story --decision "<简短不透明摘要>"`
+- 设计检视：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`
+
+其他返回状态使用同屏对应的失败命令，不得猜事件名、改用 `--note` 或重跑能力。
+
 ## 何时询问用户
 
 详细设计偏离已确认需求、存在真实设计取舍，或需要确认完整 Story 时询问用户。

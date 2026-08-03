@@ -27,7 +27,9 @@ decision 命令上附同一组元数据，原子补登记并消费答案。每�
 矛盾、新状态和衍生分支。
 
 全部问题关闭后，将证据、问题树、回答、边界、兼容性、失败行为和非目标写入精确
-`grill.md`，再执行 `advance grill-converged`。
+`grill.md`，再执行：
+
+`python ".mae-flow-work/bin/mae-flow.py" advance grill-converged`
 
 ## 生成候选 Spec
 
@@ -37,7 +39,16 @@ decision 命令上附同一组元数据，原子补登记并消费答案。每�
 
 随后为当前 Grill/Spec 内容调用一次 `grill-critic-agent`。它只读检查输入覆盖、
 决定是否被弱化、术语一致性、可验收性和 WHAT/HOW 混杂；不编辑文件、不替用户
-决定。CLEAR 后记录能力事实并执行 `advance grill-clear`。文件变化后必须重新检查。
+决定。正常返回后立即执行：
+
+`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key grill --decision "<简短不透明摘要>"`
+
+随后执行：
+
+`python ".mae-flow-work/bin/mae-flow.py" advance grill-clear`
+
+启动失败、超时或未观察到返回时，使用本次 `current` 同屏列出的 `grill` 精确失败
+命令，只记录事实且不重跑 Critic。文件变化后必须重新检查。
 
 ## 何时询问用户
 

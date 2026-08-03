@@ -11,9 +11,14 @@ UT 路由、已有能力调用和风险。按配置分别调用 `codecheck-advis
 如果最后一次批次构建仍覆盖最终源码，不重复构建；若后续修复使它失效，向用户说明
 事实，由用户决定是否再调用一次已配置构建方式。
 
-每次能力同步返回后，立即用完整命令记录一次 `capability-<outcome>` 事实。不得解析
-私有输出，不得因记录失败而重跑能力。正式 UT 一次接收最终 Spec、Story、diff 和
-按顺序累计的 UT 意图。
+能力正常返回后分别执行本次 `current` 同屏列出的完整命令，其固定 key 为：
+
+- CodeCheck：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key codecheck --decision "<简短不透明摘要>"`
+- 正式 UT：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key ut --decision "<简短不透明摘要>"`
+
+启动失败、超时或未观察到返回时，使用同屏对应的精确失败命令。不得解析私有输出，
+不得因记录失败而重跑能力。正式 UT 一次接收最终 Spec、Story、diff 和按顺序累计的
+UT 意图。
 
 ## 何时询问用户
 

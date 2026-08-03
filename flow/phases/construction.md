@@ -14,6 +14,13 @@
 C++ 可使用已配置的 `build-fix`，Java 使用已确认的 Maven 命令，其他语言使用仓库
 确认的 Skill 或命令。禁止等待轮询、后台执行或自动重试。
 
+能力正常返回后分别执行本次 `current` 同屏列出的完整命令，其固定 key 为：
+
+- 代码检视：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`
+- 构建：`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key build --decision "<简短不透明摘要>"`
+
+其他返回状态使用同屏对应的失败命令；记录失败不得触发重新检视或重新构建。
+
 ## 何时询问用户
 
 出现真实歧义、明显设计偏离、不可逆风险，或完整流程的开发批次确认时询问用户。

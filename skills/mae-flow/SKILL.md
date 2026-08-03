@@ -58,11 +58,11 @@ Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非�
 
 每题必须先持久化，再向用户提问：`python ".mae-flow-work/bin/mae-flow.py" advance grill-question --key <GQ-ID> --parent <ROOT|已回答GQ-ID> --evidence "<代码或文档证据>" --impact "<实现/验收影响>" --recommendation "<推荐答案及理由>"`。随后通过自然对话或 AskUserQuestion 一次问一个，拿到真实回答后执行 `python ".mae-flow-work/bin/mae-flow.py" decision grill-answer --key <GQ-ID> "<忠实语义摘要>"`。如果宿主已经先返回了 AskUserQuestion 答案，用同一条完整 decision 命令加上上述四个元数据参数，原子补登记问题并消费答案，不重问用户。每个答案都必须执行完整 Grill 的衍生检查：模糊词追到具体条件；新名词、新状态、新场景追问定义与边界；矛盾当场对质；被推翻的维度重新打开。所有候选题及衍生题关闭后，把八维证据、问题树、EARS 行为答案、确认的 WHAT 和留给设计的技术分歧写入 `current` 输出的精确 `grill.md`，再执行 `python ".mae-flow-work/bin/mae-flow.py" advance grill-converged`。
 
-质询结果是下游 Spec 生成的关键输入，不是可选审计材料。只有收敛后才能生成 `current` 输出的精确 `spec.md`；Spec 必须包含“Grill 决策追溯”，把每个 `GQ-*` 映射到 Spec 章节或可观察验收标准。随后为当前 Grill/Spec 内容版本调用 `grill-critic-agent` one read-only pass；它同时读取两份文件，检查输入覆盖、语义未被弱化、遗漏分支和 WHAT/HOW 混杂，不编辑、不提问、不替用户决定。CLEAR 后记录 capability 事实并执行 `python ".mae-flow-work/bin/mae-flow.py" advance grill-clear` 绑定两份文件摘要；任何文件再变化都必须重新复核。只有真实待决分支交用户，回到 Interactive Grill。Spec 最终仍由用户确认。用户明确要求保留时才选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
+质询结果是下游 Spec 生成的关键输入，不是可选审计材料。只有收敛后才能生成 `current` 输出的精确 `spec.md`；Spec 必须包含“Grill 决策追溯”，把每个 `GQ-*` 映射到 Spec 章节或可观察验收标准。随后为当前 Grill/Spec 内容版本调用 `grill-critic-agent` one read-only pass；它同时读取两份文件，检查输入覆盖、语义未被弱化、遗漏分支和 WHAT/HOW 混杂，不编辑、不提问、不替用户决定。正常返回后必须先执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key grill --decision "<简短不透明摘要>"`，再执行 `python ".mae-flow-work/bin/mae-flow.py" advance grill-clear` 绑定两份文件摘要；启动失败、超时或未观察到返回时只复制本次 `current` 同屏列出的 `grill` 精确失败命令，不得猜测事件或重跑 Critic。任何文件再变化都必须重新复核。只有真实待决分支交用户，回到 Interactive Grill。Spec 最终仍由用户确认。用户明确要求保留时才选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
 
 ### Design
 
-Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，不得在业务仓搜索模板；把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer。普通意见直接修正；只有真实取舍交用户。Story 写到 `current` 输出的精确本地 `story.md`；Design Review 会绑定其内容摘要，Review 后变化必须重新检视。用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
+Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md`，不得在业务仓搜索模板；把确认后的客户场景、业务规格、功能验收标准、软件详细设计和测试设计整理成可独立交给开发与测试的文档。它不是逐行编码计划。调用 `story-generator-agent` 一次，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key story --decision "<简短不透明摘要>"`；再调用 `craft-reviewer-agent` 一次并明确角色为 Design Reviewer，正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`。其他返回状态只复制本次 `current` 同屏列出的对应精确失败命令。普通意见直接修正；只有真实取舍交用户。Story 写到 `current` 输出的精确本地 `story.md`；Design Review 会绑定其内容摘要，Review 后变化必须重新检视。用户明确要求纳入版本库时才选 `docs/specs/requirements/<ticket>/story.md`。
 
 ### Construction
 
@@ -70,18 +70,18 @@ Story 严格沿用 `current` 输出的精确 `.mae-flow-work/plugin-resources/as
 
 Story 末尾承载全部轻量 CP 简报，不另建详细编码计划文件。每个 Full CP 保存简报、实际结果、一次 CODE Reviewer 结论和 UT 增量；同一确认卡展示本批实际结果及下一 CP，用户可直接修改后续设计。
 
-每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。Reviewer 提供的每条意见都由主 Agent给出去向：已修复、证据不足不采纳、设计取舍或超出范围；只写自然语言，不交验固定表格。对本 CP 的 exact changed code 运行一次 `python ".mae-flow-work/bin/mae-flow.py" lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 单独触发编译或再次检查。随后同步调用开局确认的 Build 路由一次并记录该 CP 的不透明 Build 事实；禁止休眠等待、轮询、转后台或自动重试。Build 完成后先形成当前 CP 的 exact manifest 提案，再用 `python ".mae-flow-work/bin/mae-flow.py" advance cp-ready --key <当前CP>` 展示完成卡。用户要求修改时用完整 decision 命令绑定 `cp-revise`，撤销未执行提交收据并重新修改、Build、呈审；用户确认后才 exact commit。commit 被观察后用 `python ".mae-flow-work/bin/mae-flow.py" advance cp-opened --key <下一CP>` 进入下一批，不提前展示空 CP 卡。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
+每个 CP 调用 `craft-reviewer-agent` 一次并明确角色为 CODE Reviewer；它只读本 CP diff 和直接集成边界，不形成复查循环。正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"`。Reviewer 提供的每条意见都由主 Agent给出去向：已修复、证据不足不采纳、设计取舍或超出范围；只写自然语言，不交验固定表格。对本 CP 的 exact changed code 运行一次 `python ".mae-flow-work/bin/mae-flow.py" lightcheck --file <exact file>...`；安全、局部、高置信问题由主 Agent 顺手修，风险高或范围外的只记录，不为 Lightcheck 单独触发编译或再次检查。随后同步调用开局确认的 Build 路由一次；正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key build --decision "<简短不透明摘要>"`。其他返回状态只复制本次 `current` 同屏列出的对应精确失败命令；禁止休眠等待、轮询、转后台或自动重试。Build 完成后先形成当前 CP 的 exact manifest 提案，再用 `python ".mae-flow-work/bin/mae-flow.py" advance cp-ready --key <当前CP>` 展示完成卡。用户要求修改时用完整 decision 命令绑定 `cp-revise`，撤销未执行提交收据并重新修改、Build、呈审；用户确认后才 exact commit。commit 被观察后用 `python ".mae-flow-work/bin/mae-flow.py" advance cp-opened --key <下一CP>` 进入下一批，不提前展示空 CP 卡。没有 exact scope 时 Lightcheck 直接 fail-open，不扫启动前用户现场。
 
 ### Quality
 
 根据语义影响和用户选择决定质量能力。Full 的通常建议顺序是 CodeCheck → UT；每个 CP 已完成一次配置的 Build。若最后一次 CP Build 之后源码没有再变化，Quality 不重复 Build；若后续修复使它失效，只展示事实并让用户决定是否重跑配置的 Build 路由。
 
-- CodeCheck：调用 `codecheck-advisor-agent` 一次，只给 exact changed production files/functions。它只请求一次正式 fullcheck。主 Agent修安全项；每条结构化意见都要有去向，raw-only 结果原样保留，不自动复验。
-- UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。
+- CodeCheck：调用 `codecheck-advisor-agent` 一次，只给 exact changed production files/functions。它只请求一次正式 fullcheck。主 Agent修安全项；每条结构化意见都要有去向，raw-only 结果原样保留，不自动复验。正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key codecheck --decision "<简短不透明摘要>"`。
+- UT：调用 `ut-generator-agent` 一次。它拥有 write + compile + run，输入 final Spec、final Story（若有）、current diff 和 cumulative construction hints。Mae-Flow 不推断语言、测试框架、计数或 disabled 文案。正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key ut --decision "<简短不透明摘要>"`。
 
-调用能力前先看 `current`，即完整 current 命令输出的当前语义 slot 已有尝试；同一语义 slot 已有记录且没有本轮用户重试决定就不要调用。新的阶段或新的 CP 是新的计划 slot，其首次调用正常执行，不让用户重复授权。该规则由主 Agent 遵守，Hook 不拦截或证明能力调用。真实能力调用同步结束后，主 Agent 只记录一次轻量恢复事实：正常返回执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key <kind> --decision "<简短不透明摘要>"`；启动失败、超时或无法观察返回时分别使用对应的完整 advance 命令。这条事实不是质量报告，不解析返回值，也不要求固定格式；记录失败时不得为了补状态而重跑昂贵能力。确需重试同一 slot，先记录用户自然语言决定 `capability.retry.<kind>`；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
+调用能力前先看 `current`，即完整 current 命令输出的当前语义 slot 已有尝试；同一语义 slot 已有记录且没有本轮用户重试决定就不要调用。新的阶段或新的 CP 是新的计划 slot，其首次调用正常执行，不让用户重复授权。该规则由主 Agent 遵守，Hook 不拦截或证明能力调用。真实能力调用同步结束后，主 Agent 只记录一次轻量恢复事实，并执行本次 `current` 在当前阶段同屏列出的一个完整事实命令：事件只允许 `capability-returned`、`capability-failed-to-start`、`capability-timed-out`、`capability-not-observed`，key 只允许 `build`、`ut`、`codecheck`、`reviewer`、`grill`、`story`。不得使用 `capability-attempt`、`capability.<代理名>`、`--note` 或位置参数猜测语法。这条事实不是质量报告，不解析返回值，也不要求固定格式；记录失败时不得为了补状态而重跑昂贵能力。确需重试同一 slot，使用 `current` 给出的精确重试决定 key；下一次匹配 slot 的真实调用消费一次授权。流程不等待、不轮询、不转后台。
 
-Quality 收尾时记录一条自然语言的最终 Spec/Story/范围 ↔ 代码/覆盖对照结论。只有 Construction 记录了跨 CP 耦合、共享状态、接口变化或晚期设计漂移，才调用 `craft-reviewer-agent` 一次做集成边界走读并记录自然语言结论；没有触发就不增加检视。
+Quality 收尾时记录一条自然语言的最终 Spec/Story/范围 ↔ 代码/覆盖对照结论。只有 Construction 记录了跨 CP 耦合、共享状态、接口变化或晚期设计漂移，才调用 `craft-reviewer-agent` 一次做集成边界走读；正常返回后执行 `python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key reviewer --decision "<简短不透明摘要>"` 并记录自然语言结论；没有触发就不增加检视。
 
 ### Delivery
 

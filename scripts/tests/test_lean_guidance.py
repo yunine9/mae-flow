@@ -161,6 +161,29 @@ class LeanGuidanceTests(unittest.TestCase):
                 for name in names:
                     self.assertIn(name, guidance)
 
+    def test_each_capability_phase_renders_copyable_fact_commands(self):
+        expected = {
+            Phase.SPEC: ("grill",),
+            Phase.STORY: ("story", "reviewer"),
+            Phase.CONSTRUCTION: ("reviewer", "build"),
+            Phase.QUALITY: ("codecheck", "ut", "reviewer", "build"),
+        }
+        outcomes = (
+            "returned", "failed-to-start", "timed-out", "not-observed")
+        for phase, kinds in expected.items():
+            with self.subTest(phase=phase):
+                guidance = render_guidance(state_for(phase))
+                self.assertIn("能力事实记录命令", guidance)
+                for kind in kinds:
+                    for outcome in outcomes:
+                        self.assertIn(
+                            "advance capability-%s --key %s --decision"
+                            % (outcome, kind),
+                            guidance,
+                        )
+                self.assertNotIn("capability-<outcome>", guidance)
+                self.assertNotIn("--key <kind>", guidance)
+
     def test_construction_plans_testability_without_running_formal_ut(self):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
         self.assertIn("可测性边界", construction)

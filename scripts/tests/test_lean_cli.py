@@ -681,6 +681,11 @@ class LeanCliTests(unittest.TestCase):
             "decision", "startup-confirmed", "按完整开发和一次交付继续。")
         self.assert_success(startup)
         self.assertIn("需要用户介入: 需求澄清", startup.stdout)
+        self.assertIn(
+            "advance capability-returned --key grill --decision",
+            startup.stdout,
+        )
+        self.assertIn("advance grill-clear", startup.stdout)
         self.write_grill_preparation("REQ-42")
 
         artifact_paths = {

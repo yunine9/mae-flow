@@ -189,6 +189,36 @@ class LeanCliTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(consumed))
 
+    def test_user_owned_decision_consumes_current_askuser_answer(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-ASKUSER", "--path", "focused",
+            "--pace", "continuous"))
+        answer = "确认按已展示的范围继续。"
+
+        captured = LeanHookAdapter(self.root).handle(
+            "PostToolUse",
+            {
+                "tool_name": "AskUserQuestion",
+                "tool_input": {
+                    "questions": [{"question": "是否确认当前范围？"}],
+                },
+                "tool_response": answer,
+            },
+        )
+        accepted = self.run_cli_raw(
+            "decision", "startup-confirmed", "用户确认当前范围。")
+
+        self.assertEqual(0, captured.exit_code, captured.stderr)
+        self.assert_success(accepted)
+        self.assertEqual("construction", self.state()["phase"])
+        consumed = [
+            item for item in self.state()["decisions"]
+            if item["key"] == "user.event.consumed"
+        ]
+        self.assertEqual(1, len(consumed))
+        receipt = json.loads(consumed[0]["value"])
+        self.assertEqual("startup-confirmed", receipt["semantic_event"])
+
     def test_user_owned_decision_rejects_an_event_from_an_older_state(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-STALE-EVENT", "--path", "focused",

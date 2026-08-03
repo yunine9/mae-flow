@@ -27,7 +27,7 @@ python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" <com
 2. 完成当前阶段最有价值的工作。调用所选 Grill、Story、Reviewer、CodeCheck、Build、UT 能力时，同一相关上下文至多一次，返回只记观察事实。
 3. 用 `decision <event> "<用户自然语言>"` 或 `advance <event> --decision "<事实或依据>"` 推进。
 
-不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
+不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 或 `AskUserQuestion` 回答只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
 
 这些 CLI 是 Agent 内部协议，不要把它们展示成用户必须执行的操作。用户只需
 使用 `/mae-flow:mae-flow` 并自然语言表达确认、修改、返修或退出。

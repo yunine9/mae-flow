@@ -121,6 +121,21 @@ def _clip(value, maximum=240):
     return text if len(text) <= maximum else text[:maximum - 1] + "…"
 
 
+def _askuser_answer(value):
+    """Normalize a successful AskUserQuestion response for user-event audit."""
+    if isinstance(value, str):
+        return value.strip()
+    if value in (None, {}, []):
+        return ""
+    try:
+        return json.dumps(
+            value, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return ""
+
+
 def _brief_list(values, maximum, render):
     rendered = [render(value) for value in values[:maximum]]
     omitted = len(values) - len(rendered)
@@ -383,6 +398,14 @@ class LeanHookAdapter:
             return updated
 
     def _posttool(self, payload):
+        if payload.get("tool_name") == "AskUserQuestion":
+            answer = _askuser_answer(payload.get("tool_response"))
+            if answer:
+                self._record_event(
+                    "AskUserQuestion",
+                    dict(payload, prompt=answer),
+                )
+            return HookResponse()
         git_result = complete_git_posttool(
             payload, self._git_facts(payload), self._update_state)
         if git_result is not None:

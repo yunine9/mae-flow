@@ -53,7 +53,8 @@ def matching_user_event(root, state):
     rows, error = safe_read_json(os.path.join(root, _LEDGER))
     if error or not isinstance(rows, list):
         raise ValueError(
-            "未捕获到本轮 CodeAgent UserPromptSubmit 自然语言输入")
+            "未捕获到本轮 CodeAgent 用户输入"
+            "（UserPromptSubmit 或 AskUserQuestion 回答）")
     state_sha = _state_sha256(root)
     consumed = _consumed_ids(state)
     for row in reversed(rows):
@@ -70,7 +71,8 @@ def matching_user_event(root, state):
                 and bool(prompt.strip())):
             return event_id
     raise ValueError(
-        "当前流程状态没有尚未消费的 CodeAgent UserPromptSubmit 自然语言输入")
+        "当前流程状态没有尚未消费的 CodeAgent 用户输入"
+        "（UserPromptSubmit 或 AskUserQuestion 回答）")
 
 
 def bind_user_event(state, event_id, semantic_event):

@@ -50,7 +50,9 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 ### Spec
 
-Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。主 Agent 先形成候选 Spec，再在呈审前调用 `grill-critic-agent` 做 one read-only pass；它只找歧义、遗漏和隐藏取舍，不编辑 Spec、不替用户决定。主 Agent直接吸收明确修正，CLEAR 直接继续，只有真实待决分支交用户。Spec 默认位于 `.mae-flow-work/<ticket>/spec.md`，用户明确要求保留审计材料时才生成并选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
+Spec 只定义 WHAT：可观察行为、边界、失败语义、兼容性和非目标。Full 必须先完成 Interactive Grill：从需求、行为基线和代码查事实，按状态、边界、并发时序、失败清理、一致性、兼容、规模性能和可观测性展开决策树。每次只用 `advance grill-question --key <GQ-ID> --decision "<证据、影响、推荐答案、父问题>"` 打开一个问题，通过自然对话或 AskUserQuestion 一次问一个；拿到真实回答后执行 `decision grill-answer --key <GQ-ID> "<用户结论的忠实语义摘要>"`。回答出现模糊词、新状态、矛盾或派生场景时继续追问，所有问题关闭且至少有一次真实回答后，把证据、问题树和确认的 WHAT 写入 `.mae-flow-work/<ticket>/grill.md`，再执行 `advance grill-converged`。
+
+质询结果是下游 Spec 生成的关键输入，不是可选审计材料。只有收敛后才能生成 `.mae-flow-work/<ticket>/spec.md`；Spec 必须包含“Grill 决策追溯”，把每个 `GQ-*` 映射到 Spec 章节或可观察验收标准。随后为当前 Grill/Spec 内容版本调用 `grill-critic-agent` one read-only pass；它同时读取两份文件，检查输入覆盖、语义未被弱化、遗漏分支和 WHAT/HOW 混杂，不编辑、不提问、不替用户决定。CLEAR 后记录 capability 事实并执行 `advance grill-clear` 绑定两份文件摘要；任何文件再变化都必须重新复核。只有真实待决分支交用户，回到 Interactive Grill。Spec 最终仍由用户确认。用户明确要求保留时才选择 `docs/specs/requirements/<ticket>/spec.md`。工作流生成的 Markdown 首行使用 `<!-- generated-by: mae-flow -->` 作为来源水印；它不是 Hook、parser 或格式门禁。
 
 ### Design
 
@@ -93,7 +95,7 @@ Quality 或 Delivery 发现问题时，分别绑定用户自然语言
 
 Git Hook 只在提交这一低成本确定性边界校验确认的工作分支、单号和类型；失败只修正当前 Git 命令，不回退阶段，也不触发 Build、UT 或 CodeCheck。
 
-Focused 启动不声明 Spec、Story 或 UT handoff；只有 `upgrade-to-full` 成功时才补入这三条 Full 产物路径。
+Focused 启动不声明 Grill、Spec、Story 或 UT handoff；发现未决需求先用 `upgrade-to-full` 进入 Full Spec，成功后才补入这四条 Full 产物路径并执行 Interactive Grill。
 
 ## Moonlight
 

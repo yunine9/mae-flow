@@ -202,9 +202,9 @@ class CapabilityPreservationTests(unittest.TestCase):
             ("openspec", "OpenSpec 规格符合检查"):
                 "test_review_compares_final_change_for_completeness_correctness_and_coherence",
             ("file:flow/steps/grill.md", "Interactive Grill"):
-                "test_grill_separates_interactive_and_read_only_modes",
+                "test_full_grill_runs_interaction_then_spec_then_read_only_coverage",
             ("role:grill-critic-agent", "Grill critic"):
-                "test_grill_separates_interactive_and_read_only_modes",
+                "test_full_grill_runs_interaction_then_spec_then_read_only_coverage",
         }
         for identity, method in expected.items():
             with self.subTest(identity=identity):
@@ -345,19 +345,47 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("does not duplicate brainstorming", text)
         self.assertNotIn("class or file design", text)
 
-    def test_grill_separates_interactive_and_read_only_modes(self):
+    def test_full_grill_runs_interaction_then_spec_then_read_only_coverage(self):
         text = guidance(self, "grill").lower()
-        self.assertIn("choose exactly one mode", text)
         self.assertIn("interactive grill", text)
         self.assertIn("one question", text)
         self.assertIn("recommended answer", text)
         self.assertIn("read-only critic", text)
         self.assertIn("never asks the user", text)
         self.assertIn("never makes a decision", text)
+        self.assertIn("grill.md", text)
+        self.assertIn("spec.md", text)
+        self.assertIn("key input", text)
+        self.assertIn("traceability", text)
+        self.assertLess(
+            text.index("interactive grill"), text.index("read-only critic"))
         for concern in (
                 "unique meaning", "answers and code facts", "untestable",
                 "what/how mixing"):
             self.assertIn(concern, text)
+
+    def test_spec_phase_and_critic_require_grill_input_coverage(self):
+        phase = read_text(
+            os.path.join(ROOT, "flow", "phases", "spec.md")).lower()
+        critic = read_text(
+            os.path.join(ROOT, "agents", "grill-critic-agent.md")).lower()
+        skill = read_text(
+            os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"))
+
+        for concept in (
+                "interactive grill", "grill.md", "gq-*", "traceability"):
+            self.assertIn(concept, phase)
+        self.assertLess(
+            phase.index("interactive grill"), phase.index("candidate spec"))
+        self.assertLess(
+            phase.index("candidate spec"), phase.index("read-only critic"))
+        for concept in (
+                "grill.md", "spec.md", "input coverage", "traceability"):
+            self.assertIn(concept, critic)
+        for concept in (
+                "grill-question", "grill-answer", "grill-converged",
+                "Grill 决策追溯"):
+            self.assertIn(concept, skill)
 
     def test_focused_tweak_stays_fast_and_upgrades_by_semantic_risk(self):
         text = guidance(self, "construction").lower()

@@ -27,6 +27,8 @@ python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" <com
 2. 完成当前阶段最有价值的工作。调用所选 Grill、Story、Reviewer、CodeCheck、Build、UT 能力时，同一相关上下文至多一次，返回只记观察事实。
 3. 用 `decision <event> "<用户自然语言>"` 或 `advance <event> --decision "<事实或依据>"` 推进。
 
+Full Spec 必须先逐题执行 Interactive Grill，把质询树和确认结果写入本地 `grill.md`；全部收敛后才生成含“Grill 决策追溯”的 `spec.md`，随后调用一次 `grill-critic-agent` 检查两份文件的输入覆盖。质询结果是 Spec 的关键输入，不能用只读 Critic 或 `grill-clear` 替代。Focused 发现未决需求时先升级 Full。
+
 不要要求用户背命令或固定话术。用户直接改文字、边界、设计、CP、质量选择或交付清单时，更新产物并记录其语义决定；`UserPromptSubmit` 或 `AskUserQuestion` 回答只证明本轮有真实用户输入，不要求 CLI 参数逐字复制用户原话。
 
 这些 CLI 是 Agent 内部协议，不要把它们展示成用户必须执行的操作。用户只需

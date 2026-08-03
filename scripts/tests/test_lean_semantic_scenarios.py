@@ -96,13 +96,35 @@ class FullWorkflowScenarioTests(unittest.TestCase):
         self.assertEqual(Phase.SPEC, state.phase)
         self.assertTrue(advance(state, "spec-ready").needs_user)
 
+        question = json.dumps({
+            "parent": "",
+            "evidence": "Current behavior covers only the primary carrier.",
+            "impact": "SUL selection remains ambiguous.",
+            "recommendation": "Select SUL only when it is configured.",
+        }, sort_keys=True, separators=(",", ":"))
+        convergence = json.dumps({
+            "answer_count": 1,
+            "grill_sha256": "a" * 64,
+        }, sort_keys=True, separators=(",", ":"))
+        critic = json.dumps({
+            "grill_sha256": "a" * 64,
+            "input_coverage": "complete",
+            "spec_sha256": "b" * 64,
+        }, sort_keys=True, separators=(",", ":"))
+        state = advance(
+            state, "grill-question", "GQ-001", question).state
+        state = advance(
+            state, "grill-answer", "GQ-001",
+            "用户确认推荐的 SUL 边界。").state
+        state = advance(
+            state, "grill-converged", value=convergence).state
         state = record_flow_attempt(
             state,
             flow_attempt_context(state, CapabilityKind.GRILL),
             "returned",
             "opaque grill return",
         )
-        state = advance(state, "grill-clear").state
+        state = advance(state, "grill-clear", value=critic).state
         state = advance(
             state, "spec-confirmed", value="用户确认 Spec 行为边界。").state
         self.assertEqual(Phase.STORY, state.phase)

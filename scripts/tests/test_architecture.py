@@ -115,6 +115,20 @@ class ArchitectureTests(unittest.TestCase):
                 self.assertIn("禁止猜测或搜索插件安装目录", source)
                 self.assertIn("插件根目录环境变量缺失", source)
 
+    def test_production_spec_does_not_demote_grill_to_post_draft_critic(self):
+        with open(os.path.join(ROOT, "flow", "phases", "spec.md"),
+                  encoding="utf-8") as stream:
+            phase = stream.read()
+        with open(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"),
+                  encoding="utf-8") as stream:
+            skill = stream.read()
+
+        retired = "主 Agent 先形成候选 Spec，再在呈审前调用"
+        self.assertNotIn(retired, phase)
+        self.assertNotIn(retired, skill)
+        self.assertIn("Interactive Grill", phase)
+        self.assertIn("Grill 决策追溯", skill)
+
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
 

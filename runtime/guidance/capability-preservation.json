@@ -482,7 +482,7 @@
       "capability": "Interactive Grill",
       "new_home": "runtime/guidance/grill.md",
       "semantic_tests": [
-        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_grill_separates_interactive_and_read_only_modes",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_full_grill_runs_interaction_then_spec_then_read_only_coverage",
         "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_requirement_branching_observable_what_and_internal_checklist"
       ],
       "status": "preserved"
@@ -526,7 +526,7 @@
       "capability": "Grill critic",
       "new_home": "runtime/guidance/grill.md",
       "semantic_tests": [
-        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_grill_separates_interactive_and_read_only_modes"
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_full_grill_runs_interaction_then_spec_then_read_only_coverage"
       ],
       "status": "thin-replacement"
     },

@@ -42,10 +42,7 @@ class LeanDocumentPathTests(unittest.TestCase):
     def test_requirement_paths_are_grouped_without_creating_them(self):
         with tempfile.TemporaryDirectory() as root:
             paths = DocumentPaths.for_ticket(root, "REQ-42")
-            safe = (
-                "REQ-42-"
-                "4ffce8ccc00b8a32ab7d1d2b3610c96a90062aa0c40a286e21788c1840061d7a"
-            )
+            safe = "REQ-42"
 
             self.assertEqual("REQ-42", paths.ticket)
             self.assertEqual(safe, paths.safe_ticket)
@@ -166,10 +163,7 @@ class LeanDocumentPathTests(unittest.TestCase):
 
     def test_windows_root_uses_windows_separators(self):
         paths = DocumentPaths.for_ticket(r"C:\repo", "REQ-42")
-        safe = (
-            "REQ-42-"
-            "4ffce8ccc00b8a32ab7d1d2b3610c96a90062aa0c40a286e21788c1840061d7a"
-        )
+        safe = "REQ-42"
 
         self.assertEqual(
             "C:\\repo\\.mae-flow-work\\" + safe, paths.local_root)
@@ -197,7 +191,20 @@ class LeanDocumentPathTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     DocumentPaths.for_ticket("root", ticket)
 
-    def test_unsafe_windows_tickets_get_distinct_deterministic_segments(self):
+    def test_normal_tickets_keep_readable_segments(self):
+        expected = (
+            "REQ-42",
+            "REQ20260702112199",
+            "NRPRACH支持SUL模式",
+            "req-42",
+        )
+
+        for ticket in expected:
+            with self.subTest(ticket=ticket):
+                self.assertEqual(
+                    ticket, DocumentPaths.for_ticket("root", ticket).safe_ticket)
+
+    def test_unsafe_windows_tickets_use_reserved_distinct_segments(self):
         tickets = (
             "REQ:42",
             "REQ?42",
@@ -233,7 +240,7 @@ class LeanDocumentPathTests(unittest.TestCase):
             "LPT¹",
             "LPT²",
             "LPT³",
-            "req-42",
+            "_mae-ticket-alias",
         )
         safe_segments = []
         for ticket in tickets:
@@ -242,6 +249,7 @@ class LeanDocumentPathTests(unittest.TestCase):
                 second = DocumentPaths.for_ticket("root", ticket)
                 self.assertEqual(ticket, first.ticket)
                 self.assertEqual(first.safe_ticket, second.safe_ticket)
+                self.assertTrue(first.safe_ticket.startswith("_mae-ticket-"))
                 self.assertEqual(64, len(first.safe_ticket.rsplit("-", 1)[1]))
                 self.assertFalse(first.safe_ticket.endswith((" ", ".")))
                 self.assertFalse(any(
@@ -252,12 +260,10 @@ class LeanDocumentPathTests(unittest.TestCase):
 
         self.assertEqual(len(safe_segments), len(set(safe_segments)))
 
-    def test_encoded_alias_cannot_claim_another_tickets_safe_segment(self):
-        # The old conditional-digest scheme mapped these exact values to the
-        # same Windows segment because the first digest happened to be digits.
+    def test_reserved_namespace_prevents_encoded_alias_collision(self):
         unsafe = DocumentPaths.for_ticket("root", "ALIAS:356")
         encoded_alias = DocumentPaths.for_ticket(
-            "root", "ALIAS-356-513813835430")
+            "root", "_mae-ticket-ALIAS-356-513813835430")
 
         self.assertNotEqual(
             unsafe.safe_ticket.casefold(),
@@ -266,40 +272,30 @@ class LeanDocumentPathTests(unittest.TestCase):
         self.assertTrue(unsafe.safe_ticket.endswith(
             "513813835430fa1547208d99f97267365c088838ee5b0fdb6e28989c762c7df6"
         ))
-        self.assertTrue(encoded_alias.safe_ticket.endswith(
-            "87cadcd7c72a6453e36350b8818d66aff2d0dcbdec372c0d6afa389f3eb4acdc"
-        ))
+        self.assertTrue(encoded_alias.safe_ticket.startswith("_mae-ticket-"))
 
-    def test_unicode_normalization_aliases_keep_distinct_full_digests(self):
+    def test_unicode_normalization_aliases_share_one_readable_segment(self):
         composed = DocumentPaths.for_ticket("root", "É")
         decomposed = DocumentPaths.for_ticket("root", "E\u0301")
 
-        self.assertNotEqual(
-            composed.safe_ticket.casefold(), decomposed.safe_ticket.casefold())
-        self.assertEqual(
-            "É-a755f65d4e5201d92b6f264d1508ea0bec9913dd7b20a96ebde25de3cda84a84",
-            composed.safe_ticket,
-        )
-        self.assertEqual(
-            "É-ef0a931437dd85e4b2e95c16738b76b3175149e1d4b0281ec15e955fa7c41b37",
-            decomposed.safe_ticket,
-        )
+        self.assertEqual("É", composed.safe_ticket)
+        self.assertEqual(composed.safe_ticket, decomposed.safe_ticket)
 
     def test_superscript_device_aliases_are_never_windows_device_names(self):
         expected_prefixes = {
-            "COM¹": "ticket-COM¹-",
-            "COM²": "ticket-COM²-",
-            "COM³": "ticket-COM³-",
-            "LPT¹": "ticket-LPT¹-",
-            "LPT²": "ticket-LPT²-",
-            "LPT³": "ticket-LPT³-",
+            "COM¹": "_mae-ticket-COM¹-",
+            "COM²": "_mae-ticket-COM²-",
+            "COM³": "_mae-ticket-COM³-",
+            "LPT¹": "_mae-ticket-LPT¹-",
+            "LPT²": "_mae-ticket-LPT²-",
+            "LPT³": "_mae-ticket-LPT³-",
         }
         for ticket, prefix in expected_prefixes.items():
             with self.subTest(ticket=ticket):
                 paths = DocumentPaths.for_ticket("root", ticket)
                 self.assertTrue(paths.safe_ticket.startswith(prefix))
 
-    def test_case_aliases_have_distinct_windows_identities(self):
+    def test_case_aliases_share_one_windows_identity(self):
         upper = DocumentPaths.for_ticket("root", "REQ-42")
         lower = DocumentPaths.for_ticket("root", "req-42")
         mixed = DocumentPaths.for_ticket("root", "Req-42")
@@ -309,7 +305,7 @@ class LeanDocumentPathTests(unittest.TestCase):
             lower.safe_ticket.casefold(),
             mixed.safe_ticket.casefold(),
         }
-        self.assertEqual(3, len(identities))
+        self.assertEqual(1, len(identities))
 
     def test_long_ticket_stays_within_windows_component_limit(self):
         original = "REQ-" + ("LONG-" * 80)
@@ -324,6 +320,7 @@ class LeanDocumentPathTests(unittest.TestCase):
             paths.safe_ticket,
             DocumentPaths.for_ticket("root", original).safe_ticket,
         )
+        self.assertTrue(paths.safe_ticket.startswith("_mae-ticket-"))
         self.assertTrue(paths.safe_ticket.endswith(
             hashlib.sha256(original.encode("utf-8")).hexdigest()))
 

@@ -17,6 +17,7 @@ import unicodedata
 
 _INVALID_WINDOWS_CHARACTER = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _DRIVE_PREFIX = re.compile(r"^[A-Za-z]:")
+_ENCODED_TICKET_PREFIX = "_mae-ticket-"
 _RESERVED_WINDOWS_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {"COM%d" % number for number in range(1, 10)}
@@ -76,23 +77,32 @@ def _safe_ticket_segment(ticket):
         safe = "ticket"
 
     reserved = safe.split(".", 1)[0].upper() in _RESERVED_WINDOWS_NAMES
-    if reserved:
-        safe = "ticket-" + safe
+    needs_encoding = (
+        candidate != original
+        or safe != normalized
+        or reserved
+        or safe.casefold().startswith(
+            _ENCODED_TICKET_PREFIX.casefold())
+        or len(safe.encode("utf-16-le")) // 2 > 255
+    )
+    if not needs_encoding:
+        return safe
 
-    # Every accepted ticket carries its complete exact-input digest.  Applying
-    # this uniformly prevents an already-safe ticket from impersonating the
-    # encoded spelling of a ticket that needed sanitization, and prevents NTFS
-    # case folding or Unicode normalization from merging business identities.
+    # Exceptional identifiers live in a reserved namespace.  Ordinary ticket
+    # names therefore remain readable without being able to impersonate an
+    # encoded Windows-safe spelling.  Keep the full digest only on this rare
+    # path so distinct invalid spellings never silently merge.
     suffix = "-" + _ticket_digest(original)
+    prefix = _ENCODED_TICKET_PREFIX
 
     # A Windows component is limited to 255 UTF-16 code units.  Trim only the
     # readable prefix; the complete digest always survives.  Removing one
     # Python code point at a time avoids splitting a surrogate pair.
-    available = 255 - len(suffix.encode("utf-16-le")) // 2
+    available = 255 - len((prefix + suffix).encode("utf-16-le")) // 2
     while safe and len(safe.encode("utf-16-le")) // 2 > available:
         safe = safe[:-1]
     safe = safe.rstrip(" .-") or "ticket"
-    return safe + suffix
+    return prefix + safe + suffix
 
 
 def _root_text(root):

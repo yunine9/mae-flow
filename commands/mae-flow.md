@@ -2,9 +2,19 @@
 
 使用 Mae-Flow 时全程用简体中文，并先读取 `skills/mae-flow/SKILL.md`。
 
+## CLI 入口
+
+所有 Mae-Flow CLI 调用都必须使用：
+
+```text
+python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" <command>
+```
+
+下文省略入口的命令名只是协议后缀，不能脱离上述入口直接执行。禁止猜测或搜索插件安装目录；禁止使用旧式 skill 目录、版本化缓存路径或 `find` 定位入口。两个插件根变量都不可用时，报告“插件根目录环境变量缺失”并停止，不执行目录扫描。
+
 ## 分流
 
-- 无参数或需求描述：已有 `.mae-flow.json` 就执行 `python "<插件>/scripts/mae-flow.py" current`；没有状态时，读取仓库预设和相关领域基线，向用户展示唯一一次完整配置卡。Build 必须按项目确认精确路由：C++ 可用配置的 `build-fix` Skill，Java/Maven 用确认的 Maven 命令，其他语言用仓库准确 Skill/命令。用户自然语言确认或修改后，一次执行 `start --ticket <单号> --ticket-type <feat|fix> --worker <工号> --requirement <需求来源> --base-branch <基线> --working-branch <工作分支> --build-method <精确Build路由> --ut-method <UT生成> --ut-command <UT入口> --quality-plan <自然语言质量组合> --path <full|focused> --pace <continuous|staged> --decision "<用户对完整配置卡的自然语言确认>"`；该命令创建/切换到确认的工作分支，原子记录 Startup 确认并进入下一阶段，不再重复询问。
+- 无参数或需求描述：已有 `.mae-flow.json` 就执行 `python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" current`；没有状态时，读取仓库预设和相关领域基线，向用户展示唯一一次完整配置卡。Build 必须按项目确认精确路由：C++ 可用配置的 `build-fix` Skill，Java/Maven 用确认的 Maven 命令，其他语言用仓库准确 Skill/命令。用户自然语言确认或修改后，一次执行 `start --ticket <单号> --ticket-type <feat|fix> --worker <工号> --requirement <需求来源> --base-branch <基线> --working-branch <工作分支> --build-method <精确Build路由> --ut-method <UT生成> --ut-command <UT入口> --quality-plan <自然语言质量组合> --path <full|focused> --pace <continuous|staged> --decision "<用户对完整配置卡的自然语言确认>"`；该命令创建/切换到确认的工作分支，原子记录 Startup 确认并进入下一阶段，不再重复询问。
 - `exit`：立即执行 `exit --reason "用户选择直接开发"`。不再追问，不回滚业务文件。
 - `ut|codecheck|grill|story|chain`：执行同名 one-shot toolbox 命令；不启动完整流程，不提交，不推送。
 - `moonlight` / 月光宝盒：仍选择 Full 或 Focused，在 `start` 加 `--moonlight`。只有用户明确授权的 exact business files 才能附带 `--business-file`、`--allow-commit`、`--allow-push`。

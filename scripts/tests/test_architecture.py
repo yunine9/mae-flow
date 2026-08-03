@@ -100,6 +100,21 @@ class ArchitectureTests(unittest.TestCase):
                 self.assertLessEqual(
                     line_count(os.path.join(ROOT, relative)), maximum)
 
+    def test_production_prompts_use_host_plugin_root_for_cli(self):
+        launcher = (
+            'python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}'
+            '/scripts/mae-flow.py"'
+        )
+        for relative in ("commands/mae-flow.md", "skills/mae-flow/SKILL.md"):
+            with open(os.path.join(ROOT, relative), encoding="utf-8") as stream:
+                source = stream.read()
+            with self.subTest(relative=relative):
+                self.assertIn(launcher, source)
+                self.assertNotIn('python "<插件', source)
+                self.assertNotIn(".cac/skills/mae-flow", source)
+                self.assertIn("禁止猜测或搜索插件安装目录", source)
+                self.assertIn("插件根目录环境变量缺失", source)
+
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
 

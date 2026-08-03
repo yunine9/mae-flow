@@ -36,9 +36,9 @@ python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" curr
 双引号必须保留，使含空格的 Windows 路径能够作为单个参数传给 Python。
 
 `CODEAGENT3_PLUGIN_ROOT` 是主合同；只有它为空或未设置时才读取
-`CLAUDE_PLUGIN_ROOT`。提示必须明确禁止以下恢复行为：
+`CLAUDE_PLUGIN_ROOT`。提示必须明确禁止以下恢复行为，同时不再暴露具体旧路径作为候选：
 
-- 猜测 `.cac/skills/mae-flow`；
+- 猜测旧式 skill 安装目录；
 - 硬编码 `.cac/plugins/cache/.../<version>`；
 - 使用 `find`、递归扫描或在 marketplace/cache 多副本之间自行选择。
 

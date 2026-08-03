@@ -11,22 +11,24 @@ Mae-Flow 只管理交付语义和恢复游标，专业能力由配置的 Skill/A
 
 ## 入口
 
-插件命令统一用 Windows 可用的 `python`：
+插件命令统一用 Windows 可用的 `python`，并通过宿主提供的插件根目录变量定位：
 
 ```text
-python "<插件目录>/scripts/mae-flow.py" current
+python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" current
 ```
+
+所有后续 CLI 调用都必须沿用同一入口前缀。下文省略入口的命令名只是协议后缀，不能脱离该前缀直接执行。禁止猜测或搜索插件安装目录；禁止使用旧式 skill 目录、版本化缓存路径或 `find` 定位入口。两个插件根变量都不可用时，报告“插件根目录环境变量缺失”并停止，不执行目录扫描。
 
 已有状态先 `current`。新需求由用户确认推荐路线后启动：
 
 ```text
-python "<插件目录>/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>" --decision "<用户对完整配置卡的自然语言确认>"
+python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>" --decision "<用户对完整配置卡的自然语言确认>"
 ```
 
 用户可直接用自然语言改方案。把决定一次写入并推进；命令中的文字可以是忠实的语义摘要，不必逐字复制用户原话，例如：
 
 ```text
-python "<插件目录>/scripts/mae-flow.py" decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"
+python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" decision startup-confirmed "用户选择 Focused，因为问题已定位且没有跨模块风险。"
 ```
 
 机器事实或普通阶段事件用 `advance`。遇到用户明确退出，立即执行 `exit --reason "<自然语言>"`；退出不回滚业务文件，也不要求再次确认。

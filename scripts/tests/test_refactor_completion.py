@@ -140,7 +140,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertEqual(
             0, contract["final_targets"]["private_monolith_test_imports"])
         self.assertEqual(
-            78,
+            79,
             contract["final_targets"]["production_reachable_python_files"],
         )
         self.assertEqual(
@@ -198,20 +198,20 @@ class RefactorCompletionContractTests(unittest.TestCase):
 
     def test_contract_rejects_baseline_and_actual_both_above_reachability_cap(self):
         root = self._write_reachability_fixture(
-            ["module_%02d" % index for index in range(78)],
-            ["module_%02d" % index for index in range(78)],
+            ["module_%02d" % index for index in range(79)],
+            ["module_%02d" % index for index in range(79)],
         )
         contract = load_contract(os.path.join(
             TESTS, "refactor_completion_contract.json"))
         errors = validate_contract(root, contract)
         self.assertIn(
-            "production reachability baseline count 79 does not match "
-            "contract target 78",
+            "production reachability baseline count 80 does not match "
+            "contract target 79",
             errors,
         )
         self.assertIn(
-            "production reachability actual count 79 does not match "
-            "contract target 78",
+            "production reachability actual count 80 does not match "
+            "contract target 79",
             errors,
         )
 

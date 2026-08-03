@@ -182,8 +182,6 @@ def apply_grill_event(state, request):
     if (not _valid_digest(receipt["grill_sha256"])
             or not _valid_digest(receipt["spec_sha256"])):
         return state, False, "Grill critic receipt digest is invalid."
-    if receipt["grill_sha256"] != status.convergence.get("grill_sha256"):
-        return state, False, "Grill critic digest does not match convergence."
     if receipt["input_coverage"] != "complete":
         return state, False, "Grill critic input coverage is not complete."
     reviewed = replace(
@@ -205,9 +203,12 @@ def grill_confirmation_gap(state):
         return "Interactive Grill needs at least one answered question."
     if not status.convergence:
         return "Interactive Grill has not converged."
+    attempted = any(
+        key == "review.grill.attempted" for key, unused in state.decisions)
     if not status.critic:
+        if attempted:
+            return ""
         return "The Grill critic has not confirmed input coverage."
     if status.critic.get("input_coverage") != "complete":
         return "The Grill critic input coverage is incomplete."
     return ""
-

@@ -686,7 +686,7 @@ class LeanCliTests(unittest.TestCase):
             "advance capability-returned --key grill --decision",
             startup.stdout,
         )
-        self.assertIn("advance grill-clear", startup.stdout)
+        self.assertNotIn("advance grill-clear", startup.stdout)
         self.write_grill_preparation("REQ-42")
 
         artifact_paths = {
@@ -714,8 +714,15 @@ class LeanCliTests(unittest.TestCase):
             "--key", "GQ-001"))
         self.assert_success(self.run_cli_raw(
             "advance", "grill-converged"))
-        self.assert_success(self.run_capability("grill"))
-        self.assert_success(self.run_cli_raw("advance", "grill-clear"))
+        criticized = self.run_capability("grill")
+        self.assert_success(criticized)
+        self.assertTrue(any(
+            item["key"] == "review.grill"
+            for item in self.state()["decisions"]))
+        self.assertNotIn(
+            "advance capability-returned --key grill", criticized.stdout)
+        with open(artifact_paths["spec"], "a", encoding="utf-8") as stream:
+            stream.write("\nAccepted Critic correction shown to the user.\n")
         spec = self.run_cli(
             "decision", "spec-confirmed", "可观察行为和范围已确认。")
         self.assert_success(spec)
@@ -725,14 +732,18 @@ class LeanCliTests(unittest.TestCase):
         story_source = "# Story\n\nReviewed implementation design.\n"
         with open(artifact_paths["story"], "w", encoding="utf-8") as stream:
             stream.write(story_source)
-        self.assert_success(self.run_capability("reviewer"))
-        self.assert_success(self.run_cli(
-            "decision", "design-review-approved", "设计检视无待裁决项。"))
+        reviewed = self.run_capability("reviewer")
+        self.assert_success(reviewed)
         review_receipt = next(
             item["value"] for item in self.state()["decisions"]
             if item["key"] == "review.design")
         self.assertRegex(
             json.loads(review_receipt)["story_sha256"], r"^[0-9a-f]{64}$")
+        self.assertNotIn(
+            "advance capability-returned --key reviewer",
+            reviewed.stdout,
+        )
+        self.assertIn("禁止重复调用", reviewed.stdout)
         with open(artifact_paths["story"], "a", encoding="utf-8") as stream:
             stream.write("\nAccepted reviewer correction shown to the user.\n")
         changed_story = self.run_cli(
@@ -790,6 +801,37 @@ class LeanCliTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(story_paths))
         self.assertIn(".mae-flow-work", story_paths[0].replace("\\", "/"))
+
+    def test_reviewer_capability_atomically_records_cp_and_quality_conclusions(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-ATOMIC-REVIEW", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "按聚焦流程继续。"))
+
+        cp_review = self.run_capability("reviewer")
+        self.assert_success(cp_review)
+        self.assertTrue(any(
+            item["key"] == "construction.cp.CP1.review"
+            for item in self.state()["decisions"]))
+        self.assertIn("禁止重复调用", cp_review.stdout)
+
+        state = self.state()
+        state["phase"] = "quality"
+        state["decisions"].append({
+            "key": "quality.integration.required",
+            "value": "shared state: SUL mapping cache",
+        })
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        integration = self.run_capability("reviewer")
+        self.assert_success(integration)
+        self.assertTrue(any(
+            item["key"] == "quality.integration.review"
+            for item in self.state()["decisions"]))
+        self.assertIn("禁止重复调用", integration.stdout)
 
     def test_unknown_or_wrong_phase_mutations_return_nonzero(self):
         self.assert_success(self.run_cli_raw(
@@ -876,12 +918,21 @@ class LeanCliTests(unittest.TestCase):
 
         with open(artifacts["spec"], "a", encoding="utf-8") as stream:
             stream.write("changed after criticism\n")
-        rejected = self.run_cli(
+        confirmed = self.run_cli(
             "decision", "spec-confirmed", "用户确认 Spec。")
 
-        self.assertEqual(2, rejected.returncode)
-        self.assertIn("Spec 在 Critic 后发生变化", rejected.stderr)
-        self.assertEqual("spec", self.state()["phase"])
+        self.assert_success(confirmed)
+        state = self.state()
+        self.assertEqual("story", state["phase"])
+        receipt = json.loads(dict(
+            (item["key"], item["value"])
+            for item in state["decisions"])["spec.confirmation"])
+        self.assertNotEqual(
+            receipt["critic_spec_sha256"], receipt["spec_sha256"])
+        with open(artifacts["spec"], "rb") as stream:
+            self.assertEqual(
+                hashlib.sha256(stream.read()).hexdigest(),
+                receipt["spec_sha256"])
 
     def test_focused_stops_at_startup_and_delivery_and_can_upgrade_semantically(self):
         self.assert_success(self.run_cli(
@@ -1037,6 +1088,13 @@ class LeanCliTests(unittest.TestCase):
         with open(os.path.join(self.root, ".mae-flow.json"),
                   "w", encoding="utf-8") as stream:
             json.dump(state, stream, ensure_ascii=False)
+        story_path = next(
+            os.path.join(self.root, *item["path"].split("/"))
+            for item in state["artifacts"] if item["kind"] == "story")
+        os.makedirs(os.path.dirname(story_path), exist_ok=True)
+        with open(story_path, "w", encoding="utf-8") as stream:
+            stream.write("# Story\n\n设计内容。\n")
+        self.assert_success(self.run_capability("story"))
         self.assert_success(self.run_capability("reviewer"))
 
         state = self.state()
@@ -1054,7 +1112,8 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(
             ["reviewer:design", "reviewer:cp:CP2"],
             [item["source_revision"]
-             for item in self.state()["capabilities"]],
+             for item in self.state()["capabilities"]
+             if item["kind"] == "reviewer"],
         )
 
     def test_nonreturned_capability_is_visible_as_risk_until_a_returned_retry(self):

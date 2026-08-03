@@ -115,23 +115,13 @@ def prepare_grill_request(root, state, request):
 
 
 def validate_spec_confirmation(root, state):
-    """Return a stable diagnostic when reviewed artifact bytes changed."""
+    """Require one Critic attempt without turning file digests into a loop."""
     status = grill_status(state)
-    critic = status.critic
-    if not critic:
+    attempted = any(
+        key == "review.grill.attempted" for key, unused in state.decisions)
+    if not status.critic and not attempted:
         return "Grill Critic 尚未形成可验证的覆盖结论。"
-    try:
-        grill_sha = _file_sha256(
-            _artifact_path(root, state, "grill"), "grill.md")
-        spec_sha = _file_sha256(
-            _artifact_path(root, state, "spec"), "spec.md")
-    except ValueError as exc:
-        return str(exc)
-    if grill_sha != critic.get("grill_sha256"):
-        return "Grill 结果在 Critic 后发生变化，必须重新收敛并复核。"
-    if spec_sha != critic.get("spec_sha256"):
-        return "Spec 在 Critic 后发生变化，必须重新复核。"
-    if critic.get("input_coverage") != "complete":
+    if status.critic and status.critic.get("input_coverage") != "complete":
         return "Grill 到 Spec 的输入覆盖尚未完成。"
     return ""
 
@@ -151,6 +141,13 @@ def _latest_design_review(state):
     return {}
 
 
+def _latest_spec_review(state):
+    for key, value in reversed(state.decisions):
+        if key in {"review.grill", "review.grill.attempted"}:
+            return key, _object(value)
+    return "", {}
+
+
 def _has_current_story_attempt(state):
     context = flow_attempt_context(state, "story")
     return any(
@@ -162,8 +159,30 @@ def _has_current_story_attempt(state):
 
 
 def prepare_phase_request(root, state, request):
-    """Attach or validate the exact Story bytes at Design review."""
+    """Bind final user confirmations without forcing review loops."""
     kind = request.kind.strip().lower()
+    if kind == "spec-confirmed" and state.phase == Phase.SPEC:
+        review_key, review = _latest_spec_review(state)
+        if not review_key:
+            raise ValueError(
+                "当前 Spec 缺少 Grill Critic 调用收据；"
+                "请先完成本阶段唯一一次 Critic 调用")
+        return AdvanceRequest(
+            request.kind,
+            request.decision_key,
+            _compact({
+                "critic_grill_sha256": review.get("grill_sha256", ""),
+                "critic_spec_sha256": review.get("spec_sha256", ""),
+                "critic_status": (
+                    "returned" if review_key == "review.grill"
+                    else "attempted"),
+                "grill_sha256": _file_sha256(
+                    _artifact_path(root, state, "grill"), "grill.md"),
+                "spec_sha256": _file_sha256(
+                    _artifact_path(root, state, "spec"), "spec.md"),
+                "summary": request.decision_value.strip(),
+            }),
+        )
     if kind not in _DESIGN_REVIEW_EVENTS | {"story-confirmed"}:
         return request
     if state.phase != Phase.STORY:

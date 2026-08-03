@@ -35,6 +35,8 @@ from mae_flow_core.state_store import (
 from .lean_manifest import (
     git_head_revision, place_startup_branch, prepare_manifest_state)
 from . import grill_receipts
+from .capability_closure import (
+    close_capability_result, closure_already_recorded)
 from .lean_startup import build_startup_state, configure_startup
 from .lean_lightcheck import run_exact_lightcheck
 from .user_events import (
@@ -256,7 +258,8 @@ def _advance_state(root, state, request):
         result = apply_moonlight_policy(state, request)
     else:
         result = advance_flow(state, request)
-    advanced = result.state
+    advanced = close_capability_result(
+        root, state, result.state, request)
     if (
             state.path == DeliveryPath.FOCUSED
             and advanced.path == DeliveryPath.FULL):
@@ -327,6 +330,7 @@ def cmd_lean_advance(root, args):
         normalized = request.kind.strip().lower()
         harmless_noops = (
             normalized in {"capability-success", "cp-progress"}
+            or closure_already_recorded(current, normalized)
             or (normalized == "reviewer-clear"
                 and current.phase == Phase.QUALITY)
         )
@@ -400,7 +404,8 @@ def cmd_lean_decision(root, args):
                 updated, reason = _advance_state(root, state, request)
                 if normalized_event == "grill-answer" and updated == state:
                     raise ValueError(reason)
-        if updated == state:
+        if (updated == state
+                and not closure_already_recorded(state, normalized_event)):
             raise ValueError(reason)
         if event_id:
             updated = _bind_user_event(updated, event_id, args.event.strip())

@@ -116,7 +116,7 @@ class LeanGrillReceiptTests(unittest.TestCase):
         self.assertEqual(
             self.digest(self.paths.local_spec), receipt["spec_sha256"])
 
-    def test_confirmation_detects_grill_or_spec_mutation_after_criticism(self):
+    def test_confirmation_binds_current_files_without_restarting_critic(self):
         convergence = prepare_grill_request(
             self.root, self.state, AdvanceRequest("grill-converged"))
         state = advance_flow(self.state, convergence).state
@@ -131,13 +131,24 @@ class LeanGrillReceiptTests(unittest.TestCase):
 
         self.assertEqual("", validate_spec_confirmation(self.root, state))
         self.write(self.paths.local_spec, "# Spec\n\nchanged\n")
-        self.assertIn(
-            "Spec", validate_spec_confirmation(self.root, state))
-
-        self.write(self.paths.local_spec, "# Spec\n\nGQ-001 -> AC-001\n")
         self.write(self.paths.local_grill, "# Grill\n\nchanged\n")
-        self.assertIn(
-            "Grill", validate_spec_confirmation(self.root, state))
+        self.assertEqual("", validate_spec_confirmation(self.root, state))
+
+        prepared = prepare_phase_request(
+            self.root,
+            state,
+            AdvanceRequest(
+                "spec-confirmed",
+                decision_value="用户确认修正后的最终 Grill 和 Spec。",
+            ),
+        )
+        receipt = json.loads(prepared.decision_value)
+        self.assertEqual(
+            self.digest(self.paths.local_grill), receipt["grill_sha256"])
+        self.assertEqual(
+            self.digest(self.paths.local_spec), receipt["spec_sha256"])
+        self.assertEqual(
+            "用户确认修正后的最终 Grill 和 Spec。", receipt["summary"])
 
     def test_missing_or_empty_artifact_is_rejected(self):
         os.remove(self.paths.local_grill)

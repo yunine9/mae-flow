@@ -74,7 +74,6 @@ _PHASE_CAPABILITIES = {
         ("CodeCheck", "codecheck"),
         ("正式 UT", "ut"),
         ("条件触发的集成边界检视", "reviewer"),
-        ("失效后经用户确认的补充构建", "build"),
     ),
 }
 _CAPABILITY_OUTCOMES = (
@@ -118,19 +117,30 @@ def render_capability_commands(state):
             state.path == DeliveryPath.FOCUSED
             and state.phase in {Phase.SPEC, Phase.STORY}):
         capabilities = ()
+    if state.phase == Phase.QUALITY and not any(
+            key == "quality.integration.required"
+            for key, unused in state.decisions):
+        capabilities = tuple(
+            item for item in capabilities if item[1] != "reviewer")
     if not capabilities:
         return ""
     lines = ["能力事实记录命令（真实调用结束后只执行匹配结果的一条）:"]
     for label, kind in capabilities:
+        context = flow_attempt_context(state, kind)
+        attempted = any(
+            attempt.kind == context.kind.value
+            and attempt.source_revision == context.source_revision
+            and attempt.environment_revision == context.environment_revision
+            for attempt in state.capabilities)
+        option = flow_retry_options(state, kind)
+        if attempted and not option.allowed:
+            lines.append(
+                "%s：当前语义位置已记录一次，禁止重复调用。" % label)
+            continue
         lines.append("%s（能力 key: %s）:" % (label, kind))
         lines.extend(
             capability_record_command(kind, outcome)
             for outcome in _CAPABILITY_OUTCOMES)
-    if state.phase == Phase.SPEC:
-        lines.extend((
-            "Grill Critic 正常返回并记录后，继续执行:",
-            'python ".mae-flow-work/bin/mae-flow.py" advance grill-clear',
-        ))
     return "\n".join(lines)
 
 
@@ -452,7 +462,7 @@ def render_user_card(state):
                 following.name, following.brief or "未记录"))
         lines.append(
             "请直接用自然语言确认，或说明需要调整的代码/后续设计；"
-            "调整完成并重新检视前不会提交。")
+            "调整决定会直接授权一次必要的重新构建，不会重跑本 CP Reviewer。")
         return "\n".join(lines)
     if (
             state.phase == Phase.DELIVERY

@@ -44,7 +44,7 @@
       "critical": true,
       "classification": "preserved behavior",
       "legacy_behavior": "Full specification required iterative questioning with genuine answers, follow-up convergence, and complete critic coverage instead of a synthetic clear verdict.",
-      "lean_behavior": "The Grill session allows one open question, requires at least one real answer, invalidates stale convergence, and blocks Spec until matching critic coverage exists.",
+      "lean_behavior": "The Grill session allows one open question, requires at least one real answer and explicit convergence, then requires exactly one critic attempt; ordinary document edits do not create a critic retry loop.",
       "tests": [
         "scripts/tests/test_lean_grill_session.py:LeanGrillSessionTests.test_convergence_requires_one_answer_and_no_open_question",
         "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_grill_clear_cannot_replace_interactive_questioning"
@@ -56,7 +56,7 @@
       "critical": true,
       "classification": "preserved behavior",
       "legacy_behavior": "The final specification was derived from the questioned requirement and retained a verifiable link to the converged Grill result and critic input.",
-      "lean_behavior": "Digest receipts bind Grill answers, the Grill artifact, Spec bytes, and critic coverage so later mutation invalidates confirmation.",
+      "lean_behavior": "Digest receipts retain Grill, Spec, and critic versions for audit, while the final user confirmation binds the current documents without bouncing the workflow back for ordinary edits.",
       "tests": [
         "scripts/tests/test_lean_grill_receipts.py:LeanGrillReceiptTests.test_critic_receipt_binds_grill_spec_and_complete_coverage",
         "scripts/tests/test_lean_cli.py:LeanCliTests.test_full_spec_cli_binds_grill_and_spec_bytes"

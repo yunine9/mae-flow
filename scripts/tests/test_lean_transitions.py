@@ -21,6 +21,7 @@ from mae_flow_core.orchestration import (  # noqa: E402
     FlowState,
     Phase,
     advance_flow,
+    flow_retry_options,
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
@@ -238,6 +239,27 @@ class FullTransitionTests(unittest.TestCase):
              "用户要求调整 CP1 的异常分支。"),
             revised.state.decisions,
         )
+
+    def test_checkpoint_revision_reuses_user_decision_for_one_build_retry_only(self):
+        state = replace(
+            flow(phase=Phase.CONSTRUCTION),
+            current_cp="CP1",
+            capabilities=(
+                CapabilityAttempt(
+                    "reviewer", "reviewer:cp:CP1", "lean-workflow-v1",
+                    "returned"),
+                CapabilityAttempt(
+                    "build", "build:construction:CP1", "lean-workflow-v1",
+                    "returned"),
+            ),
+            decisions=(("construction.cp.CP1.ready", "true"),),
+        )
+
+        revised = advance_flow(state, AdvanceRequest(
+            "cp-revise", decision_value="用户要求调整 CP1 的异常分支。"))
+
+        self.assertTrue(flow_retry_options(revised.state, "build").allowed)
+        self.assertFalse(flow_retry_options(revised.state, "reviewer").allowed)
 
     def test_delivery_defect_repair_returns_to_construction(self):
         state = replace(
@@ -506,7 +528,7 @@ class FullTransitionTests(unittest.TestCase):
                     key == review_key
                     for key, unused in recorded.state.decisions))
 
-    def test_failed_grill_critic_attempt_remains_visible_and_blocks_spec(self):
+    def test_failed_grill_critic_attempt_is_visible_without_forcing_retry(self):
         state = replace(
             with_converged_grill(flow(phase=Phase.SPEC)),
             capabilities=(CapabilityAttempt(
@@ -530,8 +552,11 @@ class FullTransitionTests(unittest.TestCase):
         self.assertTrue(any(
             key == "review.grill.attempted"
             for key, unused in failed.state.decisions))
-        self.assertEqual(Phase.SPEC, confirmation.state.phase)
-        self.assertIn("critic", confirmation.reason.lower())
+        self.assertEqual(Phase.STORY, confirmation.state.phase)
+        self.assertIn((
+            "spec.confirmation",
+            "用户看到 Grill 超时事实后确认 Spec。",
+        ), confirmation.state.decisions)
 
     def test_confirmation_fact_key_cannot_be_overridden_by_request(self):
         result = advance_flow(flow(), AdvanceRequest(

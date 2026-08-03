@@ -211,7 +211,7 @@ def main(argv=None):
     try:
         payload = read_input()
         _chdir_root(payload)
-        if normalized == "sessionstart":
+        if normalized in {"sessionstart", "userprompt", "userpromptsubmit"}:
             _install_project_launcher()
         response = _lean_adapter().handle(event, payload)
         if response.stdout:

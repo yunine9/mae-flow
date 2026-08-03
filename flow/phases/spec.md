@@ -39,16 +39,14 @@ decision 命令上附同一组元数据，原子补登记并消费答案。每�
 
 随后为当前 Grill/Spec 内容调用一次 `grill-critic-agent`。它只读检查输入覆盖、
 决定是否被弱化、术语一致性、可验收性和 WHAT/HOW 混杂；不编辑文件、不替用户
-决定。正常返回后立即执行：
+决定。调用前只看本次 `current` 的动态能力区：仍列出 Grill Critic 命令时调用一次，
+真实返回后只执行匹配结果的一条命令；已显示“当前语义位置已记录一次”时直接继续，
+禁止再次调用。该命令会原子记录调用事实和当前 Grill/Spec 检视收据，不存在第二条
+收尾命令。
 
-`python ".mae-flow-work/bin/mae-flow.py" advance capability-returned --key grill --decision "<简短不透明摘要>"`
-
-随后执行：
-
-`python ".mae-flow-work/bin/mae-flow.py" advance grill-clear`
-
-启动失败、超时或未观察到返回时，使用本次 `current` 同屏列出的 `grill` 精确失败
-命令，只记录事实且不重跑 Critic。文件变化后必须重新检查。
+启动失败、超时或未观察到返回时，同样只执行动态能力区匹配结果的一条命令，不重跑
+Critic。Critic 后的普通内容修正不会使其重新运行；最终由用户确认当前 Grill/Spec，
+文件摘要只记录版本，不作为回退门禁。
 
 ## 何时询问用户
 
@@ -62,4 +60,4 @@ decision 命令上附同一组元数据，原子补登记并消费答案。每�
 
 ## 下一步
 
-确认收据未变化后进入详细设计。
+用户确认当前最终 Spec 后进入详细设计。

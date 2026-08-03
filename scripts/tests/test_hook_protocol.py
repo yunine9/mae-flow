@@ -104,6 +104,37 @@ class HookProtocolTests(unittest.TestCase):
                 text=True, encoding="utf-8", capture_output=True, check=True)
             self.assertEqual("launcher:current", executed.stdout.strip())
 
+    def test_userprompt_refreshes_project_launcher_after_plugin_update(self):
+        with tempfile.TemporaryDirectory() as root:
+            plugin = os.path.join(root, "updated plugin")
+            project = os.path.join(root, "project")
+            os.makedirs(os.path.join(plugin, "scripts"))
+            os.makedirs(project)
+            with open(os.path.join(plugin, "scripts", "mae-flow.py"), "w",
+                      encoding="utf-8") as stream:
+                stream.write("print('updated-plugin')\n")
+            payload = {"cwd": project, "prompt": "继续"}
+            previous = os.getcwd()
+            try:
+                with mock.patch.dict(
+                        os.environ,
+                        {"CODEAGENT3_PLUGIN_ROOT": plugin}, clear=False):
+                    with mock.patch.object(
+                            self.dispatch, "read_input", return_value=payload):
+                        with mock.patch.object(self.dispatch, "_arm_watchdog"):
+                            with self.assertRaises(SystemExit) as caught:
+                                self.dispatch.main(
+                                    ["dispatch.py", "userprompt"])
+            finally:
+                os.chdir(previous)
+            self.assertEqual(0, caught.exception.code)
+            launcher = os.path.join(
+                project, ".mae-flow-work", "bin", "mae-flow.py")
+            executed = subprocess.run(
+                [sys.executable, launcher], cwd=project,
+                text=True, encoding="utf-8", capture_output=True, check=True)
+            self.assertEqual("updated-plugin", executed.stdout.strip())
+
     def test_real_registration_dispatch_blocks_cross_platform_writers(self):
         with open(HOOKS_CONFIG, encoding="utf-8") as stream:
             config = json.load(stream)["hooks"]

@@ -20,6 +20,7 @@
     "scripts/mae_flow_core/application/hooks/lean_events.py",
     "scripts/mae_flow_core/application/hooks/models.py",
     "scripts/mae_flow_core/cli_commands/__init__.py",
+    "scripts/mae_flow_core/cli_commands/capability_closure.py",
     "scripts/mae_flow_core/cli_commands/chain_workflow.py",
     "scripts/mae_flow_core/cli_commands/grill_receipts.py",
     "scripts/mae_flow_core/cli_commands/lean_lightcheck.py",

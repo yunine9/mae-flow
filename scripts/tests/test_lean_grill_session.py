@@ -156,7 +156,7 @@ class LeanGrillSessionTests(unittest.TestCase):
         self.assertEqual(
             "a" * 64, grill_status(converged).convergence["grill_sha256"])
 
-    def test_critic_requires_convergence_and_matching_complete_coverage(self):
+    def test_critic_requires_convergence_and_complete_coverage(self):
         answered = self.answered()
         unchanged, unused, reason = self.apply(
             answered, "grill-clear", value=CRITIC)
@@ -170,16 +170,13 @@ class LeanGrillSessionTests(unittest.TestCase):
             "input_coverage": "complete",
             "spec_sha256": "b" * 64,
         })
-        unchanged, unused, reason = self.apply(
-            converged, "grill-clear", value=mismatch)
-        self.assertEqual(converged, unchanged)
-        self.assertIn("digest", reason.lower())
-
         reviewed, needs_user, unused = self.apply(
-            converged, "grill-clear", value=CRITIC)
+            converged, "grill-clear", value=mismatch)
         self.assertFalse(needs_user)
         self.assertEqual(
             "complete", grill_status(reviewed).critic["input_coverage"])
+        self.assertEqual(
+            "c" * 64, grill_status(reviewed).critic["grill_sha256"])
         self.assertEqual("", grill_confirmation_gap(reviewed))
 
     def test_new_question_invalidates_convergence_and_critic(self):

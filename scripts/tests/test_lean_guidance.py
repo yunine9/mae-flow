@@ -166,7 +166,7 @@ class LeanGuidanceTests(unittest.TestCase):
             Phase.SPEC: ("grill",),
             Phase.STORY: ("story", "reviewer"),
             Phase.CONSTRUCTION: ("reviewer", "build"),
-            Phase.QUALITY: ("codecheck", "ut", "reviewer", "build"),
+            Phase.QUALITY: ("codecheck", "ut"),
         }
         outcomes = (
             "returned", "failed-to-start", "timed-out", "not-observed")
@@ -183,6 +183,35 @@ class LeanGuidanceTests(unittest.TestCase):
                         )
                 self.assertNotIn("capability-<outcome>", guidance)
                 self.assertNotIn("--key <kind>", guidance)
+
+    def test_completed_capability_is_not_rendered_as_an_action_again(self):
+        from mae_flow_core.orchestration.models import CapabilityAttempt
+
+        state = replace(
+            state_for(Phase.STORY),
+            capabilities=(CapabilityAttempt(
+                "reviewer", "reviewer:design", "lean-workflow-v1",
+                "returned", "设计检视完成"),),
+        )
+
+        text = render_guidance(state)
+
+        self.assertNotIn(
+            "advance capability-returned --key reviewer", text)
+        self.assertIn("设计检视：当前语义位置已记录一次，禁止重复调用", text)
+
+    def test_quality_reviewer_command_only_appears_for_integration_risk(self):
+        ordinary = render_guidance(state_for(Phase.QUALITY))
+        required = render_guidance(replace(
+            state_for(Phase.QUALITY),
+            decisions=((
+                "quality.integration.required",
+                "shared state: SUL mapping cache",
+            ),),
+        ))
+
+        self.assertNotIn("--key reviewer", ordinary)
+        self.assertIn("--key reviewer", required)
 
     def test_construction_plans_testability_without_running_formal_ut(self):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))

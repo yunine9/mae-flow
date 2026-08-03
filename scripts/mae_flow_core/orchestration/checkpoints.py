@@ -5,6 +5,11 @@ import json
 import re
 
 from .models import CommitPace, DeliveryPath, FlowState, Phase
+from .capabilities import (
+    flow_attempt_context,
+    flow_retry_options,
+    retry_decision_key,
+)
 from .transition_facts import (
     GIT_COMMIT_OBSERVATION,
     authorize_checkpoint,
@@ -254,6 +259,12 @@ def _revise_checkpoint(state, request):
         "construction.cp.%s.revision" % checkpoint,
         request.decision_value.strip(),
     ),)
+    if (cp_build_attempt(state, checkpoint) is not None
+            and not flow_retry_options(state, "build").allowed):
+        decisions += ((
+            retry_decision_key(flow_attempt_context(state, "build")),
+            request.decision_value.strip(),
+        ),)
     return replace(state, decisions=decisions, delivery_files=()), False, (
         "The uncommitted checkpoint review was reopened for revision.")
 

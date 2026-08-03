@@ -285,6 +285,10 @@ def _run(command):
 
 def cmd_lean_start(root, args):
     def execute():
+        if args.decision.strip():
+            raise ValueError(
+                "不能在 start 中代替用户确认；请先展示并持久化完整配置卡，"
+                "再使用 decision startup-confirmed 消费当前用户输入")
         path = _state_path(root)
         pointer_path, unused_snapshot_dir = _exit_paths(root)
         with ProjectStateLock(root):
@@ -303,11 +307,13 @@ def cmd_lean_start(root, args):
                         terminal_raw = stream.read()
                     _terminal_backup(path, terminal_raw)
             state = _start_state(root, args)
-            if args.decision.strip():
+            if args.moonlight:
                 state = place_startup_branch(root, state)
-                state = advance_flow(state, AdvanceRequest(
+                state = apply_moonlight_policy(state, AdvanceRequest(
                     "startup-confirmed",
-                    decision_value=args.decision.strip(),
+                    decision_value=(
+                        "Moonlight launch authorization confirms the "
+                        "resolved startup configuration."),
                 )).state
             atomic_write_json(path, state.to_dict())
             if os.path.isfile(pointer_path):

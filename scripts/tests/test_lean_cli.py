@@ -25,13 +25,67 @@ from mae_flow_core.adapters.lean_exit import (  # noqa: E402
 
 
 class LeanCliTests(unittest.TestCase):
+    def test_start_cannot_self_confirm_before_a_persisted_config_card(self):
+        before = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+
+        started = self.run_cli_raw(
+            "start", "--ticket", "REQ-NO-SELF-CONFIRM",
+            "--ticket-type", "feat", "--worker", "alice",
+            "--base-branch", before,
+            "--working-branch", before + "_alice_REQ-NO-SELF-CONFIRM",
+            "--build-method", "mvn compile -q",
+            "--ut-method", "ut-generator-agent",
+            "--ut-command", "mvn test",
+            "--path", "focused", "--pace", "continuous",
+            "--decision", "Agent 声称用户确认了完整配置。",
+        )
+
+        self.assertEqual(2, started.returncode)
+        self.assertIn("不能在 start 中代替用户确认", started.stderr)
+        self.assertFalse(os.path.exists(os.path.join(
+            self.root, ".mae-flow.json")))
+        after = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        self.assertEqual(before, after)
+
+    def test_start_persists_and_renders_a_complete_unconfirmed_card(self):
+        base = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=self.root,
+            text=True, encoding="utf-8", capture_output=True, check=True,
+        ).stdout.strip()
+        started = self.run_cli_raw(
+            "start", "--ticket", "REQ-DRAFT-CARD", "--ticket-type", "fix",
+            "--worker", "alice", "--requirement", "requirements/fix.md",
+            "--base-branch", base,
+            "--working-branch", base + "_alice_REQ-DRAFT-CARD",
+            "--build-method", "mvn compile -q",
+            "--ut-method", "ut-generator-agent",
+            "--ut-command", "mvn test", "--quality-plan", "Build → UT",
+            "--path", "full", "--pace", "staged",
+        )
+
+        self.assert_success(started)
+        self.assertEqual("startup", self.state()["phase"])
+        for expected in (
+                "完整启动配置", "alice", "REQ-DRAFT-CARD", "fix",
+                "requirements/fix.md", "full", "staged", base,
+                base + "_alice_REQ-DRAFT-CARD", "mvn compile -q",
+                "ut-generator-agent", "mvn test", "Build → UT"):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, started.stdout)
+
     def test_confirmed_start_places_the_exact_working_branch_and_quality_plan(self):
         base = subprocess.run(
             ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.root,
             text=True, encoding="utf-8", capture_output=True, check=True,
         ).stdout.strip()
         working = base + "_alice_REQ-BRANCH"
-        started = self.run_cli(
+        started = self.run_cli_raw(
             "start", "--ticket", "REQ-BRANCH", "--ticket-type", "feat",
             "--worker", "alice", "--base-branch", base,
             "--working-branch", working,
@@ -40,10 +94,12 @@ class LeanCliTests(unittest.TestCase):
             "--quality-plan",
             "每个 CP 用 Maven 编译一次；正式 CodeCheck 一次；UT 一次。",
             "--path", "focused", "--pace", "continuous",
-            "--decision", "用户确认完整配置。",
         )
 
         self.assert_success(started)
+        confirmed = self.run_cli(
+            "decision", "startup-confirmed", "用户确认完整配置。")
+        self.assert_success(confirmed)
         branch = subprocess.run(
             ["git", "branch", "--show-current"], cwd=self.root,
             text=True, encoding="utf-8", capture_output=True, check=True,
@@ -69,15 +125,17 @@ class LeanCliTests(unittest.TestCase):
         working = base + "_alice_REQ-EXISTING"
         subprocess.run(["git", "branch", working], cwd=self.root, check=True)
 
-        started = self.run_cli(
+        started = self.run_cli_raw(
             "start", "--ticket", "REQ-EXISTING", "--ticket-type", "feat",
             "--worker", "alice", "--base-branch", base,
             "--working-branch", working, "--build-method", "mvn compile -q",
             "--path", "focused", "--pace", "continuous",
-            "--decision", "用户确认使用已有工作分支。",
         )
 
         self.assert_success(started)
+        confirmed = self.run_cli(
+            "decision", "startup-confirmed", "用户确认使用已有工作分支。")
+        self.assert_success(confirmed)
         branch = subprocess.run(
             ["git", "branch", "--show-current"], cwd=self.root,
             text=True, encoding="utf-8", capture_output=True, check=True,
@@ -280,7 +338,7 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("Proposed startup configuration", started.stdout)
         self.assertNotIn("Confirmed startup configuration", started.stdout)
 
-    def test_start_can_atomically_consume_the_one_startup_card_decision(self):
+    def test_startup_confirmation_consumes_a_current_user_event_after_card(self):
         started = self.run_cli_raw(
             "start", "--ticket", "REQ-ONE-CARD",
             "--ticket-type", "feat", "--worker", "zhangsan",
@@ -291,10 +349,15 @@ class LeanCliTests(unittest.TestCase):
             "--ut-method", "ut-generator-agent",
             "--ut-command", "ctest --test-dir build",
             "--path", "full", "--pace", "continuous",
-            "--decision", "用户确认这张完整配置卡并进入 Spec。",
         )
 
         self.assert_success(started)
+        self.assertEqual("startup", self.state()["phase"])
+        confirmed = self.run_cli(
+            "decision", "startup-confirmed",
+            "用户确认这张完整配置卡并进入 Spec。",
+        )
+        self.assert_success(confirmed)
         state = self.state()
         self.assertEqual("spec", state["phase"])
         self.assertIn(
@@ -302,8 +365,8 @@ class LeanCliTests(unittest.TestCase):
              "value": "用户确认这张完整配置卡并进入 Spec。"},
             state["decisions"],
         )
-        self.assertIn("Confirmed startup configuration", started.stdout)
-        self.assertNotIn("需要用户介入: Intake", started.stdout)
+        self.assertIn("Confirmed startup configuration", confirmed.stdout)
+        self.assertNotIn("需要用户介入: Intake", confirmed.stdout)
 
     def test_repository_defaults_prefill_startup_and_cli_values_override_them(self):
         with open(os.path.join(self.root, ".mae-flow-defaults.json"),

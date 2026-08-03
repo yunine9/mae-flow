@@ -22,7 +22,7 @@ python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" curr
 已有状态先 `current`。新需求由用户确认推荐路线后启动：
 
 ```text
-python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>" --decision "<用户对完整配置卡的自然语言确认>"
+python "${CODEAGENT3_PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/scripts/mae-flow.py" start --ticket <单号> --path <full|focused> --pace <continuous|staged> --request "<需求摘要>"
 ```
 
 用户可直接用自然语言改方案。把决定一次写入并推进；命令中的文字可以是忠实的语义摘要，不必逐字复制用户原话，例如：
@@ -46,7 +46,7 @@ Full 的五个高价值用户介入点是 Intake、Spec、Design、CP 和 Delive
 
 先读取 `.mae-flow-defaults.json` 的稳定预设、需求来源、仓库事实、当前分支和初始脏文件。读取 `docs/specs/index.md`（不存在也可继续），按业务能力选择并只读取相关领域文档；领域不按目录、类、服务、行数或文件数划分。复杂存量领域只建立本次证据覆盖的增量基线，未记载行为视为未知。
 
-向用户展示一张完整配置卡：工号、单号及 `feat/fix` 类型、需求来源、Full/Focused、Continuous/Staged、基线分支、按 `{基线分支}_{工号}_{单号}` 派生的工作分支、精确 Build 路由、UT 生成方式、UT 运行入口和自然语言质量组合。Build 路由按项目确认：C++ 可选择配置好的 `build-fix` Skill；Java/Maven 使用确认的 Maven 命令（通常为 `mvn compile -q`）；其他语言使用仓库的准确 Skill 或命令，禁止把 `build-fix` 当通用方案。用户一次确认并可自然语言修改；不要求固定话术。启动命令必须带上确认后的配置、`--quality-plan` 和 `--decision`，原子记录 Startup 确认并进入下一阶段；不要再调用一次 `startup-confirmed`。确认后立即创建或切换到精确工作分支，不拖到提交阶段。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`，兼容不带 `--decision` 的既有调用。
+先用 `start` 持久化 Startup 草稿并向用户展示一张完整配置卡：工号、单号及 `feat/fix` 类型、需求来源、Full/Focused、Continuous/Staged、基线分支、按 `{基线分支}_{工号}_{单号}` 派生的工作分支、精确 Build 路由、UT 生成方式、UT 运行入口和自然语言质量组合。Build 路由按项目确认：C++ 可选择配置好的 `build-fix` Skill；Java/Maven 使用确认的 Maven 命令（通常为 `mvn compile -q`）；其他语言使用仓库的准确 Skill 或命令，禁止把 `build-fix` 当通用方案。用户一次确认并可自然语言修改；不要求固定话术。`start --decision` 会被拒绝，因为配置卡尚未绑定当前用户输入；拿到对已展示卡片的真实确认后，使用 `decision startup-confirmed "<忠实语义摘要>"` 消费该输入，随后才创建或切换到精确工作分支并进入下一阶段。恢复值和确认事件仍使用稳定的 `startup` / `startup-confirmed`。Moonlight 的显式启动授权是唯一免常规 Startup 问询的例外。
 
 ### Spec
 

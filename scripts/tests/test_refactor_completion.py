@@ -26,6 +26,7 @@ EXPECTED_RELEASE_SUITE_COMMANDS = (
     "python scripts/tests/test_lean_chain_session.py",
     "python scripts/tests/test_lean_chain_cli.py",
     "python scripts/tests/test_lean_chain_safety.py",
+    "python scripts/tests/test_lean_capability_parity.py",
     "python scripts/tests/test_lean_guidance.py",
     "python scripts/tests/test_native_guidance.py",
     "python scripts/tests/test_lean_composition.py",

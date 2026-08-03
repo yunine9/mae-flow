@@ -635,6 +635,7 @@ class ArchitectureTests(unittest.TestCase):
             ("scripts/tests/test_lean_migration_cli.py",),
             ("scripts/tests/test_lean_transitions.py",),
             ("scripts/tests/test_lean_grill_session.py",),
+            ("scripts/tests/test_lean_capability_parity.py",),
             ("scripts/tests/test_native_guidance.py",),
             ("scripts/tests/test_lean_cli.py",),
             ("scripts/tests/test_lean_capabilities.py",),

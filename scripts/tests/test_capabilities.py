@@ -301,7 +301,7 @@ class ReferenceCapabilitySourceTests(unittest.TestCase):
             if filename.startswith("test_") and filename.endswith(".py")
         }
 
-        self.assertEqual(37, len(expected))
+        self.assertEqual(38, len(expected))
         self.assertEqual(expected, actual)
         self.assertTrue(os.path.isfile(os.path.join(
             ROOT, "scripts", "tests", "reference_specengine_diagnostic.py")))

@@ -1,0 +1,205 @@
+{
+  "schema": 1,
+  "journeys": [
+    {
+      "id": "startup-card-and-real-confirmation",
+      "family": "startup",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Startup displayed the complete resolved configuration before a real user-owned confirmation could create the working branch.",
+      "lean_behavior": "Start persists and renders an unconfirmed card; only a current state-bound user event can confirm it and place the exact branch.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_start_cannot_self_confirm_before_a_persisted_config_card",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_confirmed_start_places_the_exact_working_branch_and_quality_plan"
+      ]
+    },
+    {
+      "id": "startup-modification-defaults-and-recovery",
+      "family": "startup",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Users could review defaults, modify any startup selection, see the resulting configuration again, and explicitly recover or restart active work.",
+      "lean_behavior": "Repository defaults only prefill the draft, configure consumes current input and redraws the card, while current and exit protect active state from overwrite.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_startup_configure_requires_current_input_and_renders_fresh_card",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_repository_defaults_prefill_startup_and_cli_values_override_them",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_new_start_rotates_old_exit_pointer_without_overwrite"
+      ]
+    },
+    {
+      "id": "full-focused-selection-and-upgrade",
+      "family": "path",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "The workflow preserved a deliberate Full or Focused choice and upgraded Focused work when material semantic risk appeared.",
+      "lean_behavior": "The two paths retain distinct user stops and a user-owned semantic upgrade moves Focused work into Full specification without silently widening scope.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_focused_stops_at_startup_and_delivery_and_can_upgrade_semantically",
+        "scripts/tests/test_lean_transitions.py:FocusedTransitionTests.test_focused_can_upgrade_semantically_to_full_specification"
+      ]
+    },
+    {
+      "id": "interactive-grill-convergence",
+      "family": "grill-spec",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Full specification required iterative questioning with genuine answers, follow-up convergence, and complete critic coverage instead of a synthetic clear verdict.",
+      "lean_behavior": "The Grill session allows one open question, requires at least one real answer, invalidates stale convergence, and blocks Spec until matching critic coverage exists.",
+      "tests": [
+        "scripts/tests/test_lean_grill_session.py:LeanGrillSessionTests.test_convergence_requires_one_answer_and_no_open_question",
+        "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_grill_clear_cannot_replace_interactive_questioning"
+      ]
+    },
+    {
+      "id": "grill-to-spec-traceability",
+      "family": "grill-spec",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "The final specification was derived from the questioned requirement and retained a verifiable link to the converged Grill result and critic input.",
+      "lean_behavior": "Digest receipts bind Grill answers, the Grill artifact, Spec bytes, and critic coverage so later mutation invalidates confirmation.",
+      "tests": [
+        "scripts/tests/test_lean_grill_receipts.py:LeanGrillReceiptTests.test_critic_receipt_binds_grill_spec_and_complete_coverage",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_full_spec_cli_binds_grill_and_spec_bytes"
+      ]
+    },
+    {
+      "id": "design-story-and-bounded-review",
+      "family": "design-construction",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Full work produced a Design Story and required a bounded design or code review result before construction could rely on that design.",
+      "lean_behavior": "Story remains a local recoverable artifact and review attempts occupy exact phase and checkpoint slots without recursive reviewer lifecycles.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_full_spec_and_story_artifacts_are_grouped_locally_by_default",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_design_and_new_cp_reviewer_use_distinct_state_slots"
+      ]
+    },
+    {
+      "id": "checkpoint-confirmation-and-delivery-pace",
+      "family": "design-construction",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Each construction checkpoint exposed its result for confirmation or revision and honored Continuous versus Staged commit timing.",
+      "lean_behavior": "Checkpoint facts form a recoverable card, revisions revoke stale authorization, and Staged requires exact per-checkpoint receipts while Continuous defers one final commit.",
+      "tests": [
+        "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_checkpoint_revise_revokes_uncommitted_confirmation_and_receipt",
+        "scripts/tests/test_lean_delivery.py:ContinuousDeliveryPlanningTests.test_continuous_plans_one_exact_commit_and_one_final_push",
+        "scripts/tests/test_lean_delivery.py:StagedDeliveryPlanningTests.test_staged_plans_each_approved_cp_locally_and_pushes_only_once"
+      ]
+    },
+    {
+      "id": "opaque-quality-capabilities-and-retry",
+      "family": "quality",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Build, CodeCheck, and unit-test capabilities ran against explicit scope, recorded observable completion, and never retried invisibly after failure.",
+      "lean_behavior": "Capability output stays opaque, each semantic slot has one automatic attempt, and an unchanged retry consumes an exact current user decision.",
+      "tests": [
+        "scripts/tests/test_lean_capabilities.py:LeanCapabilityTests.test_returned_output_is_opaque_and_does_not_become_a_verdict",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_duplicate_capability_needs_and_consumes_natural_language_retry",
+        "scripts/tests/test_lean_toolbox.py:LeanToolboxTests.test_codecheck_uses_the_exact_advisory_file_scope_once"
+      ]
+    },
+    {
+      "id": "quality-defect-repair-reentry",
+      "family": "quality",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "A defect discovered during Quality or Delivery reopened implementation and invalidated downstream conclusions that the repair could affect.",
+      "lean_behavior": "User-owned repair events create a fresh Construction checkpoint and clear dependent quality and delivery authorization before revalidation.",
+      "tests": [
+        "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_quality_defect_repair_returns_to_construction_and_clears_downstream",
+        "scripts/tests/test_lean_transitions.py:FullTransitionTests.test_delivery_defect_repair_returns_to_construction"
+      ]
+    },
+    {
+      "id": "dirty-ownership-exact-manifest-and-documents",
+      "family": "delivery",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Delivery separated startup-dirty ownership, exact business files, and independently selected conditional documents before staging or commit.",
+      "lean_behavior": "The exact manifest authorizes only named files, dirty adoption is explicit, control files are excluded, and each conditional document needs its own selection fact.",
+      "tests": [
+        "scripts/tests/test_delivery_manifest.py:DeliveryAuthorizationTests.test_explicit_adoption_is_authorized_and_recorded_as_semantic_facts",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_every_conditional_document_in_manifest_needs_independent_selection",
+        "scripts/tests/test_lean_safety_kernel.py:GitManifestSafetyTests.test_commit_requires_exact_actual_staged_manifest"
+      ]
+    },
+    {
+      "id": "delivery-confirmation-and-observed-effects",
+      "family": "delivery",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "User confirmation authorized one exact delivery plan while actual commit and push effects still had to be observed before completion.",
+      "lean_behavior": "Confirmation binds the current nonempty manifest and push target, later mutation revokes it, and Hook observations complete exact commit and push receipts.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_manifest_binds_commit_and_explicit_push_target_before_confirmation",
+        "scripts/tests/test_lean_hook_adapter.py:LeanHookAdapterTests.test_git_reservation_and_post_facts_complete_the_exact_receipt"
+      ]
+    },
+    {
+      "id": "recovery-corruption-windows-runtime",
+      "family": "recovery-platform-moonlight",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Interrupted work recovered deterministically, corrupt state produced actionable diagnostics, exit stayed available, and Windows paths and encodings remained supported.",
+      "lean_behavior": "Current reads one authoritative state, corruption fails safely without guessing, exit is unconditional, and Windows identity plus process boundaries have native tests.",
+      "tests": [
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_statusline_distinguishes_active_complete_exited_and_corrupt_v3",
+        "scripts/tests/test_windows_lean_runtime.py:WindowsPathAndEncodingTests.test_utf8_bom_state_and_gb18030_hook_payload_are_accepted",
+        "scripts/tests/test_lean_transitions.py:TerminalTransitionTests.test_exit_remains_unconditional_with_unresolved_risks"
+      ]
+    },
+    {
+      "id": "moonlight-exact-authorization-boundaries",
+      "family": "recovery-platform-moonlight",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Unattended execution suppressed routine questions only within exact file and side-effect authorization and stopped safely on uncertainty or failure.",
+      "lean_behavior": "Moonlight launch replaces routine Startup confirmation, but manifest subset checks, dirty ownership, conditional files, capability failures, and push retries remain fail-closed.",
+      "tests": [
+        "scripts/tests/test_lean_moonlight.py:MoonlightPolicyTests.test_routine_confirmation_is_suppressed_without_changing_transitions",
+        "scripts/tests/test_lean_moonlight.py:MoonlightAuthorizationTests.test_conditional_document_is_excluded_unless_explicitly_named",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_moonlight_start_is_reachable_but_grants_no_git_without_manifest"
+      ]
+    },
+    {
+      "id": "standalone-specialist-tools",
+      "family": "standalone-chain",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "UT, CodeCheck, Grill, and Story could be invoked as scoped standalone specialist tools without creating a delivery workflow or hidden Git effects.",
+      "lean_behavior": "The stateless toolbox keeps exact explicit scope, one-shot advisory semantics, interactive Grill shape, and local Story inputs without task-card protocols.",
+      "tests": [
+        "scripts/tests/test_lean_toolbox.py:LeanToolboxTests.test_ut_receives_explicit_files_without_a_task_card_or_report_contract",
+        "scripts/tests/test_lean_toolbox.py:LeanToolboxTests.test_grill_is_one_interactive_question_at_a_time",
+        "scripts/tests/test_lean_toolbox.py:LeanToolboxTests.test_story_accepts_source_documents_without_git_effects"
+      ]
+    },
+    {
+      "id": "cross-repository-chain-completeness",
+      "family": "standalone-chain",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "Cross-repository work enumerated repositories, ownership, touchpoints, contracts, dependencies, and reverse checks before one integrated confirmation.",
+      "lean_behavior": "Recoverable Chain state requires complete repository ownership, three-angle analysis, contract error semantics, dependency evidence, and reverse verification.",
+      "tests": [
+        "scripts/tests/test_lean_chain_session.py:LeanChainSessionTests.test_completion_requires_three_angles_contract_dependency_and_reverse_checks",
+        "scripts/tests/test_lean_chain_cli.py:LeanChainCliTests.test_complete_chain_verifies_renders_confirms_and_exits"
+      ]
+    },
+    {
+      "id": "cross-repository-chain-recovery-and-input",
+      "family": "standalone-chain",
+      "critical": true,
+      "classification": "preserved behavior",
+      "legacy_behavior": "A cross-repository session resumed from one explicit anchor, never guessed among stale files, and attributed answers and final confirmation to real current user input.",
+      "lean_behavior": "The Chain pointer is authoritative and fail-closed, question answers are state-bound single-use events, and material changes invalidate the rendered confirmation digest.",
+      "tests": [
+        "scripts/tests/test_lean_chain_cli.py:LeanChainCliTests.test_corrupt_pointer_and_state_fail_without_guessing",
+        "scripts/tests/test_lean_chain_cli.py:LeanChainCliTests.test_answer_rejects_user_input_bound_to_an_older_chain_state",
+        "scripts/tests/test_lean_chain_session.py:LeanChainSessionTests.test_render_confirmation_and_material_change_invalidation"
+      ]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ REFACTOR_SAFETY_SUITES = (
     ("Cross-repository Chain state", ("scripts/tests/test_lean_chain_session.py",), 90, 4000),
     ("Cross-repository Chain CLI", ("scripts/tests/test_lean_chain_cli.py",), 90, 5000),
     ("Cross-repository Chain safety", ("scripts/tests/test_lean_chain_safety.py",), 90, 4000),
+    ("Lean capability parity", ("scripts/tests/test_lean_capability_parity.py",), 90, 5000),
     ("Lean guidance and harness", ("scripts/tests/test_lean_guidance.py",), 90, 4000),
     ("Native guidance semantics", ("scripts/tests/test_native_guidance.py",), 90, 5000),
     ("Lean composition", ("scripts/tests/test_lean_composition.py",), 90, 4000),

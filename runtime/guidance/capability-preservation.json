@@ -15,6 +15,7 @@
       "scripts/tests/test_lean_hook_adapter.py",
       "scripts/tests/test_hook_protocol.py",
         "scripts/tests/test_lean_cli.py",
+        "scripts/tests/test_confirmation_receipts.py",
         "scripts/tests/test_lean_capabilities.py",
         "scripts/tests/test_lightcheck.py",
         "scripts/tests/test_file_io.py",
@@ -29,7 +30,9 @@
         "scripts/tests/test_lean_safety_kernel.py:GitManifestSafetyTests.test_push_requires_exact_recorded_commit_manifest",
         "scripts/tests/test_lean_semantic_scenarios.py:FocusedAndOpaqueCapabilityScenarioTests.test_workflow_records_one_opaque_synchronous_host_return",
         "scripts/tests/test_lightcheck.py:LightCheckTests.test_cli_reports_findings_but_returns_success",
-        "scripts/tests/test_architecture.py:ArchitectureTests.test_production_runtime_cannot_reach_retired_protocol_contracts"
+        "scripts/tests/test_architecture.py:ArchitectureTests.test_production_runtime_cannot_reach_retired_protocol_contracts",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_start_cannot_self_confirm_before_a_persisted_config_card",
+        "scripts/tests/test_lean_cli.py:LeanCliTests.test_user_owned_decision_consumes_one_current_codeagent_prompt"
       ]
     },
     {
@@ -86,7 +89,6 @@
     {
       "classification": "intentionally removed friction",
       "test_sources": [
-        "scripts/tests/test_confirmation_receipts.py",
         "scripts/tests/test_spec2code_artifacts.py",
         "scripts/tests/test_spec2code_artifact_use_cases.py",
         "scripts/tests/test_quality_artifact_cli.py",
@@ -159,7 +161,7 @@
     {"source": "scripts/tests/test_spec2code_recovery.py", "classification": "thin replacement", "reason": "Spec2Code recovery fields are mapped into the lean schema without evidence ledgers.", "replacement_semantic_tests": ["scripts/tests/test_lean_migration.py:LeanMigrationTests.test_preserves_recovery_facts_and_omits_evidence_ledgers"]},
     {"source": "scripts/tests/test_spec2code_quality_flow.py", "classification": "thin replacement", "reason": "The quality sub-flow is replaced by one opaque quality attempt and behavior-driven guidance.", "replacement_semantic_tests": ["scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_quality_is_opaque_one_shot_and_behavior_driven"]},
     {"source": "scripts/tests/test_state_core.py", "classification": "thin replacement", "reason": "The schema-v2 facade state core is replaced by the typed lean schema-v3 round-trip contract.", "replacement_semantic_tests": ["scripts/tests/test_lean_state.py:LeanStateContractTests.test_round_trip_keeps_recovery_facts"]},
-    {"source": "scripts/tests/test_confirmation_receipts.py", "classification": "intentionally removed friction", "reason": "Message-ID confirmation receipts are replaced by natural-language decisions bound to current state.", "replacement_semantic_tests": ["scripts/tests/test_lean_cli.py:LeanCliTests.test_semantic_confirmation_rejects_reserved_key_override"]},
+    {"source": "scripts/tests/test_confirmation_receipts.py", "classification": "preserved behavior", "reason": "Fixed acknowledgement wording was removed, but real single-use user decision ownership bound to the exact current state remains mandatory behavior.", "replacement_semantic_tests": ["scripts/tests/test_lean_cli.py:LeanCliTests.test_start_cannot_self_confirm_before_a_persisted_config_card", "scripts/tests/test_lean_cli.py:LeanCliTests.test_user_owned_decision_consumes_one_current_codeagent_prompt", "scripts/tests/test_lean_cli.py:LeanCliTests.test_user_owned_decision_consumes_current_askuser_answer"]},
     {"source": "scripts/tests/test_specengine.py", "classification": "migration-only", "reason": "The embedded spec engine remains vendored diagnostic material but is not a production lifecycle.", "replacement_semantic_tests": ["scripts/tests/test_capabilities.py:ReferenceCapabilitySourceTests.test_vendored_sources_match_pinned_integrity_manifest"]},
     {"source": "scripts/tests/test_checkpoints.py", "classification": "thin replacement", "reason": "Evidence-heavy checkpoint orchestration is replaced by ordered exact checkpoint manifests.", "replacement_semantic_tests": ["scripts/tests/test_lean_transitions.py:FullTransitionTests.test_staged_completion_requires_recorded_final_checkpoint_union"]},
     {"source": "scripts/tests/test_full_checkpoint_compile_recovery.py", "classification": "thin replacement", "reason": "Compile receipt recovery is replaced by one opaque returned attempt plus lean recovery facts.", "replacement_semantic_tests": ["scripts/tests/test_lean_capabilities.py:LeanCapabilityTests.test_returned_output_is_opaque_and_does_not_become_a_verdict"]},

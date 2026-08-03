@@ -38,8 +38,40 @@ def flow(path=DeliveryPath.FULL, phase=Phase.STARTUP, status="active"):
     )
 
 
+GRILL_QUESTION = json.dumps({
+    "parent": "",
+    "evidence": "Current behavior covers only the primary carrier.",
+    "impact": "SUL selection remains ambiguous.",
+    "recommendation": "Select SUL only when it is configured.",
+}, sort_keys=True, separators=(",", ":"))
+GRILL_CONVERGENCE = json.dumps({
+    "answer_count": 1,
+    "grill_sha256": "a" * 64,
+}, sort_keys=True, separators=(",", ":"))
+GRILL_CRITIC = json.dumps({
+    "grill_sha256": "a" * 64,
+    "input_coverage": "complete",
+    "spec_sha256": "b" * 64,
+}, sort_keys=True, separators=(",", ":"))
+
+
+def with_converged_grill(state):
+    if any(key == "grill.convergence" for key, unused in state.decisions):
+        return state
+    for request in (
+            AdvanceRequest("grill-question", "GQ-001", GRILL_QUESTION),
+            AdvanceRequest(
+                "grill-answer", "GQ-001",
+                "The user confirmed the recommended SUL boundary."),
+            AdvanceRequest(
+                "grill-converged", decision_value=GRILL_CONVERGENCE)):
+        state = advance_flow(state, request).state
+    return state
+
+
 def with_returned_review(state):
     if state.phase == Phase.SPEC:
+        state = with_converged_grill(state)
         attempt = CapabilityAttempt(
             "grill", "grill:spec:-", "lean-workflow-v1", "returned")
     elif state.phase == Phase.STORY:
@@ -48,6 +80,13 @@ def with_returned_review(state):
     else:
         return state
     return replace(state, capabilities=state.capabilities + (attempt,))
+
+
+def with_interactive_grill(state):
+    state = with_returned_review(with_converged_grill(state))
+    return advance_flow(
+        state, AdvanceRequest(
+            "grill-clear", decision_value=GRILL_CRITIC)).state
 
 
 def with_cp_build(state, checkpoint="CP1"):
@@ -77,6 +116,38 @@ def with_cp_commit_observed(state, checkpoint="CP1"):
 
 
 class FullTransitionTests(unittest.TestCase):
+    def test_full_spec_requires_complete_interactive_grill_sequence(self):
+        state = flow(phase=Phase.SPEC)
+
+        skipped = advance_flow(state, AdvanceRequest(
+            "spec-confirmed", decision_value="Confirm the proposed Spec."))
+        reviewed = with_interactive_grill(state)
+        confirmed = advance_flow(reviewed, AdvanceRequest(
+            "spec-confirmed", decision_value="Confirm the proposed Spec."))
+
+        self.assertEqual(Phase.SPEC, skipped.state.phase)
+        self.assertIn("interactive grill", skipped.reason.lower())
+        self.assertEqual(Phase.STORY, confirmed.state.phase)
+
+    def test_grill_clear_cannot_replace_interactive_questioning(self):
+        state = replace(
+            flow(phase=Phase.SPEC),
+            capabilities=(CapabilityAttempt(
+                "grill", "grill:spec:-", "lean-workflow-v1", "returned"),),
+        )
+
+        result = advance_flow(state, AdvanceRequest(
+            "grill-clear", decision_value=json.dumps({
+                "grill_sha256": "a" * 64,
+                "input_coverage": "complete",
+                "spec_sha256": "b" * 64,
+            }, sort_keys=True, separators=(",", ":"))))
+
+        self.assertEqual(state, result.state)
+        self.assertNotIn(
+            "review.grill", {key for key, unused in result.state.decisions})
+        self.assertIn("converge", result.reason.lower())
+
     def test_staged_checkpoint_ready_requires_exact_manifest_plan(self):
         state = with_cp_build(replace(
             flow(phase=Phase.CONSTRUCTION),
@@ -413,14 +484,19 @@ class FullTransitionTests(unittest.TestCase):
         )
         for phase, event, kind, slot, review_key in cases:
             with self.subTest(phase=phase):
-                missing = advance_flow(
-                    flow(phase=phase), AdvanceRequest(event))
+                base = flow(phase=phase)
+                request = AdvanceRequest(event)
+                if phase == Phase.SPEC:
+                    base = with_converged_grill(base)
+                    request = AdvanceRequest(
+                        event, decision_value=GRILL_CRITIC)
+                missing = advance_flow(base, request)
                 ready = replace(
-                    flow(phase=phase),
+                    base,
                     capabilities=(CapabilityAttempt(
                         kind, slot, "lean-workflow-v1", "returned"),),
                 )
-                recorded = advance_flow(ready, AdvanceRequest(event))
+                recorded = advance_flow(ready, request)
 
                 self.assertFalse(any(
                     key == review_key
@@ -430,9 +506,9 @@ class FullTransitionTests(unittest.TestCase):
                     key == review_key
                     for key, unused in recorded.state.decisions))
 
-    def test_failed_review_attempt_is_visible_without_blocking_confirmation(self):
+    def test_failed_grill_critic_attempt_remains_visible_and_blocks_spec(self):
         state = replace(
-            flow(phase=Phase.SPEC),
+            with_converged_grill(flow(phase=Phase.SPEC)),
             capabilities=(CapabilityAttempt(
                 "grill", "grill:spec:-", "lean-workflow-v1",
                 "timed-out"),),
@@ -454,7 +530,8 @@ class FullTransitionTests(unittest.TestCase):
         self.assertTrue(any(
             key == "review.grill.attempted"
             for key, unused in failed.state.decisions))
-        self.assertEqual(Phase.STORY, confirmation.state.phase)
+        self.assertEqual(Phase.SPEC, confirmation.state.phase)
+        self.assertIn("critic", confirmation.reason.lower())
 
     def test_confirmation_fact_key_cannot_be_overridden_by_request(self):
         result = advance_flow(flow(), AdvanceRequest(
@@ -492,9 +569,7 @@ class FullTransitionTests(unittest.TestCase):
                         "Final code and coverage match the confirmed scope.",
                     )
                 if phase == Phase.SPEC:
-                    original = with_returned_review(original)
-                    original = advance_flow(
-                        original, AdvanceRequest("grill-clear")).state
+                    original = with_interactive_grill(original)
                 elif phase == Phase.STORY:
                     original = with_returned_review(original)
                     original = advance_flow(
@@ -523,7 +598,9 @@ class FullTransitionTests(unittest.TestCase):
                 self.assertIs(state, result.state)
                 self.assertEqual(phase, result.state.phase)
                 self.assertFalse(result.needs_user)
-                self.assertIn("review", result.reason.lower())
+                expected_word = (
+                    "interactive grill" if phase == Phase.SPEC else "review")
+                self.assertIn(expected_word, result.reason.lower())
 
     def test_clear_or_approved_review_completion_allows_confirmation(self):
         cases = (
@@ -537,9 +614,17 @@ class FullTransitionTests(unittest.TestCase):
         )
         for phase, review_event, confirmation, expected in cases:
             with self.subTest(phase=phase):
-                reviewed = advance_flow(
-                    with_returned_review(flow(phase=phase)),
-                    AdvanceRequest(review_event))
+                if phase == Phase.SPEC:
+                    reviewed_state = with_interactive_grill(
+                        flow(phase=phase))
+                    reviewed = advance_flow(
+                        reviewed_state,
+                        AdvanceRequest(
+                            review_event, decision_value=GRILL_CRITIC))
+                else:
+                    reviewed = advance_flow(
+                        with_returned_review(flow(phase=phase)),
+                        AdvanceRequest(review_event))
                 result = advance_flow(
                     reviewed.state, AdvanceRequest(
                         confirmation, decision_value="Confirm after review."))
@@ -552,7 +637,7 @@ class FullTransitionTests(unittest.TestCase):
                 Phase.SPEC,
                 "review.grill",
                 "spec-confirmed",
-                Phase.STORY,
+                Phase.SPEC,
             ),
             (
                 Phase.STORY,
@@ -844,12 +929,12 @@ class FullTransitionTests(unittest.TestCase):
         first = advance_flow(state, AdvanceRequest(
             "grill-clear",
             "review.grill",
-            "The critic found no unresolved product ambiguity.",
+            GRILL_CRITIC,
         ))
         second = advance_flow(first.state, AdvanceRequest(
             "grill-clear",
             "review.grill.repeated_request",
-            "The critic found no unresolved product ambiguity.",
+            GRILL_CRITIC,
         ))
         self.assertFalse(first.needs_user)
         self.assertEqual(Phase.SPEC, first.state.phase)
@@ -926,7 +1011,10 @@ class FullTransitionTests(unittest.TestCase):
                      "The required reviewer was attempted once and did not return."),
                     failed.state.decisions,
                 )
-                self.assertNotEqual(phase, advanced.state.phase)
+                expected = (
+                    phase if phase == Phase.SPEC
+                    else Phase.CONSTRUCTION)
+                self.assertEqual(expected, advanced.state.phase)
 
 
 class FocusedTransitionTests(unittest.TestCase):

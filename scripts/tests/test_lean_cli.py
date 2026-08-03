@@ -461,9 +461,32 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(startup)
         self.assertIn("需要用户介入: Spec", startup.stdout)
 
-        self.assert_success(self.run_capability("grill"))
+        question = json.dumps({
+            "parent": "",
+            "evidence": "当前行为只覆盖主载波。",
+            "impact": "SUL 资源选择仍不明确。",
+            "recommendation": "仅在配置 SUL 时使用 SUL 资源。",
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        convergence = json.dumps({
+            "answer_count": 1,
+            "grill_sha256": "a" * 64,
+        }, sort_keys=True, separators=(",", ":"))
+        critic = json.dumps({
+            "grill_sha256": "a" * 64,
+            "input_coverage": "complete",
+            "spec_sha256": "b" * 64,
+        }, sort_keys=True, separators=(",", ":"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-question", "--key", "GQ-001",
+            "--decision", question))
         self.assert_success(self.run_cli(
-            "decision", "grill-clear", "只读质询未发现待决分支。"))
+            "decision", "grill-answer", "用户确认推荐的 SUL 边界。",
+            "--key", "GQ-001"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-converged", "--decision", convergence))
+        self.assert_success(self.run_capability("grill"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-clear", "--decision", critic))
         spec = self.run_cli(
             "decision", "spec-confirmed", "可观察行为和范围已确认。")
         self.assert_success(spec)

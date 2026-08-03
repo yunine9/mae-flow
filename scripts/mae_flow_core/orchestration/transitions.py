@@ -24,6 +24,7 @@ from .transition_support import (
     resolve_risk as _resolve_risk,
     return_to_repair_checkpoint as _return_to_repair_checkpoint,
 )
+from .grill_session import apply_grill_event, grill_confirmation_gap
 
 @dataclass(frozen=True)
 class AdvanceRequest:
@@ -80,7 +81,6 @@ _CONFIRMATION_KEYS = {
     "story-confirmed": "story.confirmation",
 }
 _REVIEW_DECISIONS = {
-    (Phase.SPEC, "grill-clear"): ("review.grill", "Grill found no ambiguity."),
     (Phase.SPEC, "reviewer-clear"): ("review.grill", "Grill found no ambiguity."),
     (Phase.SPEC, "reviewer-tradeoff-resolved"): (
         "review.grill", "The user resolved the Grill tradeoff."),
@@ -116,7 +116,7 @@ _CAPABILITY_OUTCOMES = {
 }
 _USER_DECISION_EVENTS = frozenset(
     set(_CONFIRMATION_KEYS)
-    | {"cp-confirmed", "cp-revise", "delivery-confirmed",
+    | {"grill-answer", "cp-confirmed", "cp-revise", "delivery-confirmed",
        "reviewer-tradeoff-resolved", "upgrade-to-full",
        "quality-defect-repair", "delivery-defect-repair"})
 
@@ -281,6 +281,32 @@ def advance_flow(state, request):
             "The explicit defect repair opened a fresh Construction CP.",
         )
 
+    if kind == "grill-clear":
+        attempt = _latest_review_attempt(state)
+        if attempt is None:
+            return AdvanceResult(
+                state,
+                False,
+                "The matching Grill critic attempt has not been recorded.",
+            )
+        if attempt.outcome != "returned":
+            attempted = _with_review_decision(
+                state,
+                request,
+                "review.grill.attempted",
+                "The required reviewer was attempted once and did not return.",
+            )
+            return AdvanceResult(
+                attempted,
+                False,
+                "The Grill critic did not return; complete coverage remains "
+                "required before Spec confirmation.",
+            )
+
+    grill_result = apply_grill_event(state, request)
+    if grill_result is not None:
+        return AdvanceResult(*grill_result)
+
     review = _REVIEW_DECISIONS.get((state.phase, kind))
     if review is not None and state.path == DeliveryPath.FULL:
         attempt = _latest_review_attempt(state)
@@ -347,6 +373,11 @@ def advance_flow(state, request):
             authorized, False,
             "The reviewed delivery was authorized; side effects remain pending.",
         )
+
+    if kind == "spec-confirmed":
+        grill_gap = grill_confirmation_gap(state)
+        if grill_gap:
+            return AdvanceResult(state, False, grill_gap)
 
     required_review = None
     if state.path == DeliveryPath.FULL:

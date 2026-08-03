@@ -58,6 +58,10 @@ class LeanDocumentPathTests(unittest.TestCase):
                 paths.local_spec,
             )
             self.assertEqual(
+                os.path.join(root, ".mae-flow-work", safe, "grill.md"),
+                paths.local_grill,
+            )
+            self.assertEqual(
                 os.path.join(
                     root, "docs", "specs", "requirements", safe,
                     "spec.md",

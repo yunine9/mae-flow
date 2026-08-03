@@ -46,6 +46,10 @@ from mae_flow_core.state_store import (
 )
 from .lean_manifest import (
     git_head_revision, place_startup_branch, prepare_manifest_state)
+from .grill_receipts import (
+    prepare_grill_request,
+    validate_spec_confirmation,
+)
 from .lean_lightcheck import run_exact_lightcheck
 from .user_events import (
     USER_OWNED_EVENTS as _USER_OWNED_EVENTS,
@@ -361,6 +365,7 @@ def cmd_lean_advance(root, args):
             raise ValueError(
                 "该用户决定事件只能使用 decision 与自然语言确认")
         request = _semantic_request(args.event, args.key, args.decision)
+        request = prepare_grill_request(root, current, request)
         return _advance_state(root, current, request)
 
     def execute():
@@ -393,6 +398,10 @@ def cmd_lean_decision(root, args):
         text = args.text.strip()
         if not text:
             raise ValueError("自然语言决定不能为空")
+        if args.event.strip().lower() == "spec-confirmed":
+            receipt_gap = validate_spec_confirmation(root, state)
+            if receipt_gap:
+                raise ValueError(receipt_gap)
         event_id = (
             _matching_user_event(root, state)
             if _requires_user_event(args.event) else "")

@@ -461,21 +461,23 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(startup)
         self.assertIn("需要用户介入: Spec", startup.stdout)
 
+        artifact_paths = {
+            item["kind"]: os.path.join(
+                self.root, *item["path"].split("/"))
+            for item in self.state()["artifacts"]
+        }
+        os.makedirs(os.path.dirname(artifact_paths["grill"]), exist_ok=True)
+        with open(artifact_paths["grill"], "w", encoding="utf-8") as stream:
+            stream.write("# Grill\n\nGQ-001 已确认。\n")
+        with open(artifact_paths["spec"], "w", encoding="utf-8") as stream:
+            stream.write("# Spec\n\nGQ-001 -> AC-001\n")
+
         question = json.dumps({
             "parent": "",
             "evidence": "当前行为只覆盖主载波。",
             "impact": "SUL 资源选择仍不明确。",
             "recommendation": "仅在配置 SUL 时使用 SUL 资源。",
         }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        convergence = json.dumps({
-            "answer_count": 1,
-            "grill_sha256": "a" * 64,
-        }, sort_keys=True, separators=(",", ":"))
-        critic = json.dumps({
-            "grill_sha256": "a" * 64,
-            "input_coverage": "complete",
-            "spec_sha256": "b" * 64,
-        }, sort_keys=True, separators=(",", ":"))
         self.assert_success(self.run_cli_raw(
             "advance", "grill-question", "--key", "GQ-001",
             "--decision", question))
@@ -483,10 +485,9 @@ class LeanCliTests(unittest.TestCase):
             "decision", "grill-answer", "用户确认推荐的 SUL 边界。",
             "--key", "GQ-001"))
         self.assert_success(self.run_cli_raw(
-            "advance", "grill-converged", "--decision", convergence))
+            "advance", "grill-converged"))
         self.assert_success(self.run_capability("grill"))
-        self.assert_success(self.run_cli_raw(
-            "advance", "grill-clear", "--decision", critic))
+        self.assert_success(self.run_cli_raw("advance", "grill-clear"))
         spec = self.run_cli(
             "decision", "spec-confirmed", "可观察行为和范围已确认。")
         self.assert_success(spec)
@@ -537,6 +538,49 @@ class LeanCliTests(unittest.TestCase):
         self.assertEqual(1, len(story_paths))
         self.assertIn(".mae-flow-work", story_paths[0].replace("\\", "/"))
 
+    def test_full_spec_cli_binds_grill_and_spec_bytes(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-GRILL-BYTES", "--path", "full",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "按 Full 继续。"))
+        artifacts = {
+            item["kind"]: os.path.join(
+                self.root, *item["path"].split("/"))
+            for item in self.state()["artifacts"]
+        }
+        os.makedirs(os.path.dirname(artifacts["grill"]), exist_ok=True)
+        with open(artifacts["grill"], "w", encoding="utf-8") as stream:
+            stream.write("# Grill\n\nGQ-001 已确认。\n")
+        with open(artifacts["spec"], "w", encoding="utf-8") as stream:
+            stream.write("# Spec\n\nGQ-001 -> AC-001\n")
+        question = json.dumps({
+            "parent": "",
+            "evidence": "当前实现只覆盖主载波。",
+            "impact": "SUL 行为不明确。",
+            "recommendation": "仅配置 SUL 时选择 SUL。",
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-question", "--key", "GQ-001",
+            "--decision", question))
+        self.assert_success(self.run_cli(
+            "decision", "grill-answer", "用户确认推荐边界。",
+            "--key", "GQ-001"))
+        self.assert_success(self.run_cli_raw(
+            "advance", "grill-converged"))
+        self.assert_success(self.run_capability("grill"))
+        self.assert_success(self.run_cli_raw("advance", "grill-clear"))
+
+        with open(artifacts["spec"], "a", encoding="utf-8") as stream:
+            stream.write("changed after criticism\n")
+        rejected = self.run_cli(
+            "decision", "spec-confirmed", "用户确认 Spec。")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("Spec 在 Critic 后发生变化", rejected.stderr)
+        self.assertEqual("spec", self.state()["phase"])
+
     def test_focused_stops_at_startup_and_delivery_and_can_upgrade_semantically(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "DTS-9", "--path", "focused",
@@ -557,12 +601,13 @@ class LeanCliTests(unittest.TestCase):
         self.assertIn("需要用户介入: Spec", upgraded.stdout)
         artifacts = self.state()["artifacts"]
         self.assertEqual(
-            ["spec", "story", "ut-handoff"],
+            ["spec", "grill", "story", "ut-handoff"],
             [item["kind"] for item in artifacts],
         )
         self.assertTrue(artifacts[0]["path"].endswith("/spec.md"))
-        self.assertIn(".mae-flow-work", artifacts[1]["path"])
-        self.assertTrue(artifacts[2]["path"].endswith("/ut-handoff.md"))
+        self.assertTrue(artifacts[1]["path"].endswith("/grill.md"))
+        self.assertIn(".mae-flow-work", artifacts[2]["path"])
+        self.assertTrue(artifacts[3]["path"].endswith("/ut-handoff.md"))
 
     def test_focused_migrated_spec_and_story_render_recovery_not_full_reviews(self):
         from pathlib import Path

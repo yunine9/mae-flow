@@ -130,10 +130,11 @@ def _path_join(root, *parts):
 
 
 def local_full_artifacts(ticket):
-    """Return the three repo-relative Full work-package paths."""
+    """Return the repo-relative Full work-package paths."""
     prefix = ".mae-flow-work/%s" % _safe_ticket_segment(ticket)
     return (
         ("spec", prefix + "/spec.md"),
+        ("grill", prefix + "/grill.md"),
         ("story", prefix + "/story.md"),
         ("ut-handoff", prefix + "/ut-handoff.md"),
     )
@@ -147,6 +148,7 @@ class DocumentPaths:
     safe_ticket: str
     local_root: str
     local_spec: str
+    local_grill: str
     local_story: str
     local_decisions: str
     local_chain: str
@@ -182,6 +184,7 @@ class DocumentPaths:
             safe_ticket=safe,
             local_root=local_root,
             local_spec=_path_join(local_root, "spec.md"),
+            local_grill=_path_join(local_root, "grill.md"),
             local_story=_path_join(local_root, "story.md"),
             local_decisions=_path_join(local_root, "decisions.md"),
             local_chain=_path_join(local_root, "chain.md"),

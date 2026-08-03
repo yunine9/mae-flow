@@ -105,11 +105,27 @@ manifest 确定后，只有已启用 Moonlight 的流程可用 `--moonlight-refr
 
 ## 独立工具箱
 
-用户明确只要 UT、CodeCheck、Grill、Story 或 Chain 时，直接调用同名命令。它们是 one-shot，无流程状态、无交付副作用、无自动重试；停止使用就是结束。
+用户明确只要 UT、CodeCheck、独立 Grill 或 Story 时，直接调用同名命令。它们是 one-shot，无流程状态、无交付副作用、无自动重试；停止使用就是结束。Chain 不属于独立工具箱。
+
+## Cross-Repository Chain
+
+Chain 是可恢复的跨仓需求调查、接口契约、依赖编排和启动卡生成流程，不是 Full/Focused 的一个阶段，也不是 one-shot。它必须由主 Agent 持有，因为仓间决策需要直接与用户逐题交互；子 Agent 只能并行检查边界明确的仓库事实，不得向用户提问、独立修改契约或推进 Chain 状态。
+
+启动前确认锚点仓没有活动 `.mae-flow.json`。新 Chain 用 `chain start --ticket <单号> --request "<用户请求>" --requirement <需求来源>`；已有 `.mae-flow-work/chain-current.json` 时只用 `chain current` 恢复，不扫描目录猜状态。先请用户给出完整仓清单和精确本地路径；路径未加入宿主工作区时建议用户使用 `/add-dir`，路径可读后才继续。
+
+对每个仓做三路只读查证：需求关键词、接口调用链、配置/路由。每个候选触点必须记录仓、文件、符号、相关原因、置信度和证据角度；用 `chain record repository|touchpoint --key <ID> --value <JSON>` 保存事实。不得编辑任何仓的业务代码，也不得启动交付、暂存、提交或推送。
+
+只问跨仓产品语义或接口契约决策。用 `chain question --key CQ-<N> --value <JSON>` 记录证据、影响和推荐答案，一次只问一个；拿到真实 `UserPromptSubmit` 或 `AskUserQuestion` 回答后用 `chain answer --key CQ-<N> "<忠实语义摘要>"`。回答出现新状态、矛盾、模糊边界或派生分支时继续逐题关闭，不允许跳过开放问题。
+
+用 `chain record contract` 固化每个接口的涉及仓、形态、字段和错误语义；用 `chain record dependency` 固化依赖方向、可并行范围、合入顺序和联调时点。随后对每个仓反向检查：只给该仓职责和契约，新的交付会话能否独立启动和验证；通过后用 `chain record reverse-check` 记录，不能独立启动就重新打开问题。
+
+文档严格使用 `skills/mae-flow/assets/CHAIN-TEMPLATE.md` 的七节，默认写 `.mae-flow-work/<ticket>/chain.md`。先执行 `chain verify` 逐一验证所有引用的仓路径、文件和符号，再执行 `chain rendered` 绑定当前文档摘要；向用户呈现触点完整性、接口形态、字段和错误语义并取得自然语言确认后，才执行 `chain confirm "<忠实语义摘要>"`。任何仓、触点、问题、契约、依赖、引用文件或文档变化都要重新校验、渲染和确认。
+
+第 7 节为每个仓生成自包含启动卡：精确本地路径、精确启动话术、建议 Full/Focused 路径及依据、职责、契约 ID、上游依赖、下游消费者、合入/联调时点和仓内验证边界。Chain 只产生本地设计与交接，不改业务代码、不启动仓内交付、不 commit/push。用户明确要求持久化时才复制到 `docs/specs/requirements/<ticket>/chain.md`；退出用 `chain exit --reason "<原因>"`，只归档本地 Chain 状态。
 
 ## 不可破坏的交付行为
 
 - Agent 只修改任务相关业务文件；用户已有脏文件保持可见，纳入交付前必须自然语言确认归属。
 - 任何提交都使用 exact files 和原有 `[单号][feat|fix]描述` 格式；不提交 Mae-Flow 状态、本地过程目录或未点名条件文档。
 - Reviewer 提供证据，不制造无休止反工；接受修复后不自动再派同一 Reviewer。
-- Build、UT、CodeCheck 是工作流按需调用的工具能力；独立 CLI 工具箱只暴露 UT、CodeCheck、Grill、Story 和 Chain。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。
+- Build、UT、CodeCheck 是工作流按需调用的工具能力；独立 CLI 工具箱只暴露 UT、CodeCheck、Grill 和 Story，Chain 使用单独的可恢复生命周期。返回异常时说明事实和风险，让用户决定是否换环境、稍后再试或继续；流程本身不循环。

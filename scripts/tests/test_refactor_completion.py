@@ -23,6 +23,9 @@ EXPECTED_RELEASE_SUITE_COMMANDS = (
     "python scripts/tests/test_lean_migration_cli.py",
     "python scripts/tests/test_lean_transitions.py",
     "python scripts/tests/test_lean_grill_session.py",
+    "python scripts/tests/test_lean_chain_session.py",
+    "python scripts/tests/test_lean_chain_cli.py",
+    "python scripts/tests/test_lean_chain_safety.py",
     "python scripts/tests/test_lean_guidance.py",
     "python scripts/tests/test_native_guidance.py",
     "python scripts/tests/test_lean_composition.py",
@@ -135,7 +138,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
         self.assertEqual(
             0, contract["final_targets"]["private_monolith_test_imports"])
         self.assertEqual(
-            73,
+            77,
             contract["final_targets"]["production_reachable_python_files"],
         )
         self.assertEqual(
@@ -193,20 +196,20 @@ class RefactorCompletionContractTests(unittest.TestCase):
 
     def test_contract_rejects_baseline_and_actual_both_above_reachability_cap(self):
         root = self._write_reachability_fixture(
-            ["module_%02d" % index for index in range(73)],
-            ["module_%02d" % index for index in range(73)],
+            ["module_%02d" % index for index in range(77)],
+            ["module_%02d" % index for index in range(77)],
         )
         contract = load_contract(os.path.join(
             TESTS, "refactor_completion_contract.json"))
         errors = validate_contract(root, contract)
         self.assertIn(
-            "production reachability baseline count 74 does not match "
-            "contract target 73",
+            "production reachability baseline count 78 does not match "
+            "contract target 77",
             errors,
         )
         self.assertIn(
-            "production reachability actual count 74 does not match "
-            "contract target 73",
+            "production reachability actual count 78 does not match "
+            "contract target 77",
             errors,
         )
 

@@ -83,29 +83,7 @@ def _deletes(command):
     )
 
 
-def decide_chain_pretool(root, state, tool, tool_input):
-    """Allow inspection and exact ``chain.md`` writes, but no repo effects."""
-    if os.path.realpath(state.anchor_root) != os.path.realpath(root):
-        return _block("chain_owner", "Chain does not own this anchor root.")
-    normalized_tool = str(tool or "").casefold().replace("-", "_")
-    if normalized_tool in {"write_stdin", "writestdin"}:
-        return _block(
-            "chain_interactive_shell",
-            "Interactive shells can bypass per-command Chain safety.",
-        )
-    if normalized_tool != "bash":
-        targets = write_targets(tool, tool_input)
-        if normalized_tool in _WRITERS or targets:
-            return (
-                _allow("chain_document_write")
-                if _exact_document(root, state, targets)
-                else _block(
-                    "chain_write_scope",
-                    "Active Chain may write only its exact local chain.md.",
-                )
-            )
-        return _allow()
-
+def _bash_decision(root, state, tool_input):
     command = _command(tool_input)
     if not command:
         return _allow()
@@ -143,3 +121,28 @@ def decide_chain_pretool(root, state, tool, tool_input):
             )
         )
     return _allow()
+
+
+def decide_chain_pretool(root, state, tool, tool_input):
+    """Allow inspection and exact ``chain.md`` writes, but no repo effects."""
+    if os.path.realpath(state.anchor_root) != os.path.realpath(root):
+        return _block("chain_owner", "Chain does not own this anchor root.")
+    normalized_tool = str(tool or "").casefold().replace("-", "_")
+    if normalized_tool in {"write_stdin", "writestdin"}:
+        return _block(
+            "chain_interactive_shell",
+            "Interactive shells can bypass per-command Chain safety.",
+        )
+    if normalized_tool == "bash":
+        return _bash_decision(root, state, tool_input)
+    targets = write_targets(tool, tool_input)
+    if normalized_tool not in _WRITERS and not targets:
+        return _allow()
+    return (
+        _allow("chain_document_write")
+        if _exact_document(root, state, targets)
+        else _block(
+            "chain_write_scope",
+            "Active Chain may write only its exact local chain.md.",
+        )
+    )

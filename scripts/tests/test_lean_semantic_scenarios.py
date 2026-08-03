@@ -85,6 +85,56 @@ def run_cli(root, *arguments):
     )
 
 
+class ChainGuidanceScenarioTests(unittest.TestCase):
+    def read(self, relative):
+        with open(os.path.join(ROOT, *relative.split("/")),
+                  encoding="utf-8") as stream:
+            return stream.read()
+
+    def test_chain_skill_requires_evidence_questions_validation_and_review(self):
+        skill = self.read("skills/mae-flow/SKILL.md")
+        required = (
+            "## Cross-Repository Chain",
+            "/add-dir",
+            "需求关键词",
+            "接口调用链",
+            "配置/路由",
+            "证据、影响和推荐答案",
+            "派生分支",
+            "形态、字段和错误语义",
+            "独立启动",
+            "chain verify",
+            "chain rendered",
+            "chain confirm",
+            "主 Agent",
+            "只读",
+        )
+        for phrase in required:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, skill)
+
+    def test_chain_template_has_complete_per_repository_launch_cards(self):
+        template = self.read("skills/mae-flow/assets/CHAIN-TEMPLATE.md")
+        for section in range(1, 8):
+            self.assertIn("## %s " % section, template)
+        for phrase in (
+                "证据角度", "接口形态", "字段定义", "错误语义",
+                "可并行范围", "合入顺序", "联调时点", "反向检查",
+                "精确本地路径", "精确启动话术", "建议路径",
+                "职责", "契约 ID", "上游依赖", "下游消费者",
+                "仓内验证边界"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, template)
+
+    def test_slash_command_routes_chain_as_a_recoverable_workflow(self):
+        command = self.read("commands/mae-flow.md")
+        self.assertIn("Chain 是可恢复的跨仓流程", command)
+        self.assertIn("chain start", command)
+        self.assertIn("chain current", command)
+        self.assertIn("一次只问一个", command)
+        self.assertNotIn("`ut|codecheck|grill|story|chain`", command)
+
+
 class FullWorkflowScenarioTests(unittest.TestCase):
     def test_small_full_stops_only_at_startup_spec_story_each_cp_and_delivery(self):
         state = FlowState.new(

@@ -129,6 +129,26 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("Interactive Grill", phase)
         self.assertIn("Grill 决策追溯", skill)
 
+    def test_chain_is_not_reachable_through_the_stateless_toolbox(self):
+        with open(os.path.join(
+                ROOT, "scripts", "mae_flow_core", "orchestration",
+                "toolbox.py"), encoding="utf-8") as stream:
+            toolbox = stream.read()
+        with open(os.path.join(
+                ROOT, "scripts", "mae_flow_core", "cli_commands",
+                "lean_workflow.py"), encoding="utf-8") as stream:
+            workflow = stream.read()
+        with open(os.path.join(
+                ROOT, "scripts", "mae_flow_core", "command_dispatch.py"),
+                encoding="utf-8") as stream:
+            routes = stream.read()
+
+        self.assertNotIn("_chain_guidance", toolbox)
+        self.assertNotIn('"chain"}', toolbox)
+        self.assertNotIn('"chain"}', workflow)
+        self.assertIn(
+            '"chain": CommandRoute("cmd_lean_chain"', routes)
+
     def test_foundation_has_no_reverse_dependencies(self):
         self.assertEqual([], assert_foundation_dependencies(ROOT))
 

@@ -31,7 +31,7 @@ def _advisory_lightcheck_before_commit(st, snapshot):
         result = api._pending_lightcheck_scope(st, snapshot)
     except BaseException as exc:
         result = api._lightcheck_tool_error(
-            "提交前轻量检查启动失败，已自动放行: " + str(exc))
+            "提交前轻量检查启动失败；已记录诊断，不阻断流程: " + str(exc))
         result["report_path"] = api._save_lightcheck_result(
             result, "提交前：异常安全降级")
     api._print_lightcheck_result(result, quiet=True)

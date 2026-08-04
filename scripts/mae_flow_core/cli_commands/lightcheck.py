@@ -256,7 +256,7 @@ def _run_lightcheck_diff(diff, files, scope):
     baseline = _diff_baseline_commit(diff)
     if code_files and not baseline:
         result = _lightcheck_tool_error(
-            "无法解析检查基线，已自动放行")
+            "无法解析检查基线；已记录诊断，本建议项不阻断流程")
         result["report_path"] = _save_lightcheck_result(result, scope)
         return result
     changed = _changed_lines_for_diff(diff, code_files)
@@ -400,7 +400,7 @@ def _print_lightcheck_findings(findings, report):
           file=sys.stderr)
 
 def _print_lightcheck_degraded(result, report):
-    print("[mae-flow] 轻量编码预检 %s（建议层已自动放行，不替代正式 CodeCheck）"
+    print("[mae-flow] 轻量编码预检 %s（已记录诊断，本建议项不阻断流程）"
           % result.get("status", "SKIPPED"))
     for reason in (result.get("skipped") or [])[:5]:
         print("  - " + reason)
@@ -410,6 +410,11 @@ def _print_lightcheck_degraded(result, report):
 def _print_lightcheck_empty(result, report):
     if result.get("status") != "CLEAN":
         _print_lightcheck_degraded(result, report)
+        return
+    if not result.get("files"):
+        print("[mae-flow] 本次没有候选源码变更，无需执行轻量编码预检。")
+        if report:
+            print("[mae-flow] 报告: " + report)
         return
     print("[mae-flow] 轻量编码预检 CLEAN（建议项，不替代正式 CodeCheck）")
     if report:

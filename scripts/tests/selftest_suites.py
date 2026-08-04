@@ -80,6 +80,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_quality_task_inputs.py",), 180, 5000),
     ("轻量编码预检跨语言与安全降级回归",
      ("scripts/tests/test_lightcheck.py",), 180, 5000),
+    ("轻量编码预检自动范围契约",
+     ("scripts/tests/test_lightcheck_scope_contract.py",), 180, 5000),
     ("Workflow 定义与转移策略回归",
      ("scripts/tests/test_workflow_definition.py",), 180, 5000),
     ("Workflow 推进策略与适配器回归",

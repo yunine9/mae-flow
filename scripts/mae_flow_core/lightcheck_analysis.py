@@ -138,7 +138,7 @@ class _ChangedAnalyzer:
     def _add_magic_findings(self, path, source, changed):
         findings = find_magic_numbers(path, source, changed)
         if findings is None:
-            self._skip(path + ": 数值字面量词法分析不确定，已自动放行")
+            self._skip(path + ": 数值字面量词法分析不确定；已记录诊断，不阻断流程")
             return
         for finding in findings:
             self.result["findings"].append({

@@ -71,7 +71,7 @@ def _append_lightcheck(document, result):
         "轻量预检报告: "
         + (
             result.get("report_path")
-            or "报告写入失败，已自动放行"
+            or "报告写入失败；已记录诊断，不阻断流程"
         ),
         "边界:compile-agent 不得为了轻量建议扩大职责；只处理真实编译错误。"
         "主会话在后续写码时按建议预防/修正。",

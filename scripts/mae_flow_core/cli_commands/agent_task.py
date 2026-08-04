@@ -290,7 +290,7 @@ def cmd_agent_task(flow, st, args):
                     "编译前兜底：" + (checkpoint_id or sid)))
         except Exception as exc:
             lightcheck_result = api._lightcheck_tool_error(
-                "编译前轻量检查异常，已自动放行: " + str(exc))
+                "编译前轻量检查异常；已记录诊断，不阻断流程: " + str(exc))
             lightcheck_result["report_path"] = api._save_lightcheck_result(
                 lightcheck_result, "编译前：异常安全降级")
     ut_targets = {}

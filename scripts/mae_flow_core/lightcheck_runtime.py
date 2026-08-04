@@ -35,7 +35,7 @@ def _pipe_result(connection):
         return connection.recv()
     except (EOFError, OSError):
         return _empty_result(
-            "TOOL_ERROR", ["轻量分析子进程未返回结果，已自动放行"])
+            "TOOL_ERROR", ["轻量分析子进程未返回结果；已记录诊断，不阻断流程"])
 
 
 def _process_context():
@@ -60,7 +60,7 @@ def _await_analysis_result(receiver, process, timeout_seconds):
         _stop_process(process)
         return _empty_result(
             "TOOL_ERROR",
-            ["轻量分析超过 %s 秒，已自动放行" % timeout_seconds],
+            ["轻量分析超过 %s 秒；已记录诊断，不阻断流程" % timeout_seconds],
             timeout_seconds * 1000)
     result = _pipe_result(receiver)
     process.join(2)
@@ -96,7 +96,7 @@ def analyze_changed_with_timeout(
     except Exception as exc:
         return _empty_result(
             "TOOL_ERROR",
-            ["轻量分析隔离启动失败，已自动放行: " + str(exc)])
+            ["轻量分析隔离启动失败；已记录诊断，不阻断流程: " + str(exc)])
     finally:
         _stop_process(process)
         receiver.close()

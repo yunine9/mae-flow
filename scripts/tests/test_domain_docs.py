@@ -23,11 +23,12 @@ class DomainDocumentTests(unittest.TestCase):
         self.assertIsNotNone(importlib.util.find_spec(name))
         return importlib.import_module(name)
 
-    def test_parser_accepts_context_reconcile_and_show(self):
+    def test_parser_accepts_context_reconcile_show_and_validate(self):
         commands = (
             ["domain-docs", "context", "--term", "SUL"],
             ["domain-docs", "reconcile", "--domain", "radio-access", "--candidate", "candidate.md"],
             ["domain-docs", "show"],
+            ["domain-docs", "validate"],
         )
         for argv in commands:
             with self.subTest(argv=argv):

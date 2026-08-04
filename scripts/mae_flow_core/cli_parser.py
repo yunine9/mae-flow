@@ -192,6 +192,7 @@ def parse_args(argv=None):
     domain_reconcile.add_argument("--candidate", required=True)
     domain_reconcile.add_argument("--keyword", action="append", default=[])
     domain_actions.add_parser("show")
+    domain_actions.add_parser("validate")
     domain_archive = sub.add_parser("domain-archive")
     archive_actions = domain_archive.add_subparsers(
         dest="domain_archive_action", required=True)

@@ -25,6 +25,9 @@ from mae_flow_core.workflow.quality_executions import (  # noqa: E402
     record_quality_execution,
     successful_quality_execution,
 )
+from mae_flow_core.cli_commands.agent_task import (  # noqa: E402
+    _resolve_requirement_sources_from_runtime,
+)
 
 
 class QualityTaskInputTests(unittest.TestCase):
@@ -76,6 +79,40 @@ class QualityTaskInputTests(unittest.TestCase):
         for value in sources + ("src/radio/prach.cpp", "src/radio"):
             self.assertIn(value, document)
         self.assertNotIn("结合 Spec 和 Story", document)
+
+    def test_quality_tasks_load_only_relevant_indexed_domain_truth(self):
+        with tempfile.TemporaryDirectory() as root:
+            package = ensure_work_package(root, "REQ-123")
+            for path, content in (
+                    (package.spec, "NRPRACH 支持 SUL"),
+                    (package.grill, "SUL 决策"),
+                    (package.story, "无线接入实现")):
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write(content)
+            specs = os.path.join(root, "docs", "specs")
+            os.makedirs(specs)
+            with open(os.path.join(specs, "index.md"), "w", encoding="utf-8") as stream:
+                stream.write("""
+| 领域 | 关键词 | 文档 |
+| --- | --- | --- |
+| radio | SUL, NRPRACH | docs/specs/radio.md |
+| billing | invoice | docs/specs/billing.md |
+""")
+            for name in ("radio", "billing"):
+                with open(os.path.join(specs, name + ".md"), "w", encoding="utf-8") as stream:
+                    stream.write(name + " truth")
+            before = os.getcwd()
+            try:
+                os.chdir(root)
+                sources = _resolve_requirement_sources_from_runtime({
+                    "config": {"单号": "REQ-123"},
+                })
+            finally:
+                os.chdir(before)
+            canonical = tuple(os.path.realpath(path) for path in sources)
+            self.assertIn(os.path.realpath(os.path.join(specs, "radio.md")), canonical)
+            self.assertNotIn(
+                os.path.realpath(os.path.join(specs, "billing.md")), canonical)
 
     def test_agent_instructions_forbid_polling_and_background_builds(self):
         with open(os.path.join(ROOT, "agents", "compile-agent.md"),

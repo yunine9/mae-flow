@@ -6,6 +6,9 @@ from mae_flow_core.quality.spec2code_artifacts import (
     blueprint_scenario_ids,
 )
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.orchestration.behavior_baseline import (
+    load_relevant_domain_context,
+)
 
 from .shared import (
     BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, STATE_PATH, append_codecheck_event,
@@ -63,7 +66,24 @@ def _resolve_requirement_sources_from_runtime(st):
     local_sources = ()
     if ticket:
         package = ensure_work_package(os.getcwd(), ticket)
-        local_sources = (package.spec, package.grill, package.story)
+        local_sources = (
+            package.spec, package.grill, package.story, package.decisions)
+        terms = []
+        for path in (config.get("需求文档", ""), *local_sources):
+            if path and os.path.isfile(path):
+                terms.append(read_text(path, encoding="utf-8", errors="replace"))
+        try:
+            domain = load_relevant_domain_context(os.getcwd(), terms)
+        except ValueError as exc:
+            api.die(
+                "领域索引无效: %s。修复后先执行 domain-docs validate，"
+                "通过后原样重试 agent-task。"
+                % exc,
+                2,
+            )
+        local_sources += tuple(
+            os.path.join(os.getcwd(), *document.path.split("/"))
+            for document in domain.documents)
     return list(quality_task_card_use_cases.requirement_sources(
         config,
         exists=os.path.exists,
@@ -341,17 +361,6 @@ def cmd_agent_task(flow, st, args):
         unresolved=tuple(unresolved),
     )
     notes = []
-    notes_path = os.path.join("docs", "delivery-notes.md")
-    if os.path.isfile(notes_path):
-        try:
-            notes = [
-                line.rstrip()
-                for line in read_text(
-                    notes_path, errors="replace").splitlines()
-                if line.strip()
-            ][:40]
-        except OSError:
-            notes = []
     if kind == "UT":
         ut_targets, target_err = api._changed_hunk_targets(
             st, groups["business"])

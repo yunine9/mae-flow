@@ -217,28 +217,14 @@ def append_execution_context(
 
 def requirement_sources(
         config, exists, absolute, glob_paths, local_sources=()):
-    """Resolve current and archived requirement/specification sources."""
+    """Resolve exact local requirement and indexed-domain sources."""
+    del glob_paths
     sources = [
         absolute(path) for path in local_sources if exists(path)
     ]
     document = config.get("需求文档", "")
     if document and exists(document):
         sources.append(absolute(document))
-    change = config.get("CHANGE_NAME", "")
-    if change:
-        patterns = (
-            "openspec/changes/%s/change.md" % change,
-            "openspec/changes/%s/specs/*/spec.md" % change,
-            "openspec/changes/archive/*%s*/change.md" % change,
-            "openspec/changes/archive/*%s*/specs/*/spec.md" % change,
-            "openspec/archive/*%s*/change.md" % change,
-            "openspec/archive/*%s*/specs/*/spec.md" % change,
-        )
-        for pattern in patterns:
-            sources.extend(
-                absolute(path)
-                for path in glob_paths(pattern)
-            )
     return tuple(dict.fromkeys(sources))
 
 

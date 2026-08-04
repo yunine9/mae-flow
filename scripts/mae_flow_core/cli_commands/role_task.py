@@ -181,7 +181,8 @@ def _stable_story_context(state, role, document=""):
         for item in domain.documents
     ]
     common = [
-        config.get("需求文档", ""), package.spec, package.grill, survey,
+        config.get("需求文档", ""), package.spec, package.grill,
+        package.decisions, survey,
         os.path.join("docs", "specs", "index.md"), *domain_paths,
     ]
     if role in ("story-review", "cp-implement", "craft-code"):

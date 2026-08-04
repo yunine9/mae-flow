@@ -11,6 +11,21 @@ _RESERVED = frozenset(
     | {"COM%d" % number for number in range(1, 10)}
     | {"LPT%d" % number for number in range(1, 10)}
 )
+REQUIRED_DOMAIN_SECTIONS = (
+    "领域目标与边界",
+    "核心术语与不变量",
+    "可观察行为与业务规则",
+    "对外及跨组件契约",
+    "数据、状态与兼容性",
+    "性能、容量与资源限制",
+    "异常、降级与恢复",
+    "验证方式与测试关注点",
+    "代码落点索引",
+    "明确不包含的范围",
+)
+_PLACEHOLDER_CONTENT = frozenset({
+    "", "无", "暂无", "待定", "待补充", "todo", "tbd", "n/a", "na",
+})
 
 
 @dataclass(frozen=True)
@@ -59,7 +74,9 @@ def _read(path):
 
 def _index_rows(content):
     rows = []
-    for line in content.splitlines():
+    domains = {}
+    keyword_owners = {}
+    for line_number, line in enumerate(content.splitlines(), 1):
         if not line.strip().startswith("|"):
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -67,15 +84,64 @@ def _index_rows(content):
             continue
         if set(cells[0]) == {"-"}:
             continue
-        domain = _domain_name(cells[0])
+        try:
+            domain = _domain_name(cells[0])
+        except ValueError as exc:
+            raise ValueError(
+                "领域索引第 %d 行的领域名无效: %s" % (line_number, exc))
         expected = "docs/specs/%s.md" % domain
         if cells[2].replace("\\", "/") != expected:
-            continue
+            raise ValueError(
+                "领域索引第 %d 行路径必须是 %s" % (line_number, expected))
         keywords = tuple(
             keyword.strip() for keyword in cells[1].split(",")
             if keyword.strip())
+        if not keywords:
+            raise ValueError("领域索引第 %d 行至少需要一个关键词" % line_number)
+        folded_domain = domain.casefold()
+        if folded_domain in domains:
+            raise ValueError(
+                "领域索引第 %d 行重复定义领域 %s" % (line_number, domain))
+        domains[folded_domain] = line_number
+        for keyword in keywords:
+            folded_keyword = keyword.casefold()
+            owner = keyword_owners.get(folded_keyword)
+            if owner is not None and owner != folded_domain:
+                raise ValueError(
+                    "领域索引第 %d 行关键词 %s 已由其他领域使用"
+                    % (line_number, keyword))
+            keyword_owners[folded_keyword] = folded_domain
         rows.append((domain, keywords, expected))
     return tuple(rows)
+
+
+def validate_domain_document(content):
+    """Return deterministic validation errors for one durable domain truth."""
+    if not isinstance(content, str) or not content.strip():
+        return ("领域文档不能为空",)
+    headings = {}
+    current = None
+    body = []
+    for line in content.splitlines():
+        match = re.match(r"^##\s+(?:\d+[.、]\s*)?(.+?)\s*$", line)
+        if match:
+            if current is not None:
+                headings[current] = "\n".join(body).strip()
+            current = match.group(1).strip()
+            body = []
+        elif current is not None:
+            body.append(line)
+    if current is not None:
+        headings[current] = "\n".join(body).strip()
+    errors = []
+    for section in REQUIRED_DOMAIN_SECTIONS:
+        value = headings.get(section, "").strip()
+        compact = re.sub(r"[\s`*_#>-]+", "", value).casefold()
+        if section not in headings:
+            errors.append("缺少章节: %s" % section)
+        elif compact in _PLACEHOLDER_CONTENT or len(compact) < 8:
+            errors.append("章节内容不完整: %s" % section)
+    return tuple(errors)
 
 
 def load_relevant_domain_context(project_root, terms):
@@ -84,10 +150,12 @@ def load_relevant_domain_context(project_root, terms):
     query = "\n".join(str(term) for term in terms).casefold()
     documents = []
     for domain, keywords, relative in _index_rows(_read(index)):
+        absolute = os.path.join(root, *relative.split("/"))
+        if not os.path.isfile(absolute):
+            raise ValueError("领域索引引用的文档不存在: %s" % relative)
         if keywords and not any(
                 keyword.casefold() in query for keyword in keywords):
             continue
-        absolute = os.path.join(root, *relative.split("/"))
         content = _read(absolute)
         if content:
             documents.append(DomainDocument(

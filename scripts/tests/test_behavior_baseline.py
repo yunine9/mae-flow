@@ -40,6 +40,50 @@ class BehaviorBaselineTests(unittest.TestCase):
                 document.path for document in context.documents))
             self.assertEqual("radio truth", context.documents[0].content)
 
+    def test_index_rejects_duplicate_domain_and_keyword_ownership(self):
+        module = self._module()
+        cases = (
+            """
+| 领域 | 关键词 | 文档 |
+| --- | --- | --- |
+| radio | SUL | docs/specs/radio.md |
+| RADIO | PRACH | docs/specs/RADIO.md |
+""",
+            """
+| 领域 | 关键词 | 文档 |
+| --- | --- | --- |
+| radio | SUL | docs/specs/radio.md |
+| transport | sul | docs/specs/transport.md |
+""",
+        )
+        for content in cases:
+            with self.subTest(content=content):
+                with tempfile.TemporaryDirectory() as root:
+                    specs = os.path.join(root, "docs", "specs")
+                    os.makedirs(specs)
+                    self._write(os.path.join(specs, "index.md"), content)
+                    with self.assertRaisesRegex(ValueError, "领域索引"):
+                        module.load_relevant_domain_context(root, ("SUL",))
+
+    def test_index_rejects_invalid_path_and_missing_document(self):
+        module = self._module()
+        rows = (
+            "| radio | SUL | docs/other.md |",
+            "| radio | SUL | docs/specs/radio.md |",
+        )
+        for row in rows:
+            with self.subTest(row=row):
+                with tempfile.TemporaryDirectory() as root:
+                    specs = os.path.join(root, "docs", "specs")
+                    os.makedirs(specs)
+                    self._write(os.path.join(specs, "index.md"), """
+| 领域 | 关键词 | 文档 |
+| --- | --- | --- |
+%s
+""" % row)
+                    with self.assertRaisesRegex(ValueError, "领域索引"):
+                        module.load_relevant_domain_context(root, ("SUL",))
+
     @staticmethod
     def _write(path, content):
         with open(path, "w", encoding="utf-8") as stream:

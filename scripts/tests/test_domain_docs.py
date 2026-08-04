@@ -60,6 +60,18 @@ class DomainDocumentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     module.plan_domain_reconciliation("root", domain, "truth")
 
+    def test_domain_document_requires_ten_substantive_sections(self):
+        module = self._module()
+        valid = "# 无线接入领域\n\n" + "\n\n".join(
+            "## %s\n这是经过确认且可长期维护的领域事实。" % heading
+            for heading in module.REQUIRED_DOMAIN_SECTIONS)
+        self.assertEqual((), module.validate_domain_document(valid))
+        invalid = valid.replace(
+            "这是经过确认且可长期维护的领域事实。", "待补充", 1)
+        errors = module.validate_domain_document(invalid)
+        self.assertTrue(errors)
+        self.assertIn("领域目标与边界", errors[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -52,6 +52,7 @@ _RESOURCE_FILES = (
     ("skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md", "assets/GRILL-PREP-TEMPLATE.md"),
     ("skills/mae-flow/assets/REVIEW-TEMPLATE.md", "assets/REVIEW-TEMPLATE.md"),
     ("skills/mae-flow/assets/STORY-TEMPLATE.md", "assets/STORY-TEMPLATE.md"),
+    ("skills/mae-flow/assets/DOMAIN-SPEC-TEMPLATE.md", "assets/DOMAIN-SPEC-TEMPLATE.md"),
 )
 
 

@@ -26,6 +26,11 @@ class ProjectResourceTests(unittest.TestCase):
                 "guidance", "grill.md")
             self.assertIn(expected, paths)
             self.assertTrue(os.path.isfile(expected))
+            domain_template = os.path.join(
+                root, ".mae-flow-work", "plugin-resources",
+                "assets", "DOMAIN-SPEC-TEMPLATE.md")
+            self.assertIn(domain_template, paths)
+            self.assertTrue(os.path.isfile(domain_template))
 
     def test_ordinary_ticket_keeps_readable_work_directory(self):
         self.assertIsNotNone(importlib.util.find_spec(

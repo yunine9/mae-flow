@@ -309,7 +309,7 @@
       "status": "thin-replacement"
     },
     {
-      "source": "role:cp-task-analyst-agent",
+      "source": "role:story-generator-agent",
       "capability": "Task Analyst",
       "new_home": "runtime/guidance/story-design.md and construction.md",
       "semantic_tests": [
@@ -348,7 +348,7 @@
       "status": "preserved"
     },
     {
-      "source": "role:test-design-agent",
+      "source": "role:story-generator-agent",
       "capability": "test-design agent",
       "new_home": "runtime/guidance/quality.md",
       "semantic_tests": [

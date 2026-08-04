@@ -33,15 +33,15 @@ class StableRecoveryContractTests(unittest.TestCase):
             with self.subTest(resource=resource):
                 self.assertTrue(os.path.isfile(os.path.join(ROOT, resource)))
 
-    def test_required_and_planned_removed_agents_exist_at_baseline(self):
+    def test_only_required_agents_remain_after_recovery(self):
         contract = load_contract()
-        agents = (
-            contract["required_agents"]
-            + contract["planned_removed_agents"]
-        )
-        for agent in agents:
+        for agent in contract["required_agents"]:
             with self.subTest(agent=agent):
                 self.assertTrue(os.path.isfile(os.path.join(
+                    ROOT, "agents", agent + ".md")))
+        for agent in contract["removed_agents"]:
+            with self.subTest(agent=agent):
+                self.assertFalse(os.path.exists(os.path.join(
                     ROOT, "agents", agent + ".md")))
 
     def test_legacy_composition_root_does_not_import_lean_runtime(self):

@@ -9,7 +9,7 @@
     "codecheck-fix-agent",
     "ut-generator-agent"
   ],
-  "planned_removed_agents": [
+  "removed_agents": [
     "test-design-agent",
     "cp-task-analyst-agent"
   ],

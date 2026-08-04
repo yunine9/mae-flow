@@ -34,11 +34,11 @@ PRESERVATION_STATUSES = {
 REQUIRED_ROLE_CAPABILITIES = {
     ("role:grill-critic-agent", "Grill critic"),
     ("role:story-generator-agent", "Story generator"),
-    ("role:cp-task-analyst-agent", "Task Analyst"),
+    ("role:story-generator-agent", "Task Analyst"),
     ("role:craft-reviewer-agent", "PLAN Reviewer"),
     ("design-provenance:lean-story-review", "Design Reviewer"),
     ("role:craft-reviewer-agent", "CODE Reviewer"),
-    ("role:test-design-agent", "test-design agent"),
+    ("role:story-generator-agent", "test-design agent"),
     ("role:cp-implementer-agent", "CP implementer"),
     ("role:compile-agent", "compile agent"),
     ("role:codecheck-fix-agent", "CodeCheck fixer"),

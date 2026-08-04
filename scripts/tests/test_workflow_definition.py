@@ -141,6 +141,15 @@ class WorkflowTransitionTests(unittest.TestCase):
 
 
 class WorkflowDefinitionTests(unittest.TestCase):
+    def test_repository_full_path_skips_heavy_legacy_precode_gates(self):
+        definition = load_definition(
+            os.path.join(ROOT, "flow", "flow.json"))
+        chain = workflow_chain(definition, "full")
+        for step in (
+                "grill_ask", "design", "test_blueprint",
+                "story_ask", "build_plan"):
+            self.assertNotIn(step, chain)
+
     def test_load_definition_preserves_unknown_fields(self):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, "flow.json")

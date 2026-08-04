@@ -7,6 +7,8 @@ import subprocess
 REFACTOR_SAFETY_SUITES = (
     ("稳定基线恢复能力契约",
      ("scripts/tests/test_stable_recovery_contract.py",), 90, 3000),
+    ("Story 单一设计产物契约",
+     ("scripts/tests/test_story_contract.py",), 90, 3000),
     ("项目本地启动器、资源与工作目录",
      ("scripts/tests/test_project_resources.py",), 90, 3000),
     ("本地 Spec 与领域文档边界",

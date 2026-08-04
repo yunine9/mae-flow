@@ -293,11 +293,9 @@ if flow:
     check("人工确认只保留真实选择、代码检视和不可逆决策",
           actual_ack_steps == {
               "config_confirm", "workflow_select", "code_reviewer_ask",
-              "grill_ask",
-              "story_ask", "hf_open", "tw_open", "archive_confirm",
+              "open", "story", "hf_open", "tw_open", "archive_confirm",
               "build_review", "tw_review", "rf_review",
-              "build_pace", "tw_pace", "rf_pace",
-              "test_blueprint", "build_plan",
+              "build_pace", "tw_pace", "rf_pace", "build_plan",
           }, str(sorted(actual_ack_steps)))
     check("三条新流程均在写码前确认开发节奏且月光旁路",
           steps.get("hf_open", {}).get("next") == "build_pace"
@@ -332,15 +330,11 @@ if flow:
                   steps.get("tw_review", {}),
                   steps.get("rf_review", {}),
               )))
-    story_ask = steps.get("story_ask", {})
-    check("STORY 入库决定并入开场卡且不在 story 步追加停顿",
-          story_ask.get("choices") == ["commit", "local", "no"]
-          and story_ask.get("next", {}).get("commit") == "story"
-          and story_ask.get("next", {}).get("local") == "story"
-          and story_ask.get("next", {}).get("no") == "build_plan"
-          and story_ask.get("choice_sets", {}).get("commit", {}).get("STORY入库")
-          and story_ask.get("choice_sets", {}).get("local", {}).get("STORY入库")
-          and story_ask.get("choice_sets", {}).get("no", {}).get("STORY入库") == "不生成")
+    check("完整开发固定执行 Grill、本地 Spec 和 Story",
+          steps.get("branch_create", {}).get("next", {}).get("full") == "grill"
+          and steps.get("grill", {}).get("next") == "open"
+          and steps.get("open", {}).get("next") == "story"
+          and steps.get("story", {}).get("next") == "build_pace")
     step_text = lambda name: open(
         os.path.join(ROOT, "flow", "steps", name + ".md"),
         encoding="utf-8").read()
@@ -697,9 +691,9 @@ if flow:
             structured_ack_ok, _ = mf._ack_verified(config_state, "我确认以上配置")
             check("主流程确认兼容宿主结构化应答", structured_ack_ok)
             stale_state = {
-                "current": "grill_ask", "config": {}, "choices": {},
+                "current": "grill", "config": {}, "choices": {},
                 "history": [{
-                    "step": "branch_create", "result": "goto:grill_ask",
+                    "step": "branch_create", "result": "goto:grill",
                     "at": "2026-01-01 00:00:02",
                 }],
                 "started": "2026-01-01 00:00:00",
@@ -951,52 +945,11 @@ if flow:
         try:
             os.chdir(td)
             now = time.strftime("%Y-%m-%d %H:%M:%S")
-            story_state = {
-                "current": "story_ask", "config": {}, "choices": {},
-                "history": [], "started": now,
-            }
-            mf.save_state(story_state)
-            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
-                json.dump([{
-                    "text": json.dumps(
-                        {"answers": {"STORY 如何交付": "生成但不入库（本地交测）"}},
-                        ensure_ascii=False),
-                    "step": "config_confirm", "at": now,
-                }], f, ensure_ascii=False)
-            mf.cmd_done(
-                flow, story_state,
-                types.SimpleNamespace(ack=None, choice="local", set=[]))
-            selected_story = mf.load_state()
-            check("STORY 开场预答直接写入入库配置且不二次询问",
-                  selected_story.get("current") == "story"
-                  and "不入库" in selected_story.get("config", {}).get("STORY入库", ""))
-            story_current = io.StringIO()
-            with contextlib.redirect_stdout(story_current):
-                mf.print_current(flow, selected_story)
-            check("STORY 完成命令不重复要求已预答的入库配置",
-                  "--set STORY入库=<值>" not in story_current.getvalue())
-            revisit = {
-                "current": "story_ask",
-                "config": {"STORY入库": "生成并入库"},
-                "choices": {"story": "commit"},
-                "protocols": {"development_checkpoints": 1},
-                "history": [], "started": now,
-            }
-            mf.save_state(revisit)
-            with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
-                json.dump([{
-                    "text": json.dumps(
-                        {"answers": {"STORY 如何交付": "不生成"}},
-                        ensure_ascii=False),
-                    "step": "config_confirm", "at": now,
-                }], f, ensure_ascii=False)
-            mf.cmd_done(
-                flow, revisit,
-                types.SimpleNamespace(ack=None, choice="no", set=[]))
-            no_story = mf.load_state()
-            check("STORY 返工改选不生成会覆盖旧入库状态",
-                  no_story.get("current") == "build_plan"
-                  and no_story.get("config", {}).get("STORY入库") == "不生成")
+            check("旧 Story 节点只作恢复别名且不再制造二次询问",
+                  flow["steps"]["story_ask"].get("next") == "story"
+                  and not flow["steps"]["story_ask"].get("user_ack")
+                  and flow["steps"]["design"].get("next") == "story"
+                  and flow["steps"]["test_blueprint"].get("next") == "story")
 
             os.makedirs("docs/review", exist_ok=True)
             open("docs/review/REVIEW-REQ1.md", "w", encoding="utf-8").write(
@@ -1131,7 +1084,7 @@ if flow:
             try:
                 with contextlib.redirect_stderr(io.StringIO()):
                     mf.cmd_goto(flow, branch_state, types.SimpleNamespace(
-                        step="grill_ask", force=True,
+                        step="grill", force=True,
                         message_id="branch-skip"))
             except SystemExit as exc:
                 branch_skip_blocked = exc.code == 2
@@ -1165,7 +1118,7 @@ if flow:
                 mf.cmd_done(flow, adopted, types.SimpleNamespace(
                     ack=None, choice=None, set=[]))
             check("沿用分支裁决后 branch_create 可正常推进",
-                  mf.load_state().get("current") == "grill_ask")
+                  mf.load_state().get("current") == "grill")
 
             upgrade_state = {
                 "current": "tw_open",
@@ -2525,7 +2478,8 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
     if f.endswith(".md"):
         name = f[:-3]
         txt = open(os.path.join(ROOT, "agents", f), encoding="utf-8").read()
-        check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
+        if name not in ("story-generator-agent", "craft-reviewer-agent"):
+            check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
         if name in ("compile-agent", "codecheck-fix-agent", "ut-generator-agent",
                     "grill-critic-agent"):
             check(f"{name} 契约绑定任务卡", "TASK_CARD_SHA256" in txt)

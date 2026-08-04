@@ -33,7 +33,8 @@ clarifications 文档尾部)——那是设计阶段方案讨论的领地,在这
 凡属**行为规格**的答案,落盘写成 EARS 句式:「WHEN <条件/触发> THE SYSTEM SHALL <可观测行为>」
 (一句一测,是后面规格条目 Scenario 和 UT 验收对照的原材料;写不成 WHEN/SHALL 的答案多半没问透,回炉再问)。
 收敛:题尽(含衍生题)/ 用户说"其余按推荐答案"(落盘标注未经确认)/ 超15题→告知规模由用户选(用户要继续就继续,不设硬上限)。
-落盘:增量写 docs/clarifications-{单号}.md(提案与规格阶段后移入变更目录),该文件是提案与规格步的输入。
+落盘:增量写 docs/clarifications-{单号}.md，并把完整问题树、用户答案、推荐依据、实现影响和未决项同步整理到
+`.mae-flow-work/{单号}/grill.md`。后者是本地 Spec 和 Story 的强制输入；已拍板答案禁止在下游重问。
 题目全部闭环后展示摘要，直接 git add docs/clarifications-{单号}.md &&
 git commit -m "[单号][类型]需求澄清"
 (**精确路径提交,禁止 git add docs/ 或 -A**——工作表和勘察笔记在 .mae-flow-work/ 过程区,天然不入库),再 done。

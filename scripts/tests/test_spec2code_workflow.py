@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Spec2Code 编码前流程节点回归。"""
+"""Story-centered pre-code workflow regression."""
 
 import json
 import os
@@ -13,64 +13,39 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         with open(
-            os.path.join(ROOT, "flow", "flow.json"),
-            encoding="utf-8",
-        ) as stream:
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
             cls.flow = json.load(stream)
 
-    def test_full_chain_contains_blueprint_and_plan_loops(self):
+    def test_full_chain_uses_story_as_the_only_precode_design_artifact(self):
         steps = self.flow["steps"]
-        self.assertEqual("test_blueprint", steps["design"]["next"])
-        self.assertEqual("build_plan", steps["story"]["next"])
-        self.assertEqual("build_plan", steps["story_ask"]["next"]["no"])
-        self.assertEqual(
-            {
-                "continue": "story_ask",
-                "revise": "test_blueprint",
-            },
-            steps["test_blueprint"]["next"],
-        )
-        self.assertEqual(
-            {
-                "continue": "build_pace",
-                "revise": "build_plan",
-            },
-            steps["build_plan"]["next"],
-        )
+        self.assertEqual("grill", steps["branch_create"]["next"]["full"])
+        self.assertEqual("story", steps["open"]["next"])
+        self.assertEqual("build_pace", steps["story"]["next"])
+        self.assertEqual("story", steps["design"]["next"])
+        self.assertEqual("story", steps["test_blueprint"]["next"])
+        self.assertEqual("story", steps["story_ask"]["next"])
 
-    def test_new_loops_bind_local_artifact_evidence(self):
+    def test_story_loop_binds_local_spec_grill_and_story(self):
         steps = self.flow["steps"]
-        blueprint = steps["test_blueprint"]["evidence"]
-        self.assertIn(
-            {"type": "spec2code_artifact", "kind": "blueprint"},
-            blueprint,
+        self.assertEqual(
+            [
+                ".mae-flow-work/{单号}/spec.md",
+                ".mae-flow-work/{单号}/grill.md",
+            ],
+            steps["open"]["evidence"][0]["any"],
         )
-        plan_evidence = steps["build_plan"]["evidence"]
-        self.assertIn(
-            {"type": "spec2code_artifact", "kind": "roadmap"},
-            plan_evidence,
-        )
-        self.assertIn(
-            {"type": "spec2code_artifact", "kind": "plan"},
-            plan_evidence,
-        )
-        self.assertIn(
-            {"type": "spec2code_plan_review", "checkpoint": "CP1"},
-            plan_evidence,
+        self.assertEqual(
+            [".mae-flow-work/{单号}/story.md"],
+            steps["story"]["evidence"][0]["any"],
         )
 
     def test_other_workflow_entries_remain_unchanged(self):
         steps = self.flow["steps"]
-        self.assertEqual(
-            "code_reviewer_ask",
-            steps["workflow_select"]["next"],
-        )
+        self.assertEqual("code_reviewer_ask", steps["workflow_select"]["next"])
         reviewer = steps["code_reviewer_ask"]
         self.assertEqual("code_reviewer", reviewer["choice_key"])
-        self.assertEqual(
-            {"disabled", "enabled"},
-            set(reviewer["choices"]),
-        )
+        self.assertEqual({"disabled", "enabled"}, set(reviewer["choices"]))
         self.assertEqual("branch_create", reviewer["next"])
         self.assertTrue(reviewer["skip_in_moonlight"])
         self.assertEqual("enabled", reviewer["moonlight_choice"])
@@ -82,9 +57,8 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
 
     def test_branch_prompt_explains_moonlight_noninteractive_resolution(self):
         with open(
-            os.path.join(ROOT, "flow", "steps", "branch_create.md"),
-            encoding="utf-8",
-        ) as stream:
+                os.path.join(ROOT, "flow", "steps", "branch_create.md"),
+                encoding="utf-8") as stream:
             prompt = stream.read()
         self.assertIn("禁止执行 AskUserQuestion", prompt)
         self.assertIn(".mae-flow.json.last", prompt)

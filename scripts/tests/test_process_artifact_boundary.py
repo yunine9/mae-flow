@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import sys
 import unittest
 
@@ -42,7 +43,7 @@ class ProcessArtifactBoundaryTests(unittest.TestCase):
         forbidden = (
             "git add docs/clarifications-", "git add docs/review/",
             "git add docs/codecheck-exempt-", "git add docs/delivery-notes.md",
-            "spec new", "spec archive",
+            "spec new", "spec archive", ".mae-flow-work/survey-",
         )
         for step_id in reached:
             path = os.path.join(ROOT, "flow", "steps", step_id + ".md")
@@ -51,6 +52,29 @@ class ProcessArtifactBoundaryTests(unittest.TestCase):
             with self.subTest(step=step_id):
                 for marker in forbidden:
                     self.assertNotIn(marker, content)
+
+    def test_local_artifact_steps_require_semantic_evidence(self):
+        expected = {
+            "open": "local_spec_valid",
+            "hf_open": "local_spec_valid",
+            "tw_open": "local_spec_valid",
+            "tw_verify": "verification_passed",
+            "verify_comet": "verification_passed",
+        }
+        for step_id, evidence_type in expected.items():
+            declared = tuple(
+                item["type"] for item in self.flow["steps"][step_id]["evidence"])
+            with self.subTest(step=step_id):
+                self.assertIn(evidence_type, declared)
+
+    def test_gate_protects_new_and_legacy_truth_sources(self):
+        pattern = self.flow["specs_truth"]
+        self.assertIsNotNone(re.search(pattern, "docs/specs/radio.md"))
+        self.assertIsNotNone(re.search(pattern, "openspec/specs/radio/spec.md"))
+        writable = tuple(
+            step_id for step_id, step in self.flow["steps"].items()
+            if step.get("allow_specs_write"))
+        self.assertEqual(("domain_archive",), writable)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,8 @@ class WorkflowEvidencePorts:
     business_changed_files: object
     spec2code_plan_review: object
     domain_archive_fresh: object = None
+    local_spec_valid: object = None
+    verification_passed: object = None
 
 
 class WorkflowEvidenceRules:
@@ -47,6 +49,18 @@ class WorkflowEvidenceRules:
 
     def __init__(self, ports):
         self.ports = ports
+
+    def local_spec_valid(self, _spec, state):
+        if self.ports is None or self.ports.local_spec_valid is None:
+            return EvidenceResult(False, "本地 Spec 校验器未配置")
+        passed, reason = self.ports.local_spec_valid(state)
+        return EvidenceResult(bool(passed), str(reason or ""))
+
+    def verification_passed(self, _spec, state):
+        if self.ports is None or self.ports.verification_passed is None:
+            return EvidenceResult(False, "本地验证报告校验器未配置")
+        passed, reason = self.ports.verification_passed(state)
+        return EvidenceResult(bool(passed), str(reason or ""))
 
     @staticmethod
     def _domain_archive_record_error(record):

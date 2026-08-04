@@ -77,6 +77,7 @@ class EvidenceRegistryTests(unittest.TestCase):
                 "archive_paths_clean", "codecheck_clean", "glob_absent",
                 "review_agent_or_no_code", "agent_or_no_source",
                 "review_codecheck", "domain_archive_complete",
+                "local_spec_valid", "verification_passed",
             ),
             registry.names,
         )

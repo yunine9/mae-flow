@@ -110,6 +110,7 @@ class QualityTaskInputTests(unittest.TestCase):
             finally:
                 os.chdir(before)
             canonical = tuple(os.path.realpath(path) for path in sources)
+            self.assertIn(os.path.realpath(os.path.join(specs, "index.md")), canonical)
             self.assertIn(os.path.realpath(os.path.join(specs, "radio.md")), canonical)
             self.assertNotIn(
                 os.path.realpath(os.path.join(specs, "billing.md")), canonical)

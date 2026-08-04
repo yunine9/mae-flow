@@ -71,7 +71,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | **grill-me**（mattpocock/skills 的 grilling） | grill 步（open 之前） | 五铁律原文级还原（追问至共识/决策树逐支/每题带推荐/一次一题/事实自查决策问人），工程化增强：8 维备课（模板化工作表 grill-prep，hook 校验章节 + done 拦「待填」残留）、题目四要素、阻塞性排序、收敛条件。**高度红线：只问需求层（WHAT），技术分歧记入「留给设计阶段」清单，禁止下钻** |
 | **Comet 0.3.9** | open/design/build/verify/archive 的方法来源 | 只保留被 `CAPABILITY_PACKS` 直接读取的阶段 Skill；主入口与未加载参考文档已删除。state/guard/handoff/archive 脚本仅供显式兼容命令，不参与主流程状态机 |
 | **OpenSpec 1.6.0** | 规格格式与方法来源 | schema、模板和选定 Skill 是内置规格引擎的运行时输入；自包含 ESM 仅供显式兼容命令与开发期差分测试，不参与主流程 |
-| **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
+| **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 使用本单 Grill/decisions（已拍板决策禁止重问，新需求缺口回流 Grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT 蓝图 | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
 | **Ponytail** | build 全程 + verify 4.1 | 固定 commit 的官方 Skill 原文双用：build 写码时 full 档常驻预防（the ladder）+ verify 对 diff 做 review。**两条红线：YAGNI 不得砍 delta spec 要求的行为；禁 ultra 档** |
 | **领域真相归档** | 最终质量 → 最终检视 | 只把确认、实现并验证的长期知识更新到 `docs/specs/`；过程经验不得另写 delivery-notes，`unchanged` 是合法结论 |
@@ -225,11 +225,13 @@ flow.json 步骤字段语义：
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `domain_archive_complete` | 领域候选已经由用户确认并应用，结果为 changes/unchanged，路径只在 `docs/specs/` 且输入仍新鲜 |
+| `local_spec_valid` | 本单 `.mae-flow-work/<单号>/spec.md` 通过语义章节校验；仅有空文件或标题不能推进 |
+| `verification_passed` | 本单验证报告包含独立 PASS 且不含 FAIL；仅创建文件不能推进 |
 
 **CodeCheck/UT 覆盖口径（2026-07-27 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口做**预分类**，窗口内直接计入，窗口外逐条编号交用户确认是否涉及本次修改，未经确认不得排除、派修复 Agent 或 done；明细缺行号时保守全算。月光模式无法询问用户，故将全部候选保守计入。UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口只是近似，不是真相——函数级规则、宏展开和定位漂移正是必须保留用户裁决的原因。
-| `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/review 在用） |
-| `archive_paths_clean` | 只检查 `spec archive` 记录的旧 change 删除、新 archive 新增和实际合并的真相源，不让其他单 OpenSpec 脏文件反向逼迫入库 |
-| `glob_absent` | 负向存在证据:pattern 必须一个都匹配不到——"动作须留下'消失'的事实"（archive 在用:原 change 目录必须从 changes/ 消失，堵复制式假归档僵尸） |
+| `clean_paths` | 指定路径 git 实测已提交且无未提交改动；保留给旧在途节点和非需求过程产物兼容使用 |
+| `archive_paths_clean` | 旧 OpenSpec 在途归档兼容证据；当前可达流程改用 `domain_archive_complete` |
+| `glob_absent` | 负向存在证据：pattern 必须一个都匹配不到；当前主链不再用它证明 OpenSpec 归档 |
 | `codecheck_clean` | 保留作旧在途流程兼容，不再由 `review_codecheck` 正常路径调用。新路径以首检或 Agent 最终 fullcheck 的绑定凭证收口，避免 done 第三次长跑 |
 | `agent_or_no_source` | 本轮没有源码、测试或构建文件改动时自动过；只要有改动就强制指定 agent 的成功状态。适用于主流程、小改和评审返工，不再只认 C++/Java |
 | `review_codecheck` | 三条流程统一先 `codecheck-scan` 冻结首检 HEAD/告警数；首检有告警才允许派一轮 CODECHECK agent，首检 0 后源码变化会令扫描过期。CLEAN/REMAINING/无源码改动的工具 FAIL 均留痕收口，不再调用 `codecheck_clean` 重跑；输出无法解析时保存绑定 HEAD 的诊断并继续，源码变化后重新尝试 |

@@ -284,7 +284,7 @@ if flow:
     # 4.5 review-fix 质量链必须保持拆分，禁止退化回一个 rf_verify 大步骤
     review_chain = [
         "rf_fix", "rf_compile", "rf_review", "rf_codecheck", "rf_ut",
-        "delivery_review", "push"]
+        "domain_archive", "delivery_review", "push"]
     got, cur = [], "rf_fix"
     for _ in range(len(review_chain)):
         got.append(cur)
@@ -300,7 +300,7 @@ if flow:
     check("人工确认只保留真实选择、代码检视和不可逆决策",
           actual_ack_steps == {
               "config_confirm", "workflow_select", "code_reviewer_ask",
-              "open", "story", "hf_open", "tw_open", "archive_confirm",
+              "open", "story", "hf_open", "tw_open",
               "build_review", "tw_review", "rf_review",
               "build_pace", "tw_pace", "rf_pace",
           }, str(sorted(actual_ack_steps)))
@@ -345,13 +345,14 @@ if flow:
     step_text = lambda name: open(
         os.path.join(ROOT, "flow", "steps", name + ".md"),
         encoding="utf-8").read()
-    check("批量确认与零待决分支都有明确步骤话术",
-          "multiSelect" in step_text("end")
-          and "每卡最多 4 条" in step_text("rf_triage")
+    check("关键确认与零待决分支都有明确步骤话术",
+          "每卡最多 4 条" in step_text("rf_triage")
           and "local-spec validate" in step_text("open")
           and "唯一一次确认" in step_text("open")
           and "候选题为 0" in step_text("grill")
-          and "AskUserQuestion" in step_text("verify_comet"))
+          and "只向用户裁决一次" in step_text("verify_comet")
+          and "只向用户确认一次" in step_text("domain_archive")
+          and "domain-archive apply --message-id" in step_text("domain_archive"))
     check("review 编译只接受 OK",
           steps.get("rf_compile", {}).get("evidence", [{}])[0].get("statuses") == ["OK"])
     check("review UT 只接受 PASS",
@@ -362,7 +363,7 @@ if flow:
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
     tweak_chain = ["tw_change", "tw_compile", "tw_review", "tw_codecheck", "tw_ut",
-                   "tw_verify", "delivery_review", "archive_confirm"]
+                   "tw_verify", "domain_archive", "delivery_review", "push"]
     got, cur = [], "tw_change"
     for _ in range(len(tweak_chain)):
         got.append(cur)
@@ -372,9 +373,10 @@ if flow:
                else nxt.get("continue") if isinstance(nxt, dict) else nxt)
     check("小改流程也经过编译、规范检查和 UT", got == tweak_chain, str(got))
     check("三条质量链均在不可逆定稿/最终推送前核对最终代码增量",
-          steps.get("verify_comet", {}).get("next") == "delivery_review"
-          and steps.get("tw_verify", {}).get("next") == "delivery_review"
-          and steps.get("rf_ut", {}).get("next") == "delivery_review"
+          steps.get("verify_comet", {}).get("next") == "domain_archive"
+          and steps.get("tw_verify", {}).get("next") == "domain_archive"
+          and steps.get("rf_ut", {}).get("next") == "domain_archive"
+          and steps.get("domain_archive", {}).get("next") == "delivery_review"
           and any(e.get("type") == "final_review_clear"
                   for e in steps.get("delivery_review", {}).get("evidence", []))
           and steps.get("delivery_review", {}).get("skip_in_moonlight"))
@@ -389,11 +391,10 @@ if flow:
     # spec_validate 只服务 change.md，不能继续冒充本地 Spec 校验。
     open_evidence = steps.get("open", {}).get("evidence", [])
     check("本地 Spec 校验与 Grill 输入链在位",
-          any(
-              ".mae-flow-work/{单号}/spec.md" in e.get("any", [])
-              and ".mae-flow-work/{单号}/grill.md" in e.get("any", [])
-              for e in open_evidence
-          )
+          any(e.get("type") == "local_spec_valid" for e in open_evidence)
+          and any(
+              ".mae-flow-work/{单号}/grill.md" in e.get("any", [])
+              for e in open_evidence)
           and "local-spec validate" in step_text("open")
           and steps.get("open", {}).get("next") == "story")
 
@@ -964,8 +965,8 @@ if flow:
                   and flow["steps"]["design"].get("next") == "story"
                   and flow["steps"]["test_blueprint"].get("next") == "story")
 
-            os.makedirs("docs/review", exist_ok=True)
-            open("docs/review/REVIEW-REQ1.md", "w", encoding="utf-8").write(
+            os.makedirs(".mae-flow-work/REQ1", exist_ok=True)
+            open(".mae-flow-work/REQ1/review.md", "w", encoding="utf-8").write(
                 "| # | 意见 | 定性 | 裁决 |\n"
                 "|---|---|---|---|\n"
                 "| 1 | 空指针 | 属实 | 转规格轮次(已确认) |\n"
@@ -1971,7 +1972,8 @@ if flow:
             # CodeCheck 是建议型工具：真实尝试/令牌有留痕即可，不因工具自身
             # 结果不稳定在 done 再跑第三遍。
             cc_ack = "确认承担CodeCheck修复Agent令牌缺失风险并继续"
-            cc_state = {"current": "rf_codecheck", "config": {},
+            cc_state = {"current": "rf_codecheck",
+                        "config": {"单号": "REQ-CODECHECK"},
                         "choices": {"workflow": "review"}, "history": [], "started": now,
                         "quality": {"codecheck_scan": {"step": "rf_codecheck", "count": 1}}}
             mf.save_state(cc_state)
@@ -2276,30 +2278,38 @@ if flow:
                   (unlocked.get("unlock") or {}).get("moonlight") is True
                   and (unlocked.get("unlock") or {}).get("step") == "rf_ut")
 
-            # 模拟 UT 已尽力但仍有遗留，随后 push 成功应停在晨间检查而不是 end。
+            # 模拟 UT 已尽力但仍有遗留。领域归档需要真实用户确认，
+            # 月光模式必须停在可恢复安全点，不能代替用户 apply 或提前 push。
             unlocked.pop("unlock", None)
             mf.save_state(unlocked)
             mf.cmd_moonlight(flow, unlocked, types.SimpleNamespace(
                 action="defer", ack=None,
-                reason="UT仍有1个历史环境失败，已重跑并排除本次代码逻辑问题，记录后继续推送"))
-            before_push = mf.load_state()
-            check("评审月光轮质量链最终进入push", before_push.get("current") == "push")
-            mf.cmd_moonlight(flow, before_push, types.SimpleNamespace(
-                action="push-failed", ack=None,
-                reason="远端认证临时失败，已重新登录并重试一次仍未恢复"))
-            push_waiting = mf.load_state()
-            check("月光宝盒不会把push失败伪装成远端成功",
-                  push_waiting.get("current") == "push"
-                  and any(x.get("kind") == "push"
-                          for x in mf._moonlight_unresolved(push_waiting)))
-            mf.advance(flow, push_waiting, "push", flow["steps"]["push"], "done")
-            morning = mf.load_state()
-            check("月光宝盒push后停在晨间检查且暂不归档",
-                  morning.get("current") == "moonlight_review"
-                  and (morning.get("moonlight") or {}).get("pushed_head")
-                  and not any(x.get("kind") == "push"
-                              for x in mf._moonlight_unresolved(morning))
+                reason="UT仍有1个历史环境失败，已重跑并排除本次代码逻辑问题，记录后等待领域归档确认"))
+            archive_waiting = mf.load_state()
+            check("评审月光轮停在领域归档等待用户",
+                  archive_waiting.get("current") == "domain_archive")
+            mf.cmd_moonlight(flow, archive_waiting, types.SimpleNamespace(
+                action="blocked", ack=None,
+                reason="领域归档候选等待用户确认"))
+            blocked_archive = mf.load_state()
+            check("月光宝盒不会代替用户确认领域归档",
+                  blocked_archive.get("current") == "domain_archive"
+                  and (blocked_archive.get("moonlight") or {}).get("hard_blocked")
                   and os.path.isfile(mf.MOONLIGHT_REPORT_PATH))
+
+            # 后续晨间修复策略使用一个独立的已推送兼容夹具，不把领域归档
+            # 安全停止伪装成真实 push。
+            morning = json.loads(json.dumps(blocked_archive))
+            morning["current"] = "moonlight_review"
+            morning["moonlight"].pop("hard_blocked", None)
+            morning["moonlight"]["issues"] = [
+                issue for issue in morning["moonlight"].get("issues", [])
+                if issue.get("kind") != "blocker"
+            ]
+            morning["moonlight"]["pushed_head"] = mf.sh(
+                "git rev-parse --verify HEAD")
+            morning.pop("revision", None)
+            morning.pop("updated_at", None)
 
             env_morning = json.loads(json.dumps(morning))
             env_morning["moonlight"]["issues"].append({
@@ -2335,10 +2345,11 @@ if flow:
             mf.cmd_moonlight(flow, repairing, types.SimpleNamespace(
                 action="finalize", ack=None, reason=None))
             finalized = mf.load_state()
-            check("评审意见处理晨间修复完成后可直接结束",
-                  finalized.get("current") == "end" and not mf._moonlight(finalized))
+            check("评审意见处理晨间修复完成后进入领域归档",
+                  finalized.get("current") == "domain_archive"
+                  and not mf._moonlight(finalized))
 
-            # full/tweak/hotfix 的夜间路径跳过不可逆归档，晨间 finalize 才恢复归档确认。
+            # full/tweak/hotfix 同样不能在夜间越过需要用户确认的领域归档。
             full_state = {
                 "current": "verify_comet", "config": {"单号": "REQMOON2", "CHANGE_NAME": "moon"},
                 "choices": {"workflow": "full"}, "history": [], "started": now,
@@ -2346,18 +2357,21 @@ if flow:
             }
             mf.save_state(full_state)
             mf.advance(flow, full_state, "verify_comet", flow["steps"]["verify_comet"], "done")
-            skipped_archive = mf.load_state()
-            check("完整开发月光轮先跳过归档进入push",
-                  skipped_archive.get("current") == "push"
-                  and any(h.get("result") == "moonlight:archive-deferred"
-                          for h in skipped_archive.get("history", [])))
-            mf.advance(flow, skipped_archive, "push", flow["steps"]["push"], "done")
-            full_morning = mf.load_state()
+            full_archive = mf.load_state()
+            check("完整开发月光轮停在领域归档",
+                  full_archive.get("current") == "domain_archive")
+            full_morning = json.loads(json.dumps(full_archive))
+            full_morning["current"] = "moonlight_review"
+            full_morning["moonlight"]["pushed_head"] = mf.sh(
+                "git rev-parse --verify HEAD")
+            full_morning.pop("revision", None)
+            full_morning.pop("updated_at", None)
+            mf.save_state(full_morning)
             mf.cmd_moonlight(flow, full_morning, types.SimpleNamespace(
                 action="finalize", ack=None, reason=None))
             full_finalized = mf.load_state()
-            check("完整开发晨间finalize恢复普通规格定稿",
-                  full_finalized.get("current") == "archive_confirm"
+            check("完整开发晨间finalize恢复领域归档",
+                  full_finalized.get("current") == "domain_archive"
                   and not mf._moonlight(full_finalized))
     finally:
         os.chdir(old_cwd)

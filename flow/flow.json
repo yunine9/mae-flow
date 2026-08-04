@@ -14,7 +14,7 @@
   "source_patterns": [
     "(^|/)(service|src|include|lib|app|modules?)/"
   ],
-  "specs_truth": "(^|/)openspec/specs/",
+  "specs_truth": "(^|/)(?:docs/specs|openspec/specs)/",
   "steps": {
     "config_confirm": {
       "title": "配置确认",
@@ -311,9 +311,11 @@
       ],
       "evidence": [
         {
+          "type": "local_spec_valid"
+        },
+        {
           "type": "glob",
           "any": [
-            ".mae-flow-work/{单号}/spec.md",
             ".mae-flow-work/{单号}/grill.md"
           ]
         }
@@ -379,10 +381,7 @@
       ],
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            ".mae-flow-work/{单号}/spec.md"
-          ]
+          "type": "local_spec_valid"
         }
       ],
       "next": "build_pace"
@@ -395,10 +394,7 @@
       ],
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            ".mae-flow-work/{单号}/spec.md"
-          ]
+          "type": "local_spec_valid"
         }
       ],
       "next": "tw_pace"
@@ -525,10 +521,7 @@
       "title": "小改 — 对照需求检查",
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            ".mae-flow-work/{单号}/verification.md"
-          ]
+          "type": "verification_passed"
         }
       ],
       "next": "domain_archive"
@@ -684,10 +677,7 @@
       "title": "验证 4/4 — 规格符合性",
       "evidence": [
         {
-          "type": "glob",
-          "any": [
-            ".mae-flow-work/{单号}/verification.md"
-          ]
+          "type": "verification_passed"
         }
       ],
       "next": "domain_archive"

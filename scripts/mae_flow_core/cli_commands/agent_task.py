@@ -84,6 +84,9 @@ def _resolve_requirement_sources_from_runtime(st):
         local_sources += tuple(
             os.path.join(os.getcwd(), *document.path.split("/"))
             for document in domain.documents)
+        index = os.path.join(os.getcwd(), "docs", "specs", "index.md")
+        if os.path.isfile(index):
+            local_sources += (index,)
     return list(quality_task_card_use_cases.requirement_sources(
         config,
         exists=os.path.exists,

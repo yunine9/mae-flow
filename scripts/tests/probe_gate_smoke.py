@@ -3,8 +3,8 @@
 """探针①：gate 冒烟 + v5 改动面的证据全路径。
 
 与 test_*.py 的单元测试互补，两部分：
-1. gate 拦/放黑盒抽样（真实 CLI 子进程）：源码步放行/非源码步拦、真相源
-   只读、定稿步 specs 可写、变更单 change.md 可写。
+1. gate 拦/放黑盒抽样（真实 CLI 子进程）：源码步放行/非源码步拦、领域真相源
+   只读、领域归档步 docs/specs 可写、旧变更单兼容写入。
 2. 证据函数全路径（selftest 同款 importlib 直调）：spec_validate 八路、
    tasks_checked 四路、glob/glob_absent 双布局。
 
@@ -83,7 +83,7 @@ def main():
     root = make_repo(base, "g1", "build")
     r = gate(root, "edit", "src/foo.c")
     check("build 步改源码放行", r.returncode == 0, r.stdout + r.stderr)
-    r = gate(root, "edit", "openspec/specs/dom/spec.md")
+    r = gate(root, "edit", "docs/specs/dom.md")
     check("build 步改真相源被拦", r.returncode != 0)
     r = gate(root, "edit", "openspec/changes/probe-x/change.md")
     check("build 步改本单 change.md 放行", r.returncode == 0, r.stdout + r.stderr)
@@ -92,9 +92,9 @@ def main():
     check("open 步改源码被拦", r.returncode != 0)
     r = gate(root, "edit", "openspec/changes/probe-x/change.md")
     check("open 步写 change.md 放行", r.returncode == 0, r.stdout + r.stderr)
-    root = make_repo(base, "g3", "archive")
-    r = gate(root, "edit", "openspec/specs/dom/spec.md")
-    check("定稿步写真相源放行", r.returncode == 0, r.stdout + r.stderr)
+    root = make_repo(base, "g3", "domain_archive")
+    r = gate(root, "edit", "docs/specs/dom.md")
+    check("领域归档步写真相源放行", r.returncode == 0, r.stdout + r.stderr)
 
     # ---------- 1b. 提交链拦截时机(用户实战黑事件回归) ----------
     # 黑事件:git add openspec/.../proposal.md 的 "md" 曾误命中 mkdir 的 cmd

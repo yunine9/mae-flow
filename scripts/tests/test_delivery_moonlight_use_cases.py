@@ -351,7 +351,7 @@ class MoonlightUseCaseTests(unittest.TestCase):
         )
         updated = self.updated(result)
         self.assertFalse(updated["moonlight"]["enabled"])
-        self.assertEqual("archive_confirm", updated["current"])
+        self.assertEqual("domain_archive", updated["current"])
         self.assertEqual("print_current", result.effects[-1].kind)
 
     def test_activation_defers_archive_and_off_requires_authorization(self):

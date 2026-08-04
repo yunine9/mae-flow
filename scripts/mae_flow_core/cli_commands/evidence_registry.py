@@ -1,5 +1,7 @@
 """Evidence registries wired to public CLI command ports."""
 
+import re
+
 from .shared import (
     AgentEvidencePorts, AgentEvidenceRules, DeliveryEvidencePorts,
     DeliveryEvidenceRules, QualityEvidencePorts, QualityEvidenceRules,
@@ -20,6 +22,7 @@ from mae_flow_core.orchestration.domain_archive import (
     input_digest,
 )
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from .local_spec import local_spec_errors
 
 
 def _domain_archive_fresh(state):
@@ -49,6 +52,38 @@ def _domain_archive_fresh(state):
         return False, (
             "领域归档输入已变化；只需重新执行 domain-archive prepare，"
             "不会回退编码、检视或质量阶段")
+    return True, ""
+
+
+def _local_spec_valid(state):
+    ticket = str(((state or {}).get("config") or {}).get("单号", "")).strip()
+    try:
+        path = ensure_work_package(os.getcwd(), ticket).spec
+        content = read_text(path, encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        return False, "本地 Spec 不可读: %s；执行 local-spec init" % exc
+    errors = local_spec_errors(content)
+    if errors:
+        return False, (
+            "本地 Spec 缺少有效内容: %s；补齐后执行 local-spec validate"
+            % "、".join(errors))
+    return True, ""
+
+
+def _verification_passed(state):
+    ticket = str(((state or {}).get("config") or {}).get("单号", "")).strip()
+    try:
+        package = ensure_work_package(os.getcwd(), ticket)
+        path = os.path.join(package.root, "verification.md")
+        content = read_text(path, encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        return False, "本地验证报告不可读: %s" % exc
+    if re.search(r"(?i)\bFAIL\b", content):
+        return False, "本地验证报告结论为 FAIL；修复后重新完成质量链"
+    if not re.search(r"(?mi)^\s*(?:总体|结论)?\s*[:：]?\s*PASS\b", content):
+        return False, (
+            "本地验证报告缺少独立一行的 PASS 结论；"
+            "在 .mae-flow-work/<单号>/verification.md 补充真实结论")
     return True, ""
 
 
@@ -263,6 +298,8 @@ _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     spec2code_plan_review=lambda spec, state:
         _spec2code_plan_review(spec, state),
     domain_archive_fresh=_domain_archive_fresh,
+    local_spec_valid=_local_spec_valid,
+    verification_passed=_verification_passed,
 ))
 
 # Compatibility names used by in-flight command handlers and legacy tests.
@@ -278,6 +315,8 @@ ev_content_free = _WORKFLOW_EVIDENCE.content_free
 ev_glob_absent = _WORKFLOW_EVIDENCE.glob_absent
 ev_clean_paths = _WORKFLOW_EVIDENCE.clean_paths
 ev_domain_archive_complete = _WORKFLOW_EVIDENCE.domain_archive_complete
+ev_local_spec_valid = _WORKFLOW_EVIDENCE.local_spec_valid
+ev_verification_passed = _WORKFLOW_EVIDENCE.verification_passed
 
 
 _EVIDENCE_REGISTRY = build_evidence_registry(

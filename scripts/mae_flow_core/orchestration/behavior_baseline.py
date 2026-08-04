@@ -26,6 +26,26 @@ REQUIRED_DOMAIN_SECTIONS = (
 _PLACEHOLDER_CONTENT = frozenset({
     "", "无", "暂无", "待定", "待补充", "todo", "tbd", "n/a", "na",
 })
+_TEMPLATE_GUIDANCE = (
+    "说明该领域解决的问题、责任边界以及与相邻领域的分界。",
+    "定义长期使用的术语、判定口径和任何情况下都必须成立的不变量。",
+    "记录用户或外部系统能够观察到的行为，以及当前有效的业务规则。",
+    "记录 REST、CORBA、消息、文件格式或跨组件调用等稳定契约。",
+    "记录关键数据含义、状态转换、升级兼容和存量数据处理规则。",
+    "记录最大并发、容量上限、时延目标和资源约束；不适用时说明领域依据。",
+    "记录异常行为、降级策略、重试边界和恢复方式。",
+    "记录能长期验证领域真相的测试层级、关键场景和观测点。",
+    "记录承载该领域规则的稳定目录、模块、类型或关键入口，不记录临时行号。",
+    "列出容易混淆但明确由其他领域负责的内容，并说明归属。",
+)
+_PROCESS_METADATA = (
+    ("需求单号", re.compile(r"(?mi)^\s*(?:需求)?单号\s*[:：]")),
+    ("CP 阶段", re.compile(r"(?i)\bCP[1-9]\d*\b")),
+    ("Reviewer", re.compile(
+        r"(?i)\b(?:(?:CODE|STORY|CRAFT)\s+)?Reviewer\b")),
+    ("过程记录", re.compile(
+        r"(?m)^\s*(?:评审记录|提交记录|开发过程|临时方案)\s*[:：]")),
+)
 
 
 @dataclass(frozen=True)
@@ -138,6 +158,14 @@ def validate_domain_document(content):
         errors.append("文档标题仍是模板占位符: <领域名称>")
     if "MAE-FLOW-DOMAIN-DRAFT" in content:
         errors.append("领域文档仍是未完成模板；补充事实后删除草稿标记")
+    if any(guidance in content for guidance in _TEMPLATE_GUIDANCE):
+        errors.append("领域文档仍包含模板说明；请替换为已验证的长期事实")
+    process_metadata = tuple(
+        label for label, pattern in _PROCESS_METADATA if pattern.search(content))
+    if process_metadata:
+        errors.append(
+            "领域文档包含需求过程元数据: %s；只保留当前长期事实"
+            % "、".join(process_metadata))
     for section in REQUIRED_DOMAIN_SECTIONS:
         value = headings.get(section, "").strip()
         compact = re.sub(r"[\s`*_#>-]+", "", value).casefold()

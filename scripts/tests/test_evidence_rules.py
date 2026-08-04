@@ -48,6 +48,21 @@ def make_ports(**overrides):
 
 
 class WorkflowEvidenceRuleTests(unittest.TestCase):
+    def test_local_process_evidence_uses_semantic_validators(self):
+        rules = WorkflowEvidenceRules(make_ports(
+            local_spec_valid=lambda _state: (False, "Spec 缺少验收条件"),
+            verification_passed=lambda _state: (False, "验证结论为 FAIL"),
+        ))
+
+        self.assertEqual(
+            (False, "Spec 缺少验收条件"),
+            tuple(rules.local_spec_valid({}, {})),
+        )
+        self.assertEqual(
+            (False, "验证结论为 FAIL"),
+            tuple(rules.verification_passed({}, {})),
+        )
+
     def test_spec2code_artifact_requires_registered_fresh_file(self):
         text = "# artifact\n"
         state = {

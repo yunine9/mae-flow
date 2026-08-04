@@ -28,12 +28,12 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
 
     def test_story_loop_binds_local_spec_grill_and_story(self):
         steps = self.flow["steps"]
+        evidence = steps["open"]["evidence"]
+        self.assertIn("local_spec_valid", tuple(
+            item["type"] for item in evidence))
         self.assertEqual(
-            [
-                ".mae-flow-work/{单号}/spec.md",
-                ".mae-flow-work/{单号}/grill.md",
-            ],
-            steps["open"]["evidence"][0]["any"],
+            [".mae-flow-work/{单号}/grill.md"],
+            next(item for item in evidence if item["type"] == "glob")["any"],
         )
         self.assertEqual(
             [".mae-flow-work/{单号}/story.md"],

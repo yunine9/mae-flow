@@ -89,6 +89,22 @@ class DomainArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "候选已过期"):
                 domain_archive.require_fresh(frozen, current)
 
+    def test_candidate_edit_invalidates_prepared_archive_digest(self):
+        with tempfile.TemporaryDirectory() as root:
+            candidate = os.path.join(root, "candidate.md")
+            self._write(candidate, document(suffix="准备时"))
+            entry = domain_archive.prepare_candidate(
+                root, candidate, "radio", ("SUL",))
+            frozen = domain_archive.input_digest(
+                root, (), "diff-v1", (entry,))
+
+            self._write(candidate, document(suffix="确认前又修改"))
+            current = domain_archive.input_digest(
+                root, (), "diff-v1", (entry,))
+
+            with self.assertRaisesRegex(ValueError, "候选已过期"):
+                domain_archive.require_fresh(frozen, current)
+
     def test_apply_rolls_back_when_one_replace_fails(self):
         with tempfile.TemporaryDirectory() as root:
             specs = os.path.join(root, "docs", "specs")

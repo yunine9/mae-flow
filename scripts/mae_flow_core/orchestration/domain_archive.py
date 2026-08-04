@@ -99,6 +99,7 @@ def input_digest(project_root, input_paths, git_facts, candidates):
     paths = [os.path.abspath(os.fspath(path)) for path in input_paths]
     paths.append(os.path.join(root, "docs", "specs", "index.md"))
     for entry in candidates:
+        paths.append(os.path.abspath(entry.candidate_path))
         relative = entry.target_path.replace("\\", "/")
         paths.append(os.path.join(root, *relative.split("/")))
     for path in sorted(set(paths), key=str.casefold):

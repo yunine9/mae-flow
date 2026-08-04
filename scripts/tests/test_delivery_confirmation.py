@@ -128,6 +128,7 @@ class DeliveryConfirmationTests(unittest.TestCase):
             state, ["src/a.cpp"], "feat: A", "main", (),
             candidate_paths=("src/a.cpp",))
         api = types.SimpleNamespace(
+            _is_positive_confirmation=lambda answer: answer.startswith("确认"),
             _authorization_message=mock.Mock(return_value=(
                 True, "确认按该清单提交", {"message_id": "msg-1"}, "")),
         )
@@ -138,6 +139,22 @@ class DeliveryConfirmationTests(unittest.TestCase):
         self.assertTrue(first["delivery_manifest"]["confirmed"])
         self.assertIs(first, second)
         api._authorization_message.assert_called_once()
+
+    def test_negative_user_answer_does_not_confirm_manifest(self):
+        state = self.state()
+        state["delivery_manifest"] = build_delivery_manifest(
+            state, ["src/a.cpp"], "feat: A", "main", (),
+            candidate_paths=("src/a.cpp",))
+        api = types.SimpleNamespace(
+            _is_positive_confirmation=lambda _answer: False,
+            _authorization_message=mock.Mock(return_value=(
+                True, "不同意，这个清单还要修改",
+                {"message_id": "msg-no"}, "")),
+        )
+
+        with self.assertRaisesRegex(ValueError, "没有明确批准"):
+            confirm_delivery_manifest(state, "msg-no", api)
+        self.assertFalse(state["delivery_manifest"]["confirmed"])
 
 
 if __name__ == "__main__":

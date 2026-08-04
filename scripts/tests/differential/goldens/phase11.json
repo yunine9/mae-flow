@@ -521,7 +521,7 @@
       ".mae-flow.json.failures": {}
     },
     "stderr": "",
-    "stdout": "[mae-flow] archive done → 进入 domain_archive\n\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 openspec/specs/ 真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+    "stdout": "[mae-flow] archive done → 进入 domain_archive\n\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 docs/specs/ 领域真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n若当前是月光宝盒无人值守模式，到这里不得替用户确认或伪造消息 ID。完成 prepare/show 后执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight blocked --reason \"领域归档候选等待用户确认\"` 安全停止；早晨处理后从本步骤继续。\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "evidence_branch_rejection": {
     "files": {
@@ -794,7 +794,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/review.md\n  - 未找到文件: .mae-flow-work/REQ-DIFF/review.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "evidence_review_rejection": {
@@ -866,6 +866,10 @@
   },
   "evidence_spec_rejection": {
     "files": {
+      ".mae-flow-work/REQ-DIFF/.ticket-id": {
+        "sha256": "4120b0d5e9aa7efd0d913ec8288eb3a264532b908d01b13e28c6def5116ed0ff",
+        "size": 8
+      },
       ".mae-flow.json": {
         "sha256": "d368adcf9ec3a96a57e02a6520da1af0251846973d9a0770f688ede36d0b2c40",
         "size": 362
@@ -886,7 +890,7 @@
     "git": {
       "branch": "main",
       "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
-      "status": "?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.usermsg"
+      "status": "?? .mae-flow-work/REQ-DIFF/.ticket-id\n?? .mae-flow.json\n?? .mae-flow.json.failures\n?? .mae-flow.json.usermsg"
     },
     "returncode": 2,
     "state": {
@@ -923,7 +927,7 @@
         }
       ]
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/spec.md\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本地 Spec 不可读: [Errno 2] No such file or directory: '<PROJECT>/.mae-flow-work/REQ-DIFF/spec.md'；执行 local-spec init\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {
@@ -946,12 +950,12 @@
   "moonlight_finalize": {
     "files": {
       ".mae-flow-work/moonlight-report.md": {
-        "sha256": "7578ca30e9f7b71e053095a4f57e8a7f77df09d92193efdba510e208e11040f6",
-        "size": 870
+        "sha256": "b6d0737873403240406b45a96afcef0cfe9304b4589f5f716363ef4e633521bd",
+        "size": 881
       },
       ".mae-flow.json": {
-        "sha256": "4d5a4a24444826b2b41e3533acff534fd0dea35198e2e90c0dcb24a9078f4aee",
-        "size": 619
+        "sha256": "ae35b6d31fdc8d0176955381fde0a988de8fa618af21ec2e2398374379e9a07f",
+        "size": 641
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -973,7 +977,7 @@
           "分支名": "",
           "单号": "REQ-DIFF"
         },
-        "current": "end",
+        "current": "domain_archive",
         "history": [
           {
             "at": "2026-07-29 10:00:00",
@@ -992,13 +996,13 @@
         "schema_version": 2,
         "started": "2026-07-29 10:00:00",
         "step_heads": {
-          "end": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+          "domain_archive": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
         },
         "updated_at": "2026-07-29 10:00:00"
       }
     },
     "stderr": "",
-    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
+    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。已恢复普通模式并进入规格定稿；定稿提交后还要再次 push。\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 docs/specs/ 领域真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n若当前是月光宝盒无人值守模式，到这里不得替用户确认或伪造消息 ID。完成 prepare/show 后执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" moonlight blocked --reason \"领域归档候选等待用户确认\"` 安全停止；早晨处理后从本步骤继续。\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "moonlight_report_issue": {
     "files": {
@@ -1109,7 +1113,7 @@
       ".mae-flow.json.failures": {}
     },
     "stderr": "",
-    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. Agent 返回后读取真实同步编译退出状态；失败时展示根因并修复，输入未变化时禁止重复编译。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 docs/specs/ 领域真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. Agent 返回后读取真实同步编译退出状态；失败时展示根因并修复，输入未变化时禁止重复编译。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "standalone_action_status": {
     "files": {
@@ -1263,6 +1267,6 @@
     "returncode": 0,
     "state": {},
     "stderr": "",
-    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,clean_paths,content_free,glob\n   open 本地 Spec 确认              [用户确认] 证据:glob\n   story Story 生成与一次设计检视        [随「STORY」询问可选、用户确认] 证据:agent_ran,content_free,glob\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:spec_field,spec_validate\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:spec_field,spec_validate\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,clean_paths,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(独立 CODE Reviewer/需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
+    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,content_free,glob\n   open 本地 Spec 确认              [用户确认] 证据:glob,local_spec_valid\n   story Story 生成与一次设计检视        [随「STORY」询问可选、用户确认] 证据:agent_ran,content_free,glob\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:verification_passed\n   domain_archive 领域知识归档        证据:domain_archive_complete\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:local_spec_valid\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:verification_passed\n   domain_archive 领域知识归档        证据:domain_archive_complete\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:local_spec_valid\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:verification_passed\n   domain_archive 领域知识归档        证据:domain_archive_complete\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   domain_archive 领域知识归档        证据:domain_archive_complete\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(独立 CODE Reviewer/需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
   }
 }

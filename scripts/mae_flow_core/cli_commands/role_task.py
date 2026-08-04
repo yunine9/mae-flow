@@ -175,7 +175,14 @@ def _stable_story_context(state, role, document=""):
     for path in (config.get("需求文档", ""), package.spec, package.grill):
         if path and os.path.isfile(path):
             terms.append(read_text(path, encoding="utf-8", errors="replace"))
-    domain = load_relevant_domain_context(os.getcwd(), terms)
+    try:
+        domain = load_relevant_domain_context(os.getcwd(), terms)
+    except ValueError as exc:
+        api.die(
+            "领域索引无效: %s。修复后先执行 domain-docs validate，"
+            "通过后原样重试 role-task。" % exc,
+            2,
+        )
     domain_paths = [
         os.path.join(os.getcwd(), *item.path.split("/"))
         for item in domain.documents

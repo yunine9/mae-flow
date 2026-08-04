@@ -2,7 +2,9 @@
 
 import copy
 import difflib
+import json
 import shutil
+import sys
 
 from .shared import os
 from .wiring import api
@@ -84,7 +86,10 @@ def _show(record, root):
     print("[mae-flow] 领域归档状态: " + str(record.get("status", "未准备")))
     domains = record.get("domains") or ()
     if not domains:
-        print("- 结论: unchanged（无需更新领域文档）")
+        if record.get("result") == "unchanged":
+            print("- 结论: unchanged（无需更新领域文档）")
+        else:
+            print("- 尚未生成领域归档候选")
         return
     for value in domains:
         entry = candidate_from_dict(root, value)
@@ -101,6 +106,36 @@ def _show(record, root):
                 before, after, fromfile=entry.target_path,
                 tofile=value["candidate_path"]):
             print(line.rstrip("\n"))
+
+
+def _command_text(arguments):
+    executable = json.dumps(os.path.abspath(sys.argv[0]), ensure_ascii=False)
+    rendered = []
+    for index, value in enumerate(arguments):
+        text = str(value)
+        rendered.append(
+            text if index < 2 or text.startswith("--") or text == "done"
+            else json.dumps(text, ensure_ascii=False))
+    return "python %s %s" % (executable, " ".join(rendered))
+
+
+def _status_recovery(record):
+    status = str((record or {}).get("status", "") or "")
+    domains = list((record or {}).get("domains") or ())
+    if status == "draft" and domains:
+        value = domains[-1]
+        arguments = [
+            "domain-archive", "prepare", "--domain", value.get("domain", "")]
+        for keyword in value.get("keywords") or ():
+            arguments.extend(("--keyword", keyword))
+        return _command_text(arguments)
+    if status == "prepared":
+        return _command_text(("domain-archive", "show"))
+    if status == "applied":
+        return _command_text(("done",))
+    return _command_text((
+        "domain-archive", "prepare", "--domain", "<领域>",
+        "--keyword", "<关键词>"))
 
 
 def _prepare(state, args, root, package):
@@ -139,7 +174,11 @@ def _prepare(state, args, root, package):
     values = list(previous.get("domains") or ())
     if initialized.initialized:
         values = [value for value in values if value.get("domain") != args.domain]
-        values.append(initialized.to_dict(root))
+        draft = initialized.to_dict(root)
+        draft["keywords"] = list(dict.fromkeys(
+            str(keyword).strip() for keyword in args.keyword
+            if str(keyword).strip()))
+        values.append(draft)
         record = {
             "status": "draft", "result": "pending", "domains": values,
             "input_sha256": "", "applied_paths": [],
@@ -156,7 +195,12 @@ def _prepare(state, args, root, package):
     values.append(prepared.to_dict(root))
     entries = tuple(candidate_from_dict(root, value) for value in values)
     record = {
-        "status": "prepared", "result": "changes", "domains": values,
+        "status": "prepared",
+        "result": (
+            "unchanged"
+            if entries and all(entry.action == "unchanged" for entry in entries)
+            else "changes"),
+        "domains": values,
         "input_sha256": _fresh_digest(root, package, entries),
         "applied_paths": [],
     }
@@ -180,6 +224,10 @@ def _apply(state, args, root, package):
         raise ValueError(error)
     if not str(answer or "").strip():
         raise ValueError("用户确认内容为空")
+    if not api._is_positive_confirmation(answer):
+        raise ValueError(
+            "用户回答没有明确批准本次领域归档；候选已保留，"
+            "按用户意见修改后重新 prepare/show")
     paths = apply_candidates(root, entries)
     record.update({
         "status": "applied", "applied_paths": list(paths),
@@ -211,6 +259,8 @@ def cmd_domain_archive(state, args):
         record = state.get("domain_archive") or {}
         if args.domain_archive_action in {"show", "status"}:
             _show(record, root)
+            if args.domain_archive_action == "status":
+                print("下一步: " + _status_recovery(record))
             return record
         return _apply(state, args, root, package)
     except (OSError, TypeError, ValueError) as exc:

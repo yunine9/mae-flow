@@ -14,7 +14,8 @@ from .wiring import api
 def perms_line(step):
     allow, forbid = [], []
     (allow if step.get("allow_source_edit") else forbid).append("修改源码")
-    (allow if step.get("allow_specs_write") else forbid).append("写 openspec/specs/ 真相源")
+    (allow if step.get("allow_specs_write") else forbid).append(
+        "写 docs/specs/ 领域真相源")
     return "允许: " + ("、".join(allow) or "仅本步指令内动作") + ";禁止: " + "、".join(forbid + ["编辑 .comet.yaml"])
 
 def _spec_data(st):

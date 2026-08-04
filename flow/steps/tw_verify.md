@@ -2,7 +2,7 @@
 
 1. 逐条对照 `.mae-flow-work/{单号}/spec.md` 和用户确认范围，检查是否漏做、做偏或顺手增加需求；
 2. 查看最终 diff，确认异常路径、兼容性和已有行为没有被无意改变；
-3. 把结论写入 `.mae-flow-work/{单号}/verification.md`，包含已核对范围、证据和结论；
+3. 把结论写入 `.mae-flow-work/{单号}/verification.md`，包含已核对范围、证据和结论；最后必须用独立一行写 `PASS` 或 `FAIL`，存在任何 `FAIL` 时不得完成本步；
 4. 展示验证摘要后 done。
 
 发现实现问题时回到 `tw_change` 修复，之后重新走编译、CodeCheck、UT 和本检查。验证报告是本地过程件，禁止提交。

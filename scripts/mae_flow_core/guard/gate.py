@@ -113,7 +113,8 @@ def _repository_edit_decision(context):
     ):
         return _block(
             "edit-specs",
-            "openspec/specs/ 为真相源,当前步骤 %s 禁止写入(黑名单#3)。"
+            "docs/specs/ 领域真相源（及旧 OpenSpec 真相源）"
+            "当前步骤 %s 禁止写入(黑名单#3)。"
             % (context.step or "未初始化"),
         )
     return None
@@ -231,7 +232,8 @@ def _bash_repository_decision(context):
     ):
         return _block(
             "bash-specs",
-            "openspec/specs/ 为真相源,当前步骤 %s 禁止经 Bash 写入(黑名单#3)。"
+            "docs/specs/ 领域真相源（及旧 OpenSpec 真相源）"
+            "当前步骤 %s 禁止经 Bash 写入(黑名单#3)。"
             % (context.step or "未初始化"),
         )
     return None

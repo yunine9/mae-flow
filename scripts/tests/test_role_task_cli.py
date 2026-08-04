@@ -212,6 +212,36 @@ class RoleTaskCliTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_invalid_domain_index_stops_with_recovery_command(self):
+        with tempfile.TemporaryDirectory() as repository:
+            previous = os.getcwd()
+            try:
+                os.chdir(repository)
+                os.makedirs("docs/specs")
+                with open("docs/specs/index.md", "w", encoding="utf-8") as stream:
+                    stream.write(
+                        "| 领域 | 关键词 | 文档 |\n"
+                        "| --- | --- | --- |\n"
+                        "| radio | SUL | docs/wrong.md |\n")
+                state = {
+                    "current": "story",
+                    "config": {"单号": "REQ-1"},
+                }
+                package = role_task_cli.ensure_work_package(
+                    repository, "REQ-1")
+                for path in (package.spec, package.grill):
+                    with open(path, "w", encoding="utf-8") as stream:
+                        stream.write("SUL\n")
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit):
+                        role_task_cli.cmd_role_task(
+                            {}, state,
+                            parse_args(["role-task", "story-generate"]))
+                self.assertIn("domain-docs validate", stderr.getvalue())
+            finally:
+                os.chdir(previous)
+
 
 if __name__ == "__main__":
     unittest.main()

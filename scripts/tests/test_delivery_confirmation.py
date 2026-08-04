@@ -63,6 +63,41 @@ class DeliveryConfirmationTests(unittest.TestCase):
                 self.state(), ["src/unrelated.cpp"], "feat: unrelated", "main",
                 (), candidate_paths=("src/a.cpp",))
 
+    def test_manifest_rejects_every_process_document_family(self):
+        forbidden = (
+            ".mae-flow-work/REQ-42/spec.md",
+            "docs/clarifications-REQ-42.md",
+            "docs/review/REVIEW-REQ-42.md",
+            "docs/codecheck-exempt-REQ-42.md",
+            "docs/delivery-notes.md",
+            "docs/story/STORY-REQ-42.md",
+            "docs/superpowers/plans/plan.md",
+            "openspec/changes/change/change.md",
+            "openspec/specs/domain/spec.md",
+        )
+        for path in forbidden:
+            with self.subTest(path=path), self.assertRaisesRegex(
+                    ValueError, "过程文件"):
+                build_delivery_manifest(
+                    self.state(), [path], "docs: process", "main", (),
+                    candidate_paths=(path,))
+
+    def test_docs_specs_requires_exact_current_archive_output(self):
+        path = "docs/specs/radio.md"
+        with self.assertRaisesRegex(ValueError, "领域归档"):
+            build_delivery_manifest(
+                self.state(), [path], "docs: truth", "main", (),
+                candidate_paths=(path,))
+        state = self.state()
+        state["domain_archive"] = {
+            "status": "applied", "result": "changes",
+            "applied_paths": [path],
+        }
+        manifest = build_delivery_manifest(
+            state, [path], "docs: truth", "main", (),
+            candidate_paths=(path,))
+        self.assertEqual([path], manifest["files"])
+
     def test_change_clears_confirmation_once_and_identical_set_keeps_it(self):
         state = self.state()
         state["delivery_manifest"] = {

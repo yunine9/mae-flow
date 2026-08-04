@@ -3,7 +3,10 @@
 import copy
 import shlex
 
-from mae_flow_core.guard.manifest import DeliveryManifest
+from mae_flow_core.guard.manifest import (
+    DeliveryManifest,
+    validate_delivery_document_boundary,
+)
 from mae_flow_core.workflow.command_catalog import render_display
 
 from .shared import os
@@ -44,6 +47,11 @@ def build_delivery_manifest(
         raise ValueError("交付清单缺少提交说明")
     if not target:
         raise ValueError("交付清单缺少目标分支")
+    archive = (state or {}).get("domain_archive") or {}
+    archive_paths = (
+        archive.get("applied_paths") or ()
+        if archive.get("status") == "applied" else ())
+    validate_delivery_document_boundary(exact.files, archive_paths)
 
     candidates = {_identity(path) for path in candidate_paths}
     outside = [path for path in exact.files if _identity(path) not in candidates]

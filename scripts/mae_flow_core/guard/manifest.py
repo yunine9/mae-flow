@@ -11,6 +11,21 @@ from ..orchestration import FlowState
 
 _GLOB_CHARACTERS = re.compile(r"[*?\[\]]")
 _ADOPTION_DECISION = "delivery.adopted_dirty"
+_PROCESS_DOCUMENT_PREFIXES = (
+    ".mae-flow-work/",
+    "docs/clarifications-",
+    "docs/review/",
+    "docs/codecheck-exempt-",
+    "docs/story/",
+    "docs/req/",
+    "docs/superpowers/",
+    "docs/mae-flow/requirements/",
+    "openspec/",
+)
+_PROCESS_DOCUMENT_FILES = frozenset({
+    ".mae-flow.json",
+    "docs/delivery-notes.md",
+})
 
 
 def _is_absolute(path):
@@ -100,6 +115,21 @@ def _normalize_path(path, repository_root):
 def _identity(path):
     """Use a portable Windows-safe repository path identity."""
     return path.replace("\\", "/").casefold()
+
+
+def validate_delivery_document_boundary(paths, archive_paths=()):
+    """Reject process artifacts and unconfirmed durable-domain documents."""
+    allowed_domain = {_identity(path) for path in archive_paths}
+    for path in paths:
+        identity = _identity(path)
+        if (
+                identity in _PROCESS_DOCUMENT_FILES
+                or any(identity.startswith(prefix)
+                       for prefix in _PROCESS_DOCUMENT_PREFIXES)):
+            raise ValueError("过程文件不得进入交付清单: %s" % path)
+        if identity.startswith("docs/specs/") and identity not in allowed_domain:
+            raise ValueError(
+                "领域文档必须由本次领域归档 domain-archive apply 实际产生: %s" % path)
 
 
 def _normalize_paths(paths, repository_root=None):

@@ -46,9 +46,11 @@ def parse_args(argv=None):
         "--new", action="store_true",
         help="保留已退出的旧现场并开启另一轮流程；未指定时恢复原流程")
     sub.add_parser("current")
-    sub.add_parser(
+    migrate = sub.add_parser(
         "migrate-flow",
-        help="内部升级命令：安全地把 schema-v2 在途状态迁移为 lean schema-v3")
+        help="恢复命令：把 Lean v3 在途状态安全恢复到稳定流程")
+    migrate.add_argument("--confirm", action="store_true")
+    migrate.add_argument("--message-id")
     done = sub.add_parser("done")
     done.add_argument("--ack")
     done.add_argument("--choice")

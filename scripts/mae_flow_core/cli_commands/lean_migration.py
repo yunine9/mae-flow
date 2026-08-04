@@ -1,45 +1,20 @@
-"""Safe one-way migration of the active legacy flow state."""
+"""Non-destructive recovery of an in-flight Lean v3 state into stable v2."""
 
+import hashlib
 import json
 import os
+import re
 import sys
 import time
-from dataclasses import dataclass, replace
 
-from mae_flow_core.orchestration import (
-    decode_flow_state,
-    migrate_legacy_flow,
-)
-from mae_flow_core.state_store import (
-    ProjectStateLock,
-    _replace_with_retry,
-    atomic_write_json,
-    remove_with_retry,
-)
+from mae_flow_core.orchestration import recover_lean_flow
+from mae_flow_core.state_store import atomic_write_json
 
 from .shared import STATE_PATH
 
 
-_DELIVERY_AUTHORIZATION_KEYS = {
-    "allow_commit",
-    "allow_push",
-    "auto_commit",
-    "auto_push",
-    "automatic_commit",
-    "automatic_push",
-    "commit_authorization",
-    "commit_message",
-    "delivery_manifest",
-    "push_authorization",
-}
-
-
-@dataclass(frozen=True)
-class StateMigrationResult:
-    state: object
-    migrated: bool
-    backup_path: str = ""
-    legacy_position: str = ""
+_BACKUP_DIRECTORY = os.path.join(".mae-flow-work", "state-backups")
+_PROPOSAL_PATH = os.path.join(_BACKUP_DIRECTORY, "lean-v3-recovery.json")
 
 
 def _read_bytes(path):
@@ -47,194 +22,139 @@ def _read_bytes(path):
         return stream.read()
 
 
-def _backup_name(path):
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    unique = "%s.%s" % (os.getpid(), time.time_ns())
-    base = "%s.v2-backup.%s.%s" % (path, stamp, unique)
-    candidate = base
-    suffix = 2
-    while os.path.exists(candidate):
-        candidate = "%s.%s" % (base, suffix)
-        suffix += 1
-    return candidate
-
-
-def _write_raw_backup(path, raw):
-    """Publish an exact backup through the Windows-safe replace primitive."""
-    target = _backup_name(path)
-    temporary = "%s.tmp.%s.%s" % (target, os.getpid(), time.time_ns())
-    try:
-        with open(temporary, "xb") as stream:
-            stream.write(raw)
-            stream.flush()
-            try:
-                os.fsync(stream.fileno())
-            except OSError:
-                pass
-        _replace_with_retry(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            try:
-                remove_with_retry(temporary)
-            except OSError:
-                pass
-    return target
-
-
 def _parse_json(raw):
-    text = raw.decode("utf-8-sig", errors="strict")
-    return json.loads(text)
+    return json.loads(raw.decode("utf-8-sig", errors="strict"))
 
 
-def _authorization_decision(key, value):
-    lowered = key.strip().lower().replace("-", "_").replace(" ", "_")
-    if lowered == "delivery" or lowered.startswith("delivery."):
-        return True
-    if lowered == "moonlight" or lowered.startswith("moonlight."):
-        return True
-    tail = lowered[7:] if lowered.startswith("config.") else lowered
-    if tail in _DELIVERY_AUTHORIZATION_KEYS:
-        return True
-    authorization_words = (
-        "月光宝盒", "自动提交", "自动推送", "提交授权", "推送授权", "交付清单",
-    )
-    if any(word in tail for word in authorization_words):
-        return True
-    serialized = value.strip().lower()
-    return any(marker in serialized for marker in (
-        '"allow_commit"',
-        '"allow_push"',
-        '"auto_commit"',
-        '"auto_push"',
-        '"automatic_commit"',
-        '"automatic_push"',
-        '"commit_authorization"',
-        '"push_authorization"',
-        '"moonlight"',
-        "月光宝盒",
-        "自动提交",
-        "自动推送",
-        "提交授权",
-        "推送授权",
-    ))
+def _lean_document(path=STATE_PATH):
+    raw = _read_bytes(path)
+    document = _parse_json(raw)
+    return raw, document
 
 
-def _safe_warning_state(state, warnings):
-    if not warnings:
-        return state
-    decisions = tuple(
-        (key, value) for key, value in state.decisions
-        if not _authorization_decision(key, value)
-    )
-    risks = list(state.risks)
-    for warning in warnings:
-        risk = (
-            "Migration warning requires a natural-language user decision "
-            "before Delivery: %s" % warning
-        )
-        if risk not in risks:
-            risks.append(risk)
-    return replace(
-        state,
-        decisions=decisions,
-        risks=tuple(risks),
-        delivery_files=(),
-    )
+def _is_lean(document):
+    return isinstance(document, dict) and document.get("engine") == "lean-v1"
 
 
-def migrate_state_file(path=STATE_PATH, project_root=None):
-    """Migrate one state file without printing before durable replacement.
-
-    Corrupt legacy bytes receive the same byte-for-byte recovery backup as a
-    parseable v2 file.  A valid unsupported schema is left untouched without a
-    misleading v2 backup.  Existing strict v3 state is read-only and idempotent.
-    """
-    project = os.path.abspath(project_root or os.getcwd())
-    state_path = path if os.path.isabs(path) else os.path.join(project, path)
-    with ProjectStateLock(project):
-        raw = _read_bytes(state_path)
+def _proposal_for(raw, recovery):
+    digest = hashlib.sha256(raw).hexdigest()
+    if os.path.isfile(_PROPOSAL_PATH):
         try:
-            document = _parse_json(raw)
-        except Exception as exc:
-            backup = _write_raw_backup(state_path, raw)
-            raise ValueError(
-                "状态 JSON 损坏，原文件未覆盖；原始字节已备份到 %s (%s: %s)" %
-                (backup, type(exc).__name__, exc))
+            with open(_PROPOSAL_PATH, encoding="utf-8") as stream:
+                existing = json.load(stream)
+            backup = existing.get("backup_path", "")
+            if existing.get("source_sha256") == digest and os.path.isfile(backup):
+                return existing
+        except (OSError, ValueError, TypeError):
+            pass
+    os.makedirs(_BACKUP_DIRECTORY, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = os.path.join(
+        _BACKUP_DIRECTORY, "%s-%s-lean-v3.json" % (stamp, digest[:10]))
+    suffix = 2
+    base = backup
+    while os.path.exists(backup):
+        backup = base[:-5] + "-%d.json" % suffix
+        suffix += 1
+    with open(backup, "xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        try:
+            os.fsync(stream.fileno())
+        except OSError:
+            pass
+    proposal = {
+        "source_sha256": digest,
+        "backup_path": backup.replace("\\", "/"),
+        "safe_boundary": recovery.safe_boundary,
+        "terminal": recovery.terminal,
+        "confirmed": False,
+    }
+    atomic_write_json(_PROPOSAL_PATH, proposal)
+    return proposal
 
-        if isinstance(document, dict) and document.get(
-                "schema_version") == 3:
-            state = decode_flow_state(document)
-            return StateMigrationResult(state, False)
 
-        if (not isinstance(document, dict)
-                or type(document.get("schema_version")) is not int
-                or document.get("schema_version") != 2):
-            version = document.get("schema_version") if isinstance(
-                document, dict) else type(document).__name__
-            raise ValueError(
-                "不支持的流程状态版本 %r；状态文件保持不变" % version)
-
-        backup = _write_raw_backup(state_path, raw)
-        migration = migrate_legacy_flow(document)
-        state = _safe_warning_state(migration.state, migration.warnings)
-        encoded = state.to_dict()
-        atomic_write_json(state_path, encoded)
-        return StateMigrationResult(
-            state, True, backup, str(document.get("current", "")))
+def prepare_stable_recovery(path=STATE_PATH):
+    raw, document = _lean_document(path)
+    if not _is_lean(document):
+        raise ValueError("当前状态不是 Lean v3，无需恢复")
+    recovery = recover_lean_flow(document)
+    if recovery.warning:
+        raise ValueError(recovery.warning)
+    return recovery, _proposal_for(raw, recovery), raw
 
 
-def _summary_lines(state, legacy_position=""):
-    lines = [
-        "恢复摘要",
-        "阶段: %s" % state.phase.value,
-        "路径: %s" % state.path.value,
-        "状态: %s" % state.status,
-    ]
-    if legacy_position:
-        lines.append("旧流程位置: %s" % legacy_position)
-    if state.status == "complete":
-        lines.append("流程已完成")
-    lines.append("产物:")
-    if state.artifacts:
-        lines.extend("- %s: %s" % item for item in state.artifacts)
+def _confirmation_text(message_id):
+    wanted = str(message_id or "").strip()
+    if not wanted:
+        raise ValueError("缺少 --message-id；先执行 messages 获取真实用户消息 ID")
+    path = STATE_PATH + ".usermsg"
+    try:
+        with open(path, encoding="utf-8") as stream:
+            rows = json.load(stream)
+    except (OSError, ValueError) as exc:
+        raise ValueError("无法读取用户消息: %s" % exc)
+    matches = [row for row in rows if isinstance(row, dict)
+               and str(row.get("id", "")) == wanted]
+    if not matches:
+        raise ValueError("不存在用户消息 ID %s" % wanted)
+    return str(matches[-1].get("text", "") or "")
+
+
+def _assert_natural_confirmation(text):
+    compact = re.sub(r"\s+", "", text)
+    if any(word in compact for word in ("不确认", "不同意", "不要恢复", "取消")):
+        raise ValueError("用户消息没有授权恢复")
+    if not any(word in compact for word in ("确认", "同意", "批准", "恢复", "迁移")):
+        raise ValueError("用户消息没有明确确认恢复")
+
+
+def confirm_stable_recovery(path, message_id):
+    recovery, proposal, raw = prepare_stable_recovery(path)
+    _assert_natural_confirmation(_confirmation_text(message_id))
+    if _read_bytes(path) != raw:
+        raise ValueError("Lean 状态在确认期间发生变化，请重新查看恢复卡")
+    if recovery.terminal:
+        terminal = proposal["backup_path"][:-5] + "-terminal.json"
+        if not os.path.exists(terminal):
+            os.replace(path, terminal)
+        proposal["terminal_archive"] = terminal.replace("\\", "/")
     else:
-        lines.append("- (无)")
-    lines.append("决策:")
-    if state.decisions:
-        lines.extend("- %s: %s" % item for item in state.decisions)
-    else:
-        lines.append("- (无)")
-    lines.append("风险:")
-    if state.risks:
-        lines.extend("- %s" % risk for risk in state.risks)
-    else:
-        lines.append("- (无)")
-    return lines
+        stable = dict(recovery.state)
+        stable["started"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        stable["initial_dirty_fingerprints"] = {}
+        atomic_write_json(path, stable)
+    proposal["confirmed"] = True
+    atomic_write_json(_PROPOSAL_PATH, proposal)
+    return recovery, proposal
 
 
-def _print_result(result):
-    if result.migrated:
-        print("[mae-flow] 迁移完成；旧状态备份: %s" % result.backup_path)
-    for line in _summary_lines(result.state, result.legacy_position):
-        print(line)
+def _print_card(recovery, proposal):
+    print("[mae-flow] 检测到 Lean v3 在途状态；已创建逐字节恢复备份。")
+    print("备份: " + proposal["backup_path"])
+    if recovery.terminal:
+        print("状态: 已完成/已退出；确认后仅归档，不启动稳定流程。")
+    else:
+        print("建议恢复到稳定流程步骤: " + recovery.safe_boundary)
+        print("仅迁移单号、用户配置、分支、启动时修改和已确认产物路径；"
+              "不会迁移令牌、哈希、指纹、检视摘要或交付收据。")
+    print("请用户明确确认后先执行 messages，再运行: "
+          "migrate-flow --confirm --message-id <消息ID>")
 
 
 def _terminal_lean_gate_bypasses():
-    """Preserve the established post-completion gate bypass during cutover."""
     if not os.path.isfile(STATE_PATH):
         return False
     try:
-        document = _parse_json(_read_bytes(STATE_PATH))
-        if not (isinstance(document, dict)
-                and document.get("schema_version") == 3):
-            return False
-        return decode_flow_state(document).status in {"complete", "exited"}
+        _raw, document = _lean_document(STATE_PATH)
+        recovery = recover_lean_flow(document)
+        return recovery.terminal
     except Exception:
         return False
 
 
 def handle_early_state_command(args):
-    """Handle v2 migration/current before the legacy loader is entered."""
+    """Intercept Lean state before the stable loader sees it."""
     if args.cmd == "gate" and _terminal_lean_gate_bypasses():
         return True
     if args.cmd not in {"current", "migrate-flow"}:
@@ -242,12 +162,36 @@ def handle_early_state_command(args):
     if not os.path.isfile(STATE_PATH):
         if args.cmd == "current":
             return False
-        print("[mae-flow] 没有可迁移的 .mae-flow.json。", file=sys.stderr)
+        print("[mae-flow] 没有可恢复的 .mae-flow.json。", file=sys.stderr)
         raise SystemExit(2)
     try:
-        result = migrate_state_file(STATE_PATH, project_root=os.getcwd())
+        _raw, document = _lean_document(STATE_PATH)
     except Exception as exc:
-        print("[mae-flow] 迁移失败: %s" % exc, file=sys.stderr)
+        print("[mae-flow] 状态读取失败: %s" % exc, file=sys.stderr)
         raise SystemExit(2)
-    _print_result(result)
+    if not _is_lean(document):
+        if args.cmd == "current":
+            return False
+        print("[mae-flow] 当前已经是稳定流程状态，无需迁移。")
+        return True
+    try:
+        if args.cmd == "migrate-flow" and args.confirm:
+            if not args.message_id:
+                raise ValueError("--confirm 必须同时提供 --message-id")
+            recovery, proposal = confirm_stable_recovery(
+                STATE_PATH, args.message_id)
+            if recovery.terminal:
+                print("[mae-flow] Lean 终态已安全归档，当前没有活动流程。")
+            else:
+                print("[mae-flow] 已恢复到稳定流程步骤: "
+                      + recovery.safe_boundary)
+            print("原始备份: " + proposal["backup_path"])
+            return True
+        if args.cmd == "migrate-flow" and args.message_id:
+            raise ValueError("--message-id 只能与 --confirm 一起使用")
+        recovery, proposal, _raw = prepare_stable_recovery(STATE_PATH)
+    except Exception as exc:
+        print("[mae-flow] 恢复失败: %s" % exc, file=sys.stderr)
+        raise SystemExit(2)
+    _print_card(recovery, proposal)
     return True

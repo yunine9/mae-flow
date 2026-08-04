@@ -15,7 +15,10 @@ from .delivery import (
     plan_delivery,
 )
 from .models import CapabilityAttempt, CommitPace, DeliveryPath, FlowState, Phase
-from .migration import MigrationResult, migrate_legacy_flow
+from .migration import (
+    MigrationResult, StableRecoveryResult, migrate_legacy_flow,
+    recover_lean_flow,
+)
 from .state_schema import decode_flow_state, encode_flow_state
 from .toolbox import ToolboxRequest, ToolboxResult, run_toolbox_request
 from .transitions import AdvanceRequest, AdvanceResult, advance_flow
@@ -31,6 +34,7 @@ __all__ = [
     "DeliveryPlan",
     "FlowState",
     "MigrationResult",
+    "StableRecoveryResult",
     "Phase",
     "RetryOption",
     "ToolboxRequest",
@@ -42,6 +46,7 @@ __all__ = [
     "decode_flow_state",
     "encode_flow_state",
     "migrate_legacy_flow",
+    "recover_lean_flow",
     "plan_delivery",
     "record_attempt",
     "retry_options",

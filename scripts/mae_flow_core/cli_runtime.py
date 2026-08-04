@@ -1,5 +1,6 @@
 """Public composition root for Mae-Flow CLI commands."""
 
+import os
 import sys
 import types
 from .cli_commands import shared
@@ -34,6 +35,60 @@ from .cli_commands import moonlight_commands as _moonlight_commands
 from .cli_commands import lifecycle as _lifecycle
 from .cli_commands import lean_migration as _lean_migration
 from .cli_commands import dispatch as _dispatch
+
+
+_PLUGIN_ROOT = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", ".."))
+_RESOURCE_FILES = (
+    ("runtime/guidance/grill.md", "guidance/grill.md"),
+    ("runtime/guidance/construction.md", "guidance/construction.md"),
+    ("runtime/guidance/quality.md", "guidance/quality.md"),
+    ("runtime/guidance/review.md", "guidance/review.md"),
+    ("runtime/guidance/story-design.md", "guidance/story-design.md"),
+    ("skills/mae-flow/assets/CHAIN-TEMPLATE.md", "assets/CHAIN-TEMPLATE.md"),
+    ("skills/mae-flow/assets/GRILL-PREP-TEMPLATE.md", "assets/GRILL-PREP-TEMPLATE.md"),
+    ("skills/mae-flow/assets/REVIEW-TEMPLATE.md", "assets/REVIEW-TEMPLATE.md"),
+    ("skills/mae-flow/assets/STORY-TEMPLATE.md", "assets/STORY-TEMPLATE.md"),
+)
+
+
+def materialize_plugin_resources(root, plugin_root=None):
+    """Copy immutable plugin guidance into the project work area."""
+    plugin_root = os.path.abspath(plugin_root or _PLUGIN_ROOT)
+    target_root = os.path.join(
+        os.path.abspath(root), ".mae-flow-work", "plugin-resources")
+    written = []
+    for source_relative, target_relative in _RESOURCE_FILES:
+        source = os.path.join(plugin_root, *source_relative.split("/"))
+        target = os.path.join(target_root, *target_relative.split("/"))
+        try:
+            with open(source, "rb") as stream:
+                content = stream.read()
+        except OSError as exc:
+            raise RuntimeError(
+                "插件资源缺失，请刷新或重装 Mae-Flow: %s"
+                % source_relative) from exc
+        try:
+            with open(target, "rb") as stream:
+                if stream.read() == content:
+                    written.append(target)
+                    continue
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        temporary = target + ".tmp-%s" % os.getpid()
+        try:
+            with open(temporary, "wb") as stream:
+                stream.write(content)
+            os.replace(temporary, target)
+        finally:
+            try:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            except OSError:
+                pass
+        written.append(target)
+    return tuple(written)
 
 api.register(shared)
 _COMMAND_MODULES = (
@@ -101,6 +156,11 @@ def main():
                 "[mae-flow] 调用目录非项目根,已定位到: %s" % root,
                 file=sys.stderr,
             )
+    try:
+        materialize_plugin_resources(root)
+    except (OSError, RuntimeError) as exc:
+        print("[mae-flow] %s" % exc, file=sys.stderr)
+        raise SystemExit(2)
     if handle_early_state_command(args):
         return None
     return _legacy_main()

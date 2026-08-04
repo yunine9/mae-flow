@@ -27,16 +27,13 @@ from mae_flow_core import (
     resolve_runtime,
 )
 from mae_flow_core.file_io import read_text, write_text
-from mae_flow_core.application.hooks.task_cards import (
-    TaskCardPorts as _TaskCardPorts,
-)
-from mae_flow_core.application.hooks.events import (
-    handle_hook_event as _handle_hook_event,
-)
+from mae_flow_core.application.hooks.task_cards import TaskCardPorts as _TaskCardPorts
+from mae_flow_core.application.hooks.events import handle_hook_event as _handle_hook_event
 from mae_flow_core.adapters.hook_active_events import ActiveHookEventAdapter
 from mae_flow_core.adapters.hook_events import HookEventAdapter
 from mae_flow_core.adapters.hook_diagnostics import HookBlockDiagnostics
 from mae_flow_core.adapters.hook_runtime import HookRuntimeAdapter
+from mae_flow_core.adapters.project_launcher import install_launcher_for_event
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -293,6 +290,7 @@ def main():
     try:
         d = read_input()
         _chdir_root(d)
+        install_launcher_for_event(ev)
         runtime = resolve_runtime(os.getcwd())
         response = _handle_hook_event(
             ev, d, runtime, _hook_event_ports())

@@ -216,9 +216,11 @@ def append_execution_context(
 
 
 def requirement_sources(
-        config, exists, absolute, glob_paths):
+        config, exists, absolute, glob_paths, local_sources=()):
     """Resolve current and archived requirement/specification sources."""
-    sources = []
+    sources = [
+        absolute(path) for path in local_sources if exists(path)
+    ]
     document = config.get("需求文档", "")
     if document and exists(document):
         sources.append(absolute(document))

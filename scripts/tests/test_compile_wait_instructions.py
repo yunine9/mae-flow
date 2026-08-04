@@ -46,8 +46,8 @@ class CompileWaitInstructionTests(unittest.TestCase):
                 self.assertEqual([], forbidden_wait_primitives(content))
                 compact = re.sub(r"\s+", "", content)
                 for required in (
-                        "单次同步", "最大值", "返回就是完成信号",
-                        "未变化", "timeout/transportfailure", "如实FAIL"):
+                        "单次同步", "最大超时", "返回就是完成信号",
+                        "未变化", "timeout/transportfailure", "如实报告失败"):
                     self.assertIn(required, compact)
 
     def test_wait_primitive_scanner_rejects_known_regression_shapes(self):

@@ -24,6 +24,10 @@ from mae_flow_core.workflow.agent_observations import (  # noqa: E402
 from mae_flow_core.adapters.hook_active_events import (  # noqa: E402
     ActiveHookEventAdapter,
 )
+from mae_flow_core.workflow.quality_executions import (  # noqa: E402
+    quality_input_snapshot,
+    successful_quality_execution,
+)
 
 
 class AgentObservationTests(unittest.TestCase):
@@ -121,6 +125,50 @@ class AgentObservationTests(unittest.TestCase):
         }).exit_code)
         self.assertTrue(has_finished_observation(
             self.state, "STORY", "story"))
+
+    def test_quality_completion_records_real_successful_command(self):
+        state = {
+            "current": "tw_compile",
+            "config": {"编译方式": "make module"},
+            "agent_tasks": {"COMPILE": {
+                "step": "tw_compile", "head": "abc",
+                "task_files": ["src/a.cpp"], "execution_roots": ["src"],
+            }},
+        }
+        runtime = SimpleNamespace(_contract_state=lambda: state)
+        adapter = ActiveHookEventAdapter(
+            state=self.state, maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name, maeflow=lambda *_args: 0,
+            runtime_adapter=runtime,
+            task_card_ports=lambda: SimpleNamespace(script_path=lambda: "mae-flow"),
+            log=lambda _message: None,
+        )
+        transcript = os.path.join(self.temporary.name, "agent.jsonl")
+        rows = (
+            {"message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": "build", "name": "Bash",
+                "input": {"command": "make module"},
+            }]}},
+            {"message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "build",
+                "content": "exit_code: 0\nbuild succeeded",
+            }]}},
+        )
+        with open(transcript, "w", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+        payload = {
+            "tool_name": "Task", "tool_use_id": "compile-run",
+            "tool_input": {"subagent_type": "compile-agent"},
+        }
+        self.assertEqual(0, adapter.pretool(payload).exit_code)
+        adapter.subagentstop({
+            "tool_use_id": "compile-run",
+            "agent_transcript_path": transcript,
+        })
+        self.assertIsNotNone(successful_quality_execution(
+            self.state, "COMPILE", "tw_compile",
+            quality_input_snapshot(state, "COMPILE", "tw_compile")))
 
 
 if __name__ == "__main__":

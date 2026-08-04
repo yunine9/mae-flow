@@ -32,6 +32,14 @@ from mae_flow_core.workflow.agent_observations import (
     latest_started_invocation,
     record_agent_finished,
     record_agent_started,
+    started_observation,
+)
+from mae_flow_core.workflow.quality_executions import (
+    quality_input_snapshot,
+    record_quality_execution,
+)
+from mae_flow_core.quality.tool_transcript import (
+    bash_call, bash_calls, call_failed, parse_transcript, skill_call,
 )
 
 
@@ -295,7 +303,61 @@ class ActiveHookEventAdapter:
             record_agent_finished(
                 state_path, invocation_id, lifecycle,
                 time.strftime("%Y-%m-%d %H:%M:%S"), detail),
+            record_execution=self._record_quality_execution,
             log=self.log,
+        )
+
+    @staticmethod
+    def _explicit_transcript_path(payload):
+        for key, value in payload.items():
+            if (isinstance(value, str) and "transcript" in key.lower()
+                    and "agent" in key.lower()):
+                return value
+        main = payload.get("transcript_path", "")
+        return ActiveHookEventAdapter._latest_subagent_transcript(main)
+
+    @staticmethod
+    def _quality_call(kind, calls, config):
+        if kind == "COMPILE":
+            build = str(config.get("编译方式", "") or "")
+            if "build-fix" in build.lower():
+                return skill_call(calls, "build-fix")
+            return bash_call(calls, build)
+        if kind == "UT":
+            return bash_call(calls, str(config.get("UT运行命令", "") or ""))
+        if kind == "CODECHECK":
+            matches = bash_calls(calls, "codecheck fullcheck")
+            return matches[-1][0] if matches else None
+        return None
+
+    def _record_quality_execution(self, payload, invocation_id, lifecycle):
+        started = started_observation(self.state, invocation_id) or {}
+        kind = started.get("kind", "")
+        if kind not in ("COMPILE", "CODECHECK", "UT"):
+            return
+        state = self.runtime._contract_state()
+        path = self._explicit_transcript_path(payload)
+        calls = ()
+        if path:
+            try:
+                calls = parse_transcript(
+                    self._load_agent_transcript(path)).tool_calls
+            except Exception as exc:
+                self.log("quality transcript EXC(fail-closed evidence): %s" % exc)
+        call = self._quality_call(kind, calls, state.get("config", {}) or {})
+        command = ""
+        if call:
+            value = call.input
+            command = value.get("command", "") if isinstance(value, dict) else str(value)
+            if call.name.lower() == "skill":
+                command = "Skill:" + str(value)
+        succeeded = bool(
+            lifecycle == "returned" and call and not call_failed(call))
+        record_quality_execution(
+            self.state, kind, started.get("step", ""), invocation_id,
+            command, succeeded,
+            quality_input_snapshot(state, kind, started.get("step", "")),
+            time.strftime("%Y-%m-%d %H:%M:%S"), lifecycle=lifecycle,
         )
 
     def subagentstop(self, payload):

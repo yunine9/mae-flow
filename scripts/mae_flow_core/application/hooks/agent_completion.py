@@ -12,6 +12,7 @@ class AgentCompletionPorts:
     state_path: str
     latest_started: Callable
     record_finished: Callable
+    record_execution: Callable
     log: Callable
 
 
@@ -57,6 +58,7 @@ def handle_agent_completion(payload, ports):
     try:
         ports.record_finished(
             ports.state_path, invocation_id, lifecycle, _detail(payload))
+        ports.record_execution(payload, invocation_id, lifecycle)
         ports.log("subagentstop lifecycle: %s/%s" % (
             invocation_id, lifecycle))
     except Exception as exc:

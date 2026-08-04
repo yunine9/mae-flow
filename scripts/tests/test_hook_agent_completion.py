@@ -25,6 +25,7 @@ class AgentCompletionTests(unittest.TestCase):
             state_path="/repo/.mae-flow.json",
             latest_started=lambda **_kwargs: latest,
             record_finished=lambda *args: events.append(args),
+            record_execution=lambda *_args: None,
             log=lambda message: events.append(("log", message)),
         )
         return ports, events

@@ -5,6 +5,7 @@ import hashlib
 from mae_flow_core.quality.spec2code_artifacts import (
     blueprint_scenario_ids,
 )
+from mae_flow_core.orchestration.work_package import ensure_work_package
 
 from .shared import (
     BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
@@ -57,11 +58,18 @@ def _resolve_task_roots_from_runtime(files):
     return list(plan.roots), list(plan.unresolved)
 
 def _resolve_requirement_sources_from_runtime(st):
+    config = st.get("config", {})
+    ticket = str(config.get("单号", "") or "")
+    local_sources = ()
+    if ticket:
+        package = ensure_work_package(os.getcwd(), ticket)
+        local_sources = (package.spec, package.grill, package.story)
     return list(quality_task_card_use_cases.requirement_sources(
-        st.get("config", {}),
+        config,
         exists=os.path.exists,
         absolute=os.path.abspath,
         glob_paths=globmod.glob,
+        local_sources=local_sources,
     ))
 
 

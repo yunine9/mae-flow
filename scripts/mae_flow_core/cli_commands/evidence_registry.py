@@ -12,6 +12,9 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.workflow.agent_observations import finished_observation
+from mae_flow_core.workflow.quality_executions import (
+    quality_input_snapshot, successful_quality_execution,
+)
 
 
 def _finished_agent_observation(kind, step, since):
@@ -40,6 +43,8 @@ _AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
     script_path=lambda: sys.argv[0],
     risk_labels=RISK_AGENT_LABELS,
     finished_observation=_finished_agent_observation,
+    quality_execution=lambda kind, step, state: successful_quality_execution(
+        STATE_PATH, kind, step, quality_input_snapshot(state, kind, step)),
     askuser_tokens=lambda: api._agent_token_data(),
     changed_source_files=lambda state: api._changed_source_files(state),
     shell_output=lambda command: api.sh(command),

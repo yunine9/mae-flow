@@ -76,6 +76,11 @@ def _started_for(records, invocation_id):
     ), {})
 
 
+def started_observation(state_path, invocation_id):
+    started = _started_for(_records(state_path), str(invocation_id or ""))
+    return dict(started) if started else None
+
+
 def record_agent_finished(
         state_path, invocation_id, lifecycle, at, detail=""):
     lifecycle = str(lifecycle or "returned").lower()

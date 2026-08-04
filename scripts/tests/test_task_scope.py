@@ -311,7 +311,7 @@ class TaskScopeTests(unittest.TestCase):
             git_intent.shell_command_groups(single_quoted)[0],
         )
 
-    def test_same_digest_compile_task_reissue_has_a_new_state_issuance(self):
+    def test_same_input_compile_reissue_has_no_receipt_or_fingerprint(self):
         write(
             "services/anr/src/Logic.cpp",
             "int changedFunction() {\n  return 2;\n}\n",
@@ -323,11 +323,9 @@ class TaskScopeTests(unittest.TestCase):
         second_card, second_task = self.task(mf.load_state(), "compile")
 
         self.assertEqual(first_card, second_card)
-        self.assertEqual(first_task["sha256"], second_task["sha256"])
-        self.assertNotEqual(
-            first_task["issuance_id"],
-            second_task["issuance_id"],
-        )
+        self.assertEqual(first_task["task_files"], second_task["task_files"])
+        self.assertNotIn("sha256", first_task)
+        self.assertNotIn("issuance_id", first_task)
         self.assertNotIn("issuance", second_card.lower())
         self.assertNotIn("签发轮次", second_card)
 

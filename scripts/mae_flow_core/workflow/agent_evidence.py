@@ -14,6 +14,7 @@ class AgentEvidencePorts:
     script_path: object
     risk_labels: object
     finished_observation: object
+    quality_execution: object
     askuser_tokens: object
     changed_source_files: object
     shell_output: object
@@ -76,6 +77,16 @@ class AgentEvidenceRules:
         observation = self.ports.finished_observation(
             kind, state.get("current", ""), entered)
         if observation:
+            if (kind in ("COMPILE", "CODECHECK", "UT")
+                    and not observation.get("legacy")
+                    and not self.ports.quality_execution(
+                        kind, state.get("current", ""), state)):
+                return self._blocked(
+                    kind, accepted_why,
+                    "%s 子 Agent 已返回，但没有检测到与当前输入匹配的成功执行。"
+                    "请检查任务卡中的真实命令、退出状态和 timeout；"
+                    "返回文字不能替代机器执行。" % kind,
+                )
             return EvidenceResult(True, "")
         return self._blocked(
             kind,

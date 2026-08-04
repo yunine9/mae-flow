@@ -25,6 +25,7 @@ def make_ports(**overrides):
         "script_path": lambda: "/repo/scripts/mae-flow.py",
         "risk_labels": {"COMPILE": "compile risk"},
         "finished_observation": lambda _kind, _step, _since: None,
+        "quality_execution": lambda _kind, _step, _state: None,
         "askuser_tokens": lambda: {},
         "changed_source_files": lambda _state: (["src/main.py"], ""),
         "shell_output": lambda _command: "a" * 40,
@@ -53,11 +54,23 @@ class AgentEvidenceRuleTests(unittest.TestCase):
             "detail": "任意自然语言；甚至说 FAIL 也不由这里裁决",
         }
         rules = AgentEvidenceRules(make_ports(
-            finished_observation=lambda _kind, _step, _since: observation))
+            finished_observation=lambda _kind, _step, _since: observation,
+            quality_execution=lambda _kind, _step, _state: {"succeeded": True}))
         self.assertTrue(rules.agent_ran(
             {"agent": "COMPILE", "statuses": ["OK"]},
             {"current": "tw_compile"},
         ).passed)
+
+    def test_quality_return_without_real_execution_is_not_enough(self):
+        observation = {
+            "kind": "UT", "step": "verify_ut", "lifecycle": "returned",
+            "at": "2026-07-29 10:01:00",
+        }
+        result = AgentEvidenceRules(make_ports(
+            finished_observation=lambda *_args: observation,
+        )).agent_ran({"agent": "UT"}, {"current": "verify_ut"})
+        self.assertFalse(result.passed)
+        self.assertIn("返回文字不能替代机器执行", result.reason)
 
     def test_interrupted_or_timeout_does_not_count_as_returned(self):
         for lifecycle in ("interrupted", "timeout"):

@@ -76,6 +76,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_codecheck_logging.py",), 180, 5000),
     ("质量任务范围、函数边界与执行目录回归",
      ("scripts/tests/test_task_scope.py",), 180, 5000),
+    ("质量任务精确输入与真实执行回归",
+     ("scripts/tests/test_quality_task_inputs.py",), 180, 5000),
     ("轻量编码预检跨语言与安全降级回归",
      ("scripts/tests/test_lightcheck.py",), 180, 5000),
     ("Workflow 定义与转移策略回归",

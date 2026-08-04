@@ -37,6 +37,7 @@ from .cli_commands import lean_migration as _lean_migration
 from .cli_commands import dispatch as _dispatch
 from .cli_commands import local_spec as _local_spec
 from .cli_commands import domain_docs as _domain_docs
+from .cli_commands import domain_archive as _domain_archive
 from .cli_commands import delivery_manifest as _delivery_manifest
 
 
@@ -126,6 +127,7 @@ _COMMAND_MODULES = (
     _lean_migration,
     _local_spec,
     _domain_docs,
+    _domain_archive,
     _delivery_manifest,
     _dispatch,
 )

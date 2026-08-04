@@ -134,6 +134,10 @@ def validate_domain_document(content):
     if current is not None:
         headings[current] = "\n".join(body).strip()
     errors = []
+    if "<领域名称>" in content:
+        errors.append("文档标题仍是模板占位符: <领域名称>")
+    if "MAE-FLOW-DOMAIN-DRAFT" in content:
+        errors.append("领域文档仍是未完成模板；补充事实后删除草稿标记")
     for section in REQUIRED_DOMAIN_SECTIONS:
         value = headings.get(section, "").strip()
         compact = re.sub(r"[\s`*_#>-]+", "", value).casefold()
@@ -142,6 +146,38 @@ def validate_domain_document(content):
         elif compact in _PLACEHOLDER_CONTENT or len(compact) < 8:
             errors.append("章节内容不完整: %s" % section)
     return tuple(errors)
+
+
+def render_domain_index(content, additions):
+    """Return index content with deterministic new-domain rows appended."""
+    base = str(content or "")
+    rows = _index_rows(base)
+    known = {row[0].casefold() for row in rows}
+    if not base.strip():
+        base = (
+            "# 领域文档索引\n\n"
+            "| 领域 | 关键词 | 文档 |\n"
+            "| --- | --- | --- |\n"
+        )
+    pending = []
+    for domain, keywords in sorted(additions, key=lambda item: item[0].casefold()):
+        name = _domain_name(domain)
+        if name.casefold() in known:
+            continue
+        words = tuple(dict.fromkeys(
+            str(keyword).strip() for keyword in keywords
+            if str(keyword).strip()))
+        if not words:
+            raise ValueError("新领域 %s 至少需要一个索引关键词" % name)
+        pending.append(
+            "| %s | %s | docs/specs/%s.md |" %
+            (name, ", ".join(words), name))
+        known.add(name.casefold())
+    rendered = base.rstrip() + ("\n" if pending else "") + "\n".join(pending)
+    if pending:
+        rendered += "\n"
+    _index_rows(rendered)
+    return rendered
 
 
 def load_relevant_domain_context(project_root, terms):

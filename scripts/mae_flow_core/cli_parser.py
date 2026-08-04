@@ -22,7 +22,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "story-localize|local-spec|domain-docs|manifest|codecheck-scan|"
+            "story-localize|local-spec|domain-docs|domain-archive|manifest|codecheck-scan|"
             "codecheck-scope|codecheck-record|approve-exemption|"
             "migrate-flow|exit"
             "(用法见 current/exit 指令)。\n"
@@ -192,6 +192,18 @@ def parse_args(argv=None):
     domain_reconcile.add_argument("--candidate", required=True)
     domain_reconcile.add_argument("--keyword", action="append", default=[])
     domain_actions.add_parser("show")
+    domain_archive = sub.add_parser("domain-archive")
+    archive_actions = domain_archive.add_subparsers(
+        dest="domain_archive_action", required=True)
+    archive_prepare = archive_actions.add_parser("prepare")
+    archive_choice = archive_prepare.add_mutually_exclusive_group(required=True)
+    archive_choice.add_argument("--domain")
+    archive_choice.add_argument("--unchanged", action="store_true")
+    archive_prepare.add_argument("--keyword", action="append", default=[])
+    archive_actions.add_parser("show")
+    archive_actions.add_parser("status")
+    archive_apply = archive_actions.add_parser("apply")
+    archive_apply.add_argument("--message-id", required=True)
     manifest = sub.add_parser("manifest")
     manifest_actions = manifest.add_subparsers(
         dest="manifest_action", required=True)

@@ -71,6 +71,8 @@ class DomainDocumentTests(unittest.TestCase):
         errors = module.validate_domain_document(invalid)
         self.assertTrue(errors)
         self.assertIn("领域目标与边界", errors[0])
+        self.assertTrue(module.validate_domain_document(
+            valid + "\n<!-- MAE-FLOW-DOMAIN-DRAFT -->\n"))
 
 
 if __name__ == "__main__":

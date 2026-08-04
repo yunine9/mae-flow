@@ -1,9 +1,45 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    delivery_checkpoints, hashlib, os, re, read_text, shlex, specengine, subprocess,
+    CHECKPOINT_CONTINUE_ACK, CHECKPOINT_CONTINUOUS_ACK,
+    CHECKPOINT_REVISE_ACK, STATE_PATH, delivery_checkpoints, hashlib, os, re,
+    read_text, shlex, specengine, subprocess,
 )
 from .wiring import api
+from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.workflow.agent_observations import finished_observation
+
+
+def _story_checkpoint_mode(st):
+    ticket = str((st.get("config") or {}).get("单号", "") or "")
+    return bool(
+        (st.get("choices") or {}).get("workflow") == "full"
+        and ticket
+        and os.path.isfile(
+            ensure_work_package(os.getcwd(), ticket).story))
+
+
+def _story_implementer_returned(st, checkpoint):
+    review = _development_review(st) or {}
+    if review.get("version") != 3:
+        return True
+    task = (st.get("agent_tasks") or {}).get("CP_IMPLEMENT") or {}
+    if (task.get("step") != st.get("current")
+            or task.get("checkpoint") != checkpoint):
+        return False
+    return bool(finished_observation(
+        STATE_PATH, "CP_IMPLEMENT", st.get("current", ""), task.get("at", "")))
+
+
+def _print_checkpoint_decisions(final=False):
+    print("\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：")
+    print("  - " + CHECKPOINT_CONTINUE_ACK)
+    print("  - " + CHECKPOINT_REVISE_ACK)
+    if not final:
+        print("  - " + CHECKPOINT_CONTINUOUS_ACK)
+    print("点选后执行 checkpoint decide continue|revise"
+          + ("" if final else "|continuous")
+          + "；命令会自动读取本次检视后的新回答。")
 
 def _risk_acceptance(kind, st):
     rec = (st.get("risk_acceptances", {}) or {}).get(kind, {})
@@ -72,7 +108,7 @@ def _development_review(st):
         data
         if (
             isinstance(data, dict)
-            and data.get("version") in (1, 2)
+            and data.get("version") in (1, 2, 3)
         )
         else None
     )

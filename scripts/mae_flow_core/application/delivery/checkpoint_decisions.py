@@ -373,6 +373,8 @@ def _switch_continuous(
     next_item = _current_item(review)
     if next_item:
         next_item["fixed_base"] = completed_head
+        if review.get("version") == 3:
+            next_item["status"] = "coding"
     suffix = (
         "进入 " + next_item["id"] + "，"
         if next_item else "全部检查点已完成，"
@@ -421,6 +423,8 @@ def _accept_legacy_checkpoint(
     next_item = _current_item(review)
     if next_item:
         next_item["fixed_base"] = receipt_head
+        if review.get("version") == 3:
+            next_item["status"] = "coding"
     return _success(
         effects=(
             _set_review(review),

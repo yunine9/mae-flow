@@ -13,6 +13,7 @@ class AgentCompletionPorts:
     latest_started: Callable
     record_finished: Callable
     record_execution: Callable
+    scope_violation: Callable
     log: Callable
 
 
@@ -49,7 +50,7 @@ def _detail(payload):
 
 
 def handle_agent_completion(payload, ports):
-    """Record a completed lifecycle and always fail open on return wording."""
+    """Record lifecycle metadata and enforce only observable write scope."""
     invocation_id = _invocation_id(payload) or ports.latest_started()
     if not invocation_id:
         ports.log("subagentstop: 未找到对应 started 观察，按 fail-open 跳过")
@@ -63,4 +64,10 @@ def handle_agent_completion(payload, ports):
             invocation_id, lifecycle))
     except Exception as exc:
         ports.log("subagentstop observation EXC(fail-open): %s" % exc)
+    try:
+        reason = ports.scope_violation(payload, invocation_id)
+        if reason:
+            return HookResponse(exit_code=2, stderr=reason + "\n")
+    except Exception as exc:
+        ports.log("subagentstop scope EXC(fail-open): %s" % exc)
     return HookResponse()

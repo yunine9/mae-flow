@@ -4,7 +4,7 @@
 
 1. `role-task cp-implement --checkpoint CPn`：任务卡给出精确输入路径、当前 CP 范围和允许修改的源码路径。
 2. `agent-task compile --checkpoint CPn --scope "<当前 CP 范围>"`：一轮只执行一次同步编译；构建输入未变化时不得重跑。
-3. 开场启用 CODE Reviewer 时按节奏派发 craft-reviewer-agent：
+3. 开场启用 CODE Reviewer 时，用 `role-task craft-code --checkpoint CPn` 生成精确任务卡并按节奏派发 craft-reviewer-agent：
    - Staged：当前 CP 最多一次；
    - Continuous：中间 CP 不派发，所有 CP 完成后统一一次。
 4. 处理真实问题后重新编译；修正动作不自动触发第二轮 Reviewer。

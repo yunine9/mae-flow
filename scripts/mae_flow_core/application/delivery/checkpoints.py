@@ -13,6 +13,7 @@ from typing import Callable
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
 from mae_flow_core.application.delivery.checkpoint_ready_recovery import (
+    activate_next_checkpoint,
     ready_recovered_precommit,
 )
 from mae_flow_core.workflow.advancement import PACE_STEPS
@@ -103,7 +104,8 @@ def _checkpoint_items_error(items):
     return ""
 
 
-def _checkpoint_review_state(request, artifacts, task, ports):
+def _checkpoint_review_state(
+        request, artifacts, task, ports, story_mode=False):
     current = request["current"]
     workflow = request["workflow"]
     items = request["items"]
@@ -125,7 +127,7 @@ def _checkpoint_review_state(request, artifacts, task, ports):
         ],
     }, ensure_ascii=False, sort_keys=True)
     review = {
-        "version": 2 if artifacts else 1,
+        "version": 3 if story_mode else 2 if artifacts else 1,
         "review_before_commit": True,
         "code_reviewer": (
             request.get("code_reviewer")
@@ -156,7 +158,7 @@ def _checkpoint_review_state(request, artifacts, task, ports):
 
 def plan_checkpoint(
         current, workflow, moonlight, raw_items, ports,
-        code_reviewer=None):
+        code_reviewer=None, story_mode=False):
     """Validate and create a checkpoint plan without mutating state."""
     if current not in PACE_STEPS:
         return _failure(
@@ -190,6 +192,7 @@ def plan_checkpoint(
         artifacts,
         (task_sha, task_lines, head),
         ports,
+        story_mode=story_mode,
     )
     checkpoints = review["checkpoints"]
     output = [
@@ -240,15 +243,21 @@ def _code_reviewer_enabled(review):
 
 
 def _requires_craft_review(review, item):
-    return (
-        review.get("version") == 2
-        and _code_reviewer_enabled(review)
-        and not item.get("craft_review_performed")
-    )
+    if not _code_reviewer_enabled(review) or item.get(
+            "craft_review_performed"):
+        return False
+    if review.get("version") == 2:
+        return True
+    if review.get("version") != 3:
+        return False
+    if review.get("mode") == "staged":
+        return True
+    items = review.get("checkpoints") or []
+    return bool(items) and item is items[-1]
 
 
 def _record_committed_source_sha(review, item, base, head):
-    if review.get("version") == 2:
+    if review.get("version") in (2, 3):
         item["compile_source_sha256"] = hashlib.sha256(
             (base + "\0" + head).encode("utf-8")
         ).hexdigest()
@@ -398,7 +407,6 @@ def _ready_precommit(review, item, base, head, agent_tasks, ports):
         exit_code=0,
     )
 
-
 def _ready_committed(
         review, item, base, head, mode, agent_tasks, ports):
     requires_craft = _requires_craft_review(review, item)
@@ -462,8 +470,7 @@ def _ready_committed(
             if next_index < len(review.get("checkpoints", []))
             else None
         )
-        if next_item:
-            next_item["fixed_base"] = head
+        activate_next_checkpoint(review, next_item, head)
         stdout.append(
             "[mae-flow] %s 已编译并记录范围 %s..%s；"
             "连续模式不 push、不等待，直接进入%s。"

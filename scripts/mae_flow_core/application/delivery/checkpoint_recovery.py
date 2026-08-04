@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
+from mae_flow_core.application.delivery.checkpoint_ready_recovery import (
+    activate_next_checkpoint,
+)
 
 
 @dataclass(frozen=True)
@@ -122,8 +125,7 @@ def _accept_checkpoint(
     review["current_index"] = int(
         review.get("current_index", 0)) + 1
     next_item = _current_item(review)
-    if next_item:
-        next_item["fixed_base"] = head
+    activate_next_checkpoint(review, next_item, head)
     suffix = (
         "进入 " + next_item["id"]
         if next_item else "全部计划检查点已完成")
@@ -147,8 +149,7 @@ def _complete_continuous(review, item, head, now):
     review["current_index"] = int(
         review.get("current_index", 0)) + 1
     next_item = _current_item(review)
-    if next_item:
-        next_item["fixed_base"] = head
+    activate_next_checkpoint(review, next_item, head)
     message = (
         "已切换为一次完成模式；当前内部提交将在质量链后"
         "与剩余代码统一检视。"

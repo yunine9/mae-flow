@@ -18,6 +18,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 from mae_flow_core.foundation import fingerprints
 from mae_flow_core.adapters.hook_runtime import create_hook_runtime
 from mae_flow_core import cli_runtime as mf
+from mae_flow_core.application.delivery.checkpoints import (
+    _requires_craft_review,
+)
+from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.delivery.models import thaw
+from mae_flow_core.cli_commands import checkpoint_plan as checkpoint_plan_cli
+from mae_flow_core.cli_commands import checkpoint_facts as checkpoint_facts_cli
 from test_spec2code_artifacts import BLUEPRINT, PLAN, ROADMAP, review
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
@@ -135,6 +142,51 @@ class CheckpointTests(unittest.TestCase):
                 "confirmed_by": "user",
                 "confirmed_at": "2026-07-30 10:00:00",
             }
+
+    def test_story_checkpoint_mode_is_lightweight_and_keeps_reviewer_cadence(self):
+        state = self.state(current="build_pace")
+        state["choices"]["workflow"] = "full"
+        package = ensure_work_package(self.repo, "REQ1")
+        with open(package.story, "w", encoding="utf-8") as stream:
+            stream.write("# Story\n\n## CP 划分\n- CP1\n- CP2\n")
+        result = mf._checkpoint_plan_result(
+            state, ("第一批", "第二批"), {})
+        review = thaw(result.effects[0].payload)
+        self.assertEqual(3, review["version"])
+        self.assertNotIn("roadmap_path", review)
+        self.assertNotIn("plan_path", review)
+
+        review["mode"] = "staged"
+        self.assertTrue(_requires_craft_review(
+            review, review["checkpoints"][0]))
+        review["mode"] = "continuous"
+        self.assertFalse(_requires_craft_review(
+            review, review["checkpoints"][0]))
+        self.assertTrue(_requires_craft_review(
+            review, review["checkpoints"][-1]))
+
+    def test_story_checkpoint_requires_current_cp_implementer_return(self):
+        state = {
+            "current": "build",
+            "development_review": {"version": 3},
+            "agent_tasks": {
+                "CP_IMPLEMENT": {
+                    "step": "build", "checkpoint": "CP1",
+                    "at": "2026-08-04 10:00:00",
+                },
+            },
+        }
+        original = checkpoint_facts_cli.finished_observation
+        try:
+            checkpoint_facts_cli.finished_observation = lambda *args: None
+            self.assertFalse(
+                mf._story_implementer_returned(state, "CP1"))
+            checkpoint_facts_cli.finished_observation = lambda *args: {
+                "kind": "CP_IMPLEMENT", "lifecycle": "returned"}
+            self.assertTrue(
+                mf._story_implementer_returned(state, "CP1"))
+        finally:
+            checkpoint_facts_cli.finished_observation = original
 
     def v2_state(self, mode):
         state = self.state(current="build")

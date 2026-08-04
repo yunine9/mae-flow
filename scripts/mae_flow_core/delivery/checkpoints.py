@@ -68,7 +68,7 @@ def development_review(state):
     return (
         data
         if isinstance(data, dict)
-        and data.get("version") in (1, 2)
+        and data.get("version") in (1, 2, 3)
         else None
     )
 

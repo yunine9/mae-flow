@@ -19,13 +19,14 @@ from mae_flow_core.application.hooks.models import HookResponse  # noqa: E402
 
 
 class AgentCompletionTests(unittest.TestCase):
-    def ports(self, latest="run-1"):
+    def ports(self, latest="run-1", scope_violation=""):
         events = []
         ports = AgentCompletionPorts(
             state_path="/repo/.mae-flow.json",
             latest_started=lambda **_kwargs: latest,
             record_finished=lambda *args: events.append(args),
             record_execution=lambda *_args: None,
+            scope_violation=lambda *_args: scope_violation,
             log=lambda message: events.append(("log", message)),
         )
         return ports, events
@@ -73,6 +74,17 @@ class AgentCompletionTests(unittest.TestCase):
         response = handle_agent_completion({}, ports)
         self.assertEqual(HookResponse(), response)
         self.assertEqual([], [event for event in events if event[0] != "log"])
+
+    def test_real_file_scope_violation_blocks_without_parsing_return_prose(self):
+        ports, events = self.ports(
+            scope_violation="craft-reviewer-agent 是只读角色，却修改了 src/a.py")
+        response = handle_agent_completion({
+            "invocation_id": "run-1",
+            "assistant_text": "CLEAR，检视完成。",
+        }, ports)
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("src/a.py", response.stderr)
+        self.assertEqual("returned", events[0][2])
 
 
 if __name__ == "__main__":

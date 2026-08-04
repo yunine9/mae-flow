@@ -102,7 +102,9 @@ class AgentObservationTests(unittest.TestCase):
     def test_pretool_agent_and_subagentstop_form_one_lifecycle(self):
         runtime = SimpleNamespace(
             _contract_state=lambda: {
-                "current": "story", "agent_tasks": {}},
+                "current": "story", "agent_tasks": {
+                    "STORY": {"step": "story"},
+                }},
         )
         adapter = ActiveHookEventAdapter(
             state=self.state,
@@ -110,7 +112,8 @@ class AgentObservationTests(unittest.TestCase):
             repository_root=self.temporary.name,
             maeflow=lambda *_args: 0,
             runtime_adapter=runtime,
-            task_card_ports=lambda: None,
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
             log=lambda _message: None,
         )
         payload = {

@@ -33,6 +33,7 @@ class CheckpointQualityPorts:
     registered_artifact_sha: Callable[[str], str]
     now: Callable[[], str]
     is_test_path: Callable[[str], bool] = lambda _path: False
+    role_returned: Callable[[str, str], bool] = lambda _role, _checkpoint: False
 
 
 def _failure(message):
@@ -53,7 +54,7 @@ def _success(review, stdout, extra=()):
 
 
 def _current(review, checkpoint):
-    if not isinstance(review, dict) or review.get("version") != 2:
+    if not isinstance(review, dict) or review.get("version") not in (2, 3):
         return None
     items = review.get("checkpoints") or []
     index = int(review.get("current_index", 0) or 0)
@@ -250,7 +251,8 @@ def _complete_continuous_craft(updated, item):
     index = updated["current_index"]
     if index < len(items):
         next_item = items[index]
-        next_item["status"] = "planned"
+        next_item["status"] = (
+            "coding" if updated.get("version") == 3 else "planned")
         next_item["fixed_base"] = item.get("head", "")
     return _success(
         updated,
@@ -281,6 +283,26 @@ def record_craft_review(
     if item.get("compile_source_sha256") != current_source_sha256:
         return _failure(
             "源码摘要与首次编译收据不一致；重新编译后派新鲜 CODE Reviewer。")
+    if updated.get("version") == 3:
+        if not ports.role_returned("REVIEWER", checkpoint):
+            return _failure(
+                "当前检查点的 craft-reviewer-agent 尚未正常返回；"
+                "先执行 role-task craft-code --checkpoint %s，"
+                "按任务卡完成一次检视。" % checkpoint)
+        item["craft_review_performed"] = True
+        item["reviewed_at"] = ports.now()
+        if updated.get("mode") == "continuous":
+            return _complete_continuous_craft(updated, item)
+        item["status"] = "review_pending"
+        receipt = item.get("receipt")
+        if isinstance(receipt, dict):
+            receipt["ack_cursor"] = ports.ack_cursor()
+        return _success(
+            updated,
+            ("[mae-flow] %s CODE 走读已返回；现在展示 CP 检视卡给用户。"
+             % checkpoint,),
+            extra=(DeliveryEffect("show_checkpoint_review", {}),),
+        )
     text, why = _validated_craft_text(
         review_path,
         ticket,

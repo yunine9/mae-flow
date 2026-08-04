@@ -7,6 +7,9 @@ ROLE_STEPS = {
     "craft-plan": {"build_plan", "build"},
     "cp-implement": {"build"},
     "craft-code": {"build"},
+    "story-generate": {"story"},
+    "story-review": {"story"},
+    "grill-critic": {"grill"},
 }
 
 

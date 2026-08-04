@@ -115,6 +115,24 @@ class TaskCardContractTests(unittest.TestCase):
                 ("src/main.py",),
                 "grill-critic-agent 是只读审查角色",
             ),
+            (
+                "CP_IMPLEMENT",
+                {"head": HEAD, "task_files": ["src/allowed.py"]},
+                ("src/other.py",),
+                "cp-implementer-agent 修改了任务卡范围外文件",
+            ),
+            (
+                "REVIEWER",
+                {"head": HEAD},
+                ("src/main.py",),
+                "craft-reviewer-agent 是只读审查角色",
+            ),
+            (
+                "STORY",
+                {"head": HEAD},
+                ("src/main.py",),
+                "story-generator-agent 修改了业务源码",
+            ),
         )
         for kind, task, changed, reason in cases:
             with self.subTest(kind=kind):
@@ -196,6 +214,28 @@ class TaskCardContractTests(unittest.TestCase):
             self.ports(current_head=lambda: "b" * 40),
         )
         self.assertTrue(changed.accepted)
+
+    def test_missing_role_cards_show_only_real_recovery_commands(self):
+        cases = (
+            ("STORY", "story", "role-task story-generate"),
+            ("REVIEWER", "story", "role-task story-review"),
+            ("CP_IMPLEMENT", "build", "role-task cp-implement --checkpoint CP1"),
+            ("GRILL_PREP", "grill", "role-task grill-critic --stage prep"),
+            ("GRILL_FINAL", "grill", "role-task grill-critic --stage final"),
+        )
+        for kind, step, command in cases:
+            state = {
+                "current": step,
+                "config": {"单号": "REQ-1"},
+                "agent_tasks": {},
+                "development_review": {
+                    "current_index": 0,
+                    "checkpoints": [{"id": "CP1"}],
+                },
+            }
+            decision = verify_dispatch_task(kind, state, self.ports())
+            self.assertFalse(decision.accepted)
+            self.assertIn(command, decision.reason)
 
 
 if __name__ == "__main__":

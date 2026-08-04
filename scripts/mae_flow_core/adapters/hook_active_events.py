@@ -21,7 +21,10 @@ from mae_flow_core.application.hooks.event_policies import (
     template_target,
 )
 from mae_flow_core.application.hooks.models import HookResponse
-from mae_flow_core.application.hooks.task_cards import verify_dispatch_task
+from mae_flow_core.application.hooks.task_cards import (
+    verify_agent_scope,
+    verify_dispatch_task,
+)
 from mae_flow_core.file_io import (
     load_json,
     read_lines,
@@ -40,6 +43,9 @@ from mae_flow_core.workflow.quality_executions import (
 )
 from mae_flow_core.quality.tool_transcript import (
     bash_call, bash_calls, call_failed, parse_transcript, skill_call,
+)
+from mae_flow_core.quality.compile_side_effects import (
+    successful_direct_write_paths,
 )
 
 
@@ -119,7 +125,11 @@ class ActiveHookEventAdapter:
             state = self.runtime._contract_state()
             decision = (
                 verify_dispatch_task(kind, state, self.task_card_ports())
-                if kind in ("COMPILE", "CODECHECK", "UT", "GRILL")
+                if kind in (
+                    "STORY", "REVIEWER", "CP_IMPLEMENT",
+                    "COMPILE", "CODECHECK", "UT",
+                    "GRILL", "GRILL_PREP", "GRILL_FINAL",
+                )
                 else None
             )
             response = (
@@ -304,6 +314,7 @@ class ActiveHookEventAdapter:
                 state_path, invocation_id, lifecycle,
                 time.strftime("%Y-%m-%d %H:%M:%S"), detail),
             record_execution=self._record_quality_execution,
+            scope_violation=self._scope_violation,
             log=self.log,
         )
 
@@ -359,6 +370,36 @@ class ActiveHookEventAdapter:
             quality_input_snapshot(state, kind, started.get("step", "")),
             time.strftime("%Y-%m-%d %H:%M:%S"), lifecycle=lifecycle,
         )
+
+    def _scope_violation(self, payload, invocation_id):
+        """Check repository writes without interpreting the Agent response."""
+        started = started_observation(self.state, invocation_id) or {}
+        kind = str(started.get("kind", "") or "")
+        if not kind:
+            return ""
+        state = self.runtime._contract_state()
+        task = (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
+        if not task:
+            return ""
+        direct_write_paths = ()
+        path = self._explicit_transcript_path(payload)
+        if path:
+            try:
+                calls = parse_transcript(
+                    self._load_agent_transcript(path)).tool_calls
+                direct_write_paths = successful_direct_write_paths(
+                    calls, self.repository_root)
+            except Exception as exc:
+                self.log(
+                    "scope transcript EXC(use repository facts): %s" % exc)
+        decision = verify_agent_scope(
+            kind,
+            task,
+            state,
+            self.task_card_ports(),
+            direct_write_paths=direct_write_paths,
+        )
+        return "" if decision.accepted else decision.reason
 
     def subagentstop(self, payload):
         return handle_agent_completion(

@@ -92,7 +92,7 @@ class CheckpointQualityTests(unittest.TestCase):
             ],
         }
 
-    def ports(self, files, verify=True):
+    def ports(self, files, verify=True, role_returned=False):
         return CheckpointQualityPorts(
             is_file=lambda path: path in files,
             read_text=lambda path: files[path],
@@ -110,7 +110,36 @@ class CheckpointQualityTests(unittest.TestCase):
                 if kind == "plan" else ""
             ),
             now=lambda: "2026-07-30 13:00:00",
+            role_returned=lambda _role, _checkpoint: role_returned,
         )
+
+    def test_story_code_review_uses_lifecycle_without_review_digest(self):
+        state = self.state()
+        state["version"] = 3
+        item = state["checkpoints"][0]
+        item.update({
+            "status": "craft_pending",
+            "compile_source_sha256": self.SOURCE_SHA,
+            "receipt": {"ack_cursor": ()},
+        })
+        missing = record_craft_review(
+            state, "CP1", "", "REQ-1", self.SOURCE_SHA,
+            self.ports({}, role_returned=False))
+        self.assertEqual(2, missing.exit_code)
+        self.assertIn("尚未正常返回", missing.stderr[0])
+
+        returned = record_craft_review(
+            state, "CP1", "", "REQ-1", self.SOURCE_SHA,
+            self.ports({}, role_returned=True))
+        reviewed = thaw(returned.effects[0].payload)
+        self.assertEqual(
+            "review_pending", reviewed["checkpoints"][0]["status"])
+        self.assertTrue(
+            reviewed["checkpoints"][0]["craft_review_performed"])
+
+    def test_story_craft_review_command_does_not_require_review_file(self):
+        crafted = parse_args(["checkpoint", "craft-reviewed", "CP1"])
+        self.assertIsNone(crafted.review)
 
     def test_prepare_and_user_decide_plan_loop(self):
         paths = {

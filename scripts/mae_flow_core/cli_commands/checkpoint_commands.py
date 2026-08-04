@@ -2,6 +2,7 @@
 
 from .shared import (
     CheckpointDecisionPorts, CheckpointQualityPorts, FinalReviewPorts,
+    STATE_PATH,
     activate_final_rework, decide_checkpoint, decide_checkpoint_plan,
     decide_craft_review,
     hashlib, inspect_checkpoint_status, os, prepare_checkpoint_plan,
@@ -9,6 +10,7 @@ from .shared import (
     refresh_checkpoint, refresh_final_review, thaw_delivery_payload, time,
 )
 from .wiring import api
+from mae_flow_core.workflow.agent_observations import finished_observation
 
 def cmd_checkpoint_status(st):
     data = api._development_review(st)
@@ -138,7 +140,20 @@ def _checkpoint_quality_ports(st):
             or ""),
         now=lambda: time.strftime("%Y-%m-%d %H:%M:%S"),
         is_test_path=lambda path: api._is_test_file(path, st),
+        role_returned=lambda role, checkpoint: _role_returned(
+            st, role, checkpoint),
     )
+
+
+def _role_returned(st, role, checkpoint):
+    record = (st.get("role_tasks") or {}).get("craft-code") or {}
+    if (
+            role != "REVIEWER"
+            or record.get("checkpoint") != checkpoint
+            or record.get("step") != st.get("current")):
+        return False
+    return bool(finished_observation(
+        STATE_PATH, role, st.get("current", ""), record.get("at", "")))
 
 
 def _apply_checkpoint_quality_result(st, result):
@@ -212,7 +227,7 @@ def cmd_checkpoint_craft_reviewed(st, args):
     result = record_craft_review(
         api._development_review(st),
         args.checkpoint_id,
-        args.review,
+        args.review or "",
         ticket,
         _current_craft_source_sha(st),
         _checkpoint_quality_ports(st),

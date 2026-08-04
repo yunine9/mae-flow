@@ -21,6 +21,7 @@ class RoleTaskContext:
     review_output: str = ""
     review_target_sha256: str = ""
     write_output: str = ""
+    lifecycle_only: bool = False
 
 
 _MARKERS = {
@@ -29,6 +30,9 @@ _MARKERS = {
     "craft-plan": "CRAFT_REVIEW_RESULT:",
     "cp-implement": "CP_IMPLEMENT_RESULT:",
     "craft-code": "CRAFT_REVIEW_RESULT:",
+    "story-generate": "",
+    "story-review": "",
+    "grill-critic": "",
 }
 
 _INPUTS = {
@@ -37,6 +41,9 @@ _INPUTS = {
     "craft-plan": ("blueprint", "roadmap", "plan"),
     "cp-implement": ("blueprint", "roadmap", "plan"),
     "craft-code": ("roadmap", "plan"),
+    "story-generate": (),
+    "story-review": (),
+    "grill-critic": (),
 }
 _OPTIONAL_INPUTS = {
     "test-design": {"blueprint"},
@@ -45,6 +52,8 @@ _OPTIONAL_INPUTS = {
 
 
 def _append_artifacts(document, role, artifacts):
+    if not _INPUTS[role]:
+        return
     document.append("允许读取的过程件（路径与摘要必须同时匹配）:")
     for kind in _INPUTS[role]:
         ref = artifacts.get(kind)
@@ -94,7 +103,29 @@ def _append_review_contract(document, context, user_decision=False):
         ])
 
 
-def _append_role_contract(document, role, context):
+def _append_stable_role_contract(document, role, context, checkpoint):
+    if role == "story-generate":
+        document.extend([
+            "职责:根据本地 Grill、Spec、相关领域文档、模板和真实代码生成 Story。",
+            "唯一允许写入的过程件: "
+            + (context.write_output or "（缺失；返回 NEEDS_INPUT）"),
+            "不得创建 Design、Test Blueprint、Roadmap 或详细 Build Plan。",
+        ])
+    elif role == "story-review":
+        document.extend([
+            "模式: Story 设计检视，只读。",
+            "职责:核对业务验收、接口边界、关键函数设计、测试设计和 CP 划分。",
+            "本轮只执行一次；返回真实 Finding，不修改 Story 或其他文件。",
+        ])
+    elif role == "grill-critic":
+        document.extend([
+            "质询检查阶段: " + (checkpoint or "（缺失）"),
+            "职责:只读检查需求材料、代码勘察和当前 Grill 文档，寻找会改变实现或验收的遗漏分支。",
+            "禁止替用户拍板，禁止修改任何文件。",
+        ])
+
+
+def _append_role_contract(document, role, context, checkpoint=""):
     if role == "test-design":
         document.extend([
             "职责:只生成或修订 UT 行为蓝图；不写测试或业务源码。",
@@ -140,7 +171,15 @@ def _append_role_contract(document, role, context):
             context.diff or "（缺失；返回 NEEDS_INPUT）",
             "只检查当前 CP diff 与直接集成边界，每轮最多五条。",
         ])
-        _append_review_contract(document, context, user_decision=True)
+        if context.lifecycle_only:
+            document.extend([
+                "返回真实 Finding 或无问题结论；自然语言格式不作为门禁。",
+                "不写 Review 过程件，不返回令牌、摘要或固定状态行。",
+            ])
+        else:
+            _append_review_contract(document, context, user_decision=True)
+    else:
+        _append_stable_role_contract(document, role, context, checkpoint)
 
 
 def build_role_task_document(
@@ -163,7 +202,7 @@ def build_role_task_document(
     ])
     _append_artifacts(document, role, context.artifacts)
     _append_context_paths(document, context.context_paths)
-    _append_role_contract(document, role, context)
+    _append_role_contract(document, role, context, checkpoint)
     document.extend([
         "不得读取任务卡未列出的其他上下文；缺失时返回 NEEDS_INPUT。",
         "最终报告可以使用任意自然语言格式。",

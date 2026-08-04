@@ -13,6 +13,10 @@ from mae_flow_core.application.quality.task_cards import (
     store_task_card,
 )
 from mae_flow_core.quality.role_tasks import role_allowed
+from mae_flow_core.orchestration.behavior_baseline import (
+    load_relevant_domain_context,
+)
+from mae_flow_core.orchestration.work_package import ensure_work_package
 
 from .shared import hashlib, os, read_text, time, write_text
 from .wiring import api
@@ -24,6 +28,9 @@ _REQUIRED_ARTIFACTS = {
     "craft-plan": ("blueprint", "roadmap", "plan"),
     "cp-implement": ("blueprint", "roadmap", "plan"),
     "craft-code": ("roadmap", "plan"),
+    "story-generate": (),
+    "story-review": (),
+    "grill-critic": (),
 }
 
 
@@ -42,7 +49,9 @@ def _artifact_refs(state):
     return refs
 
 
-def _require_artifact_refs(role, refs):
+def _require_artifact_refs(role, refs, story_mode=False):
+    if story_mode and role in ("cp-implement", "craft-code"):
+        return
     missing = [
         kind for kind in _REQUIRED_ARTIFACTS[role]
         if kind not in refs
@@ -115,6 +124,75 @@ def _survey_neighbors(path):
         ):
             result.append(relative)
     return tuple(result)
+
+
+def _document_paths(path):
+    """Extract repository-local existing or creatable paths from Story."""
+    if not path or not os.path.isfile(path):
+        return ()
+    text = read_text(path, encoding="utf-8", errors="replace")
+    tokens = re.findall(
+        r"`([^`\n]+)`|(?<![\w:/])([\w.@+-]+(?:/[\w.@+-]+)+)",
+        text,
+    )
+    root = os.path.realpath(os.getcwd())
+    result = []
+    for pair in tokens:
+        value = next((item for item in pair if item), "")
+        value = value.rstrip(".,，。:：;；)")
+        absolute = os.path.realpath(value)
+        relative = os.path.relpath(absolute, root).replace("\\", "/")
+        if (
+                not value
+                or relative == ".."
+                or relative.startswith("../")
+                or relative.startswith(".mae-flow-work/")
+                or relative.startswith("docs/specs/")
+                or relative in result
+                or not os.path.isdir(os.path.dirname(absolute))):
+            continue
+        result.append(relative)
+    return tuple(result)
+
+
+def _plain_existing(paths):
+    result = []
+    for path in paths:
+        value = str(path or "")
+        if value and os.path.isfile(value):
+            absolute = os.path.abspath(value)
+            if absolute not in result:
+                result.append(absolute)
+    return tuple(result)
+
+
+def _stable_story_context(state, role, document=""):
+    config = state.get("config") or {}
+    ticket = str(config.get("单号", "") or "")
+    package = ensure_work_package(os.getcwd(), ticket)
+    survey = os.path.join(".mae-flow-work", "survey-%s.md" % ticket)
+    terms = []
+    for path in (config.get("需求文档", ""), package.spec, package.grill):
+        if path and os.path.isfile(path):
+            terms.append(read_text(path, encoding="utf-8", errors="replace"))
+    domain = load_relevant_domain_context(os.getcwd(), terms)
+    domain_paths = [
+        os.path.join(os.getcwd(), *item.path.split("/"))
+        for item in domain.documents
+    ]
+    common = [
+        config.get("需求文档", ""), package.spec, package.grill, survey,
+        os.path.join("docs", "specs", "index.md"), *domain_paths,
+    ]
+    if role in ("story-review", "cp-implement", "craft-code"):
+        common.append(package.story)
+    if role in ("story-generate", "story-review"):
+        common.append(os.path.join(
+            ".mae-flow-work", "plugin-resources", "assets",
+            "STORY-TEMPLATE.md"))
+    if document:
+        common.append(document)
+    return package, _plain_existing(common)
 
 
 def _context_ref(path):
@@ -258,8 +336,17 @@ def cmd_role_task(_flow, state, args):
             2,
         )
     checkpoint = str(args.checkpoint or "")
-    if role != "test-design" and not checkpoint:
+    if role in (
+            "task-analysis", "craft-plan", "cp-implement", "craft-code",
+    ) and not checkpoint:
         api.die("%s 任务卡必须指定 --checkpoint CPn。" % role, 2)
+    if role == "grill-critic":
+        checkpoint = str(args.stage or "")
+        if not checkpoint or not args.document:
+            api.die(
+                "grill-critic 必须同时指定 --stage prep|final 和 --document。",
+                2,
+            )
     item = api._checkpoint_current(state) or {}
     expected_status = {
         "task-analysis": "planned",
@@ -283,9 +370,21 @@ def cmd_role_task(_flow, state, args):
             2,
         )
     ticket = str((state.get("config") or {}).get("单号", "") or "")
-    plan_files = _plan_files(state, checkpoint)
+    package = ensure_work_package(os.getcwd(), ticket)
+    story_mode = os.path.isfile(package.story)
+    plan_files = (
+        _document_paths(package.story)
+        if story_mode and role in ("cp-implement", "craft-code")
+        else _plan_files(state, checkpoint)
+    )
     artifact_refs = _artifact_refs(state)
-    _require_artifact_refs(role, artifact_refs)
+    _require_artifact_refs(role, artifact_refs, story_mode=story_mode)
+    if role in ("story-generate", "story-review", "grill-critic") or (
+            story_mode and role in ("cp-implement", "craft-code")):
+        package, context_paths = _stable_story_context(
+            state, role, getattr(args, "document", "") or "")
+    else:
+        context_paths = _existing_context_paths(state, plan_files)
     document = build_role_task_document(
         role=role,
         project_root=os.path.abspath(os.getcwd()),
@@ -294,11 +393,16 @@ def cmd_role_task(_flow, state, args):
         context=RoleTaskContext(
             artifacts=artifact_refs,
             files=plan_files,
-            context_paths=_existing_context_paths(state, plan_files),
+            context_paths=context_paths,
             diff=_role_diff(state, role, plan_files),
             review_output=_review_output(ticket, checkpoint, role),
             review_target_sha256=_review_target_sha(state, role),
-            write_output=_write_output(ticket, role),
+            write_output=(
+                package.story if role == "story-generate"
+                else _write_output(ticket, role)
+            ),
+            lifecycle_only=bool(
+                story_mode and role in ("cp-implement", "craft-code")),
         ),
     )
     suffix = ("-" + checkpoint.lower()) if checkpoint else ""
@@ -321,9 +425,40 @@ def cmd_role_task(_flow, state, args):
         "review_target_sha256": _review_target_sha(state, role),
         "at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
+    agent_kind = {
+        "story-generate": "STORY",
+        "story-review": "REVIEWER",
+        "grill-critic": "GRILL_" + checkpoint.upper(),
+        "cp-implement": "CP_IMPLEMENT",
+        "craft-code": "REVIEWER",
+    }.get(role, "")
+    if agent_kind:
+        head = api.sh("git rev-parse --verify HEAD")
+        precommit_review = role == "craft-code"
+        state.setdefault("agent_tasks", {})[agent_kind] = {
+            "step": step,
+            "checkpoint": checkpoint,
+            "stage": checkpoint if role == "grill-critic" else "",
+            "path": artifact.path,
+            "head": head,
+            "precommit_review": precommit_review,
+            "source_snapshot": (
+                api._source_snapshot_since(head, state, api.FLOW)
+                if precommit_review and head else {}
+            ),
+            "task_files": list(plan_files),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
     api.save_state(state)
     print("[mae-flow] %s 角色任务卡已生成: %s" % (role, artifact.path))
+    agent = {
+        "story-generate": "story-generator-agent",
+        "story-review": "craft-reviewer-agent",
+        "grill-critic": "grill-critic-agent",
+        "cp-implement": "cp-implementer-agent",
+        "craft-code": "craft-reviewer-agent",
+    }.get(role, "对应角色 Agent")
     print(
-        '启动新鲜角色 Agent 时只传：读取并严格执行任务卡 "%s"；'
-        "返回内容可以使用任意自然语言格式。" % artifact.path
+        '启动 %s 时只传：读取并严格执行任务卡 "%s"；'
+        "返回内容可以使用任意自然语言格式。" % (agent, artifact.path)
     )

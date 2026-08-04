@@ -1,9 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    CHECKPOINT_CODE_STEPS, CHECKPOINT_CONTINUE_ACK, CHECKPOINT_CONTINUOUS_ACK,
-    CHECKPOINT_LOCKED_STATUSES, CHECKPOINT_REVISE_ACK, CheckpointPlanPorts,
-    CheckpointReadyPorts, CheckpointRecoveryPorts, checkpoint_commit_commands,
+    CHECKPOINT_CODE_STEPS, CHECKPOINT_LOCKED_STATUSES, CheckpointPlanPorts,
+    CheckpointReadyPorts, CheckpointRecoveryPorts,
+    checkpoint_commit_commands,
     checkpoint_review_context, hashlib, os, plan_checkpoint, read_text,
     ready_checkpoint,
     reviewed_worktree_fresh, thaw_delivery_payload, time,
@@ -94,6 +94,7 @@ def _checkpoint_plan_result(
             (st.get("choices") or {}).get("code_reviewer")
             or "enabled"
         ),
+        story_mode=api._story_checkpoint_mode(st),
         ports=CheckpointPlanPorts(
             dirty_paths=lambda: api._blocking_dirty_source_paths(st, api.FLOW),
             task_structure=lambda: api._task_structure_fingerprint(st),
@@ -181,17 +182,14 @@ def _checkpoint_source_fresh(head, st):
         return False, "代码发生变化:" + "、".join(changed[:8])
     return True, ""
 
-def _print_checkpoint_decisions(final=False):
-    print("\n展示完整 diff、关键风险和自验证方式后，用 AskUserQuestion 提供：")
-    print("  - " + CHECKPOINT_CONTINUE_ACK)
-    print("  - " + CHECKPOINT_REVISE_ACK)
-    if not final:
-        print("  - " + CHECKPOINT_CONTINUOUS_ACK)
-    print("点选后执行 checkpoint decide continue|revise"
-          + ("" if final else "|continuous")
-          + "；命令会自动读取本次检视后的新回答。")
-
 def cmd_checkpoint_ready(flow, st, args):
+    if not api._story_implementer_returned(st, args.checkpoint_id):
+        api.die(
+            "当前 CP 的 cp-implementer-agent 尚未正常返回；先执行 "
+            "role-task cp-implement --checkpoint %s，再按任务卡完成实现。"
+            % args.checkpoint_id,
+            2,
+        )
     result = ready_checkpoint(
         review=api._development_review(st),
         current=st.get("current"),
@@ -303,7 +301,7 @@ def _show_pending_checkpoint_review(st, data, item):
             receipt.get("remote_ref", ""))))
     if item.get("task_structure_drift"):
         print("⚠ 实现清单结构在开发中发生变化，请重点核对新增/删除任务是否仍符合确认范围。")
-    _print_checkpoint_decisions(final=False)
+    api._print_checkpoint_decisions(final=False)
 
 def _show_coding_checkpoint(data, item):
     if data.get("mode") == "staged" and api._review_before_commit(data):
@@ -378,7 +376,7 @@ def _show_final_pending_review(data, final):
         print("⚠ 当前本地 HEAD 已经存在于上游；仍须完成检视，"
               "但不要再次 push 或改写远端历史。")
     _show_final_review_context(data)
-    _print_checkpoint_decisions(final=True)
+    api._print_checkpoint_decisions(final=True)
 
 def _show_final_pending_commit(st, final):
     add, commit = _checkpoint_commit_command(st, final)

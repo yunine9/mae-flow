@@ -227,8 +227,13 @@ def parse_args(argv=None):
         "craft-plan",
         "cp-implement",
         "craft-code",
+        "story-generate",
+        "story-review",
+        "grill-critic",
     ])
     role_task.add_argument("--checkpoint")
+    role_task.add_argument("--stage", choices=["prep", "final"])
+    role_task.add_argument("--document")
     lightcheck = sub.add_parser("lightcheck")
     lightcheck.add_argument(
         "--quiet", action="store_true",
@@ -254,7 +259,10 @@ def parse_args(argv=None):
         "choice", choices=["continue", "revise"])
     checkpoint_craft = checkpoint_actions.add_parser("craft-reviewed")
     checkpoint_craft.add_argument("checkpoint_id", help="当前检查点，如 CP1")
-    checkpoint_craft.add_argument("--review", required=True)
+    checkpoint_craft.add_argument(
+        "--review",
+        help="旧版在途流程的 CODE Review 过程件；Story 流程不需要",
+    )
     checkpoint_craft_decide = checkpoint_actions.add_parser("craft-decide")
     checkpoint_craft_decide.add_argument(
         "checkpoint_id", help="当前检查点，如 CP1")

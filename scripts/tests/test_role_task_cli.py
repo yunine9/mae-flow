@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import contextlib
+import io
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -35,10 +37,27 @@ class RoleTaskCliTests(unittest.TestCase):
             self.assertEqual(role, args.role)
             self.assertEqual("CP2", args.checkpoint)
 
+    def test_parser_accepts_story_and_two_grill_critic_stages(self):
+        for role in ("story-generate", "story-review"):
+            args = parse_args(["role-task", role])
+            self.assertEqual(role, args.role)
+            self.assertIsNone(args.checkpoint)
+        for stage in ("prep", "final"):
+            args = parse_args([
+                "role-task", "grill-critic",
+                "--stage", stage,
+                "--document", ".mae-flow-work/REQ-1/grill.md",
+            ])
+            self.assertEqual("grill-critic", args.role)
+            self.assertEqual(stage, args.stage)
+
     def test_role_stage_matrix_is_narrow(self):
         self.assertTrue(role_allowed("test-design", "test_blueprint"))
         self.assertTrue(role_allowed("craft-plan", "build_plan"))
         self.assertTrue(role_allowed("cp-implement", "build"))
+        self.assertTrue(role_allowed("story-generate", "story"))
+        self.assertTrue(role_allowed("story-review", "story"))
+        self.assertTrue(role_allowed("grill-critic", "grill"))
         self.assertFalse(role_allowed("cp-implement", "build_plan"))
         self.assertFalse(role_allowed("craft-code", "verify_ut"))
 
@@ -150,6 +169,48 @@ class RoleTaskCliTests(unittest.TestCase):
         self.assertIn("/src/service.py | SHA256 ", body)
         self.assertIn("/survey-REQ-1.md | SHA256 ", body)
         self.assertNotIn(outside.name, body)
+
+    def test_story_and_grill_commands_materialize_dispatchable_cards(self):
+        with tempfile.TemporaryDirectory() as repository:
+            previous = os.getcwd()
+            try:
+                os.chdir(repository)
+                state = {
+                    "current": "story",
+                    "config": {"单号": "REQ-1", "需求文档": "req.md"},
+                }
+                with open("req.md", "w", encoding="utf-8") as stream:
+                    stream.write("支持 NRPRACH SUL。\n")
+                os.makedirs("docs/specs")
+                with open("docs/specs/index.md", "w", encoding="utf-8") as stream:
+                    stream.write("# 领域文档索引\n")
+                package = role_task_cli.ensure_work_package(
+                    repository, "REQ-1")
+                for path in (package.spec, package.grill):
+                    with open(path, "w", encoding="utf-8") as stream:
+                        stream.write("已确认内容\n")
+                with contextlib.redirect_stdout(io.StringIO()):
+                    role_task_cli.cmd_role_task(
+                        {}, state, parse_args(["role-task", "story-generate"]))
+                card = state["agent_tasks"]["STORY"]
+                self.assertTrue(os.path.isfile(card["path"]))
+                with open(card["path"], encoding="utf-8") as stream:
+                    body = stream.read()
+                self.assertIn(os.path.abspath(package.spec), body)
+                self.assertIn(os.path.abspath(package.grill), body)
+                self.assertNotIn("SHA256", body)
+
+                state["current"] = "grill"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    role_task_cli.cmd_role_task(
+                        {}, state, parse_args([
+                            "role-task", "grill-critic", "--stage", "prep",
+                            "--document", package.grill,
+                        ]))
+                self.assertEqual(
+                    "prep", state["agent_tasks"]["GRILL_PREP"]["stage"])
+            finally:
+                os.chdir(previous)
 
 
 if __name__ == "__main__":

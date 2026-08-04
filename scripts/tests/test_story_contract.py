@@ -76,6 +76,17 @@ class StoryContractTests(unittest.TestCase):
                 "CRAFT_REVIEW_RESULT:", "文件变化后重新检视"):
             self.assertNotIn(forbidden, reviewer)
 
+    def test_reachable_agent_guidance_has_real_task_card_commands(self):
+        grill = read("flow/steps/grill.md")
+        story = read("flow/steps/story.md")
+        build = read("flow/steps/build.md")
+        self.assertIn("role-task grill-critic --stage prep", grill)
+        self.assertIn("role-task grill-critic --stage final", grill)
+        self.assertIn("role-task story-generate", story)
+        self.assertIn("role-task story-review", story)
+        self.assertIn("role-task cp-implement --checkpoint CPn", build)
+        self.assertIn("role-task craft-code --checkpoint CPn", build)
+
     def test_only_seven_approved_agents_remain(self):
         expected = {
             "grill-critic-agent.md",

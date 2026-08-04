@@ -31,7 +31,6 @@ _AGENT_KINDS = (
     ("compile-agent", "COMPILE"),
     ("codecheck-fix-agent", "CODECHECK"),
     ("ut-generator-agent", "UT"),
-    ("grill-critic-agent", "GRILL"),
 )
 
 _TEMPLATE_TARGETS = (
@@ -51,6 +50,10 @@ def agent_kind(tool_input):
         str(tool_input.get(key, "") or "")
         for key in ("subagent_type", "description", "prompt")
     )
+    if "grill-critic-agent" in blob:
+        if ".mae-flow-work/standalone/" in blob.replace("\\", "/"):
+            return "GRILL"
+        return "GRILL_PREP" if "prep" in blob.lower() else "GRILL_FINAL"
     return next(
         (kind for name, kind in _AGENT_KINDS if name in blob),
         "",

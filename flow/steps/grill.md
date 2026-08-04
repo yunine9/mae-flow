@@ -14,6 +14,8 @@ grill 的目标就是让开发和 AI 共同把边界和细节全部摆上台面�
 不适用(必须写具体依据,定位到代码/文档;"无关""不涉及"不是依据)。哪怕 SE 文档写清了某维,
 也要么变成"确认题"(向用户核实我理解得对不对),要么"不适用+依据"——不许一句"已覆盖"划过。
 第 9 章汇总:候选题按阻塞性排序;技术分歧记入「留给设计阶段」。
+完成八维备课后先执行 `python "{MAEFLOW_PATH}" role-task grill-critic --stage prep --document ".mae-flow-work/grill-prep-{单号}.md"`，
+把输出的唯一启动话术原样交给 grill-critic-agent。它只读找遗漏；把真实缺口补入候选题后再开始逐题询问。
 若 8 维全部为「不适用+具体依据」且候选题为 0,不要凭空发明问题；用一次
 AskUserQuestion 展示八维结论摘要,让用户选择「确认八维均无待决项,直接进入提案 /
 指定某一维继续抽查 / 补充遗漏信息」。拿到这次真实决策后直接收尾,满足 ASKUSER 证据。
@@ -33,6 +35,9 @@ clarifications 文档尾部)——那是设计阶段方案讨论的领地,在这
 凡属**行为规格**的答案,落盘写成 EARS 句式:「WHEN <条件/触发> THE SYSTEM SHALL <可观测行为>」
 (一句一测,是后面规格条目 Scenario 和 UT 验收对照的原材料;写不成 WHEN/SHALL 的答案多半没问透,回炉再问)。
 收敛:题尽(含衍生题)/ 用户说"其余按推荐答案"(落盘标注未经确认)/ 超15题→告知规模由用户选(用户要继续就继续,不设硬上限)。
+题尽后先把当前完整树同步到 `.mae-flow-work/{单号}/grill.md`，再执行
+`python "{MAEFLOW_PATH}" role-task grill-critic --stage final --document ".mae-flow-work/{单号}/grill.md"`，
+把输出的唯一启动话术原样交给 grill-critic-agent。它指出的新缺口必须回到逐题质询；无缺口或新增题闭环后才收尾，禁止自动重跑 Critic。
 落盘:增量写 docs/clarifications-{单号}.md，并把完整问题树、用户答案、推荐依据、实现影响和未决项同步整理到
 `.mae-flow-work/{单号}/grill.md`。后者是本地 Spec 和 Story 的强制输入；已拍板答案禁止在下游重问。
 题目全部闭环后展示摘要，直接 git add docs/clarifications-{单号}.md &&

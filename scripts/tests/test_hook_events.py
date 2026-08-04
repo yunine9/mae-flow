@@ -170,7 +170,8 @@ class HookEventTests(unittest.TestCase):
             ("compile-agent", "COMPILE"),
             ("codecheck-fix-agent", "CODECHECK"),
             ("ut-generator-agent", "UT"),
-            ("grill-critic-agent", "GRILL"),
+            ("grill-critic-agent prep", "GRILL_PREP"),
+            ("grill-critic-agent final", "GRILL_FINAL"),
             ("ordinary-agent", ""),
         )
         for name, expected in cases:

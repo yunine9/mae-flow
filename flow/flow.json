@@ -301,6 +301,14 @@
         {
           "type": "agent_ran",
           "agent": "ASKUSER"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "GRILL_PREP"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "GRILL_FINAL"
         }
       ],
       "next": "open"

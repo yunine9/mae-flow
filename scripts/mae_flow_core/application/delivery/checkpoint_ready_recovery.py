@@ -8,6 +8,15 @@ def _failure(message):
         effects=(), stdout=(), stderr=(message,), exit_code=2)
 
 
+def activate_next_checkpoint(review, item, head):
+    """Carry the fixed base and activate lightweight Story checkpoints."""
+    if not item:
+        return
+    item["fixed_base"] = head
+    if review.get("version") == 3:
+        item["status"] = "coding"
+
+
 def ready_recovered_precommit(
         review, item, base, head, agent_tasks, ports):
     dirty = tuple(ports.dirty_paths())

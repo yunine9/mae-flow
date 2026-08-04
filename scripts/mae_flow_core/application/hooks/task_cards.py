@@ -38,17 +38,36 @@ def verify_completion_task(kind, report, state, ports):
     return accepted(task)
 
 
-def _dispatch_missing_message(kind, script_path):
-    if kind == "GRILL":
-        remedy = (
-            'python "%s" action status，并按输出执行 action critic 生成 GRILL 任务卡'
-            % script_path
-        )
+def _current_checkpoint(state):
+    review = state.get("development_review") or {}
+    items = review.get("checkpoints") or []
+    index = int(review.get("current_index", 0) or 0)
+    return str(items[index].get("id", "CP1")) if index < len(items) else "CP1"
+
+
+def _dispatch_missing_message(kind, script_path, state):
+    ticket = str((state.get("config") or {}).get("单号", "单号") or "单号")
+    checkpoint = _current_checkpoint(state)
+    commands = {
+        "STORY": "role-task story-generate",
+        "CP_IMPLEMENT": "role-task cp-implement --checkpoint " + checkpoint,
+        "GRILL_PREP": (
+            'role-task grill-critic --stage prep --document '
+            '".mae-flow-work/grill-prep-%s.md"' % ticket),
+        "GRILL_FINAL": (
+            'role-task grill-critic --stage final --document '
+            '".mae-flow-work/%s/grill.md"' % ticket),
+    }
+    if kind == "REVIEWER":
+        command = (
+            "role-task story-review"
+            if state.get("current") == "story"
+            else "role-task craft-code --checkpoint " + checkpoint)
+    elif kind == "GRILL":
+        command = "action status"
     else:
-        remedy = (
-            'python "%s" agent-task %s 生成并签发任务卡'
-            % (script_path, kind.lower())
-        )
+        command = commands.get(kind, "agent-task " + kind.lower())
+    remedy = 'python "%s" %s' % (script_path, command)
     return (
         "[mae-flow] 派发前拦截:%s 尚无本步任务卡。先执行 %s,再按其输出话术派发。"
         "现在拦下只损失一次调用;跑完整只 agent 才被契约打回,重做要上百轮白跑。"
@@ -56,21 +75,12 @@ def _dispatch_missing_message(kind, script_path):
     )
 
 
-def _dispatch_refresh_remedy(kind, script_path):
-    if kind == "GRILL":
-        return (
-            'python "%s" action status，并重新执行当前 action critic'
-            % script_path
-        )
-    return 'python "%s" agent-task %s' % (script_path, kind.lower())
-
-
 def verify_dispatch_task(kind, state, ports):
     """Require the current task card without fingerprint freshness gates."""
     task = _task_for(state, kind)
     script_path = ports.script_path()
     if not task:
-        return rejected(_dispatch_missing_message(kind, script_path))
+        return rejected(_dispatch_missing_message(kind, script_path, state))
     if task.get("step") != state.get("current"):
         return rejected(
             "[mae-flow] 派发前拦截:%s 任务卡属于旧步骤 %s，当前步骤为 %s。"
@@ -225,11 +235,29 @@ def _scope_rejection(kind, task, changed, ports, direct_write_paths):
     if kind == "UT":
         return _ut_scope_rejection(
             changed, ports, direct_write_paths)
-    if kind == "GRILL" and changed:
+    if kind.startswith("GRILL") and changed:
         return (
             "grill-critic-agent 是只读审查角色，却修改了文件: "
             + "、".join(changed[:5])
         )
+    if kind == "CP_IMPLEMENT":
+        allowed = {
+            str(path).replace("\\", "/").lower()
+            for path in task.get("task_files", [])
+        }
+        bad = [path for path in changed if path.lower() not in allowed]
+        if bad:
+            return (
+                "cp-implementer-agent 修改了任务卡范围外文件: "
+                + "、".join(bad[:5]))
+    if kind == "REVIEWER" and changed:
+        return (
+            "craft-reviewer-agent 是只读审查角色，却修改了文件: "
+            + "、".join(changed[:5]))
+    if kind == "STORY" and changed:
+        return (
+            "story-generator-agent 修改了业务源码: "
+            + "、".join(changed[:5]))
     return ""
 
 

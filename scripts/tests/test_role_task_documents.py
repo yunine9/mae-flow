@@ -62,7 +62,7 @@ class RoleTaskDocumentTests(unittest.TestCase):
     def test_each_role_has_scoped_inputs_and_output_contract(self):
         roles = (
             "test-design", "task-analysis", "craft-plan", "cp-implement",
-            "craft-code",
+            "craft-code", "story-generate", "story-review", "grill-critic",
         )
         for role in roles:
             with self.subTest(role=role):
@@ -71,6 +71,45 @@ class RoleTaskDocumentTests(unittest.TestCase):
                 self.assertNotIn("_RESULT:", body)
                 self.assertNotIn("TASK_CARD_SHA256", body)
                 self.assertNotIn("聊天记录", body)
+
+    def test_story_roles_receive_local_spec_grill_story_and_domain_context(self):
+        context = RoleTaskContext(
+            artifacts={},
+            context_paths=(
+                "/repo/.mae-flow-work/REQ-1/spec.md",
+                "/repo/.mae-flow-work/REQ-1/grill.md",
+                "/repo/.mae-flow-work/REQ-1/story.md",
+                "/repo/docs/specs/radio.md",
+                "/repo/.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md",
+            ),
+            write_output="/repo/.mae-flow-work/REQ-1/story.md",
+        )
+        generated = build_role_task_document(
+            role="story-generate", project_root="/repo", ticket="REQ-1",
+            checkpoint="", context=context).body()
+        reviewed = build_role_task_document(
+            role="story-review", project_root="/repo", ticket="REQ-1",
+            checkpoint="", context=context).body()
+        self.assertIn("唯一允许写入", generated)
+        self.assertIn("/repo/.mae-flow-work/REQ-1/story.md", generated)
+        self.assertIn("只读", reviewed)
+        self.assertIn("只执行一次", reviewed)
+
+    def test_grill_critic_is_read_only_and_stage_is_explicit(self):
+        body = build_role_task_document(
+            role="grill-critic", project_root="/repo", ticket="REQ-1",
+            checkpoint="prep",
+            context=RoleTaskContext(
+                artifacts={},
+                context_paths=(
+                    "/repo/.mae-flow-work/grill-prep-REQ-1.md",
+                    "/repo/.mae-flow-work/REQ-1/grill.md",
+                ),
+            ),
+        ).body()
+        self.assertIn("质询检查阶段: prep", body)
+        self.assertIn("只读", body)
+        self.assertIn("禁止修改任何文件", body)
 
     def test_implementer_receives_comment_standard_and_allowed_files(self):
         body = build("cp-implement")

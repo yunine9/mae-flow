@@ -65,6 +65,7 @@ class CapabilityMatch:
 
 
 _AGENT_CAPABILITIES = {
+    "compile-agent": "build",
     "ut-generator-agent": "ut",
     "codecheck-advisor-agent": "codecheck",
     "grill-critic-agent": "grill",
@@ -77,6 +78,7 @@ _PLUGIN_AGENT_CAPABILITIES.update({
     for identity, kind in _AGENT_CAPABILITIES.items()
 })
 _TRUSTED_BUILD_SKILLS = {"build-fix", "mae-flow:build-fix"}
+_TRUSTED_BUILD_AGENTS = {"compile-agent", "mae-flow:compile-agent"}
 DEFAULT_CAPABILITY_REGISTRY = (
     CapabilitySelector(
         "Task",
@@ -136,10 +138,15 @@ def match_capability(payload, registry):
                 and selector.tool_name == tool_name):
             matched = _selector_matches(selector, tool_input)
             if matched is not None:
-                if (matched.kind == "build"
-                        and (matched.tool_name != "Skill"
-                             or matched.identity not in _TRUSTED_BUILD_SKILLS)):
-                    continue
+                if matched.kind == "build":
+                    trusted_skill = (
+                        matched.tool_name == "Skill"
+                        and matched.identity in _TRUSTED_BUILD_SKILLS)
+                    trusted_agent = (
+                        matched.tool_name in {"Task", "Agent"}
+                        and matched.identity in _TRUSTED_BUILD_AGENTS)
+                    if not trusted_skill and not trusted_agent:
+                        continue
                 matches.append(matched)
     distinct = {
         (match.kind, match.identity)

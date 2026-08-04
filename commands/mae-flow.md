@@ -51,7 +51,7 @@ Full 固定展示 Startup、Spec、Story、CP、Delivery 五张短卡；Focused 
 ## 质量与交付
 
 - Full Design 先调 `story-generator-agent`，再调 `craft-reviewer-agent`（Design Reviewer 角色）；每个 Construction CP 调 `craft-reviewer-agent` 一次（CODE Reviewer 角色）。
-- Construction 使用带项目启动器前缀的完整 lightcheck 命令检查一次精确本次代码；无 exact scope 就 fail-open，不扫用户启动前现场。每个 CP 在 Reviewer 意见处置后同步调用一次开局确认的 Build 路由；不休眠等待、不轮询、不转后台、不自动重试。
+- Construction 使用带项目启动器前缀的完整 lightcheck 命令检查一次精确本次代码；活跃 Construction 无 exact scope 直接失败，不扫用户启动前现场。每个 CP 在 Reviewer 意见处置后同步启动一次 `compile-agent`，Task 传入精确 CP、开局确认的 Build 路由、Build 目录和本 CP 修改文件；主 Agent 直接调用 Skill/Bash 不算 Build 完成。不休眠等待、不轮询、不转后台、不自动重试。
 - 正式 CodeCheck 调 `codecheck-advisor-agent` 一次；UT 调 `ut-generator-agent`，由它完成 write/compile/run。Quality 复用最后一次仍覆盖最终源码的 CP Build，不机械重复编译。
 - 调用前先查看完整 current 命令输出的当前语义 slot 已有尝试；同一 slot 无用户重试决定就不再次调用，新的阶段/CP slot 首次调用正常执行。每次真实能力调用同步结束后立即使用带项目启动器前缀的完整 advance 命令记录一次；记录失败不触发能力重跑。
 - Delivery 前记录最终 Spec/Story/范围 ↔ 代码/覆盖自然语言结论；只有存在语义跨 CP 耦合时才追加一次集成 Reviewer。

@@ -10,6 +10,7 @@ from mae_flow_core.lightcheck import (
     analyze_changed_with_timeout,
     render_markdown,
 )
+from mae_flow_core.orchestration.models import Phase
 from mae_flow_core.state_store import atomic_write_text
 
 
@@ -189,4 +190,21 @@ def run_exact_lightcheck(files, quiet=False):
         result = _tool_error("轻量检查异常，已自动放行: " + str(exc))
     result["report_path"] = _save(result)
     _print(result, quiet)
+    return 0
+
+
+def run_cli_lightcheck(root, files, quiet, state_loader, die):
+    """Reject an empty active Construction scope; otherwise stay fail-open."""
+    if files:
+        return run_exact_lightcheck(files, quiet=quiet)
+    try:
+        state = state_loader(root)
+    except ValueError:
+        state = None
+    if state is not None and state.phase == Phase.CONSTRUCTION:
+        die(
+            "活跃编码阶段的 Lightcheck 必须提供精确范围："
+            "lightcheck --file <精确本次修改文件>"
+            " [--file <更多精确文件>]")
+    print("[mae-flow] 轻量编码预检未提供精确本次修改文件，已自动放行。")
     return 0

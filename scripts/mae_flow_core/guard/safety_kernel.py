@@ -7,7 +7,8 @@ from ..foundation import git_intent
 from ..foundation.commit_message import valid_business_commit_message
 from ..foundation.source_paths import repository_path_identity
 from ..orchestration.models import DeliveryPath, FlowState, Phase
-from ..orchestration.checkpoints import checkpoint_commit_pending
+from ..orchestration.checkpoints import (
+    checkpoint_commit_pending, checkpoint_edit_gap, source_edit_allowed)
 from .command_policy import (
     classify_command_mutation,
     dangerous_bash_result,
@@ -31,7 +32,6 @@ from .intent import (
 
 
 _ADOPTED_DIRTY = "delivery.adopted_dirty"
-_FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
 
 def _allow(rule=""):
     return SafetyDecision(True, rule=rule)
@@ -57,16 +57,6 @@ def _command(tool_input):
         value = tool_input.get("command", "")
         return value if isinstance(value, str) else ""
     return ""
-
-def _has_decision(state, key):
-    return any(existing == key for existing, unused in state.decisions)
-
-def _source_edit_allowed(state):
-    if state.path == DeliveryPath.FOCUSED:
-        return _has_decision(state, _FOCUSED_SCOPE_APPROVED)
-    if state.path != DeliveryPath.FULL:
-        return False
-    return state.phase == Phase.CONSTRUCTION
 
 def _relative_write_targets(context, tool, tool_input):
     targets = []
@@ -150,7 +140,10 @@ def _edit_decision(context, tool, tool_input, opaque_writer=False):
             "use the user-owned cp-revise decision before changing source."
             % pending_checkpoint,
         )
-    if controlled_targets and not _source_edit_allowed(context.state):
+    checkpoint_gap = checkpoint_edit_gap(context.state, controlled_targets)
+    if checkpoint_gap:
+        return _block("checkpoint_boundary", checkpoint_gap)
+    if controlled_targets and not source_edit_allowed(context.state):
         return _block(
             "source_edit",
             "Source edits require semantic authorization for this path and phase.",

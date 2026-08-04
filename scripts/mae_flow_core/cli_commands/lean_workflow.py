@@ -20,8 +20,6 @@ from mae_flow_core.orchestration import (
     ToolboxRequest,
     advance_flow,
     decode_flow_state,
-    flow_attempt_context,
-    retry_decision_key,
     run_toolbox_request,
 )
 from mae_flow_core.orchestration.documents import local_full_artifacts
@@ -38,7 +36,7 @@ from . import grill_receipts
 from .capability_closure import (
     close_capability_result, closure_already_recorded)
 from .lean_startup import build_startup_state, configure_startup
-from .lean_lightcheck import run_exact_lightcheck
+from .lean_lightcheck import run_cli_lightcheck
 from .user_events import (
     USER_OWNED_EVENTS as _USER_OWNED_EVENTS,
     bind_user_event as _bind_user_event,
@@ -49,7 +47,6 @@ from .user_events import (
 
 STATE_NAME = ".mae-flow.json"
 _TOOLBOX = {"ut", "codecheck", "grill", "story"}
-_RETRY_KINDS = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
 def _die(message):
     print("[mae-flow] " + message, file=sys.stderr)
     raise SystemExit(2)
@@ -251,6 +248,8 @@ def _moonlight_enabled(state):
 
 
 def _advance_state(root, state, request):
+    grill_receipts.require_configured_build_invocation(state, request)
+    state = grill_receipts.reconcile_phase_state(root, state, request)
     request = grill_receipts.prepare_phase_request(root, state, request)
     if request.kind.strip().lower().startswith("capability-"):
         result = advance_flow(state, request)
@@ -352,9 +351,7 @@ def _validate_natural_decision(state, key, text):
     retry_prefix = "capability.retry."
     if key.startswith(retry_prefix):
         kind = key[len(retry_prefix):]
-        if kind in _RETRY_KINDS:
-            return retry_decision_key(flow_attempt_context(state, kind))
-        raise ValueError("该 capability key 是流程保留事实，不能直接写入")
+        return grill_receipts.capability_retry_decision_key(state, kind)
     if key.startswith((
             "capability.", "moonlight.", "delivery.", "review.",
             "startup.", "spec.", "story.", "focused.", "construction.",
@@ -487,9 +484,6 @@ def cmd_lean_toolbox(unused_root, args):
     return _run(execute)
 
 
-def cmd_lean_lightcheck(unused_root, args):
+def cmd_lean_lightcheck(root, args):
     """Run one fail-open changed-code suggestion pass without state effects."""
-    if not args.file:
-        print("[mae-flow] 轻量编码预检未提供精确本次修改文件，已自动放行。")
-        return 0
-    return run_exact_lightcheck(args.file, quiet=args.quiet)
+    return run_cli_lightcheck(root, args.file, args.quiet, _load_state, _die)

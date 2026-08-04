@@ -70,6 +70,7 @@ class CapabilityRegistryTests(unittest.TestCase):
             ("Task", {"subagent_type": "ut-generator-agent"}, "ut"),
             ("Task", {"subagent_type": "codecheck-advisor-agent"},
              "codecheck"),
+            ("Task", {"subagent_type": "compile-agent"}, "build"),
             ("Agent", {"agent_type": "mae-flow:craft-reviewer-agent"},
              "reviewer"),
             ("Skill", {"skill": "build-fix"}, "build"),

@@ -12,13 +12,11 @@ import time
 from types import SimpleNamespace
 
 from ..application.hooks.lean_events import LeanHookPorts, handle_lean_hook_event
-from ..application.hooks.capability_observation import (
-    complete_git_posttool, reserve_git_pretool)
+from ..application.hooks.capability_observation import apply_capability_pretool, complete_git_posttool, reserve_git_pretool
 from ..application.hooks.models import HookResponse
 from ..guard.command_policy import recursive_delete_facts
 from ..guard.chain_safety import decide_chain_pretool
-from ..guard.safety_kernel import (
-    SafetyContext, decide_pretool, decide_stateless_pretool)
+from ..guard.safety_kernel import SafetyContext, decide_pretool, decide_stateless_pretool
 from ..orchestration import ChainState, FlowState, flow_retry_options, guidance as ui_guidance
 from ..state_store import (
     ProjectStateLock,
@@ -34,14 +32,10 @@ from .lean_exit import (
     explicit_exit,
     release_flow_state,
 )
-
-
 SUMMARY_BUDGET = 1200
 
 
-def _empty_paths(_payload):
-    return ()
-
+def _empty_paths(_payload): return ()
 
 @dataclass(frozen=True)
 class LeanHookFactPorts:
@@ -358,6 +352,10 @@ class LeanHookAdapter:
             tool_input = dict(tool_input)
             tool_input["recursive_delete_targets"] = delete_targets
         task_temp = self._fact_text(self.facts.task_owned_temp_dir, payload)
+        state, capability_gate = apply_capability_pretool(
+            state, payload, self.root, self._update_state)
+        if capability_gate is not None:
+            return capability_gate
         if isinstance(state, ChainState):
             decision = decide_chain_pretool(
                 self.root, state, tool, tool_input)

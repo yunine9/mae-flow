@@ -1,11 +1,13 @@
 """Bind Full Spec Grill semantics to exact local artifact bytes."""
 
+from dataclasses import replace
 import hashlib
 import json
 import os
 
 from mae_flow_core.orchestration.documents import DocumentPaths
-from mae_flow_core.orchestration.capabilities import flow_attempt_context
+from mae_flow_core.orchestration.capabilities import (
+    flow_attempt_context, retry_decision_key)
 from mae_flow_core.orchestration.grill_session import grill_status
 from mae_flow_core.orchestration.models import Phase
 from mae_flow_core.orchestration.transitions import AdvanceRequest
@@ -156,6 +158,71 @@ def _has_current_story_attempt(state):
         and attempt.environment_revision == context.environment_revision
         for attempt in state.capabilities
     )
+
+
+def _current_attempt(state, kind):
+    context = flow_attempt_context(state, kind)
+    return next((
+        attempt for attempt in reversed(state.capabilities)
+        if attempt.kind == context.kind.value
+        and attempt.source_revision == context.source_revision
+        and attempt.environment_revision == context.environment_revision
+    ), None)
+
+
+def reconcile_phase_state(root, state, request):
+    """Repair lean pre-atomic review state without rerunning the Reviewer."""
+    kind = request.kind.strip().lower()
+    if kind != "story-confirmed" or state.phase != Phase.STORY:
+        return state
+    if any(
+            key in {"review.design", "review.design.attempted"}
+            for key, unused in state.decisions):
+        return state
+    attempt = _current_attempt(state, "reviewer")
+    if attempt is None:
+        return state
+    review_key = (
+        "review.design"
+        if attempt.outcome == "returned" else "review.design.attempted")
+    receipt = _compact({
+        "legacy_reconciled": True,
+        "story_sha256": _file_sha256(
+            _artifact_path(root, state, "story"), "story.md"),
+        "summary": attempt.summary,
+    })
+    return replace(
+        state, decisions=state.decisions + ((review_key, receipt),))
+
+
+def require_configured_build_invocation(state, request):
+    if (request.kind.strip().lower() != "cp-ready"
+            or state.phase != Phase.CONSTRUCTION):
+        return
+    method = state.startup_config.build_method.strip()
+    if not method:
+        return
+    checkpoint = state.current_cp or "CP1"
+    invoked_key = "construction.cp.%s.build-invoked" % checkpoint
+    if any(key == invoked_key for key, unused in state.decisions):
+        return
+    raise ValueError(
+        "当前 CP 尚未实际启动 compile-agent 执行 Build 路由 %s；"
+        "先完成子 Agent 调用，再登记 Build 事实并执行 cp-ready" % method)
+
+
+def capability_retry_decision_key(state, kind):
+    retry_kinds = {"build", "ut", "codecheck", "reviewer", "grill", "story"}
+    if kind not in retry_kinds:
+        raise ValueError("该 capability key 是流程保留事实，不能直接写入")
+    context = flow_attempt_context(state, kind)
+    attempt = _current_attempt(state, kind)
+    if kind in {"reviewer", "grill"} and attempt is not None:
+        label = "Reviewer" if kind == "reviewer" else "Grill Critic"
+        raise ValueError(
+            "%s 为单次检视，当前槽位已尝试；"
+            "不得申请重试，直接进入当前阶段的用户确认" % label)
+    return retry_decision_key(context)
 
 
 def prepare_phase_request(root, state, request):

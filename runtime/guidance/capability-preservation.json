@@ -604,9 +604,12 @@
     {
       "source": "role:compile-agent",
       "capability": "compile agent",
-      "new_home": "runtime/guidance/construction.md configured opaque Build route per CP",
-      "semantic_tests": [],
-      "status": "migration-only"
+      "new_home": "agents/compile-agent.md and runtime/guidance/construction.md",
+      "semantic_tests": [
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_production_skill_uses_lean_phases_and_once_only_capabilities",
+        "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_phase_guidance_names_every_required_agent_and_skill"
+      ],
+      "status": "preserved"
     },
     {
       "source": "role:codecheck-fix-agent",

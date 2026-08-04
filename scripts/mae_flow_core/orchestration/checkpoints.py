@@ -26,6 +26,7 @@ from .transition_support import cp_build_attempt
 
 _PREFIX = "construction.cp."
 _FACTS = {"brief", "result", "review", "ut-intent"}
+_FOCUSED_SCOPE_APPROVED = "focused.scope_approved"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,31 @@ class CheckpointFacts:
     result: str = ""
     review: str = ""
     ut_intent: str = ""
+
+
+def source_edit_allowed(state):
+    if state.path == DeliveryPath.FOCUSED:
+        return any(
+            key == _FOCUSED_SCOPE_APPROVED for key, unused in state.decisions)
+    return state.path == DeliveryPath.FULL and state.phase == Phase.CONSTRUCTION
+
+
+def checkpoint_edit_gap(state, has_controlled_targets):
+    if (not has_controlled_targets or state.path != DeliveryPath.FULL
+            or state.phase != Phase.CONSTRUCTION):
+        return ""
+    checkpoint = state.current_cp or "CP1"
+    if cp_build_attempt(state, checkpoint) is None:
+        return ""
+    try:
+        if flow_retry_options(state, "build").allowed:
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return (
+        "当前 %s 已记录 Build，必须先执行 cp-ready 并由用户检视；"
+        "用户确认后使用 cp-opened 打开下一 CP，要求修改则使用 cp-revise。"
+        % checkpoint)
 
 
 def _key(checkpoint, fact):

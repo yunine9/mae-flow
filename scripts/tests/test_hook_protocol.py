@@ -65,7 +65,7 @@ class HookProtocolTests(unittest.TestCase):
         self.assertEqual(
             {
                 "Edit", "Write", "MultiEdit", "Bash", "WriteStdin",
-                "AskUserQuestion", "Task",
+                "AskUserQuestion", "Task", "Skill",
             },
             pretool,
         )

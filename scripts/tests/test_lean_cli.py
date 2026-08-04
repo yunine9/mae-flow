@@ -316,6 +316,30 @@ class LeanCliTests(unittest.TestCase):
 
     def run_capability(self, kind, outcome="returned"):
         self.capability_invocations += 1
+        if kind == "build":
+            state = self.state()
+            method = state["startup_config"].get("build_method", "")
+            if method:
+                checkpoint = state.get("current_cp") or "CP1"
+                payload = {
+                    "tool_name": "Task",
+                    "tool_use_id": "test-build-%d" %
+                    self.capability_invocations,
+                    "tool_input": {
+                        "subagent_type": "mae-flow:compile-agent",
+                        "prompt": (
+                            "Mode: Lean CP Build\n"
+                            "CP (exact): %s\n"
+                            "Build method (exact): %s\n"
+                            "Build directory (exact): %s\n"
+                            "Changed production files (exact):\n"
+                            "- src/test.cpp\n"
+                        ) % (checkpoint, method, self.root),
+                    },
+                }
+                invoked = LeanHookAdapter(self.root).handle(
+                    "PreToolUse", payload)
+                self.assertEqual(0, invoked.exit_code, invoked.stderr)
         return self.run_cli_raw(
             "advance", "capability-" + outcome,
             "--key", kind,
@@ -1116,6 +1140,66 @@ class LeanCliTests(unittest.TestCase):
              if item["kind"] == "reviewer"],
         )
 
+    def test_design_reviewer_cannot_request_a_same_slot_retry(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-NO-REVIEW-RETRY", "--path", "full",
+            "--pace", "continuous"))
+        state = self.state()
+        state["phase"] = "story"
+        state["capabilities"] = [{
+            "kind": "reviewer",
+            "source_revision": "reviewer:design",
+            "environment_revision": "lean-workflow-v1",
+            "outcome": "returned",
+            "summary": "设计检视已完成",
+        }]
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        rejected = self.run_cli(
+            "decision", "capability.retry.reviewer",
+            "用户要求直接进入编码。")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("Reviewer 为单次检视", rejected.stderr)
+        self.assertFalse(any(
+            item["key"].startswith("capability.retry.reviewer.")
+            for item in self.state()["decisions"]))
+
+    def test_legacy_design_attempt_can_use_one_story_confirmation(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-LEGACY-REVIEW", "--path", "full",
+            "--pace", "continuous"))
+        state = self.state()
+        state["phase"] = "story"
+        state["capabilities"] = [{
+            "kind": "reviewer",
+            "source_revision": "reviewer:design",
+            "environment_revision": "lean-workflow-v1",
+            "outcome": "returned",
+            "summary": "旧会话已完成设计检视",
+        }]
+        story_path = next(
+            os.path.join(self.root, *item["path"].split("/"))
+            for item in state["artifacts"] if item["kind"] == "story")
+        os.makedirs(os.path.dirname(story_path), exist_ok=True)
+        with open(story_path, "w", encoding="utf-8") as stream:
+            stream.write("# Story\n\n用户已检视的最终设计。\n")
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        confirmed = self.run_cli(
+            "decision", "story-confirmed", "开始编码。")
+
+        self.assert_success(confirmed)
+        final = self.state()
+        self.assertEqual("construction", final["phase"])
+        self.assertTrue(any(
+            item["key"] == "review.design"
+            for item in final["decisions"]))
+
     def test_nonreturned_capability_is_visible_as_risk_until_a_returned_retry(self):
         self.assert_success(self.run_cli(
             "start", "--ticket", "REQ-CAP-RISK", "--path", "focused",
@@ -1165,13 +1249,11 @@ class LeanCliTests(unittest.TestCase):
             "decision", "grill-failed", "Grill 本轮超时，不自动重试。"))
         self.assertEqual([], self.state()["risks"])
 
-        self.assert_success(self.run_cli(
-            "decision", "capability.retry.grill",
-            "用户确认环境恢复，授权 Grill 再尝试一次。"))
-        self.assert_success(self.run_capability("grill"))
-        self.assert_success(self.run_cli_raw("advance", "grill-clear"))
-
-        self.assertEqual([], self.state()["risks"])
+        current = self.run_cli_raw("current")
+        self.assert_success(current)
+        self.assertNotIn(
+            "advance capability-returned --key grill", current.stdout)
+        self.assertIn("禁止重复调用", current.stdout)
         state = self.state()
         state["phase"] = "quality"
         with open(os.path.join(self.root, ".mae-flow.json"),
@@ -1455,6 +1537,58 @@ class LeanCliTests(unittest.TestCase):
         self.assert_success(result)
         self.assertIn("未提供精确本次修改文件", result.stdout)
         self.assertEqual(before, self.state())
+
+    def test_active_construction_lightcheck_requires_exact_files(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-LIGHT-ACTIVE", "--path", "focused",
+            "--pace", "continuous"))
+        self.assert_success(self.run_cli(
+            "decision", "startup-confirmed", "进入编码实现。"))
+
+        result = self.run_cli_raw("lightcheck")
+
+        self.assertEqual(2, result.returncode)
+        self.assertIn("--file <精确本次修改文件>", result.stderr)
+
+    def test_cp_ready_requires_the_configured_build_to_be_invoked(self):
+        self.assert_success(self.run_cli(
+            "start", "--ticket", "REQ-BUILD-PROOF", "--path", "full",
+            "--pace", "continuous", "--build-method", "build-fix"))
+        state = self.state()
+        state["phase"] = "construction"
+        state["current_cp"] = "CP1"
+        state["capabilities"] = [{
+            "kind": "build",
+            "source_revision": "build:construction:CP1",
+            "environment_revision": "lean-workflow-v1",
+            "outcome": "returned",
+            "summary": "Agent 只登记了事实",
+        }]
+        with open(os.path.join(self.root, ".mae-flow.json"),
+                  "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=False)
+
+        rejected = self.run_cli_raw("advance", "cp-ready", "--key", "CP1")
+        invoked = LeanHookAdapter(self.root).handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_use_id": "build-proof-1",
+            "tool_input": {
+                "subagent_type": "mae-flow:compile-agent",
+                "prompt": (
+                    "Mode: Lean CP Build\n"
+                    "CP (exact): CP1\n"
+                    "Build method (exact): build-fix\n"
+                    "Build directory (exact): %s\n"
+                    "Changed production files (exact):\n- src/test.cpp\n"
+                ) % self.root,
+            },
+        })
+        accepted = self.run_cli_raw("advance", "cp-ready", "--key", "CP1")
+
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("实际启动 compile-agent", rejected.stderr)
+        self.assertEqual(0, invoked.exit_code, invoked.stderr)
+        self.assert_success(accepted)
 
     def test_new_start_rotates_old_exit_pointer_without_overwrite(self):
         self.assert_success(self.run_cli(

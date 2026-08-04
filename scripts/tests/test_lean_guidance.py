@@ -23,7 +23,10 @@ from mae_flow_core.orchestration.models import (  # noqa: E402
     Phase,
     StartupConfig,
 )
-from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
+from mae_flow_core.orchestration.guidance import (  # noqa: E402
+    render_capability_facts,
+    render_guidance,
+)
 from mae_flow_core import state_store  # noqa: E402
 import lean_harness  # noqa: E402
 
@@ -200,6 +203,10 @@ class LeanGuidanceTests(unittest.TestCase):
             "advance capability-returned --key reviewer", text)
         self.assertIn("设计检视：当前语义位置已记录一次，禁止重复调用", text)
 
+        facts = render_capability_facts(state)
+        self.assertIn("reviewer: 单次检视已完成，禁止重试", facts)
+        self.assertNotIn("reviewer: 再次调用前需要用户决定", facts)
+
     def test_quality_reviewer_command_only_appears_for_integration_risk(self):
         ordinary = render_guidance(state_for(Phase.QUALITY))
         required = render_guidance(replace(
@@ -214,11 +221,17 @@ class LeanGuidanceTests(unittest.TestCase):
         self.assertIn("--key reviewer", required)
 
     def test_construction_plans_testability_without_running_formal_ut(self):
-        construction = render_guidance(state_for(Phase.CONSTRUCTION))
+        construction = render_guidance(replace(
+            state_for(Phase.CONSTRUCTION),
+            startup_config=StartupConfig(build_method="build-fix"),
+        ))
         self.assertIn("可测性边界", construction)
         self.assertIn("累计 UT 交接", construction)
         self.assertIn("不正式编写或运行 UT", construction)
         self.assertIn("已配置的 `build-fix`", construction)
+        self.assertIn(
+            "先启动 compile-agent，并传入启动时确认的 Build 路由: build-fix",
+            construction)
         self.assertNotIn("tests leading each behavior change", construction)
 
     def test_focused_recovery_from_full_only_phases_never_demands_full_reviews(self):

@@ -162,6 +162,165 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(2, commit.exit_code)
         self.assertIn("Git commit", commit.stderr)
 
+    def test_duplicate_design_reviewer_is_blocked_before_task_launch(self):
+        state = FlowState(
+            ticket="REQ-REVIEW-ONCE",
+            path=DeliveryPath.FULL,
+            phase=Phase.STORY,
+            commit_pace=CommitPace.CONTINUOUS,
+            capabilities=(CapabilityAttempt(
+                "reviewer", "reviewer:design", "lean-workflow-v1",
+                "returned", "设计检视已完成"),),
+        )
+        self.write_state(state)
+
+        response = LeanHookAdapter(self.root).handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "mae-flow:craft-reviewer-agent",
+                "description": "Third review digest bind",
+                "prompt": "再次检查同一份 Story。",
+            },
+        })
+
+        self.assertEqual(2, response.exit_code)
+        self.assertIn("Design Reviewer", response.stderr)
+        self.assertIn("story-confirmed", response.stderr)
+        self.assertNotIn("授权重试", response.stderr)
+
+    def test_code_reviewer_requires_exact_spec_story_and_changed_scope(self):
+        state = FlowState(
+            ticket="REQ-REVIEW-INPUT",
+            path=DeliveryPath.FULL,
+            phase=Phase.CONSTRUCTION,
+            commit_pace=CommitPace.CONTINUOUS,
+            current_cp="CP1",
+            artifacts=(
+                ("spec", ".mae-flow-work/REQ-REVIEW-INPUT/spec.md"),
+                ("story", ".mae-flow-work/REQ-REVIEW-INPUT/story.md"),
+            ),
+        )
+        self.write_state(state)
+        adapter = LeanHookAdapter(self.root)
+        missing = adapter.handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "mae-flow:craft-reviewer-agent",
+                "description": "Review CP1",
+                "prompt": "结合 Spec 和 Story 检视当前修改。",
+            },
+        })
+        valid = adapter.handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_input": {
+                "subagent_type": "mae-flow:craft-reviewer-agent",
+                "description": "Review CP1",
+                "prompt": (
+                    "Mode: CODE Reviewer\n"
+                    "Spec path (exact): "
+                    ".mae-flow-work/REQ-REVIEW-INPUT/spec.md\n"
+                    "Story path (exact): "
+                    ".mae-flow-work/REQ-REVIEW-INPUT/story.md\n"
+                    "Changed production files (exact):\n- src/nr/sul.cpp\n"
+                ),
+            },
+        })
+
+        self.assertEqual(2, missing.exit_code)
+        self.assertIn(
+            ".mae-flow-work/REQ-REVIEW-INPUT/spec.md", missing.stderr)
+        self.assertIn(
+            ".mae-flow-work/REQ-REVIEW-INPUT/story.md", missing.stderr)
+        self.assertIn("Changed production files (exact)", missing.stderr)
+        self.assertEqual(0, valid.exit_code, valid.stderr)
+
+    def test_configured_build_requires_compile_agent_invocation_receipt(self):
+        state = FlowState(
+            ticket="REQ-BUILD-PROOF",
+            path=DeliveryPath.FULL,
+            phase=Phase.CONSTRUCTION,
+            commit_pace=CommitPace.CONTINUOUS,
+            current_cp="CP1",
+            startup_config=StartupConfig(build_method="build-fix"),
+        )
+        self.write_state(state)
+
+        adapter = LeanHookAdapter(self.root)
+        direct = adapter.handle("PreToolUse", {
+            "tool_name": "Skill",
+            "tool_use_id": "build-tool-1",
+            "tool_input": {"skill": "mae-flow:build-fix"},
+        })
+        missing = adapter.handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_use_id": "build-tool-2",
+            "tool_input": {
+                "subagent_type": "mae-flow:compile-agent",
+                "prompt": "请编译 CP1。",
+            },
+        })
+        response = adapter.handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_use_id": "build-tool-3",
+            "tool_input": {
+                "subagent_type": "mae-flow:compile-agent",
+                "prompt": (
+                    "Mode: Lean CP Build\n"
+                    "CP (exact): CP1\n"
+                    "Build method (exact): build-fix\n"
+                    "Build directory (exact): D:\\dev\\repo\n"
+                    "Changed production files (exact):\n- src/nr/sul.cpp\n"
+                ),
+            },
+        })
+
+        self.assertEqual(0, direct.exit_code, direct.stderr)
+        self.assertEqual(2, missing.exit_code)
+        self.assertIn("Build method (exact)", missing.stderr)
+        self.assertIn("Build directory (exact)", missing.stderr)
+        self.assertIn("Changed production files (exact)", missing.stderr)
+        self.assertEqual(0, response.exit_code, response.stderr)
+        with open(self.state_path, encoding="utf-8") as stream:
+            decisions = json.load(stream)["decisions"]
+        self.assertIn({
+            "key": "construction.cp.CP1.build-invoked",
+            "value": "build-fix",
+        }, decisions)
+
+    def test_compile_agent_accepts_an_exact_configured_command(self):
+        state = FlowState(
+            ticket="REQ-BUILD-COMMAND",
+            path=DeliveryPath.FULL,
+            phase=Phase.CONSTRUCTION,
+            commit_pace=CommitPace.CONTINUOUS,
+            current_cp="CP2",
+            startup_config=StartupConfig(build_method="mvn compile -q"),
+        )
+        self.write_state(state)
+
+        response = LeanHookAdapter(self.root).handle("PreToolUse", {
+            "tool_name": "Task",
+            "tool_use_id": "build-tool-2",
+            "tool_input": {
+                "subagent_type": "mae-flow:compile-agent",
+                "prompt": (
+                    "Mode: Lean CP Build\n"
+                    "CP (exact): CP2\n"
+                    "Build method (exact): mvn compile -q\n"
+                    "Build directory (exact): D:\\dev\\repo\n"
+                    "Changed production files (exact):\n- pom.xml\n"
+                ),
+            },
+        })
+
+        self.assertEqual(0, response.exit_code, response.stderr)
+        with open(self.state_path, encoding="utf-8") as stream:
+            decisions = json.load(stream)["decisions"]
+        self.assertIn({
+            "key": "construction.cp.CP2.build-invoked",
+            "value": "mvn compile -q",
+        }, decisions)
+
     def receipt_state(self):
         state = FlowState(
             ticket="REQ-5",

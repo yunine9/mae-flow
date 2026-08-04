@@ -246,12 +246,12 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
                 "delivery", "full", "focused", "moonlight", "lightcheck",
                 "grill-critic-agent", "story-generator-agent",
                 "craft-reviewer-agent", "codecheck-advisor-agent",
-                "build-fix", "ut-generator-agent", "exact files",
+                "compile-agent", "build-fix", "ut-generator-agent", "exact files",
                 "one final push"):
             self.assertIn(concept, combined)
         for forbidden in (
                 "done --", "agent-task", "task_card", "task card",
-                "message-id", "exact ack", "sleep", "poll", "compile-agent",
+                "message-id", "exact ack", "sleep", "poll",
                 "codecheck-fix-agent"):
             self.assertNotIn(forbidden, combined)
 
@@ -278,6 +278,7 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("`story-generator-agent`", phases["story"])
         self.assertIn("`craft-reviewer-agent`", phases["story"])
         self.assertIn("`craft-reviewer-agent`", phases["construction"])
+        self.assertIn("`compile-agent`", phases["construction"])
         for capability in (
                 "`codecheck-advisor-agent`", "`ut-generator-agent`"):
             self.assertIn(capability, phases["quality"])

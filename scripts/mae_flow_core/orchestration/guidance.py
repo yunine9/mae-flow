@@ -125,6 +125,18 @@ def render_capability_commands(state):
     if not capabilities:
         return ""
     lines = ["能力事实记录命令（真实调用结束后只执行匹配结果的一条）:"]
+    if state.phase == Phase.CONSTRUCTION:
+        method = state.startup_config.build_method.strip()
+        if method:
+            lines.extend((
+                "Build 子 Agent 实际调用要求:",
+                "先启动 compile-agent，并传入启动时确认的 Build 路由: "
+                + method,
+                "Task 必须包含精确 CP、Build 目录和本 CP 修改文件；"
+                "子 Agent 返回后才执行下方 build 事实命令。",
+            ))
+        else:
+            lines.append("Build 路由未配置，不能声称本 CP 已完成构建。")
     for label, kind in capabilities:
         context = flow_attempt_context(state, kind)
         attempted = any(
@@ -133,7 +145,8 @@ def render_capability_commands(state):
             and attempt.environment_revision == context.environment_revision
             for attempt in state.capabilities)
         option = flow_retry_options(state, kind)
-        if attempted and not option.allowed:
+        if attempted and (
+                kind in {"reviewer", "grill"} or not option.allowed):
             lines.append(
                 "%s：当前语义位置已记录一次，禁止重复调用。" % label)
             continue
@@ -310,7 +323,10 @@ def render_capability_facts(state):
                 and item.source_revision == context.source_revision
                 and item.environment_revision == context.environment_revision
                 for item in state.capabilities)
-            if option.allowed and current_attempted:
+            if (attempt.kind in {"reviewer", "grill"}
+                    and current_attempted):
+                label = "单次检视已完成，禁止重试"
+            elif option.allowed and current_attempted:
                 label = "已授权一次重试（尚未消费）"
             elif option.allowed:
                 label = "当前新语义 slot 尚未调用；仅按阶段计划调用"

@@ -185,7 +185,7 @@ class LeanCapabilityTests(unittest.TestCase):
 
     def test_production_registry_uses_thin_capabilities_not_legacy_fixers(self):
         cases = (
-            ("compile-agent", None),
+            ("compile-agent", "build"),
             ("codecheck-fix-agent", None),
             ("codecheck-advisor-agent", "codecheck"),
             ("ut-generator-agent", "ut"),

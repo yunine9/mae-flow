@@ -4,12 +4,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import re
 
 from mae_flow_core.application.hooks.models import HookResponse
 from mae_flow_core.foundation.git_intent import git_delivery_intents
 from mae_flow_core.guard.manifest import git_receipt_reservation
-from mae_flow_core.orchestration.capabilities import SUMMARY_LIMIT
-from mae_flow_core.orchestration.capability_registry import match_capability
+from mae_flow_core.orchestration.capabilities import SUMMARY_LIMIT, flow_attempt_context
+from mae_flow_core.orchestration.capability_registry import load_capability_registry, match_capability
+from mae_flow_core.orchestration.models import FlowState, Phase
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,138 @@ def observe_capability(payload, registry):
     """Build an exact observation from a registered real host identity."""
     matched = _matched_result(payload, registry)
     return matched if matched is not None else CapabilityObservationResult()
+
+
+def _same_slot_attempted(state, kind):
+    context = flow_attempt_context(state, kind)
+    return any(
+        item.kind == context.kind.value
+        and item.source_revision == context.source_revision
+        and item.environment_revision == context.environment_revision
+        for item in state.capabilities)
+
+
+def _one_shot_launch_gap(state, payload, registry):
+    matched = match_capability(payload, registry)
+    if (matched is None or matched.kind not in {"reviewer", "grill"}
+            or not _same_slot_attempted(state, matched.kind)):
+        return ""
+    if matched.kind == "grill":
+        return (
+            "Grill Critic 在当前 Spec 槽位已执行一次，禁止重复调用；"
+            "直接展示最终 Spec 并使用 spec-confirmed 完成用户确认。")
+    if state.phase == Phase.STORY:
+        return (
+            "Design Reviewer 在当前 Story 槽位已执行一次，禁止重复调用；"
+            "不得请求 Reviewer 重试，直接展示最终 Story 并使用 "
+            "story-confirmed 进入编码实现。")
+    if state.phase == Phase.CONSTRUCTION:
+        return (
+            "CODE Reviewer 在当前 CP 槽位已执行一次，禁止重复调用；"
+            "继续本 CP Build，并通过 cp-ready 展示用户检视卡。")
+    return (
+        "集成 Reviewer 在当前质量槽位已执行一次，禁止重复调用；"
+        "继续最终质量收口。")
+
+
+def _reviewer_prompt(payload):
+    tool_input = payload.get("tool_input", {})
+    if not isinstance(tool_input, Mapping):
+        return ""
+    return "\n".join(
+        str(tool_input.get(key, "") or "")
+        for key in ("description", "prompt"))
+
+
+def _scope_present(prompt):
+    return re.search(
+        r"(?:Changed production files \(exact\)|本 CP 精确修改文件)"
+        r"[ \t]*:[ \t]*(?:\S[^\r\n]*|\r?\n[ \t]*-[ \t]*\S[^\r\n]*)",
+        prompt, re.IGNORECASE) is not None
+
+
+def _exact_field_present(prompt, label, value=""):
+    prefix = label + ":"
+    return ((prefix + " " + value) in prompt if value
+            else re.search(
+                re.escape(prefix) + r"[ \t]+\S[^\r\n]*", prompt) is not None)
+
+
+def _reviewer_input_gap(state, payload, registry):
+    matched = match_capability(payload, registry)
+    if state.path.value != "full" or matched is None or matched.kind != "reviewer":
+        return ""
+    prompt = _reviewer_prompt(payload)
+    artifacts = dict(state.artifacts)
+    missing = any(
+        not artifacts.get(kind) or artifacts[kind] not in prompt
+        for kind in ("spec", "story"))
+    needs_scope = state.phase in {Phase.CONSTRUCTION, Phase.QUALITY}
+    if not missing and (not needs_scope or _scope_present(prompt)):
+        return ""
+    lines = ["Reviewer Task 必须显式携带精确输入路径："]
+    for kind, label in (("spec", "Spec"), ("story", "Story")):
+        if artifacts.get(kind):
+            lines.append("%s path (exact): %s" % (label, artifacts[kind]))
+    if needs_scope:
+        lines.append("Changed production files (exact):\n- <本 CP 精确文件>")
+    return "\n".join(lines)
+
+
+def _build_input_gap(state, payload, registry):
+    matched = match_capability(payload, registry)
+    if (matched is None or matched.kind != "build"
+            or matched.tool_name not in {"Task", "Agent"}):
+        return ""
+    method = state.startup_config.build_method.strip()
+    checkpoint = state.current_cp or "CP1"
+    prompt = _reviewer_prompt(payload)
+    fields_ok = (
+        method
+        and _exact_field_present(prompt, "CP (exact)", checkpoint)
+        and _exact_field_present(prompt, "Build method (exact)", method)
+        and _exact_field_present(prompt, "Build directory (exact)")
+        and _scope_present(prompt))
+    if fields_ok:
+        return ""
+    return (
+        "compile-agent Task 必须显式携带本 CP 精确构建输入：\n"
+        "CP (exact): %s\n"
+        "Build method (exact): %s\n"
+        "Build directory (exact): <精确构建目录>\n"
+        "Changed production files (exact):\n- <本 CP 精确文件>"
+        % (checkpoint, method or "<启动配置尚未确认>"))
+
+
+def _record_build_invocation(state, payload, registry):
+    method = state.startup_config.build_method.strip()
+    matched = match_capability(payload, registry)
+    if (state.phase != Phase.CONSTRUCTION or not method or matched is None
+            or matched.kind != "build"
+            or matched.tool_name not in {"Task", "Agent"}):
+        return state
+    checkpoint = state.current_cp or "CP1"
+    key = "construction.cp.%s.build-invoked" % checkpoint
+    decisions = tuple(item for item in state.decisions if item[0] != key)
+    return replace(state, decisions=decisions + ((key, method),))
+
+
+def apply_capability_pretool(state, payload, root, update_state):
+    """Persist real Build invocation and reject invalid capability launches."""
+    if not isinstance(state, FlowState):
+        return state, None
+    registry = load_capability_registry(root)
+    gap = (_one_shot_launch_gap(state, payload, registry)
+           or _reviewer_input_gap(state, payload, registry)
+           or _build_input_gap(state, payload, registry))
+    if gap:
+        return state, HookResponse(
+            exit_code=2, stderr="[mae-flow] %s\n" % gap)
+    recorded = _record_build_invocation(state, payload, registry)
+    if recorded != state:
+        state = update_state(lambda current: _record_build_invocation(
+            current, payload, registry))
+    return state, None
 
 
 def _observation_payload(observation):

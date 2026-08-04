@@ -22,12 +22,14 @@ from mae_flow_core.guard.safety_kernel import (  # noqa: E402
     decide_stateless_pretool,
 )
 from mae_flow_core.orchestration import (  # noqa: E402
+    AdvanceRequest,
     CapabilityAttempt,
     CommitPace,
     DeliveryPath,
     FlowState,
     Phase,
     StartupConfig,
+    advance_flow,
 )
 from mae_flow_core.orchestration.delivery import (  # noqa: E402
     DELIVERY_RECEIPT_KEY,
@@ -265,6 +267,30 @@ class SourceEditAuthorizationTests(unittest.TestCase):
         self.assertEqual(
             (False, "source_edit"), (decision.allow, decision.rule))
         self.assertIn("CP1", decision.message)
+
+    def test_full_checkpoint_build_freezes_source_until_review_or_revision(self):
+        built = replace(
+            _state(commit_pace=CommitPace.CONTINUOUS),
+            current_cp="CP1",
+            capabilities=(CapabilityAttempt(
+                "build", "build:construction:CP1", "lean-workflow-v1",
+                "returned", "本批构建已返回"),),
+        )
+
+        blocked = self.decision(built, "src/main.py")
+        revised = advance_flow(built, AdvanceRequest(
+            "cp-revise", decision_value="用户要求修改 CP1。"))
+        reopened = self.decision(revised.state, "src/main.py")
+        next_cp = self.decision(
+            replace(built, current_cp="CP2"), "src/main.py")
+
+        self.assertEqual(
+            (False, "checkpoint_boundary"),
+            (blocked.allow, blocked.rule),
+        )
+        self.assertIn("cp-ready", blocked.message)
+        self.assertTrue(reopened.allow, reopened.message)
+        self.assertTrue(next_cp.allow, next_cp.message)
 
     def test_non_bash_command_text_is_never_treated_as_shell_execution(self):
         decision = decide_pretool(

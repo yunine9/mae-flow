@@ -1,9 +1,21 @@
 质量链已经结束，但在不可逆规格定稿或最终 push 前，必须核对“用户最后检视过的
 代码版本”是否仍等于当前最终代码。
 
-执行：
+先执行最终增量检视：
 
 `python "{MAEFLOW_PATH}" checkpoint final`
+
+检视通过后生成可读的精确交付清单（每个文件分别使用 `--file`；启动流程前已经
+存在的修改还要逐文件附带 `--adopt-dirty "路径=用户决定"`）：
+
+`python "{MAEFLOW_PATH}" manifest set --file "<文件>" --message "<提交说明>" --target "<目标分支>"`
+
+把清单展示给用户。收到用户回答后先执行 `messages` 取得消息 ID，再执行：
+
+`python "{MAEFLOW_PATH}" manifest confirm --message-id "<消息ID>"`
+
+相同清单不会重复要求确认；文件、提交说明或目标分支发生变化时，才需要重新确认。
+确认后只可 `git add --` 清单内的精确文件，禁止用目录、glob 或全量暂存。
 
 - 没有源码、测试或构建配置增量：命令会说明无需重复检视，直接 done；
 - 最终仍有未提交增量：先冻结 Local Changes，让用户在 IDE 检视；确认后只允许精确提交该

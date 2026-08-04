@@ -58,6 +58,7 @@ def _dispatch_global_command(flow, state, runtime, args):
         "lightcheck": api.cmd_lightcheck,
         "local-spec": api.cmd_local_spec,
         "domain-docs": api.cmd_domain_docs,
+        "manifest": api.cmd_delivery_manifest,
     }.get(args.cmd)
     if document_handler is not None:
         return document_handler(state, args)

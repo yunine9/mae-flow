@@ -22,7 +22,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "story-localize|local-spec|domain-docs|codecheck-scan|"
+            "story-localize|local-spec|domain-docs|manifest|codecheck-scan|"
             "codecheck-scope|codecheck-record|approve-exemption|"
             "migrate-flow|exit"
             "(用法见 current/exit 指令)。\n"
@@ -190,6 +190,17 @@ def parse_args(argv=None):
     domain_reconcile.add_argument("--candidate", required=True)
     domain_reconcile.add_argument("--keyword", action="append", default=[])
     domain_actions.add_parser("show")
+    manifest = sub.add_parser("manifest")
+    manifest_actions = manifest.add_subparsers(
+        dest="manifest_action", required=True)
+    manifest_set = manifest_actions.add_parser("set")
+    manifest_set.add_argument("--file", action="append", required=True)
+    manifest_set.add_argument("--message", required=True)
+    manifest_set.add_argument("--target", required=True)
+    manifest_set.add_argument("--adopt-dirty", action="append", default=[])
+    manifest_actions.add_parser("show")
+    manifest_confirm = manifest_actions.add_parser("confirm")
+    manifest_confirm.add_argument("--message-id", required=True)
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")

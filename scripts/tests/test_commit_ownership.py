@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 from mae_flow_core import cli_runtime as mf
 from mae_flow_core.cli_commands import git_ownership
 from mae_flow_core.guard.ownership import OwnershipFacts, decide_ownership
+from mae_flow_core.guard.ownership import decide_compile_task_commit
 with open(
         os.path.join(ROOT, "flow", "flow.json"),
         encoding="utf-8") as flow_stream:
@@ -70,6 +71,17 @@ class CommitOwnershipTests(unittest.TestCase):
             "history": [], "started": "2026-07-28 10:00:00",
             "initial_dirty": [], "initial_dirty_fingerprints": {},
         }
+
+    def test_digest_free_compile_task_uses_real_lifecycle_execution_fact(self):
+        task = {"step": "build", "task_files": ["src/a.cpp"]}
+
+        pending = decide_compile_task_commit(
+            "build", task, token=None, completed=False)
+        complete = decide_compile_task_commit(
+            "build", task, token=None, completed=True)
+
+        self.assertEqual("bash-compile-task-pending", pending.rule)
+        self.assertIsNone(complete)
 
     def mark_initial(self, state, path):
         state["initial_dirty"].append(path)

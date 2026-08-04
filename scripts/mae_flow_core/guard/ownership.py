@@ -27,8 +27,10 @@ class OwnershipDecision:
     advisories: tuple = ()
 
 
-def decide_compile_task_commit(step, task, token):
+def decide_compile_task_commit(step, task, token, completed=False):
     """Close the issued-COMPILE/pre-completion commit window."""
+    if completed:
+        return None
     if (
             not isinstance(task, dict)
             or task.get("step") != step):
@@ -47,8 +49,8 @@ def decide_compile_task_commit(step, task, token):
     return GateDecision(
         "block",
         "bash-compile-task-pending",
-        "当前步骤的 COMPILE 任务已签发但尚无匹配此任务卡的合法完成令牌。"
-        "先完成当前 COMPILE 任务并让 SubagentStop 验收；compile-agent 的"
+        "当前步骤的编译任务已签发，但尚未同时观察到 Agent 正常返回和"
+        "对应输入上的真实成功执行。先完成当前 COMPILE 任务；compile-agent 的"
         "直接修复保持未提交，随后由主流程按正常候选规则提交。",
     )
 

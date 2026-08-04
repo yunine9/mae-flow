@@ -124,10 +124,25 @@ def _enforce_commit_ownership(decision, jdie):
 
 def _gate_compile_task_window(st):
     tokens = api._agent_token_data()
+    task = (st.get("agent_tasks", {}) or {}).get("COMPILE")
+    completed = False
+    if isinstance(task, dict) and not task.get("sha256"):
+        try:
+            completed = bool(
+                api._finished_agent_observation(
+                    "COMPILE", st.get("current", ""),
+                    api._step_entered_at(st))
+                and api.successful_quality_execution(
+                    api.STATE_PATH, "COMPILE", st.get("current", ""),
+                    api.quality_input_snapshot(
+                        st, "COMPILE", st.get("current", ""))))
+        except (AttributeError, TypeError, ValueError):
+            completed = False
     decision = decide_compile_task_commit(
         st.get("current", ""),
-        (st.get("agent_tasks", {}) or {}).get("COMPILE"),
+        task,
         (tokens if isinstance(tokens, dict) else {}).get("COMPILE"),
+        completed=completed,
     )
     if decision:
         _die_decision(decision)
@@ -135,6 +150,28 @@ def _gate_compile_task_window(st):
 
 def _gate_commit_candidates(c, st, jdie):
     candidate_snapshot = api._pending_commit_candidates(c)
+    manifest = st.get("delivery_manifest") or {}
+    if manifest:
+        if not manifest.get("confirmed"):
+            _die_rule(
+                "bash-delivery-manifest-unconfirmed",
+                "交付清单尚未由用户确认。先执行 manifest show，收到用户回答后"
+                "使用 manifest confirm --message-id <消息ID>。")
+        expected = {
+            api._repo_path_identity(path)
+            for path in manifest.get("files", ())
+        }
+        actual = {
+            api._repo_path_identity(path)
+            for path in candidate_snapshot.get("paths", ())
+        }
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
+            _die_rule(
+                "bash-delivery-manifest-files",
+                "待提交文件必须精确等于用户确认的交付清单。缺少: %s；夹带: %s。"
+                % ("、".join(missing) or "无", "、".join(extra) or "无"))
     item = api._checkpoint_locked_item(st) or {}
     receipt = item.get("receipt") or {}
     review_required = (
@@ -352,6 +389,25 @@ def cmd_gate(flow, st, args):
         wanted = st["config"].get("分支名", "")
         add_paths, _add_force = api._git_add_pathspecs(
             git_command)
+        manifest = st.get("delivery_manifest") or {}
+        if add_paths and manifest:
+            if not manifest.get("confirmed"):
+                _die_rule(
+                    "bash-delivery-manifest-unconfirmed",
+                    "交付清单尚未由用户确认，不能暂存交付文件。")
+            allowed = {
+                api._repo_path_identity(path)
+                for path in manifest.get("files", ())
+            }
+            outside = [
+                path for path in add_paths
+                if api._repo_path_identity(path) not in allowed
+            ]
+            if outside:
+                _die_rule(
+                    "bash-delivery-manifest-stage",
+                    "git add 只能包含用户确认清单中的精确文件: "
+                    + "、".join(outside))
         context = BashGateContext(
             command=c,
             has_internal_state_path=internal_state,

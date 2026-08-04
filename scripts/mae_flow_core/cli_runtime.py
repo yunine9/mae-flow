@@ -35,6 +35,8 @@ from .cli_commands import moonlight_commands as _moonlight_commands
 from .cli_commands import lifecycle as _lifecycle
 from .cli_commands import lean_migration as _lean_migration
 from .cli_commands import dispatch as _dispatch
+from .cli_commands import local_spec as _local_spec
+from .cli_commands import domain_docs as _domain_docs
 
 
 _PLUGIN_ROOT = os.path.abspath(os.path.join(
@@ -120,6 +122,8 @@ _COMMAND_MODULES = (
     _moonlight_commands,
     _lifecycle,
     _lean_migration,
+    _local_spec,
+    _domain_docs,
     _dispatch,
 )
 for _module in _COMMAND_MODULES:

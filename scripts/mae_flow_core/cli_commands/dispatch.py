@@ -54,8 +54,13 @@ def _dispatch_global_command(flow, state, runtime, args):
     if args.cmd == "moonlight" and args.action in ("on", "continue"):
         return _dispatch_moonlight_start(
             flow, state, runtime, args)
-    if args.cmd == "lightcheck":
-        return api.cmd_lightcheck(state, args)
+    document_handler = {
+        "lightcheck": api.cmd_lightcheck,
+        "local-spec": api.cmd_local_spec,
+        "domain-docs": api.cmd_domain_docs,
+    }.get(args.cmd)
+    if document_handler is not None:
+        return document_handler(state, args)
     if args.cmd == "gate":
         return api.cmd_gate(flow, state, args)
     if args.cmd == "action":

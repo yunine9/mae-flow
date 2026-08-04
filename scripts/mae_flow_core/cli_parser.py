@@ -22,7 +22,9 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
-            "story-localize|codecheck-scan|codecheck-scope|codecheck-record|approve-exemption|migrate-flow|exit"
+            "story-localize|local-spec|domain-docs|codecheck-scan|"
+            "codecheck-scope|codecheck-record|approve-exemption|"
+            "migrate-flow|exit"
             "(用法见 current/exit 指令)。\n"
             "注意:子命令不带连字符(是 current 不是 --current);"
             "done 的 --set 可重复,值含空格要加引号；"
@@ -175,6 +177,19 @@ def parse_args(argv=None):
     story_localize.add_argument(
         "--ticket", required=True,
         help="用户选择不入库的 STORY 单号；把文档移入本地过程区")
+    local_spec = sub.add_parser("local-spec")
+    local_spec.add_argument(
+        "local_spec_action", choices=("init", "validate", "show"))
+    domain_docs = sub.add_parser("domain-docs")
+    domain_actions = domain_docs.add_subparsers(
+        dest="domain_docs_action", required=True)
+    domain_context = domain_actions.add_parser("context")
+    domain_context.add_argument("--term", action="append", default=[])
+    domain_reconcile = domain_actions.add_parser("reconcile")
+    domain_reconcile.add_argument("--domain", required=True)
+    domain_reconcile.add_argument("--candidate", required=True)
+    domain_reconcile.add_argument("--keyword", action="append", default=[])
+    domain_actions.add_parser("show")
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")

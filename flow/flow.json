@@ -7,7 +7,9 @@
     "design",
     "test_blueprint",
     "story_ask",
-    "build_plan"
+    "build_plan",
+    "archive_confirm",
+    "archive"
   ],
   "source_patterns": [
     "(^|/)(service|src|include|lib|app|modules?)/"
@@ -233,7 +235,7 @@
           ]
         }
       ],
-      "next": "delivery_review"
+      "next": "domain_archive"
     },
     "rf_verify": {
       "title": "处理评审意见 — 旧版验证迁移",
@@ -550,7 +552,7 @@
           "equals": "pass"
         }
       ],
-      "next": "delivery_review"
+      "next": "domain_archive"
     },
     "build_pace": {
       "title": "编码前开发节奏确认",
@@ -711,6 +713,16 @@
           "equals": "pass"
         }
       ],
+      "next": "domain_archive"
+    },
+    "domain_archive": {
+      "title": "领域知识归档",
+      "allow_specs_write": true,
+      "evidence": [
+        {
+          "type": "domain_archive_complete"
+        }
+      ],
       "next": "delivery_review"
     },
     "delivery_review": {
@@ -720,58 +732,16 @@
           "type": "final_review_clear"
         }
       ],
-      "next_by": "workflow",
-      "next": {
-        "full": "archive_confirm",
-        "hotfix": "archive_confirm",
-        "tweak": "archive_confirm",
-        "review": "push"
-      },
+      "next": "push",
       "skip_in_moonlight": true
     },
     "archive_confirm": {
-      "title": "规格定稿确认(不可逆)",
-      "user_ack": true,
-      "confirmation_answers": [
-        "确认定稿"
-      ],
-      "evidence": [
-        {
-          "type": "agent_ran",
-          "agent": "ASKUSER"
-        }
-      ],
-      "next": "archive"
+      "title": "旧规格定稿确认恢复",
+      "next": "domain_archive"
     },
     "archive": {
-      "title": "规格定稿",
-      "allow_specs_write": true,
-      "evidence": [
-        {
-          "type": "glob",
-          "any": [
-            "openspec/changes/archive/*{CHANGE_NAME}*"
-          ]
-        },
-        {
-          "type": "glob_absent",
-          "any": [
-            "openspec/changes/{CHANGE_NAME}/change.md",
-            "openspec/changes/{CHANGE_NAME}/proposal.md",
-            "openspec/changes/{CHANGE_NAME}/tasks.md"
-          ],
-          "note": "定稿是移动不是复制:原变更目录必须已从 openspec/changes/ 消失。仍在=复制式假定稿(会干扰后续在建区判定),用 spec archive 完成移动"
-        },
-        {
-          "type": "spec_field",
-          "field": "phase",
-          "equals": "archived"
-        },
-        {
-          "type": "archive_paths_clean"
-        }
-      ],
-      "next": "push"
+      "title": "旧规格定稿恢复",
+      "next": "domain_archive"
     },
     "push": {
       "title": "推送分支",

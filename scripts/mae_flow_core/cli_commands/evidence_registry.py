@@ -15,6 +15,41 @@ from mae_flow_core.workflow.agent_observations import finished_observation
 from mae_flow_core.workflow.quality_executions import (
     quality_input_snapshot, successful_quality_execution,
 )
+from mae_flow_core.orchestration.domain_archive import (
+    candidate_from_dict,
+    input_digest,
+)
+from mae_flow_core.orchestration.work_package import ensure_work_package
+
+
+def _domain_archive_fresh(state):
+    record = (state or {}).get("domain_archive") or {}
+    ticket = str(((state or {}).get("config") or {}).get("单号", "")).strip()
+    if not ticket:
+        return False, "领域归档缺少需求单号；执行 domain-archive status"
+    try:
+        root = os.getcwd()
+        package = ensure_work_package(root, ticket)
+        entries = tuple(
+            candidate_from_dict(root, value)
+            for value in record.get("domains", ()))
+        git_facts = "%s\n%s" % (
+            api.sh("git -c core.quotepath=false diff --no-ext-diff --binary HEAD -- ."),
+            api.sh("git -c core.quotepath=false status --porcelain --untracked-files=all"),
+        )
+        actual = input_digest(
+            root,
+            (package.spec, package.grill, package.story, package.decisions),
+            git_facts,
+            entries,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return False, "领域归档新鲜度无法校验: %s；执行 domain-archive status" % exc
+    if actual != record.get("input_sha256"):
+        return False, (
+            "领域归档输入已变化；只需重新执行 domain-archive prepare，"
+            "不会回退编码、检视或质量阶段")
+    return True, ""
 
 
 def _finished_agent_observation(kind, step, since):
@@ -219,6 +254,7 @@ _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     business_changed_files=lambda state: api._biz_changed_files(state),
     spec2code_plan_review=lambda spec, state:
         _spec2code_plan_review(spec, state),
+    domain_archive_fresh=_domain_archive_fresh,
 ))
 
 # Compatibility names used by in-flight command handlers and legacy tests.
@@ -233,6 +269,7 @@ ev_spec_validate = _WORKFLOW_EVIDENCE.spec_validate
 ev_content_free = _WORKFLOW_EVIDENCE.content_free
 ev_glob_absent = _WORKFLOW_EVIDENCE.glob_absent
 ev_clean_paths = _WORKFLOW_EVIDENCE.clean_paths
+ev_domain_archive_complete = _WORKFLOW_EVIDENCE.domain_archive_complete
 
 
 _EVIDENCE_REGISTRY = build_evidence_registry(

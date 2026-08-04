@@ -69,7 +69,11 @@ def _prepare(state, args, root, package):
     updated = copy.deepcopy(state)
     previous = copy.deepcopy(updated.get("domain_archive") or {})
     if previous.get("status") == "applied":
-        raise ValueError("领域归档已经应用，无需重复准备")
+        previous_entries = _entries(root, previous)
+        current_digest = _fresh_digest(root, package, previous_entries)
+        if previous.get("input_sha256") == current_digest:
+            raise ValueError("领域归档已经应用且输入未变化，无需重复准备")
+        previous = {}
     if args.unchanged:
         if previous.get("domains"):
             raise ValueError("已经存在领域候选，不能再声明全部 unchanged")
@@ -143,6 +147,7 @@ def _apply(state, args, root, package):
         "status": "applied", "applied_paths": list(paths),
         "authorization": receipt,
     })
+    record["input_sha256"] = _fresh_digest(root, package, entries)
     updated = copy.deepcopy(state)
     updated["domain_archive"] = record
     api.save_state(updated)

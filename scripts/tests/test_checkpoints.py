@@ -1129,7 +1129,7 @@ class CheckpointTests(unittest.TestCase):
             mf.advance(
                 FLOW, legacy_final, "tw_verify",
                 FLOW["steps"]["tw_verify"], "done")
-        self.assertEqual(mf.load_state()["current"], "archive_confirm")
+        self.assertEqual(mf.load_state()["current"], "domain_archive")
 
     def test_old_state_before_pace_keeps_original_route(self):
         legacy = self.state(current="tw_open")

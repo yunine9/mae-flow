@@ -39,6 +39,7 @@ class WorkflowEvidencePorts:
     risk_acceptance: object
     business_changed_files: object
     spec2code_plan_review: object
+    domain_archive_fresh: object = None
 
 
 class WorkflowEvidenceRules:
@@ -46,6 +47,43 @@ class WorkflowEvidenceRules:
 
     def __init__(self, ports):
         self.ports = ports
+
+    def domain_archive_complete(self, _spec, state):
+        record = (state or {}).get("domain_archive") or {}
+        if record.get("status") != "applied":
+            return EvidenceResult(
+                False,
+                "领域归档尚未完成；执行 domain-archive status 查看当前状态和唯一恢复动作",
+            )
+        result = record.get("result")
+        paths = record.get("applied_paths") or []
+        if result not in {"changes", "unchanged"}:
+            return EvidenceResult(False, "领域归档结果无效；执行 domain-archive status")
+        if result == "unchanged" and paths:
+            return EvidenceResult(False, "unchanged 归档不应包含上库文件")
+        invalid = [
+            str(path) for path in paths
+            if not (
+                str(path).replace("\\", "/") == "docs/specs/index.md"
+                or (
+                    str(path).replace("\\", "/").startswith("docs/specs/")
+                    and str(path).replace("\\", "/").endswith(".md")
+                )
+            )
+        ]
+        if invalid:
+            return EvidenceResult(
+                False, "领域归档包含非法过程文件: " + "、".join(invalid))
+        if self.ports is not None and self.ports.domain_archive_fresh is not None:
+            fresh, reason = self.ports.domain_archive_fresh(state)
+            if not fresh:
+                return EvidenceResult(
+                    False,
+                    reason or (
+                        "领域归档输入已变化；只需重新执行 domain-archive prepare，"
+                        "不会回退已完成的质量步骤"),
+                )
+        return EvidenceResult(True, "")
 
     def glob(self, spec, state):
         patterns = [

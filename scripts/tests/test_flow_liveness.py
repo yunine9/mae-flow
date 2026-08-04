@@ -76,6 +76,26 @@ class FlowLivenessTests(unittest.TestCase):
                     "capability.retry"):
                 self.assertNotIn(forbidden, serialized, step_id)
 
+    def test_every_delivery_path_archives_domain_truth_exactly_once(self):
+        self.assertEqual("domain_archive", FLOW["steps"]["verify_comet"]["next"])
+        self.assertEqual("domain_archive", FLOW["steps"]["tw_verify"]["next"])
+        self.assertEqual("domain_archive", FLOW["steps"]["rf_ut"]["next"])
+        self.assertEqual("delivery_review", FLOW["steps"]["domain_archive"]["next"])
+        self.assertEqual("push", FLOW["steps"]["delivery_review"]["next"])
+        for step_id in reachable():
+            if step_id != "domain_archive":
+                self.assertNotEqual(
+                    "domain_archive",
+                    FLOW["steps"][step_id].get("next")
+                    if step_id not in {"verify_comet", "tw_verify", "rf_ut"}
+                    else "allowed",
+                    step_id)
+
+    def test_legacy_archive_steps_are_one_way_recovery_bridges(self):
+        for step_id in ("archive_confirm", "archive"):
+            self.assertNotIn(step_id, reachable())
+            self.assertEqual("domain_archive", FLOW["steps"][step_id]["next"])
+
 
 if __name__ == "__main__":
     unittest.main()

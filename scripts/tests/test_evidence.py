@@ -76,7 +76,7 @@ class EvidenceRegistryTests(unittest.TestCase):
                 "pushed", "agent_ran", "content_free", "clean_paths",
                 "archive_paths_clean", "codecheck_clean", "glob_absent",
                 "review_agent_or_no_code", "agent_or_no_source",
-                "review_codecheck",
+                "review_codecheck", "domain_archive_complete",
             ),
             registry.names,
         )

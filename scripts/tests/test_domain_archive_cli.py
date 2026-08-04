@@ -60,6 +60,7 @@ class DomainArchiveCliTests(unittest.TestCase):
         self.assertEqual("prepared", prepared["status"])
         self.assertEqual("applied", applied["status"])
         self.assertEqual([], applied["applied_paths"])
+        self.assertTrue(applied["input_sha256"])
 
 
 if __name__ == "__main__":

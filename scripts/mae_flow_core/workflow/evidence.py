@@ -72,6 +72,7 @@ def build_evidence_registry(*, workflow, agent, delivery, quality):
         ("review_agent_or_no_code", agent.review_agent_or_no_code),
         ("agent_or_no_source", agent.agent_or_no_source),
         ("review_codecheck", quality.review_codecheck),
+        ("domain_archive_complete", workflow.domain_archive_complete),
     ))
 
 

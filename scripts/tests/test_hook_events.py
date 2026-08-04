@@ -164,6 +164,9 @@ class HookEventTests(unittest.TestCase):
 
     def test_quality_agent_classification_is_application_policy(self):
         cases = (
+            ("story-generator-agent", "STORY"),
+            ("craft-reviewer-agent", "REVIEWER"),
+            ("cp-implementer-agent", "CP_IMPLEMENT"),
             ("compile-agent", "COMPILE"),
             ("codecheck-fix-agent", "CODECHECK"),
             ("ut-generator-agent", "UT"),
@@ -180,6 +183,7 @@ class HookEventTests(unittest.TestCase):
     def test_active_pretool_policy_preserves_gate_order(self):
         cases = (
             ("Task", {}, False, ("agent", "")),
+            ("Agent", {}, False, ("agent", "")),
             ("AskUserQuestion", {}, True, ("block-question", "")),
             ("AskUserQuestion", {}, False, ("allow", "")),
             ("Edit", {"file_path": "src/a.py"}, False,

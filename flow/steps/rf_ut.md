@@ -7,8 +7,7 @@
 3. Agent 必须读取任务卡并按其中 `UT生成方式` 调用 Mae-Flow 插件自带的
    AutoUT/java-autout Skill 或既有写法，参考 `UT运行命令` 真实执行测试；
    该项写“随生成方式自带”时由对应 Skill 按项目决定；
-4. 只有 `UT_RESULT: PASS`、TASK_CARD_SHA256 和 GENERATOR_USED 合法，且 EXECUTED_UT 能对应到
-   本轮真实成功的测试调用，done 才放行。NEEDS_INPUT/FAIL 不能当通过。
+4. Agent 返回后以真实测试调用和退出状态判断；失败不能当通过，返回文字不参与格式校验。
 
 PENDING_QUESTIONS / SUSPECTED_BUGS 仍按主流程协议呈用户裁决；未经用户确认，UT agent 和主会话都不得修改被测源码。源码经 unlock 修复后执行 done，harness 会自动回流 rf_compile，强制重跑编译 → CodeCheck → UT；不接受仅重跑 UT 就推送。未经 unlock 却检测到被测源码变化会直接判越权。
 

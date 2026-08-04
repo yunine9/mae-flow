@@ -162,7 +162,7 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
         )
         self.assertEqual(6, len(seen))
 
-    def test_store_card_writes_sealed_body_and_returns_digest(self):
+    def test_store_card_writes_plain_body_without_return_receipt(self):
         writes = []
         made = []
         document = TaskCardDocument(["# card", "line"])
@@ -187,11 +187,7 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
             "/repo/.mae-flow-work/agent-tasks/verify-ut.md",
             artifact.path,
         )
-        self.assertEqual(
-            expected_body
-            + "TASK_CARD_SHA256: " + expected_digest + "\n",
-            writes[0][1],
-        )
+        self.assertEqual(expected_body, writes[0][1])
         self.assertEqual(
             ["/repo/.mae-flow-work/agent-tasks"], made)
 
@@ -220,8 +216,8 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
         self.assertEqual(["src/a.cpp"], record["task_files"])
         self.assertEqual(["src"], record["execution_roots"])
         self.assertEqual(
-            {"src/old.cpp": "fingerprint"},
-            record["initial_source_fingerprints"],
+            None,
+            record.get("initial_source_fingerprints"),
         )
         self.assertTrue(record["standalone"])
 

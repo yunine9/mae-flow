@@ -25,6 +25,9 @@ class PretoolDecision:
 
 
 _AGENT_KINDS = (
+    ("story-generator-agent", "STORY"),
+    ("craft-reviewer-agent", "REVIEWER"),
+    ("cp-implementer-agent", "CP_IMPLEMENT"),
     ("compile-agent", "COMPILE"),
     ("codecheck-fix-agent", "CODECHECK"),
     ("ut-generator-agent", "UT"),
@@ -55,7 +58,7 @@ def agent_kind(tool_input):
 
 
 def active_pretool_decision(tool, tool_input, moonlight):
-    if tool == "Task":
+    if tool in ("Task", "Agent"):
         return PretoolDecision("agent")
     if tool == "AskUserQuestion" and moonlight:
         return PretoolDecision("block-question")
@@ -85,7 +88,7 @@ def _standalone_protected(value):
 
 
 def standalone_pretool_decision(tool, tool_input):
-    if tool == "Task":
+    if tool in ("Task", "Agent"):
         return PretoolDecision("agent")
     if tool in ("Edit", "Write", "MultiEdit"):
         path = tool_input.get("file_path") or tool_input.get("path")

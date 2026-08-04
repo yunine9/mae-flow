@@ -42,7 +42,8 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
     def test_cp_implementer_stops_at_checkpoint_boundary(self):
         text = read("agents/cp-implementer-agent.md")
         self.assertIn("只允许修改任务卡", text)
-        self.assertIn("NEEDS_INPUT", text)
+        self.assertIn("自然语言报告计划合同错误", text)
+        self.assertNotIn("CP_IMPLEMENT_RESULT:", text)
 
     def test_ut_generator_retains_behavior_driven_execution(self):
         text = read("agents/ut-generator-agent.md")

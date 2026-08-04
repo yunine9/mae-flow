@@ -273,14 +273,11 @@ def standalone_task_record(
     return {
         "step": step,
         "path": path,
-        "sha256": digest,
         "head": head,
         "scope": scope,
         "allowed_files": list(allowed_files),
         "task_files": list(task_files),
         "execution_roots": list(execution_roots),
-        "initial_source_fingerprints": dict(
-            initial_source_fingerprints),
         "standalone": True,
         "stage": stage,
         "at": at,

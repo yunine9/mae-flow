@@ -355,6 +355,10 @@
           ]
         },
         {
+          "type": "agent_ran",
+          "agent": "REVIEWER"
+        },
+        {
           "type": "content_free",
           "file": ".mae-flow-work/{单号}/story.md",
           "patterns": [

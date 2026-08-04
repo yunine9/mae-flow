@@ -122,6 +122,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/workflow/__init__.py",
           "scripts/mae_flow_core/workflow/advancement.py",
           "scripts/mae_flow_core/workflow/agent_evidence.py",
+          "scripts/mae_flow_core/workflow/agent_observations.py",
           "scripts/mae_flow_core/workflow/completion.py",
           "scripts/mae_flow_core/workflow/definition.py",
           "scripts/mae_flow_core/workflow/evidence.py",
@@ -146,6 +147,7 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_full_checkpoint_compile_recovery.py",
           "scripts/tests/test_compile_wait_instructions.py",
           "scripts/tests/test_stable_recovery_contract.py",
+          "scripts/tests/test_agent_observations.py",
           "scripts/tests/test_project_resources.py",
           "scripts/tests/test_local_spec.py",
           "scripts/tests/test_behavior_baseline.py",
@@ -2478,11 +2480,8 @@ for f in sorted(os.listdir(os.path.join(ROOT, "agents"))):
     if f.endswith(".md"):
         name = f[:-3]
         txt = open(os.path.join(ROOT, "agents", f), encoding="utf-8").read()
-        if name not in ("story-generator-agent", "craft-reviewer-agent"):
-            check(f"{name} 契约含 _RESULT 标记", "_RESULT:" in txt)
-        if name in ("compile-agent", "codecheck-fix-agent", "ut-generator-agent",
-                    "grill-critic-agent"):
-            check(f"{name} 契约绑定任务卡", "TASK_CARD_SHA256" in txt)
+        check(f"{name} 契约不要求返回令牌或指纹",
+              "_RESULT:" not in txt and "TASK_CARD_SHA256" not in txt)
 
 check("Hook 入口只装配已抽离的 Agent 契约运行时",
       "HookRuntimeAdapter" in dp and "def _codecheck_contract" not in dp)

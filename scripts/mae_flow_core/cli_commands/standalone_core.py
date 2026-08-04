@@ -362,7 +362,6 @@ def _action_task_card(action, kind, stage=""):
             os.getcwd(), action, "agent.task_created", {
                 "standalone": True,
                 "task_path": os.path.abspath(path),
-                "task_sha256": digest,
                 "head": head,
                 "allowed_files": scan.get("files", []),
                 "scan_count": scan.get("count"),
@@ -375,5 +374,5 @@ def _action_task_card(action, kind, stage=""):
         print("[mae-flow] CodeCheck 详细日志: %s"
               % api.norm(codecheck_log_path(os.getcwd(), action)))
     print("启动 %s 时只传这一句:\n读取并严格执行任务卡 \"%s\"；"
-          "最终报告必须原样带 TASK_CARD_SHA256: %s" % (agent, path, digest))
+          "完成后用自然语言报告实际执行、结果和阻塞。" % (agent, path))
     return path

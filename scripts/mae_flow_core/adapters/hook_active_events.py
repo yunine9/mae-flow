@@ -28,6 +28,11 @@ from mae_flow_core.file_io import (
     read_text,
     write_text,
 )
+from mae_flow_core.workflow.agent_observations import (
+    latest_started_invocation,
+    record_agent_finished,
+    record_agent_started,
+)
 
 
 _QUESTION_BLOCKED = (
@@ -81,19 +86,42 @@ class ActiveHookEventAdapter:
         except Exception:
             return False
 
-    def _gate_agent_dispatch(self, tool_input):
+    @staticmethod
+    def _agent_invocation_id(payload):
+        for key in ("invocation_id", "agent_id", "tool_use_id", "task_id"):
+            if payload.get(key):
+                return str(payload[key])
+        return "agent-%s-%s" % (os.getpid(), time.time_ns())
+
+    def _record_agent_start(self, payload, kind, state):
+        try:
+            record_agent_started(
+                self.state, kind, state.get("current", ""),
+                self._agent_invocation_id(payload),
+                time.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        except Exception as exc:
+            self.log("agent start observation EXC(fail-open): %s" % exc)
+
+    def _gate_agent_dispatch(self, payload, tool_input):
         kind = agent_kind(tool_input)
         if not kind:
             return HookResponse()
         try:
             state = self.runtime._contract_state()
-            decision = verify_dispatch_task(
-                kind, state, self.task_card_ports())
-            return (
+            decision = (
+                verify_dispatch_task(kind, state, self.task_card_ports())
+                if kind in ("COMPILE", "CODECHECK", "UT", "GRILL")
+                else None
+            )
+            response = (
                 HookResponse()
-                if decision.accepted
+                if decision is None or decision.accepted
                 else HookResponse(exit_code=2, stderr=decision.reason + "\n")
             )
+            if response.exit_code == 0:
+                self._record_agent_start(payload, kind, state)
+            return response
         except Exception as exc:
             self.log("agent dispatch gate EXC(fail-open): %s" % exc)
             return HookResponse()
@@ -104,7 +132,7 @@ class ActiveHookEventAdapter:
         decision = active_pretool_decision(
             tool, tool_input, self._moonlight_enabled())
         if decision.action == "agent":
-            return self._gate_agent_dispatch(tool_input)
+            return self._gate_agent_dispatch(payload, tool_input)
         if decision.action == "block-question":
             return HookResponse(exit_code=2, stderr=_QUESTION_BLOCKED)
         if decision.action == "gate-edit":
@@ -120,7 +148,7 @@ class ActiveHookEventAdapter:
         decision = standalone_pretool_decision(
             payload.get("tool_name", ""), tool_input)
         if decision.action == "agent":
-            return self._gate_agent_dispatch(tool_input)
+            return self._gate_agent_dispatch(payload, tool_input)
         if decision.action == "block-edit":
             return HookResponse(exit_code=2, stderr=_ACTION_EDIT_BLOCKED)
         if decision.action == "block-bash":
@@ -259,41 +287,14 @@ class ActiveHookEventAdapter:
             if line.strip()
         ]
 
-    def _run_agent_contract(
-            self, kind, status, report, calls, retry):
-        legacy_calls = [call.to_legacy() for call in calls]
-        validators = {
-            "CODECHECK": self.runtime._codecheck_contract,
-            "UT": self.runtime._ut_contract,
-            "COMPILE": self.runtime._compile_contract,
-            "GRILL": self.runtime._grill_contract,
-        }
-        validator = validators.get(kind)
-        if validator:
-            validator(status, report, legacy_calls, soft=retry)
-        return HookResponse()
-
     def _agent_completion_ports(self):
         return AgentCompletionPorts(
-            latest_subagent_transcript=self._latest_subagent_transcript,
-            load_transcript=self._load_agent_transcript,
-            read_transcript_head=lambda path, limit: read_text(
-                path, errors="replace", limit=limit),
-            contract_state=self.runtime._contract_state,
-            record_codecheck_trace=(
-                lambda status, report, calls, path, retry:
-                self.runtime._record_codecheck_agent_trace(
-                    status,
-                    report,
-                    [call.to_legacy() for call in calls],
-                    path,
-                    retry=retry,
-                )
-            ),
-            run_contract=self._run_agent_contract,
-            record_token=self.runtime._record_agent_token,
-            record_rejection=self.runtime._record_rejection,
-            autopsy=self._autopsy,
+            state_path=self.state,
+            latest_started=lambda: latest_started_invocation(self.state),
+            record_finished=lambda state_path, invocation_id, lifecycle, detail:
+            record_agent_finished(
+                state_path, invocation_id, lifecycle,
+                time.strftime("%Y-%m-%d %H:%M:%S"), detail),
             log=self.log,
         )
 

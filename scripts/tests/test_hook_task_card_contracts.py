@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for Hook task-card freshness and Agent source scope."""
 
-import hashlib
 import os
 from pathlib import Path
 import sys
@@ -32,20 +31,16 @@ class TaskCardContractTests(unittest.TestCase):
         self.card_path = os.path.join(
             self.temporary.name, "compile-task.md")
         self.body = "# compile task\n"
-        self.digest = hashlib.sha256(
-            self.body.encode("utf-8")).hexdigest()
         with open(
                 self.card_path, "w", encoding="utf-8",
                 newline="\n") as stream:
-            stream.write(
-                self.body + "TASK_CARD_SHA256: " + self.digest + "\n")
+            stream.write(self.body)
         self.state = {
             "current": "tw_compile",
             "agent_tasks": {
                 "COMPILE": {
                     "step": "tw_compile",
                     "head": HEAD,
-                    "sha256": self.digest,
                     "path": self.card_path,
                 },
             },
@@ -72,78 +67,27 @@ class TaskCardContractTests(unittest.TestCase):
         values.update(overrides)
         return TaskCardPorts(**values)
 
-    def report(self, digest=None):
-        return "TASK_CARD_SHA256: " + (digest or self.digest)
-
-    def test_completion_accepts_a_current_untampered_card(self):
+    def test_completion_accepts_current_card_with_opaque_report(self):
         decision = verify_completion_task(
-            "COMPILE", self.report(), self.state, self.ports())
+            "COMPILE", "任意自然语言返回", self.state, self.ports())
         self.assertTrue(decision.accepted)
         self.assertEqual(self.state["agent_tasks"]["COMPILE"], decision.task)
 
-    def test_completion_rejects_missing_wrong_and_tampered_card(self):
+    def test_completion_rejects_only_missing_or_wrong_step_card(self):
         missing = verify_completion_task(
-            "UT", self.report(), self.state, self.ports())
+            "UT", "", self.state, self.ports())
         self.assertFalse(missing.accepted)
         self.assertEqual(
             "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。",
             missing.reason,
         )
 
-        wrong = verify_completion_task(
-            "COMPILE", self.report("b" * 64), self.state, self.ports())
-        self.assertIn("最终报告缺少当前任务卡", wrong.reason)
-
-        with open(
-                self.card_path, "w", encoding="utf-8",
-                newline="\n") as stream:
-            stream.write(
-                self.body + "changed\nTASK_CARD_SHA256: "
-                + self.digest + "\n")
-        tampered = verify_completion_task(
-            "COMPILE", self.report(), self.state, self.ports())
-        self.assertEqual(
-            "任务卡内容被修改过,必须重新执行 agent-task 生成。",
-            tampered.reason,
-        )
-
-    def test_completion_rejects_rebased_and_committed_precommit_card(self):
-        rebased = verify_completion_task(
-            "COMPILE",
-            self.report(),
-            self.state,
-            self.ports(
-                current_head=lambda: "b" * 40,
-                merge_base=lambda _base, _current: "c" * 40,
-            ),
-        )
-        self.assertIn("amend/rebase/切分支", rebased.reason)
-
-        task = dict(self.state["agent_tasks"]["COMPILE"])
-        task["precommit_review"] = True
-        self.state["agent_tasks"]["COMPILE"] = task
-        committed = verify_completion_task(
-            "COMPILE",
-            self.report(),
-            self.state,
-            self.ports(current_head=lambda: "b" * 40),
-        )
-        self.assertIn("用户先检视未提交 diff", committed.reason)
-
-    def test_completion_rejects_any_compile_task_that_advanced_head(self):
-        advanced = verify_completion_task(
-            "COMPILE",
-            self.report(),
-            self.state,
-            self.ports(
-                current_head=lambda: "b" * 40,
-                merge_base=lambda _base, _current: HEAD,
-            ),
-        )
-
-        self.assertFalse(advanced.accepted)
-        self.assertIn("COMPILE 任务期间 HEAD 已变化", advanced.reason)
-        self.assertIn("禁止 git commit", advanced.reason)
+        wrong_step = dict(self.state)
+        wrong_step["current"] = "verify_ut"
+        decision = verify_completion_task(
+            "COMPILE", "status=FAIL", wrong_step, self.ports())
+        self.assertFalse(decision.accepted)
+        self.assertIn("旧步骤", decision.reason)
 
     def test_scope_enforces_each_agent_write_boundary(self):
         cases = (
@@ -236,7 +180,7 @@ class TaskCardContractTests(unittest.TestCase):
         self.assertIn("源码缺陷必须先交用户裁决", direct_edit.reason)
         self.assertNotIn("UT 命令产生了非测试文件副作用", direct_edit.reason)
 
-    def test_dispatch_rejects_missing_and_stale_task_before_agent_runs(self):
+    def test_dispatch_rejects_missing_but_not_fingerprint_drift(self):
         missing = verify_dispatch_task(
             "COMPILE",
             {"current": "tw_compile", "agent_tasks": {}},
@@ -246,29 +190,12 @@ class TaskCardContractTests(unittest.TestCase):
         self.assertIn("尚无本步任务卡", missing.reason)
         self.assertIn("agent-task compile", missing.reason)
 
-        stale = verify_dispatch_task(
+        changed = verify_dispatch_task(
             "COMPILE",
             self.state,
             self.ports(current_head=lambda: "b" * 40),
         )
-        self.assertFalse(stale.accepted)
-        self.assertIn("任务卡签发于 HEAD", stale.reason)
-
-    def test_dispatch_rejects_precommit_snapshot_changes(self):
-        task = dict(self.state["agent_tasks"]["COMPILE"])
-        task.update({
-            "precommit_review": True,
-            "source_snapshot": {"src/main.py": "old"},
-        })
-        self.state["agent_tasks"]["COMPILE"] = task
-        decision = verify_dispatch_task(
-            "COMPILE",
-            self.state,
-            self.ports(
-                source_snapshot=lambda _head: {"src/main.py": "new"}),
-        )
-        self.assertFalse(decision.accepted)
-        self.assertIn("签发后代码又发生变化", decision.reason)
+        self.assertTrue(changed.accepted)
 
 
 if __name__ == "__main__":

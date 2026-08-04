@@ -62,12 +62,7 @@ class TaskCardDocument:
         ).hexdigest()
 
     def sealed_body(self):
-        return (
-            self.body()
-            + "TASK_CARD_SHA256: "
-            + self.digest()
-            + "\n"
-        )
+        return self.body()
 
 
 def task_record(
@@ -96,7 +91,6 @@ def task_record(
     record = {
         "step": step,
         "path": path,
-        "sha256": digest,
         "head": head,
         "scope": scope,
         "checkpoint": checkpoint,
@@ -116,7 +110,6 @@ def task_record(
         "unchanged_initial_dirty": list(
             unchanged_initial_dirty),
         "at": at,
-        "issuance_id": str(issuance_id or ""),
     }
     if blueprint:
         record["blueprint"] = {

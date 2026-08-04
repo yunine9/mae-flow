@@ -25,17 +25,14 @@ class QualityTaskCardTests(unittest.TestCase):
         self.assertTrue(task_allowed("UT", "rf_verify"))
         self.assertFalse(task_allowed("CODECHECK", "build"))
 
-    def test_document_preserves_lines_and_legacy_digest_contract(self):
+    def test_document_preserves_lines_without_a_return_receipt(self):
         document = TaskCardDocument(["# card", "line"])
         document.extend(["tail"])
         body = "# card\nline\ntail\n"
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         self.assertEqual(body, document.body())
         self.assertEqual(digest, document.digest())
-        self.assertEqual(
-            body + "TASK_CARD_SHA256: " + digest + "\n",
-            document.sealed_body(),
-        )
+        self.assertEqual(body, document.sealed_body())
 
     def test_task_record_detaches_mutable_inputs(self):
         files = ["src/main.cpp"]
@@ -72,8 +69,8 @@ class QualityTaskCardTests(unittest.TestCase):
             record["worktree_snapshot"],
         )
         self.assertTrue(record["worktree_snapshot_valid"])
-        self.assertEqual("abc", record["sha256"])
-        self.assertEqual("issuance-123", record["issuance_id"])
+        self.assertNotIn("sha256", record)
+        self.assertNotIn("issuance_id", record)
 
     def test_task_record_detaches_blueprint_binding(self):
         blueprint = {

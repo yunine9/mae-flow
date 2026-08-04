@@ -3,7 +3,7 @@
 
 1. 执行 `python "{MAEFLOW_PATH}" agent-task compile --scope "代码精简后的最终源码"`；
 2. 把输出的唯一启动话术原样交给 compile-agent；
-3. 只有 `COMPILE_RESULT: OK` 才能 done；
+3. 以真实同步编译退出状态判断，返回文字不参与格式校验；
 4. 完成后进入 CodeCheck。若精简阶段没有改源码，状态机会自动跳过本节点。
 
 生成任务卡前源码必须已经按单号格式提交。这样任务卡里的文件范围和基点 HEAD 才是真实的；

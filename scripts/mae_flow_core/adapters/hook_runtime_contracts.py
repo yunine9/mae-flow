@@ -1,4 +1,9 @@
-"""Split Hook runtime adapter responsibilities."""
+"""Legacy quality evaluators kept for offline compatibility tests.
+
+The active SubagentStop path deliberately does not call this mixin.  Agent
+return text is opaque lifecycle detail; real compile/test execution is handled
+by explicit quality workflow actions rather than prose contracts.
+"""
 
 from .hook_runtime_dependencies import *  # noqa: F401,F403
 

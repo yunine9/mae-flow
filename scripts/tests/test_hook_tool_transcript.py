@@ -17,7 +17,6 @@ from mae_flow_core.quality.tool_transcript import (  # noqa: E402
     call_failed,
     parse_transcript,
     reported_bash_call,
-    select_contract_marker,
     skill_call,
 )
 
@@ -174,26 +173,6 @@ class ToolTranscriptTests(unittest.TestCase):
             transcript.tool_calls,
             "python -m unittest -v（全量）",
         ).call_id)
-
-    def test_contract_marker_accepts_one_or_repeated_equal_marker(self):
-        one = select_contract_marker(
-            "preface\nUT_RESULT: PASS\nTESTS_TOTAL: 3")
-        self.assertEqual(("UT", "PASS", ""), (
-            one.kind, one.status, one.error))
-
-        repeated = select_contract_marker(
-            "COMPILE_RESULT: OK\nsummary\nCOMPILE_RESULT: OK")
-        self.assertEqual(("COMPILE", "OK", ""), (
-            repeated.kind, repeated.status, repeated.error))
-
-    def test_contract_marker_rejects_conflicting_results(self):
-        marker = select_contract_marker(
-            "UT_RESULT: PASS\nUT_RESULT: FAIL")
-        self.assertEqual("", marker.kind)
-        self.assertEqual("", marker.status)
-        self.assertIn("UT/FAIL", marker.error)
-        self.assertIn("UT/PASS", marker.error)
-
 
 if __name__ == "__main__":
     unittest.main()

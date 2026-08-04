@@ -147,17 +147,6 @@ def _store_agent_task(flow, st, args, context):
     )
     digest = artifact.digest
     path = artifact.path
-    issuance_id = hashlib.sha256(
-        (
-            kind
-            + "\0"
-            + digest
-            + "\0"
-            + str(st.get("revision", ""))
-            + "\0"
-            + str(time.time_ns())
-        ).encode("utf-8")
-    ).hexdigest()[:24]
     lightcheck_result = context["lightcheck_result"]
     worktree_snapshot, worktree_snapshot_valid = (
         _compile_worktree_snapshot(kind, context["task_head"]))
@@ -188,13 +177,11 @@ def _store_agent_task(flow, st, args, context):
         ut_targets=context["ut_targets"] if kind == "UT" else {},
         unchanged_initial_dirty=context["inherited_dirty"],
         at=time.strftime("%Y-%m-%d %H:%M:%S"),
-        issuance_id=issuance_id,
         blueprint=context["blueprint"])
     if kind == "CODECHECK":
         append_codecheck_event(
             os.getcwd(), st, "agent.task_created", {
                 "task_path": os.path.abspath(path),
-                "task_sha256": digest,
                 "head": context["task_head"],
                 "allowed_files": context["scan"].get("files", []),
                 "scan_count": context["scan"].get("count"),
@@ -207,7 +194,9 @@ def _store_agent_task(flow, st, args, context):
     if kind == "CODECHECK":
         print("[mae-flow] CodeCheck 详细日志: %s"
               % api.norm(codecheck_log_path(os.getcwd(), st)))
-    print(f"启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"{path}\"；最终报告必须原样带 TASK_CARD_SHA256: {digest}")
+    print(
+        "启动对应专项 Agent 时只传这一句:\n"
+        f"读取并严格执行任务卡 \"{path}\"；完成后用自然语言报告实际执行、结果和阻塞。")
 
 def cmd_agent_task(flow, st, args):
     """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""

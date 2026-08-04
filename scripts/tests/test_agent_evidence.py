@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for Agent token and review Evidence rules."""
+"""Agent evidence depends on lifecycle, never return wording or fingerprints."""
 
 import os
 import sys
@@ -24,10 +24,8 @@ def make_ports(**overrides):
         "risk_acceptance": lambda _kind, _state: (False, ""),
         "script_path": lambda: "/repo/scripts/mae-flow.py",
         "risk_labels": {"COMPILE": "compile risk"},
-        "tokens": lambda: {},
-        "rejections": lambda: {},
-        "source_snapshot_since": lambda _head, _state: {},
-        "source_changed_since": lambda _head, _state: ([], ""),
+        "finished_observation": lambda _kind, _step, _since: None,
+        "askuser_tokens": lambda: {},
         "changed_source_files": lambda _state: (["src/main.py"], ""),
         "shell_output": lambda _command: "a" * 40,
         "argv_output": lambda _arguments: "commit",
@@ -38,135 +36,43 @@ def make_ports(**overrides):
 
 
 class AgentEvidenceRuleTests(unittest.TestCase):
-    def test_missing_token_keeps_actionable_risk_message(self):
-        rules = AgentEvidenceRules(make_ports())
-        result = rules.agent_ran(
+    def test_missing_return_has_actionable_message_without_receipt_language(self):
+        result = AgentEvidenceRules(make_ports()).agent_ran(
             {"agent": "COMPILE", "statuses": ["OK"]},
             {"current": "tw_compile"},
         )
         self.assertFalse(result.passed)
-        self.assertIn(
-            "本步内未检测到 COMPILE 子 agent 的合法收尾",
-            result.reason,
-        )
-        self.assertIn(
-            'accept-risk compile --reason "compile risk"',
-            result.reason,
-        )
+        self.assertIn("本步内未检测到 COMPILE 子 Agent 已返回", result.reason)
+        self.assertNotIn("令牌", result.reason)
+        self.assertNotIn("XXX_RESULT", result.reason)
 
-    def test_token_is_bound_to_step_status_and_source_snapshot(self):
-        token = {
-            "COMPILE": {
-                "at": "2026-07-29 10:00:01",
-                "step": "tw_compile",
-                "status": "OK",
-                "head": "a" * 40,
-                "source_snapshot": {"src/main.py": "hash"},
-            }
+    def test_returned_lifecycle_passes_regardless_of_declared_statuses(self):
+        observation = {
+            "kind": "COMPILE", "step": "tw_compile",
+            "lifecycle": "returned", "at": "2026-07-29 10:01:00",
+            "detail": "任意自然语言；甚至说 FAIL 也不由这里裁决",
         }
-        state = {"current": "tw_compile"}
         rules = AgentEvidenceRules(make_ports(
-            tokens=lambda: token,
-            source_snapshot_since=lambda _head, _state: {
-                "src/main.py": "hash"},
-        ))
+            finished_observation=lambda _kind, _step, _since: observation))
         self.assertTrue(rules.agent_ran(
-            {"agent": "COMPILE", "statuses": ["OK"]}, state).passed)
-        changed = AgentEvidenceRules(make_ports(
-            tokens=lambda: token,
-            source_snapshot_since=lambda _head, _state: {
-                "src/main.py": "changed"},
-        ))
-        self.assertIn(
-            "未提交代码快照已变化",
-            changed.agent_ran(
-                {"agent": "COMPILE", "statuses": ["OK"]},
-                state,
-            ).reason,
-        )
-
-    def test_token_must_match_the_current_task_digest(self):
-        token = {
-            "COMPILE": {
-                "at": "2026-07-29 10:00:01",
-                "step": "tw_compile",
-                "status": "OK",
-                "head": "a" * 40,
-                "task_sha256": "stale-task",
-            }
-        }
-        state = {
-            "current": "tw_compile",
-            "agent_tasks": {
-                "COMPILE": {"sha256": "current-task"},
-            },
-        }
-
-        result = AgentEvidenceRules(make_ports(
-            tokens=lambda: token,
-        )).agent_ran(
             {"agent": "COMPILE", "statuses": ["OK"]},
-            state,
-        )
+            {"current": "tw_compile"},
+        ).passed)
 
-        self.assertFalse(result.passed)
-        self.assertIn("令牌不属于当前任务卡", result.reason)
+    def test_interrupted_or_timeout_does_not_count_as_returned(self):
+        for lifecycle in ("interrupted", "timeout"):
+            with self.subTest(lifecycle=lifecycle):
+                rules = AgentEvidenceRules(make_ports(
+                    finished_observation=lambda *_args: None))
+                self.assertFalse(rules.agent_ran(
+                    {"agent": "REVIEWER"}, {"current": "story"}).passed)
 
-    def test_compile_token_must_match_same_digest_task_issuance(self):
-        token = {
-            "COMPILE": {
-                "at": "2026-07-29 10:00:01",
-                "step": "tw_compile",
-                "status": "OK",
-                "head": "a" * 40,
-                "task_sha256": "same-card-digest",
-                "task_issuance_id": "old-issuance",
-            },
-        }
-        state = {
-            "current": "tw_compile",
-            "agent_tasks": {
-                "COMPILE": {
-                    "sha256": "same-card-digest",
-                    "issuance_id": "new-issuance",
-                },
-            },
-        }
-
-        result = AgentEvidenceRules(make_ports(
-            tokens=lambda: token,
-        )).agent_ran(
-            {"agent": "COMPILE", "statuses": ["OK"]},
-            state,
-        )
-
-        self.assertFalse(result.passed)
-        self.assertIn("令牌不属于当前任务卡", result.reason)
-
-    def test_legacy_non_compile_token_compatibility_is_unchanged(self):
-        token = {
-            "CODECHECK": {
-                "at": "2026-07-29 10:00:01",
-                "step": "verify_codecheck",
-                "status": "OK",
-                "head": "a" * 40,
-            }
-        }
-        state = {
-            "current": "verify_codecheck",
-            "agent_tasks": {
-                "CODECHECK": {"sha256": "existing-task"},
-            },
-        }
-
-        result = AgentEvidenceRules(make_ports(
-            tokens=lambda: token,
-        )).agent_ran(
-            {"agent": "CODECHECK", "statuses": ["OK"]},
-            state,
-        )
-
-        self.assertTrue(result.passed, result.reason)
+    def test_askuser_keeps_real_interaction_evidence(self):
+        rules = AgentEvidenceRules(make_ports(
+            askuser_tokens=lambda: {
+                "ASKUSER": {"at": "2026-07-29 10:01:00"}}))
+        self.assertTrue(rules.agent_ran(
+            {"agent": "ASKUSER"}, {"current": "grill"}).passed)
 
     def test_no_source_short_circuits_agent_requirement(self):
         rules = AgentEvidenceRules(make_ports(
@@ -174,31 +80,21 @@ class AgentEvidenceRuleTests(unittest.TestCase):
         self.assertTrue(rules.agent_or_no_source(
             {"agent": "COMPILE"}, {"current": "tw_compile"}).passed)
 
-    def test_review_snapshot_rejects_missing_entry_and_dirty_source(self):
+    def test_review_snapshot_safety_is_unchanged(self):
         rules = AgentEvidenceRules(make_ports())
         state = {"current": "tw_review", "step_heads": {}}
-        self.assertEqual(
-            (
-                False,
-                "缺少 tw_review 的检视入口 HEAD，无法确定用户看到的是哪版代码",
-            ),
-            tuple(rules.review_snapshot(
-                {"base_step": "tw_change"}, state)),
-        )
+        self.assertIn("缺少 tw_review 的检视入口 HEAD", rules.review_snapshot(
+            {"base_step": "tw_change"}, state).reason)
         state["step_heads"] = {
-            "tw_review": "a" * 40,
-            "tw_change": "b" * 40,
-        }
+            "tw_review": "a" * 40, "tw_change": "b" * 40}
         dirty = AgentEvidenceRules(make_ports(
             argv_output=lambda arguments: (
                 "b" * 40 if arguments[1] == "merge-base" else "commit"),
             blocking_dirty_source_paths=lambda _state: ["src/main.py"],
         ))
-        self.assertIn(
-            "用户检视期间源码/测试/构建文件又发生未提交变化",
-            dirty.review_snapshot(
-                {"base_step": "tw_change"}, state).reason,
-        )
+        self.assertIn("用户检视期间源码/测试/构建文件又发生未提交变化",
+                      dirty.review_snapshot(
+                          {"base_step": "tw_change"}, state).reason)
 
 
 if __name__ == "__main__":

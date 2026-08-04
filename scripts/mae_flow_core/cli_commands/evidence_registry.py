@@ -6,11 +6,32 @@ from .shared import (
     RISK_AGENT_LABELS, WorkflowEvidencePorts, WorkflowEvidenceRules,
     append_codecheck_event, build_evidence_registry, globmod, hashlib, os,
     read_bytes,
-    read_text, spec2code_artifact_path, spec2code_review_requires_rework,
+    read_text, STATE_PATH, spec2code_artifact_path, spec2code_review_requires_rework,
     spec2code_review_requires_human_decision, specengine, sys, time,
     validate_spec2code_review, EvidenceResult,
 )
 from .wiring import api
+from mae_flow_core.workflow.agent_observations import finished_observation
+
+
+def _finished_agent_observation(kind, step, since):
+    observed = finished_observation(STATE_PATH, kind, step, since)
+    if observed:
+        return observed
+    # Read-only compatibility for in-flight stable-v2 work.  Old Hook tokens
+    # are treated only as historical "returned" lifecycle facts; status,
+    # digest, task issuance, HEAD and source fingerprints are intentionally
+    # ignored.  New completions never create these tokens.
+    legacy = api._agent_token_data().get(kind, "")
+    at = legacy.get("at", "") if isinstance(legacy, dict) else legacy
+    legacy_step = legacy.get("step", "") if isinstance(legacy, dict) else ""
+    if at and at >= since and legacy_step in ("", step):
+        return {
+            "kind": kind, "step": step, "lifecycle": "returned",
+            "at": at, "legacy": True,
+        }
+    return None
+
 
 _AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
     moonlight=lambda state: api._moonlight(state),
@@ -18,12 +39,8 @@ _AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
     risk_acceptance=lambda kind, state: api._risk_acceptance(kind, state),
     script_path=lambda: sys.argv[0],
     risk_labels=RISK_AGENT_LABELS,
-    tokens=lambda: api._agent_token_data(),
-    rejections=lambda: api._agent_rejection_data(),
-    source_snapshot_since=lambda head, state: api._source_snapshot_since(
-        head, state),
-    source_changed_since=lambda head, state: api._source_changed_since(
-        head, state),
+    finished_observation=_finished_agent_observation,
+    askuser_tokens=lambda: api._agent_token_data(),
     changed_source_files=lambda state: api._changed_source_files(state),
     shell_output=lambda command: api.sh(command),
     argv_output=lambda arguments: api.argv_out(arguments),

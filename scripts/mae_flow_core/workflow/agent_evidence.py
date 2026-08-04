@@ -1,4 +1,4 @@
-"""Agent-token and review-snapshot Evidence rules."""
+"""Agent lifecycle and review-snapshot Evidence rules."""
 
 import os
 from dataclasses import dataclass
@@ -13,10 +13,8 @@ class AgentEvidencePorts:
     risk_acceptance: object
     script_path: object
     risk_labels: object
-    tokens: object
-    rejections: object
-    source_snapshot_since: object
-    source_changed_since: object
+    finished_observation: object
+    askuser_tokens: object
     changed_source_files: object
     shell_output: object
     argv_output: object
@@ -44,101 +42,12 @@ class AgentEvidenceRules:
             + " --reason \""
             + risk
             + "\" --message-id <messages输出的ID>；"
-            "它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。"
+            "它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。"
         )
 
     def _blocked(self, kind, expired, message):
         return EvidenceResult(
             False, message + " " + self._risk_option(kind, expired))
-
-    def _token_binding_rejection(self, state, kind, token):
-        token_step = token.get("step", "")
-        if token_step and token_step != state.get("current"):
-            return (
-                "%s 令牌属于步骤 %s，当前是 %s。每个步骤必须重新执行，"
-                "不能复用上一关同一秒签发的令牌。"
-                % (kind, token_step, state.get("current"))
-            )
-        task = (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
-        task_digest = str(task.get("sha256", "") or "")
-        task_issuance = str(task.get("issuance_id", "") or "")
-        if (
-                kind == "COMPILE"
-                and (
-                    task_digest
-                    and str(token.get("task_sha256", "") or "") != task_digest
-                    or task_issuance
-                    and str(
-                        token.get("task_issuance_id", "") or ""
-                    ) != task_issuance
-                )):
-            return (
-                "%s 令牌不属于当前任务卡。重新完成当前任务；"
-                "旧任务或未绑定任务卡的令牌不能复用。" % kind
-            )
-        return ""
-
-    def _token_status_rejection(self, spec, kind, token):
-        status = token.get("status", "")
-        wanted = (
-            spec.get("statuses")
-            or ([spec["status"]] if spec.get("status") else [])
-        )
-        if wanted and status not in wanted:
-            return (
-                "%s 子 agent 虽已收尾,但结果为 %s,本步只接受 %s。"
-                "FAIL/BLOCKED/NEEDS_INPUT 是有效上报,但不是质量通过证据;"
-                "处理报告中的问题后重启 agent。"
-                % (
-                    kind,
-                    status or "旧令牌未记录状态",
-                    "/".join(wanted),
-                )
-            )
-        return ""
-
-    def _token_source_rejection(self, state, kind, token):
-        head = token.get("head", "")
-        snapshot = token.get("source_snapshot")
-        if head and isinstance(snapshot, dict):
-            current = self.ports.source_snapshot_since(head, state)
-            if current != snapshot:
-                return (
-                    "%s 证据已过期:令牌签发后的未提交代码快照已变化。"
-                    "重新启动对应 agent 对当前工作区收尾；"
-                    "旧证据不能背书另一份 diff。" % kind
-                )
-        elif head:
-            changed, error = self.ports.source_changed_since(
-                head, state)
-            if error:
-                return (
-                    "%s 证据新鲜度无法核实(%s)。重新启动对应 agent"
-                    "(ASKUSER 则重新向用户提问)签发绑定当前代码状态的新令牌。"
-                    % (kind, error)
-                )
-            if changed:
-                more = "…" if len(changed) > 5 else ""
-                return (
-                    "%s 证据已过期:令牌签发后源码发生变更(%s%s)。"
-                    "变更若属本单成果先按规范 commit,然后重新启动对应 agent"
-                    "(ASKUSER 则重新向用户确认)对最新代码收尾——"
-                    "旧证据对新代码无效。"
-                    % (kind, "、".join(changed[:5]), more)
-                )
-        return ""
-
-    def _fresh_token_result(
-            self, spec, state, kind, token, accepted_why):
-        rejections = (
-            self._token_binding_rejection(state, kind, token),
-            self._token_status_rejection(spec, kind, token),
-            self._token_source_rejection(state, kind, token),
-        )
-        for reason in rejections:
-            if reason:
-                return self._blocked(kind, accepted_why, reason)
-        return EvidenceResult(True, "")
 
     def agent_ran(self, spec, state):
         kind = spec["agent"]
@@ -149,14 +58,12 @@ class AgentEvidenceRules:
             kind, state)
         if accepted:
             return EvidenceResult(True, "")
-        token = self.ports.tokens().get(kind, "")
-        timestamp = (
-            token.get("at", "") if isinstance(token, dict) else token)
-        if timestamp and timestamp >= entered:
-            value = token if isinstance(token, dict) else {}
-            return self._fresh_token_result(
-                spec, state, kind, value, accepted_why)
         if kind == "ASKUSER":
+            token = self.ports.askuser_tokens().get(kind, "")
+            timestamp = (
+                token.get("at", "") if isinstance(token, dict) else token)
+            if timestamp and timestamp >= entered:
+                return EvidenceResult(True, "")
             return self._blocked(
                 kind,
                 accepted_why,
@@ -166,32 +73,16 @@ class AgentEvidenceRules:
                 "自行改写标注/口头声称已确认均无效。"
                 % (timestamp or "无", entered),
             )
-        rejections = self.ports.rejections()
-        rejected = (
-            rejections.get(kind, {})
-            or rejections.get("SUBAGENT", {})
-        )
-        if (
-            rejected.get("at", "") >= entered
-            and rejected.get("step") in ("", state.get("current"))
-        ):
-            return self._blocked(
-                kind,
-                accepted_why,
-                "%s 子 agent 已运行但未签发令牌。真实拒签原因: %s "
-                "如果只是最终报告写法不合规且已有执行凭证，"
-                "保持源码不变后重答即可复用；只有缺少真实执行证据"
-                "或源码又变化时才需要重跑。"
-                % (kind, rejected.get("reason", "未知")),
-            )
+        observation = self.ports.finished_observation(
+            kind, state.get("current", ""), entered)
+        if observation:
+            return EvidenceResult(True, "")
         return self._blocked(
             kind,
             accepted_why,
-            "本步内未检测到 %s 子 agent 的合法收尾"
-            "(最近令牌: %s;本步始于 %s)。请启动对应专项 agent，"
-            "并让它在最终回复中给出唯一的 XXX_RESULT: 标记。"
-            "主会话代写或口头汇报不算执行证据。"
-            % (kind, timestamp or "无", entered),
+            "本步内未检测到 %s 子 Agent 已返回（本步始于 %s）。"
+            "请启动对应专项 Agent；返回内容可以使用任意自然语言格式。"
+            % (kind, entered),
         )
 
     def agent_or_no_source(self, spec, state):

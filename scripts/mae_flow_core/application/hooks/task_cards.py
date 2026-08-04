@@ -1,8 +1,6 @@
 """Task-card freshness and source-scope use cases for Hook Agents."""
 
 from dataclasses import dataclass
-import hashlib
-import re
 from typing import Callable
 
 from mae_flow_core.application.hooks.models import accepted, rejected
@@ -29,76 +27,14 @@ def _task_for(state, kind):
     return (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
 
 
-def _card_digest(ports, task):
-    text = ports.read_text(task["path"])
-    body = text.rsplit("TASK_CARD_SHA256:", 1)[0]
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
-
-
-def _completion_head_rejection(kind, task, current, head):
-    if current == head:
-        return ""
-    if task.get("standalone"):
-        return (
-            "独立任务禁止自动 commit，但当前 HEAD 已变化。"
-            "保留代码后结束本任务并由用户自行决定是否提交。"
-        )
-    if task.get("precommit_review"):
-        return (
-            "当前检查点要求用户先检视未提交 diff；子 Agent 禁止自动 commit。"
-            "保留工作区代码并重新按真实结果收尾。"
-        )
-    if kind == "COMPILE":
-        return (
-            "COMPILE 任务期间 HEAD 已变化，说明子 Agent 执行了或绕过门禁完成了"
-            " git commit。compile-agent 禁止 git commit、git push；"
-            "保留直接修复为未提交改动并重新生成任务卡。"
-        )
-    return ""
-
-
 def verify_completion_task(kind, report, state, ports):
-    """Verify the card returned by a completed contract Agent."""
+    """Compatibility helper: validate task identity, never return wording."""
     task = _task_for(state, kind)
     if not task:
         return rejected(
             "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。")
     if task.get("step") != state.get("current"):
         return rejected("任务卡属于旧步骤,禁止拿旧配置执行当前任务。", task)
-    match = re.search(
-        r"^TASK_CARD_SHA256:\s*([0-9a-f]{64})\s*$",
-        report,
-        re.M | re.I,
-    )
-    if (
-            not match
-            or match.group(1).lower()
-            != str(task.get("sha256", "")).lower()):
-        return rejected(
-            "最终报告缺少当前任务卡的 TASK_CARD_SHA256,说明启动信息不完整。",
-            task,
-        )
-    try:
-        actual = _card_digest(ports, task)
-    except Exception as exc:
-        return rejected("任务卡不可读:" + str(exc), task)
-    if actual != task.get("sha256"):
-        return rejected(
-            "任务卡内容被修改过,必须重新执行 agent-task 生成。", task)
-    head = task.get("head", "")
-    if not re.fullmatch(r"[0-9a-f]{7,64}", head or ""):
-        return rejected("任务卡缺少可验证的基点 HEAD。", task)
-    current = ports.current_head()
-    if ports.merge_base(head, current) != head and head != current:
-        return rejected(
-            "任务卡基点已不在当前提交历史中(amend/rebase/切分支)，"
-            "请重新生成任务卡。",
-            task,
-        )
-    head_rejection = _completion_head_rejection(
-        kind, task, current, head)
-    if head_rejection:
-        return rejected(head_rejection, task)
     return accepted(task)
 
 
@@ -130,7 +66,7 @@ def _dispatch_refresh_remedy(kind, script_path):
 
 
 def verify_dispatch_task(kind, state, ports):
-    """Reject stale Agent work before the expensive subagent is launched."""
+    """Require the current task card without fingerprint freshness gates."""
     task = _task_for(state, kind)
     script_path = ports.script_path()
     if not task:
@@ -146,33 +82,7 @@ def verify_dispatch_task(kind, state, ports):
             ),
             task,
         )
-    try:
-        actual = _card_digest(ports, task)
-    except Exception as exc:
-        return rejected(
-            "[mae-flow] 派发前拦截:%s 任务卡不可读(%s)。"
-            "先重新生成任务卡，避免整只 agent 跑完才发现输入失效。"
-            % (kind, exc),
-            task,
-        )
-    if actual != task.get("sha256"):
-        return rejected(
-            "[mae-flow] 派发前拦截:%s 任务卡内容已变化。"
-            "先重新生成任务卡；旧卡不能代表当前任务。" % kind,
-            task,
-        )
-    head = task.get("head", "")
-    current = ports.current_head()
-    if head and current and head != current:
-        remedy = _dispatch_refresh_remedy(kind, script_path)
-        return rejected(
-            "[mae-flow] 派发前拦截:%s 任务卡签发于 HEAD %s,当前 HEAD %s"
-            "——源码已变化,旧卡描述的不是现在的代码,跑完也拿不到令牌。"
-            "先重新执行 %s 再派发。"
-            % (kind, head[:10], current[:10], remedy),
-            task,
-        )
-    return _verify_dispatch_source_freshness(kind, state, task, head, ports)
+    return accepted(task)
 
 
 def _verify_dispatch_source_freshness(kind, state, task, head, ports):

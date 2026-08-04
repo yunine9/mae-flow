@@ -63,6 +63,11 @@ class StoryContractTests(unittest.TestCase):
         self.assertIn(".mae-flow-work/<单号>/story.md", generator)
 
     def test_story_reviewer_runs_once_without_digest_reentry(self):
+        flow = json.loads(read("flow/flow.json"))
+        evidence = flow["steps"]["story"]["evidence"]
+        self.assertIn("REVIEWER", [
+            item.get("agent") for item in evidence
+            if item.get("type") == "agent_ran"])
         reviewer = read("agents/craft-reviewer-agent.md")
         self.assertIn("Story 设计检视", reviewer)
         self.assertIn("只执行一次", reviewer)

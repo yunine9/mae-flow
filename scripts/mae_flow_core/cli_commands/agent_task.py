@@ -8,7 +8,7 @@ from mae_flow_core.quality.spec2code_artifacts import (
 from mae_flow_core.orchestration.work_package import ensure_work_package
 
 from .shared import (
-    BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, append_codecheck_event,
+    BUILD_DESCRIPTOR_EXTS, SOURCE_FILENAMES, STATE_PATH, append_codecheck_event,
     codecheck_log_path, globmod, os, quality_task_card_documents,
     quality_task_card_use_cases, quality_task_cards, read_text, time, write_text,
     sys,
@@ -139,6 +139,10 @@ def _approved_blueprint(state, kind):
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
+    from mae_flow_core.workflow.quality_executions import (
+        invalidate_quality_executions,
+    )
+    invalidate_quality_executions(STATE_PATH, kind, sid)
     document = context["document"]
     api._drop_agent_token(kind, strict=True)
     artifact = quality_task_card_use_cases.store_task_card(

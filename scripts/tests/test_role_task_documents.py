@@ -60,18 +60,16 @@ diff --git a/src/service.py b/src/service.py
 
 class RoleTaskDocumentTests(unittest.TestCase):
     def test_each_role_has_scoped_inputs_and_output_contract(self):
-        expected = {
-            "test-design": "TEST_DESIGN_RESULT:",
-            "task-analysis": "TASK_ANALYSIS_RESULT:",
-            "craft-plan": "CRAFT_REVIEW_RESULT:",
-            "cp-implement": "CP_IMPLEMENT_RESULT:",
-            "craft-code": "CRAFT_REVIEW_RESULT:",
-        }
-        for role, marker in expected.items():
+        roles = (
+            "test-design", "task-analysis", "craft-plan", "cp-implement",
+            "craft-code",
+        )
+        for role in roles:
             with self.subTest(role=role):
                 body = build(role)
-                self.assertIn(marker, body)
-                self.assertIn("TASK_CARD_SHA256", body)
+                self.assertIn("任意自然语言格式", body)
+                self.assertNotIn("_RESULT:", body)
+                self.assertNotIn("TASK_CARD_SHA256", body)
                 self.assertNotIn("聊天记录", body)
 
     def test_implementer_receives_comment_standard_and_allowed_files(self):
@@ -86,9 +84,9 @@ class RoleTaskDocumentTests(unittest.TestCase):
     def test_code_reviewer_receives_diff_but_no_write_permission(self):
         body = build("craft-code")
         self.assertIn("diff --git a/src/service.py", body)
-        self.assertIn("REVIEW_TARGET_SHA256: " + "d" * 64, body)
-        self.assertIn("TASK_CARD_SHA256", body)
-        self.assertIn("CRAFT_REVIEW_RESULT: CLEAN|FINDINGS", body)
+        self.assertNotIn("REVIEW_TARGET_SHA256", body)
+        self.assertNotIn("TASK_CARD_SHA256", body)
+        self.assertIn("返回文字格式不作为门禁", body)
         self.assertIn("- 处置：待用户裁决", body)
         self.assertIn("- 状态：待裁决", body)
         self.assertIn("## Finding F1", body)

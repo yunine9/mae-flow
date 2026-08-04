@@ -61,3 +61,18 @@ def successful_quality_execution(state_path, kind, step, input_snapshot):
                 and item.get("input_snapshot") == input_snapshot):
             return dict(item)
     return None
+
+
+def invalidate_quality_executions(state_path, kind, step):
+    """A newly issued task requires a new real execution, without hashes."""
+    def mutate(data):
+        records = data.setdefault("executions", [])
+        records[:] = [
+            item for item in records
+            if not (item.get("kind") == kind and item.get("step") == step)
+        ]
+        return data
+
+    update_json(
+        quality_execution_path(state_path), mutate,
+        default={"executions": []}, recover_corrupt=True)

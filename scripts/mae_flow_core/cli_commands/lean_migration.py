@@ -175,6 +175,13 @@ def handle_early_state_command(args):
     if not _is_lean(document):
         if args.cmd == "current":
             return False
+        if not (isinstance(document, dict)
+                and document.get("schema_version") == 2
+                and isinstance(document.get("current"), str)
+                and document.get("current")):
+            print("[mae-flow] 恢复失败: 不支持的状态格式；原文件保持不变。",
+                  file=sys.stderr)
+            raise SystemExit(2)
         print("[mae-flow] 当前已经是稳定流程状态，无需迁移。")
         return True
     try:

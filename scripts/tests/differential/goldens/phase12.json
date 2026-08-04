@@ -190,17 +190,25 @@
   },
   "compile_task_card": {
     "files": {
+      ".mae-flow-work/REQ-DIFF/.ticket-id": {
+        "sha256": "4120b0d5e9aa7efd0d913ec8288eb3a264532b908d01b13e28c6def5116ed0ff",
+        "size": 8
+      },
       ".mae-flow-work/agent-tasks/build-compile.md": {
-        "sha256": "1da51aba6f3971dcc24b57f84520a270e38f2613640f4d010bdb22fb94f7b5bf",
-        "size": 1929
+        "sha256": "061391913fd39c909cc33201b4a956dfe55336c15192a501428e32c5157ae98a",
+        "size": 1846
       },
       ".mae-flow-work/lightcheck/latest.md": {
         "sha256": "2acf44195416da1a86b78444d20abead0e7f6456d0597bbe1fd596d8799c588b",
         "size": 764
       },
       ".mae-flow.json": {
-        "sha256": "86aec06ef3ff72af9ba9654644f0e0ab47234cdba5a294b55b85eaa4d22cd6c9",
-        "size": 1501
+        "sha256": "e1ed24efa999d2472b93528a8fc318d38b5d4b76af6d8b2306cae8ddec3ad2c4",
+        "size": 1368
+      },
+      ".mae-flow.json.quality-executions": {
+        "sha256": "9ab68835c114eb5a53f4ee76d51513e41a52fdfffa7be55d86dd54caef99fc7f",
+        "size": 23
       },
       ".mae-flow.json.tokens": {
         "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
@@ -218,7 +226,7 @@
     "git": {
       "branch": "main",
       "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
-      "status": "?? .mae-flow-work/agent-tasks/build-compile.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json\n?? .mae-flow.json.tokens"
+      "status": "?? .mae-flow-work/REQ-DIFF/.ticket-id\n?? .mae-flow-work/agent-tasks/build-compile.md\n?? .mae-flow-work/lightcheck/latest.md\n?? .mae-flow.json\n?? .mae-flow.json.quality-executions\n?? .mae-flow.json.tokens"
     },
     "returncode": 0,
     "state": {
@@ -233,7 +241,6 @@
             ],
             "head": "506fb3c011448f3d6f5f7fb9ca3a5f6eee8b9564",
             "initial_compile_net": 0,
-            "issuance_id": "<TASK_ISSUANCE_ID>",
             "lightcheck": {
               "findings": 1,
               "report_path": "<PROJECT>/.mae-flow-work/lightcheck/latest.md",
@@ -242,7 +249,6 @@
             "path": "<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md",
             "precommit_review": false,
             "scope": "",
-            "sha256": "<TASK_CARD_SHA256>",
             "source_snapshot": {},
             "step": "build",
             "task_files": [
@@ -273,10 +279,13 @@
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
       },
+      ".mae-flow.json.quality-executions": {
+        "executions": []
+      },
       ".mae-flow.json.tokens": {}
     },
     "stderr": "[mae-flow] ⚠ 轻量编码预检发现 1 个本轮新触发问题（建议修复，不阻断）:\n  MF-MAGIC-NUMBER src/main.py:2 — 数值字面量 42 直接用于业务逻辑；请改用命名常量或同行说明意图 (1 > 0)\n  人类可读报告: <PROJECT>/.mae-flow-work/lightcheck/latest.md\n  请按项目 formatter/附近同类代码修正后再提交；最多修复并复查两轮，仍不确定则留给正式 CodeCheck，禁止扩大范围。\n",
-    "stdout": "[mae-flow] COMPILE 任务卡已生成: <PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\n启动对应专项 agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\"；最终报告必须原样带 TASK_CARD_SHA256: <TASK_CARD_SHA256>\n"
+    "stdout": "[mae-flow] COMPILE 任务卡已生成: <PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\n启动对应专项 Agent 时只传这一句:\n读取并严格执行任务卡 \"<PROJECT>/.mae-flow-work/agent-tasks/build-compile.md\"；完成后用自然语言报告实际执行、结果和阻塞。\n"
   },
   "corrupt_exit_repair": {
     "files": {
@@ -456,7 +465,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本步内未检测到 COMPILE 子 agent 的合法收尾(最近令牌: 无;本步始于 2026-07-29 10:00:00)。请启动对应专项 agent，并让它在最终回复中给出唯一的 XXX_RESULT: 标记。主会话代写或口头汇报不算执行证据。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：没有可验证的编译成功证据，代码可能无法构建。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk compile --reason \"没有可验证的编译成功证据，代码可能无法构建\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 本步内未检测到 COMPILE 子 Agent 已返回（本步始于 2026-07-29 10:00:00）。请启动对应专项 Agent；返回内容可以使用任意自然语言格式。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：没有可验证的编译成功证据，代码可能无法构建。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk compile --reason \"没有可验证的编译成功证据，代码可能无法构建\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "evidence_archive_rejection": {
@@ -781,7 +790,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 令牌，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): docs/review/REVIEW-REQ-DIFF.md\n  - 未找到文件: docs/review/REVIEW-REQ-DIFF.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "evidence_review_rejection": {
@@ -1274,7 +1283,7 @@
       ".mae-flow.json.failures": {}
     },
     "stderr": "",
-    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. 只有 `COMPILE_RESULT: OK` 才能 done。BLOCKED/FAIL 是诚实报告但不是通过证据：展示根因，按报告处理后重启新实例。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 openspec/specs/ 真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. Agent 返回后读取真实同步编译退出状态；失败时展示根因并修复，输入未变化时禁止重复编译。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "ownership_foreign_openspec": {
     "files": {
@@ -1372,10 +1381,6 @@
         "sha256": "7718299a5d9eab908cfbf432f30b9b428c364cc92501cca3712e978f5e1f78a5",
         "size": 297
       },
-      ".mae-flow.json.agent-rejections": {
-        "sha256": "0e303b672ff2801b0d554f29ad7bcb833e3ae53477672ffc3d3227173e1fb84e",
-        "size": 251
-      },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
         "size": 23
@@ -1384,9 +1389,9 @@
     "git": {
       "branch": "main",
       "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
-      "status": "?? .mae-flow-work/agent-compile.jsonl\n?? .mae-flow.json\n?? .mae-flow.json.agent-rejections"
+      "status": "?? .mae-flow-work/agent-compile.jsonl\n?? .mae-flow.json"
     },
-    "returncode": 2,
+    "returncode": 0,
     "state": {
       ".mae-flow.json": {
         "choices": {
@@ -1403,18 +1408,9 @@
         "schema_version": 2,
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
-      },
-      ".mae-flow.json.agent-rejections": {
-        "COMPILE": {
-          "at": "2026-07-29 10:00:00",
-          "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
-          "reason": "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。",
-          "step": "build",
-          "task_sha256": ""
-        }
       }
     },
-    "stderr": "[mae-flow] COMPILE 契约违规:未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。 请按 agent 定义的 Return format 重新真实收尾。\n",
+    "stderr": "",
     "stdout": ""
   },
   "terminal_pretooluse_bypass": {
@@ -1506,6 +1502,6 @@
     "returncode": 0,
     "state": {},
     "stderr": "",
-    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill_ask 需求澄清询问             [可选环节:需求质询(流程内询问决定)、用户确认] (无硬证据)\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,clean_paths,content_free,glob\n   open 提案与规格                   证据:agent_ran,clean_paths,glob,spec_field,spec_validate\n   design 方案设计                  证据:clean_paths,spec_field,spec_validate\n   test_blueprint UT 行为蓝图检视     [用户确认] 证据:spec2code_artifact\n   story_ask STORY 生成询问         [可选环节:STORY(流程内询问决定)、用户确认] (无硬证据)\n   story 生成 STORY               [随「STORY」询问可选] 证据:agent_ran,content_free,glob\n   build_plan 编码计划检视            [用户确认] 证据:spec2code_artifact,spec2code_plan_review,spec_field\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:spec_field,spec_validate\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:spec_field,spec_validate\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,clean_paths,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(独立 CODE Reviewer/需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
+    "stdout": "\n═══ 完整开发(full) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   grill 需求澄清(逐题拍板)             [随「需求质询」询问可选] 证据:agent_ran,clean_paths,content_free,glob\n   open 本地 Spec 确认              [用户确认] 证据:glob\n   story Story 生成与一次设计检视        [随「STORY」询问可选、用户确认] 证据:agent_ran,content_free,glob\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 已定位问题修复(hotfix) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   hf_open 已定位问题修复 — 确认修改范围     [用户确认] 证据:spec_field,spec_validate\n   build_pace 编码前开发节奏确认         [用户确认] 证据:checkpoint_plan\n   build 编码实现                   证据:agent_or_no_source,checkpoint_plan_complete,commit_tagged_after_entry,tasks_checked,tier_scope\n   build_review 编码完成 — 用户检视代码   [用户确认] 证据:review_snapshot\n   verify_ponytail 验证 1/4 — 代码精简(先删) (无硬证据)\n   verify_codecheck 验证 2/4 — 规范检查(代码定稿) 证据:review_codecheck\n   verify_ut 验证 3/4 — 补充单元测试    证据:agent_or_no_source\n   verify_comet 验证 4/4 — 规格符合性  证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 局部修改(tweak) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   tw_open 局部修改 — 确认修改范围        [用户确认] 证据:spec_field,spec_validate\n   tw_pace 局部修改 — 开发节奏确认        [用户确认] 证据:checkpoint_plan\n   tw_change 局部修改 — 修改代码        证据:checkpoint_plan_complete,commit_tagged_after_entry,tier_scope\n   tw_compile 小改 — 编译验证         证据:agent_or_no_source\n   tw_review 小改 — 用户检视代码        [用户确认] 证据:review_snapshot\n   tw_codecheck 小改 — 规范检查       证据:review_codecheck\n   tw_ut 小改 — 单元测试              证据:agent_or_no_source\n   tw_verify 小改 — 对照需求检查        证据:spec_field\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   archive_confirm 规格定稿确认(不可逆)  [用户确认] 证据:agent_ran\n   archive 规格定稿                 证据:archive_paths_clean,glob,glob_absent,spec_field\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n═══ 处理评审意见(review) ═══\n   config_confirm 配置确认          [用户确认] (无硬证据)\n   workflow_select 交付方式选择       [用户确认] (无硬证据)\n   code_reviewer_ask 独立 CODE Reviewer 选择 [可选环节:独立 CODE Reviewer(流程内询问决定)、用户确认] (无硬证据)\n   branch_create 创建工作分支         证据:branch_ok\n   rf_triage 处理评审意见 — 意见裁决      证据:agent_ran,clean_paths,content_free,glob\n   rf_pace 处理评审意见 — 开发节奏确认      [用户确认] 证据:checkpoint_plan\n   rf_fix 处理评审意见 — 修改代码         证据:checkpoint_plan_complete,review_fix_committed\n   rf_compile 处理评审意见 — 编译验证     证据:agent_or_no_source\n   rf_review 处理评审意见 — 用户检视代码    [用户确认] 证据:review_snapshot\n   rf_codecheck 处理评审意见 — 规范检查   证据:review_codecheck\n   rf_ut 处理评审意见 — 增量单元测试        证据:agent_or_no_source\n   delivery_review 最终代码增量检视     证据:final_review_clear\n   push 推送分支                    证据:pushed\n   end 交付完成                     (无硬证据)\n\n可选环节(独立 CODE Reviewer/需求质询/STORY)由流程内询问逐单决定;其余步骤为流程完整性的一部分,不提供配置级裁剪。\n"
   }
 }

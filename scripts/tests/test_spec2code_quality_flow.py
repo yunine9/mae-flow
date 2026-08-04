@@ -286,56 +286,20 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
             json.dumps(rows, ensure_ascii=False),
         )
 
-    def test_done_rejects_old_answer_after_blueprint_reregistration(self):
+    def test_retired_blueprint_entry_resumes_directly_at_story(self):
         path = ".mae-flow-work/test-blueprint-REQ-1.md"
         self.write(path, BLUEPRINT)
         self.register("blueprint", path)
-        self.present("blueprint")
-        old_answer = {
-            "id": "answer-a",
-            "step": "test_blueprint",
-            "at": "2026-07-30 15:00:00",
-            "text": "UT 行为蓝图已确认，继续",
-        }
-        self.user_messages([old_answer])
-
-        self.write(path, BLUEPRINT + "\n")
-        self.register("blueprint", path)
         args = types.SimpleNamespace(
-            choice="continue",
+            choice=None,
             ack=None,
             set=[],
         )
-        with self.assertRaises(SystemExit) as stale_receipt:
-            with contextlib.redirect_stderr(io.StringIO()):
-                mf.cmd_done(FLOW, self.state, args)
-        self.assertEqual(2, stale_receipt.exception.code)
-
-        self.present("blueprint")
-        with self.assertRaises(SystemExit) as stale_answer:
-            with contextlib.redirect_stderr(io.StringIO()):
-                mf.cmd_done(FLOW, self.state, args)
-        self.assertEqual(2, stale_answer.exception.code)
-
-        self.user_messages([
-            old_answer,
-            {
-                "id": "answer-b",
-                "step": "test_blueprint",
-                "at": "2026-07-30 15:01:00",
-                "text": "UT 行为蓝图已确认，继续",
-            },
-        ])
         with contextlib.redirect_stdout(io.StringIO()):
             mf.cmd_done(FLOW, self.state, args)
-        self.assertEqual("story_ask", self.state["current"])
-        blueprint = self.state["spec2code"]["blueprint"]
-        self.assertEqual(
-            blueprint["revision"],
-            blueprint["confirmed_revision"],
-        )
+        self.assertEqual("story", self.state["current"])
 
-    def test_real_cli_orders_roadmap_task_analysis_plan_and_reviewer(self):
+    def test_retired_role_tasks_are_context_only_without_return_digest(self):
         test_card, _ = self.role("test-design")
         self.assertIn("docs/requirement.md", test_card)
         self.assertIn("survey-REQ-1.md", test_card)
@@ -367,94 +331,17 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
         self.state["spec"]["plan"] = plan_path
         review_card, review_task = self.role("craft-plan")
         plan_sha = self.state["spec2code"]["plan"]["sha256"]
-        self.assertIn("REVIEW_TARGET_SHA256: " + plan_sha, review_card)
-        self.assertIn(
-            "TASK_CARD_SHA256: " + review_task["sha256"],
-            review_card,
-        )
+        self.assertNotIn("TASK_CARD_SHA256", review_card)
+        self.assertNotIn("CRAFT_REVIEW_RESULT", review_card)
         self.assertEqual(
             plan_sha,
             review_task["review_target_sha256"],
         )
-        failures = mf.check_evidence(
-            FLOW["steps"]["build_plan"], self.state)
-        self.assertTrue(any(
-            "PLAN Review" in failure for failure in failures))
-        review_path = ".mae-flow-work/reviews/REQ-1/CP1-plan.md"
-        self.write(review_path, review(
-            findings=0,
-            result="CLEAN",
-            mode="PLAN",
-            task_card_sha=review_task["sha256"],
-            target_sha=plan_sha,
-        ))
-        self.assertEqual(
-            [],
-            mf.check_evidence(
-                FLOW["steps"]["build_plan"], self.state),
-        )
-        self.present("plan")
-        receipt = self.state["spec2code"][
-            "confirmation_receipts"]["build_plan"]
-        self.assertEqual(
-            review_path,
-            receipt["review_path"],
-        )
-        self.assertTrue(receipt["review_sha256"])
-        self.write(review_path, review(
-            findings=1,
-            disposition="人工裁决",
-            status="已解决",
-            mode="PLAN",
-            task_card_sha=review_task["sha256"],
-            target_sha=plan_sha,
-        ))
-        self.state["moonlight"] = {"enabled": True}
-        failures = mf.check_evidence(
-            FLOW["steps"]["build_plan"], self.state)
-        self.assertTrue(any(
-            "月光宝盒不得代替用户拍板" in failure
-            for failure in failures
-        ))
-        self.state.pop("moonlight")
-        self.write(review_path, review(
-            findings=0,
-            result="CLEAN",
-            mode="PLAN",
-            task_card_sha=review_task["sha256"],
-            target_sha=plan_sha,
-        ))
-        self.write(plan_path, PLAN + "\n")
-        self.register("plan", plan_path)
-        self.assertEqual(
-            "",
-            mf._role_task_sha(
-                self.state, "craft-plan", "CP1"),
-        )
-
-        self.write("src/service.py", "VALUE = 2\n")
-        subprocess.run(
-            ["git", "add", "src/service.py"], check=True)
-        subprocess.run(
-            ["git", "commit", "-qm", "[REQ-1][feat]implement"],
-            check=True,
-        )
-        self.state["current"] = "verify_ut"
+        self.state["current"] = "build_plan"
         with contextlib.redirect_stdout(io.StringIO()):
-            mf.cmd_agent_task(
-                FLOW,
-                self.state,
-                types.SimpleNamespace(
-                    kind="ut",
-                    scope=None,
-                    checkpoint=None,
-                ),
-            )
-        ut_task = self.state["agent_tasks"]["UT"]
-        with open(ut_task["path"], encoding="utf-8") as stream:
-            ut_card = stream.read()
-        self.assertIn("已确认 UT 行为蓝图", ut_card)
-        self.assertIn("SC-1", ut_card)
+            mf.cmd_done(FLOW, self.state, types.SimpleNamespace(
+                choice=None, ack=None, set=[]))
+        self.assertEqual("build", self.state["current"])
 
 
 if __name__ == "__main__":

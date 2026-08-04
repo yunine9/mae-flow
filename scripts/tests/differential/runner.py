@@ -26,6 +26,11 @@ DEFAULT_GOLDENS = os.path.join(
 def _capture_files(root, replacements):
     result = {}
     for current, dirs, files in os.walk(root):
+        relative_directory = os.path.relpath(current, root).replace("\\", "/")
+        if relative_directory in {
+                ".mae-flow-work/plugin-resources", ".mae-flow-work/bin"}:
+            dirs[:] = []
+            continue
         dirs[:] = sorted(
             name for name in dirs
             if name not in {".git", "__pycache__"})
@@ -46,6 +51,18 @@ def _capture_files(root, replacements):
                 "size": os.path.getsize(absolute),
             }
     return result
+
+
+def _normalized_git_status(root):
+    text = _git(
+        root, "-c", "core.quotepath=false", "status", "--porcelain",
+        "--untracked-files=all")
+    return "\n".join(
+        line for line in text.splitlines()
+        if not any(marker in line for marker in (
+            ".mae-flow-work/plugin-resources/",
+            ".mae-flow-work/bin/mae-flow.py",
+        )))
 
 
 def _read_states(root):
@@ -164,14 +181,7 @@ def run_scenario(implementation_root, scenario_name):
             git={
                 "branch": _git(project, "branch", "--show-current"),
                 "head": _git(project, "rev-parse", "--verify", "HEAD"),
-                "status": _git(
-                    project,
-                    "-c",
-                    "core.quotepath=false",
-                    "status",
-                    "--porcelain",
-                    "--untracked-files=all",
-                ),
+                "status": _normalized_git_status(project),
             },
         )
         return Snapshot.from_dict(

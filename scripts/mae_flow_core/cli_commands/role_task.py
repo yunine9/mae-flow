@@ -325,6 +325,5 @@ def cmd_role_task(_flow, state, args):
     print("[mae-flow] %s 角色任务卡已生成: %s" % (role, artifact.path))
     print(
         '启动新鲜角色 Agent 时只传：读取并严格执行任务卡 "%s"；'
-        "最终报告原样带 TASK_CARD_SHA256: %s"
-        % (artifact.path, artifact.digest)
+        "返回内容可以使用任意自然语言格式。" % artifact.path
     )

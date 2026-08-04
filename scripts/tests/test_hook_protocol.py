@@ -81,6 +81,14 @@ class HookProtocolTests(unittest.TestCase):
             self.assertIn(repr(entry), content)
             self.assertNotIn("CLAUDE_PLUGIN_ROOT", content)
 
+    def test_hook_manifest_is_codeagent_only_and_observes_agent_tool(self):
+        with open(os.path.join(ROOT, "hooks", "hooks.json"),
+                  encoding="utf-8") as stream:
+            content = stream.read()
+        self.assertIn("CODEAGENT3_PLUGIN_ROOT", content)
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT", content)
+        self.assertIn("AskUserQuestion|Task|Agent", content)
+
     def test_unexpected_top_level_exception_fails_open(self):
         with mock.patch.object(
                 self.dispatch, "read_input", side_effect=RuntimeError("boom")):

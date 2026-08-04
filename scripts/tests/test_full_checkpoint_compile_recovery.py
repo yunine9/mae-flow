@@ -19,6 +19,12 @@ HOOK = os.path.join(ROOT, "hooks", "dispatch.py")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from mae_flow_core import cli_runtime as mf  # noqa: E402
+from mae_flow_core.workflow.agent_observations import (  # noqa: E402
+    record_agent_finished, record_agent_started,
+)
+from mae_flow_core.workflow.quality_executions import (  # noqa: E402
+    quality_input_snapshot, record_quality_execution,
+)
 
 
 with open(
@@ -123,67 +129,19 @@ class FullCheckpointCompileRecoveryTests(unittest.TestCase):
         self.task = mf.load_state()["agent_tasks"]["COMPILE"]
         self.assertTrue(self.task["precommit_review"])
 
-    def _write_transcript(self):
-        path = os.path.join(
-            self.repo, ".mae-flow-work", "compile-transcript.jsonl")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        rows = [
-            {
-                "type": "assistant",
-                "message": {
-                    "role": "assistant",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": "build-call",
-                        "name": "Skill",
-                        "input": {"skill": "build-fix"},
-                    }],
-                },
-            },
-            {
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": "build-call",
-                        "is_error": False,
-                        "content": "opaque internal result",
-                    }],
-                },
-            },
-            {
-                "type": "assistant",
-                "message": {
-                    "role": "assistant",
-                    "content": (
-                        "COMPILE_RESULT: OK\n"
-                        "TASK_CARD_SHA256: " + self.task["sha256"]
-                    ),
-                },
-            },
-        ]
-        with open(path, "w", encoding="utf-8", newline="\n") as stream:
-            for row in rows:
-                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-        return path
-
-    def _run_hook(self):
-        payload = json.dumps({
-            "cwd": self.repo,
-            "agent_transcript_path": self._write_transcript(),
-        }, ensure_ascii=False) + "\n"
-        env = dict(os.environ)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        return subprocess.run(
-            [sys.executable, HOOK, "subagentstop"],
-            cwd=self.repo,
-            input=payload,
-            text=True,
-            capture_output=True,
-            env=env,
-            timeout=20,
-        )
+    def _record_success(self):
+        state = mf.load_state()
+        invocation = "compile-run"
+        record_agent_started(
+            mf.STATE_PATH, "COMPILE", "build", invocation,
+            "9999-12-31 23:59:57")
+        record_agent_finished(
+            mf.STATE_PATH, invocation, "returned",
+            "9999-12-31 23:59:58", "任意自然语言返回")
+        record_quality_execution(
+            mf.STATE_PATH, "COMPILE", "build", invocation, "build-fix",
+            True, quality_input_snapshot(state, "COMPILE", "build"),
+            "9999-12-31 23:59:58")
 
     def _ready(self):
         state = mf.load_state()
@@ -216,13 +174,10 @@ class FullCheckpointCompileRecoveryTests(unittest.TestCase):
                 ),
             )
 
-    def test_minimal_build_fix_report_issues_token_and_reaches_review(self):
-        hook = self._run_hook()
-        self.assertEqual(0, hook.returncode, hook.stdout + hook.stderr)
+    def test_lifecycle_and_real_execution_reach_review_without_token(self):
+        self._record_success()
         with open(mf.STATE_PATH + ".tokens", encoding="utf-8") as stream:
-            token = json.load(stream)["COMPILE"]
-        self.assertEqual("OK", token["status"])
-        self.assertIn("src/main.cpp", token["source_snapshot"])
+            self.assertNotIn("COMPILE", json.load(stream))
 
         state = self._ready()
 
@@ -230,10 +185,10 @@ class FullCheckpointCompileRecoveryTests(unittest.TestCase):
         self.assertEqual("review_pending", item["status"])
         self.assertEqual(self.base, git(self.repo, "rev-parse", "HEAD"))
 
-    def test_compile_token_rejects_a_later_source_edit(self):
-        hook = self._run_hook()
-        self.assertEqual(0, hook.returncode, hook.stdout + hook.stderr)
+    def test_reissued_compile_task_requires_a_new_real_execution(self):
+        self._record_success()
         self._write_source("int value = 3;\n")
+        self._issue_compile_task()
 
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as rejected:

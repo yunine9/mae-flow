@@ -244,7 +244,7 @@ class ConfirmationReceiptTests(unittest.TestCase):
         self.assertIn("build", why)
         self.assertIn("verify_ut", why)
 
-    def test_binary_review_accepts_natural_positive_answer_after_receipt(self):
+    def test_retired_build_plan_has_no_second_user_confirmation(self):
         temp, root = self.make_repo()
         self.addCleanup(temp.cleanup)
         old_cwd = os.getcwd()
@@ -276,11 +276,11 @@ class ConfirmationReceiptTests(unittest.TestCase):
                 encoding="utf-8") as stream:
             step = json.load(stream)["steps"]["build_plan"]
 
-        ok, why = mf._choice_verified(step, state, "continue", [])
+        self.assertNotIn("user_ack", step)
+        self.assertNotIn("choice_key", step)
+        self.assertEqual("build_pace", step["next"])
 
-        self.assertTrue(ok, why)
-
-    def test_binary_review_maps_revision_and_rejects_ambiguous_answers(self):
+    def test_retired_build_plan_cannot_consume_a_user_choice(self):
         temp, root = self.make_repo()
         self.addCleanup(temp.cleanup)
         old_cwd = os.getcwd()
@@ -299,12 +299,10 @@ class ConfirmationReceiptTests(unittest.TestCase):
                 encoding="utf-8") as stream:
             step = json.load(stream)["steps"]["build_plan"]
         cases = (
-            ("计划还有遗漏，需要调整", "revise", True),
-            ("计划还有遗漏，需要调整", "continue", False),
-            ("确认，但是 Task 3 需要修改", "continue", False),
-            ("我看到了", "continue", False),
+            ("计划还有遗漏，需要调整", "revise"),
+            ("确认，但是 Task 3 需要修改", "continue"),
         )
-        for answer, choice, expected in cases:
+        for answer, choice in cases:
             with self.subTest(answer=answer, choice=choice):
                 with open(
                         os.path.join(root, ".mae-flow.json.usermsg"),
@@ -321,7 +319,7 @@ class ConfirmationReceiptTests(unittest.TestCase):
                 ok, _why = mf._choice_verified(
                     step, state, choice, [])
 
-                self.assertEqual(expected, ok)
+                self.assertFalse(ok)
 
     def test_structured_choice_receipt_maps_custom_labels_for_any_choice_step(self):
         temp, root = self.make_repo()

@@ -70,14 +70,8 @@ def _append_review_contract(document, context, user_decision=False):
     document.extend([
         "Review 记录必须写入: "
         + (context.review_output or "（缺失；返回 NEEDS_INPUT）"),
-        "Review 记录必须包含以下冻结信封:",
-        "- CRAFT_REVIEW_RESULT: CLEAN|FINDINGS",
-        "- Reviewer 模式: 与本任务卡模式一致",
-        "- 检查点: 与本任务卡开发检查点一致",
-        "- TASK_CARD_SHA256: 复制任务卡末尾的最终摘要",
-        "- REVIEW_TARGET_SHA256: "
-        + (context.review_target_sha256 or "（缺失；返回 NEEDS_INPUT）"),
-        "只有明确 CLEAN 才允许零条 Finding；FINDINGS 必须至少一条。",
+        "Review 记录写明结论、检查点和真实 Finding；返回文字格式不作为门禁。",
+        "零条 Finding 时直接说明未发现真实问题。",
         "FINDINGS 使用以下完整模板:",
         "## Finding F1",
         "- 位置：<文件:行或符号>",
@@ -172,7 +166,6 @@ def build_role_task_document(
     _append_role_contract(document, role, context)
     document.extend([
         "不得读取任务卡未列出的其他上下文；缺失时返回 NEEDS_INPUT。",
-        "最终报告第一行必须使用 " + _MARKERS[role],
-        "最终报告必须原样带 TASK_CARD_SHA256。",
+        "最终报告可以使用任意自然语言格式。",
     ])
     return document

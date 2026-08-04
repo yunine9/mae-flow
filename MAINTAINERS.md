@@ -4,6 +4,22 @@
 重构后的模块边界、依赖方向和扩展步骤见
 [docs/refactor-architecture.md](docs/refactor-architecture.md)。
 
+## 2026-08-04 稳定恢复后的权威边界
+
+当前生产实现以 `d32ccfb` 的稳定流程为底座，只接受小步减法式演进。后续文档若仍描述独立 Test Blueprint、
+Roadmap、详细 Build Plan、固定 Agent 返回字段、摘要重绑或 Lean 六阶段运行时，以本节为准：这些都不是新单的
+生产门禁。Story 是编码前唯一设计产物，Grill 和本地 Spec 是它的强制输入；Spec/Grill/Story 留在
+`.mae-flow-work/<单号>/`，只有协调后的领域文档进入 `docs/specs/`。
+
+子 Agent 返回按不透明自然语言处理。Hook 只记录生命周期、真实 Bash/Skill 执行和真实文件写入；不得重新加入
+结果标记、令牌、任务卡/源码摘要或 Reviewer 文件指纹校验。这里的放松不影响 PreToolUse 路径授权、只读 Reviewer、
+CP 文件范围、UT/CodeCheck/Compile 的源码所有权和 Git 精确提交边界。
+
+用户在 Story 后只确认一次并选择节奏：Staged 每个 CP 停靠，Continuous 只在全部 CP 完成后统一停靠。
+任何文件时间戳、摘要变化或 Reviewer 后的主 Agent 修正，都不得自动重派 Reviewer、重问同一确认或把流程打回。
+所有步骤输出的命令必须能被生产 parser 直接解析；每个可达非终态都必须存在真实后继。这两项和 Stop Hook
+三次零进展 fail-open 共同构成“禁止卡死/循环”的发布红线。
+
 ---
 
 ## 一、架构总览

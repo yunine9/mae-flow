@@ -46,12 +46,21 @@
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
   - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
-  - **SubagentStop**:派一次 compile-agent 或 ut-generator-agent 后,tokens 里出现对应 COMPILE/UT 条目，
-    且任务卡指纹与真实 Skill/Bash 调用能被识别(=transcript 定位与契约校验活着);
+  - **SubagentStop**:派一次 compile-agent 或 ut-generator-agent 后,`.mae-flow.json.agent-observations`
+    出现同一 invocation 的 started/returned 记录；质量 Agent 还应有匹配任务输入的真实 Skill/Bash 成功执行记录。
+    返回文字可任意变化，不应因状态行、令牌、摘要或格式被打回；只读 Reviewer 故意改源码仍必须被真实写入边界拦截；
   - **Stop**:月光宝盒在非安全停点让主 Agent 结束回复，应被打回继续；执行 `moonlight blocked` 留痕后应允许停止，
     日志出现 stop start/end。若宿主根本不触发 Stop，月光模式降级为 Skill 软约束，必须回报维护人；
   - **SessionStart**:重启会话,开场自动出现"存在进行中的交付流程"提示。
   加分项(最强确认,防线不但活着还咬人):在 story/定稿步故意不弹框直接让 AI done → 应被 ASKUSER 证据拒绝。
+- [ ] **0.9 稳定基线减法回归（发布阻断项）**：用一个 3-4 CP 的完整开发需求验证：
+  - 中文配置卡和旧 Grill 八维质询仍可用，prep/final Critic 各一次且至少能形成衍生问题；Grill 结果进入 Story；
+  - Story 前没有独立 Test Blueprint、Roadmap 或详细 Build Plan；Story 后只确认一次，再由用户选择 Staged/Continuous；
+  - Staged 每个 CP 都停，Continuous 中间 CP 不停且最终只停一次；不能由 Agent 自行合并用户选择的停点；
+  - Story/Reviewer 后由主 Agent 修正文档或代码，不得因时间戳/摘要变化自动重审、重复确认或回退阶段；
+  - 故意执行一次 current 输出中的命令，必须原样可解析；任务卡缺失时错误消息给出的恢复命令也必须可直接执行；
+  - Lightcheck 自动获取精确变更范围，检查嵌套深度和魔鬼数字但不阻断；Compile 只有一次同步调用且无 sleep/轮询；
+  - 最终提交前展示用户确认过的精确文件清单，Spec/Grill/Story 不入库，协调后的 `docs/specs/` 领域文档可入库。
 
 ## 阶段 1 — 首单实跑校准(半天,选一个小需求,建议 局部修改/已定位问题修复)
 

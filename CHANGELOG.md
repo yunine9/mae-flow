@@ -1,5 +1,24 @@
 # 更新记录
 
+## 2026-08-04：从 d32ccfb 稳定基线恢复并做减法
+
+- 以 `d32ccfb` 的旧流程和测试体系为实现底座，不再沿用后续重写的 Lean 六阶段运行时；
+  旧版中文配置卡、Interactive Grill、Chain、质量链、Git 边界和异常恢复保持原实现；
+- 编码前产物收敛为本地 Story：Grill 与本地 Spec 是强制输入，取消独立 Test Blueprint、Roadmap
+  和详细 Build Plan 门禁；Story 的性能规格、外部接口、关键函数设计、测试设计和 CP 章节恢复明确语义；
+- `.mae-flow-work/<可读单号>/` 保存 Spec、Grill、Story 和运行脚本，单号仅在冲突、保留名或非法路径时追加
+  短摘要；Spec 不入库，领域知识经 `docs/specs/index.md` 路由和协调后才允许进入交付清单；
+- Story Generator、Story Reviewer、Grill prep/final Critic、CP Implementer 和 Code Reviewer 均有真实可解析的
+  `role-task` 命令与精确任务卡；命令提示一致性和状态图活性成为发布红线测试；
+- SubagentStop 只把 `started/returned/interrupted/timeout` 生命周期和真实工具执行作为证据，不再解析
+  Agent 返回文字、固定状态行、令牌、任务卡摘要或文件指纹；只读角色和实现角色的真实文件写入边界仍保留；
+- 用户只在 Story 完成后确认一次并选择开发节奏。Staged 每个 CP 固定停靠，Continuous 中间 CP 连续开发、
+  最后统一检视；Story 或 Reviewer 文本变化不再触发摘要重绑、重复确认或自动重审；
+- Lightcheck 沿用旧版自动变更范围和 fail-open 机制，规则改为嵌套深度与魔鬼数字；编译保持单次同步调用，
+  不使用固定 sleep、后台轮询或输入未变化重试；提交前仍生成用户确认过的精确交付清单；
+- 新增旧 Lean 状态的单向备份恢复、完整命令/提示词对拍和流程无死路测试。发布验证为 1114 项单元/集成测试
+  全绿，并通过 `python scripts/selftest.py` 全量发布自检。
+
 ## 2026-07-31：长编译只做一次，修复分阶段风险出口
 
 - compile-agent 与 build-fix 改为一轮一次同步调用，以编译提供方返回作为完成信号；删除后台任务、

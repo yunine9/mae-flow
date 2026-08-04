@@ -62,6 +62,22 @@ class DomainArchiveCliTests(unittest.TestCase):
         self.assertEqual([], applied["applied_paths"])
         self.assertTrue(applied["input_sha256"])
 
+    def test_untracked_legacy_process_file_is_moved_into_work_package(self):
+        state = {"config": {"单号": "REQ-1"}}
+        fake_api = types.SimpleNamespace(argv_out=lambda _args: "")
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(
+                domain_archive, "api", fake_api):
+            source = os.path.join(root, "docs", "clarifications-REQ-1.md")
+            os.makedirs(os.path.dirname(source))
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("confirmed decisions")
+            package = domain_archive.ensure_work_package(root, "REQ-1")
+            moved = domain_archive._localize_legacy_process_files(
+                root, state, package)
+            self.assertEqual(1, len(moved))
+            self.assertFalse(os.path.exists(source))
+            self.assertTrue(os.path.isfile(package.decisions))
+
 
 if __name__ == "__main__":
     unittest.main()

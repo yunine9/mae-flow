@@ -197,9 +197,7 @@ def _trusted_harness_commit_path(
         return True
     if p in {".gitignore", ".gitattributes"}:
         return True
-    if (p.startswith("docs/req/") or p.startswith("docs/review/")
-            or p.startswith("docs/clarifications-")
-            or p.startswith("docs/codecheck-exempt-")):
+    if p.startswith("docs/req/"):
         return True
     if not p.startswith("openspec/") or _is_story_document(p):
         return False

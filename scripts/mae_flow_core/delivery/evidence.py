@@ -26,6 +26,7 @@ class DeliveryEvidencePorts:
     agent_written_paths: object
     read_text_replace: object
     agent_ran: object
+    review_document: object = None
 
 
 def review_status_count(text, status):
@@ -402,8 +403,11 @@ class DeliveryEvidenceRules:
         return EvidenceResult(True, "")
 
     def review_fix_committed(self, spec, state):
-        path = "docs/review/REVIEW-%s.md" % (
-            state.get("config", {}).get("单号", ""))
+        path = (
+            self.ports.review_document(state)
+            if self.ports.review_document is not None
+            else ".mae-flow-work/%s/review.md" % (
+                state.get("config", {}).get("单号", "")))
         try:
             text = self.ports.read_text_replace(path)
         except OSError:

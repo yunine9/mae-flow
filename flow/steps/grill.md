@@ -2,19 +2,20 @@
 3 每题附推荐答案(含理由与代码佐证);4 一次只问一个,等回答再问下一个;5 事实自己查、决策问用户。
 本阶段的哲学(用户原话,照此执行):**不怕问题多,就怕问题遗漏**——很多人自己都不知道需求要达成什么预期,
 grill 的目标就是让开发和 AI 共同把边界和细节全部摆上台面。
-中断恢复:先读 .mae-flow-work/grill-prep-{单号}.md(备课与衍生题)与 docs/clarifications-{单号}.md(已拍板答案),
+中断恢复:先读 `.mae-flow-work/{单号}/grill-prep.md`(备课与衍生题)与
+`.mae-flow-work/{单号}/decisions.md`(已拍板答案),
 从未问的题继续——已拍板的禁止重问,文档即状态。
 备课(先填工作表,再开口提问):通读 SE 文档 → 定向探索相关模块,**边探边记「代码勘察笔记」**
-.mae-flow-work/survey-{单号}.md(相关模块清单、关键文件+职责、现有接口/数据结构、调用链要点、与本需求的触点
+`.mae-flow-work/{单号}/survey.md`(相关模块清单、关键文件+职责、现有接口/数据结构、调用链要点、与本需求的触点
 ——这份笔记是后续 open/design/build 阶段的共享地图,记全一次,全程不再全量重读代码)→
-把模板 {GRILL_PREP_TEMPLATE_PATH} 全文复制落盘为 .mae-flow-work/grill-prep-{单号}.md(先保结构后填内容;
+把模板 {GRILL_PREP_TEMPLATE_PATH} 全文复制落盘为 `.mae-flow-work/{单号}/grill-prep.md`(先保结构后填内容;
 章节由 hook 校验,缺章打回)→ 逐维把「(待填…)」占位替换为结论,8 维禁跳:
 **每维必须产出实质结论,禁止快速划过**(hook 拦残留 {{占位}}/待填,逼你真扫过每一维):二选一——
 有缺口(写成候选题,四要素:缺口位置/代码佐证/推荐答案/实现影响,写不出实现影响的删)/
 不适用(必须写具体依据,定位到代码/文档;"无关""不涉及"不是依据)。哪怕 SE 文档写清了某维,
 也要么变成"确认题"(向用户核实我理解得对不对),要么"不适用+依据"——不许一句"已覆盖"划过。
 第 9 章汇总:候选题按阻塞性排序;技术分歧记入「留给设计阶段」。
-完成八维备课后先执行 `python "{MAEFLOW_PATH}" role-task grill-critic --stage prep --document ".mae-flow-work/grill-prep-{单号}.md"`，
+完成八维备课后先执行 `python "{MAEFLOW_PATH}" role-task grill-critic --stage prep --document ".mae-flow-work/{单号}/grill-prep.md"`，
 把输出的唯一启动话术原样交给 grill-critic-agent。它只读找遗漏；把真实缺口补入候选题后再开始逐题询问。
 若 8 维全部为「不适用+具体依据」且候选题为 0,不要凭空发明问题；用一次
 AskUserQuestion 展示八维结论摘要,让用户选择「确认八维均无待决项,直接进入提案 /
@@ -31,16 +32,14 @@ AskUserQuestion 展示八维结论摘要,让用户选择「确认八维均无待
 衍生出的新题**追加进工作表**(标注"衍生自答案N"),纳入队列继续问——问题变多是本阶段在正常工作。
 高度边界:本阶段只问**需求/规格层**决策(要什么、边界在哪、什么算对);技术实现方案的分歧
 (选型、模块划分、算法)不展开、不提问,记入「留给设计阶段」清单(工作表第 9 章,收尾时同步到
-clarifications 文档尾部)——那是设计阶段方案讨论的领地,在这里问会撞车重复。
+本地 decisions 文档尾部)——那是设计阶段方案讨论的领地,在这里问会撞车重复。
 凡属**行为规格**的答案,落盘写成 EARS 句式:「WHEN <条件/触发> THE SYSTEM SHALL <可观测行为>」
 (一句一测,是后面规格条目 Scenario 和 UT 验收对照的原材料;写不成 WHEN/SHALL 的答案多半没问透,回炉再问)。
 收敛:题尽(含衍生题)/ 用户说"其余按推荐答案"(落盘标注未经确认)/ 超15题→告知规模由用户选(用户要继续就继续,不设硬上限)。
 题尽后先把当前完整树同步到 `.mae-flow-work/{单号}/grill.md`，再执行
 `python "{MAEFLOW_PATH}" role-task grill-critic --stage final --document ".mae-flow-work/{单号}/grill.md"`，
 把输出的唯一启动话术原样交给 grill-critic-agent。它指出的新缺口必须回到逐题质询；无缺口或新增题闭环后才收尾，禁止自动重跑 Critic。
-落盘:增量写 docs/clarifications-{单号}.md，并把完整问题树、用户答案、推荐依据、实现影响和未决项同步整理到
-`.mae-flow-work/{单号}/grill.md`。后者是本地 Spec 和 Story 的强制输入；已拍板答案禁止在下游重问。
-题目全部闭环后展示摘要，直接 git add docs/clarifications-{单号}.md &&
-git commit -m "[单号][类型]需求澄清"
-(**精确路径提交,禁止 git add docs/ 或 -A**——工作表和勘察笔记在 .mae-flow-work/ 过程区,天然不入库),再 done。
+落盘:增量写 `.mae-flow-work/{单号}/decisions.md`，并把完整问题树、用户答案、推荐依据、实现影响和未决项同步整理到
+`.mae-flow-work/{单号}/grill.md`。两者都是本地 Spec 和 Story 的强制输入；已拍板答案禁止在下游重问。
+题目全部闭环后展示摘要，直接 done。Grill 的所有文件都是本地过程件，禁止 git add 或 commit。
 用户已经在逐题过程中完成决策，不要为“阶段结束”额外索要一次确认。

@@ -6,6 +6,7 @@ from .shared import (
     write_text,
 )
 from .wiring import api
+from mae_flow_core.orchestration.work_package import ensure_work_package
 
 def cmd_codecheck_scan(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
@@ -273,7 +274,9 @@ def cmd_approve_exemption(flow, st, args):
     key = api._approval_key(rule, file_name)
     rows[:] = [x for x in rows if api._approval_key(x.get("rule", ""), x.get("file", "")) != key]
     rows.append(rec)
-    ex = os.path.join("docs", "codecheck-exempt-" + st["config"].get("单号", "") + ".md")
+    package = ensure_work_package(
+        os.getcwd(), st["config"].get("单号", ""))
+    ex = os.path.join(package.root, "codecheck-exemptions.md")
     os.makedirs(os.path.dirname(ex), exist_ok=True)
     if not os.path.exists(ex):
         write_text(ex, "# CodeCheck 正式豁免记录\n\n")
@@ -293,7 +296,7 @@ def cmd_approve_exemption(flow, st, args):
         })
     api.save_state(st)
     print(f"[mae-flow] 已登记用户批准的正式豁免: {rule} | {file_name}\n"
-          f"记录已写入 {ex}；请精确 git add/commit，禁止手写其他豁免冒充审批。")
+          f"记录已写入本地过程件 {ex}；不得 git add/commit，禁止手写其他豁免冒充审批。")
 
 def cmd_template(flow, args):
     """打印模板绝对路径(story|chain)。子 agent/会话在项目目录里搜不到插件安装目录,

@@ -170,7 +170,7 @@ def _stable_story_context(state, role, document=""):
     config = state.get("config") or {}
     ticket = str(config.get("单号", "") or "")
     package = ensure_work_package(os.getcwd(), ticket)
-    survey = os.path.join(".mae-flow-work", "survey-%s.md" % ticket)
+    survey = os.path.join(package.root, "survey.md")
     terms = []
     for path in (config.get("需求文档", ""), package.spec, package.grill):
         if path and os.path.isfile(path):
@@ -210,13 +210,13 @@ def _existing_context_paths(state, files):
     ticket = str(config.get("单号", "") or "")
     change = str(config.get("CHANGE_NAME", "") or "")
     spec = state.get("spec") or {}
-    survey = os.path.join(".mae-flow-work", "survey-%s.md" % ticket)
+    package = ensure_work_package(os.getcwd(), ticket)
+    survey = os.path.join(package.root, "survey.md")
     candidates = (
         config.get("需求文档", ""),
-        os.path.join("openspec", "changes", change, "change.md")
-        if change else "",
+        package.spec,
         spec.get("design_doc", ""),
-        os.path.join("docs", "clarifications-%s.md" % ticket),
+        package.decisions,
         survey,
         "runtime/standards/comment-standard-v1.md",
         *_survey_neighbors(survey),

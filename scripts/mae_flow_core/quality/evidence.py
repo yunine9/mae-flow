@@ -28,6 +28,7 @@ class QualityEvidencePorts:
     approved_exemptions: object
     was_exempt_before_review: object
     approval_key: object
+    exemption_path: object = None
 
 
 class QualityEvidenceRules:
@@ -151,8 +152,8 @@ class QualityEvidenceRules:
                 False,
                 "harness 现场复核实测遗留 %d 条告警,且无豁免清单(%s)。"
                 "两条路:修掉重试;或经用户逐条裁决豁免(AskUserQuestion),"
-                "把「规则ID + 文件 + 用户原话」逐行写入 %s 并 commit "
-                "后重试——口头豁免无效"
+                "把「规则ID + 文件 + 用户原话」逐行写入本地过程件 %s "
+                "后重试——口头豁免无效，该文件不得提交"
                 % (total, exemption, exemption),
             )
         text = self.ports.read_text_replace(exemption)
@@ -213,17 +214,11 @@ class QualityEvidenceRules:
         cached = self._scan_cache_result(state, files)
         if cached is not None:
             return cached
-        exemption = "docs/codecheck-exempt-%s.md" % (
-            state["config"].get("单号", ""))
-        if self.ports.exists(exemption):
-            dirty = self.ports.argv_output([
-                "git", "status", "--porcelain", "--", exemption])
-            if dirty:
-                return EvidenceResult(
-                    False,
-                    "豁免记录 %s 尚未提交；本地文件不能替远端 MR 背书，"
-                    "请精确提交后重试" % exemption,
-                )
+        if self.ports.exemption_path is not None:
+            exemption = self.ports.exemption_path(state)
+        else:
+            exemption = ".mae-flow-work/%s/codecheck-exemptions.md" % (
+                state["config"].get("单号", ""))
         verified = self._verified_result(state, files)
         if verified is None:
             failure, verified = self._execute_verification(

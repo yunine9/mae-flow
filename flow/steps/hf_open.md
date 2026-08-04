@@ -1,17 +1,8 @@
-按下方内嵌规则创建精简变更：先确认英文短名和范围，再执行
-`python "{MAEFLOW_PATH}" spec new "<英文短名>"`——它创建 **v5 四合一 change.md 骨架**(hotfix 档,
-本单唯一入库产物)。把问题、根因、修复目标与修复思路写进「# 为什么」节,修复任务写进「# 实现清单」节,
-实现清单只列生产代码/配置实现，不列 UT、测试文件或测试用例；UT 由 verify_ut 统一负责。
-「（待填…」占位全部替换;行为规格确有变化时才补「# 规格条目：<域名>」节(格式合同用
-`python "{MAEFLOW_PATH}" spec instructions change` 取,禁止手工猜格式)。
-下方原文里的 proposal/tasks/delta spec 产物话术一律以本页 change.md 小节为准。
-在途旧布局单(已有 proposal.md/tasks.md 的)继续按旧产物补齐走完,不要新建 change.md。
-交付登记已由 spec new 自动完成(在途旧单缺登记时补一条 `python "{MAEFLOW_PATH}" spec init`)。
-展示提案摘要(问题定位+修复思路)，用 AskUserQuestion 提供“确认范围并继续 / 需要调整”按钮。
-用户点选确认后提交产物，再 done --set CHANGE_NAME=<change目录名>；不再要求输入确认句
-(done 硬校验:写了规格条目则格式必须过、占位不得残留)。
-若触发升级条件(3+ 文件/架构变更/DB schema/新 public API)，停手展示原因并等用户确认(文件数这一条由 done 的 tier_scope 证据机器亲数,超限硬拦并给升级/accept-risk 两条出路)；
-确认升级后执行 `goto design --force --ack "用户原话"`；状态机会把 workflow 与规格阶段一起同步到完整开发的设计入口，禁止手写状态。
+已定位问题修复只维护本单本地 Spec，不创建或提交 OpenSpec 产物。
 
-──── 本步骤内嵌方法原文（已固定版本） ────
-{{CAPABILITY_PACK:hotfix-open}}
+1. 执行 `python "{MAEFLOW_PATH}" local-spec init`，取得 `.mae-flow-work/{单号}/spec.md`；
+2. 写清问题、根因、修复目标、范围、可观察行为、验收条件和不在范围；没有 Grill 时在“Grill 决策”说明依据；
+3. 执行 `python "{MAEFLOW_PATH}" local-spec validate`；
+4. 展示范围摘要，用本步骤唯一一次用户确认决定“确认范围并继续 / 需要调整”；确认后直接 done。
+
+本地 Spec 永不上库。若触发升级条件（3 个以上业务文件、架构或数据库变化、新增 public API），展示事实并由用户决定升级完整开发或明确接受轻量范围风险；禁止自行升级、手写状态或创建 change 目录。

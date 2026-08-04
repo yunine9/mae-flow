@@ -116,6 +116,10 @@ _DELIVERY_EVIDENCE = DeliveryEvidenceRules(DeliveryEvidencePorts(
     agent_written_paths=lambda: api._agent_written_paths(),
     read_text_replace=lambda path: read_text(path, errors="replace"),
     agent_ran=lambda spec, state: _AGENT_EVIDENCE.agent_ran(spec, state),
+    review_document=lambda state: os.path.join(
+        ensure_work_package(
+            os.getcwd(), (state.get("config") or {}).get("单号", "")).root,
+        "review.md"),
 ))
 
 ev_checkpoint_plan = _DELIVERY_EVIDENCE.checkpoint_plan
@@ -155,6 +159,10 @@ _QUALITY_EVIDENCE = QualityEvidenceRules(QualityEvidencePorts(
     was_exempt_before_review=lambda state, exemption, rule, path:
         api._was_exempt_before_review(state, exemption, rule, path),
     approval_key=lambda rule, path: api._approval_key(rule, path),
+    exemption_path=lambda state: os.path.join(
+        ensure_work_package(
+            os.getcwd(), (state.get("config") or {}).get("单号", "")).root,
+        "codecheck-exemptions.md"),
 ))
 
 ev_codecheck_clean = _QUALITY_EVIDENCE.codecheck_clean

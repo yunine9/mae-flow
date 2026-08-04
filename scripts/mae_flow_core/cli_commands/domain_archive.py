@@ -2,6 +2,7 @@
 
 import copy
 import difflib
+import shutil
 
 from .shared import os
 from .wiring import api
@@ -32,6 +33,43 @@ def _git_facts():
         api.sh("git -c core.quotepath=false diff --no-ext-diff --binary HEAD -- ."),
         api.sh("git -c core.quotepath=false status --porcelain --untracked-files=all"),
     )
+
+
+def _localize_legacy_process_files(root, state, package):
+    ticket = _ticket(state)
+    change = str(((state or {}).get("config") or {}).get("CHANGE_NAME", "")).strip()
+    mappings = [
+        (os.path.join(root, "docs", "clarifications-%s.md" % ticket), package.decisions),
+        (os.path.join(root, "docs", "review", "REVIEW-%s.md" % ticket),
+         os.path.join(package.root, "review.md")),
+        (os.path.join(root, "docs", "codecheck-exempt-%s.md" % ticket),
+         os.path.join(package.root, "codecheck-exemptions.md")),
+        (os.path.join(root, "docs", "story", "STORY-%s.md" % ticket), package.story),
+        (os.path.join(root, "docs", "delivery-notes.md"),
+         os.path.join(package.root, "legacy", "delivery-notes.md")),
+    ]
+    if change:
+        mappings.append((
+            os.path.join(root, "openspec", "changes", change),
+            os.path.join(package.root, "legacy", "openspec-change-%s" % change),
+        ))
+    moved = []
+    for source, preferred in mappings:
+        if not os.path.exists(source):
+            continue
+        relative = os.path.relpath(source, root).replace("\\", "/")
+        tracked = api.argv_out([
+            "git", "ls-files", "--", relative]).strip()
+        if tracked:
+            continue
+        target = preferred
+        if os.path.exists(target):
+            target = os.path.join(
+                package.root, "legacy", relative.replace("/", "__"))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.move(source, target)
+        moved.append((relative, os.path.relpath(target, root).replace("\\", "/")))
+    return tuple(moved)
 
 
 def _entries(root, record):
@@ -166,6 +204,9 @@ def cmd_domain_archive(state, args):
     try:
         package = ensure_work_package(root, _ticket(state))
         if args.domain_archive_action == "prepare":
+            for source, target in _localize_legacy_process_files(
+                    root, state, package):
+                print("[mae-flow] 已迁移未提交过程件: %s -> %s" % (source, target))
             return _prepare(state, args, root, package)
         record = state.get("domain_archive") or {}
         if args.domain_archive_action in {"show", "status"}:

@@ -98,12 +98,12 @@
         {
           "type": "glob",
           "any": [
-            "docs/review/REVIEW-{单号}.md"
+            ".mae-flow-work/{单号}/review.md"
           ]
         },
         {
           "type": "content_free",
-          "file": "docs/review/REVIEW-{单号}.md",
+          "file": ".mae-flow-work/{单号}/review.md",
           "patterns": [
             "待裁决"
           ],
@@ -112,12 +112,6 @@
         {
           "type": "agent_ran",
           "agent": "ASKUSER"
-        },
-        {
-          "type": "clean_paths",
-          "paths": [
-            "docs/review/REVIEW-{单号}.md"
-          ]
         }
       ],
       "next": "rf_pace"
@@ -270,12 +264,12 @@
         {
           "type": "glob",
           "any": [
-            ".mae-flow-work/grill-prep-{单号}.md"
+            ".mae-flow-work/{单号}/grill-prep.md"
           ]
         },
         {
           "type": "content_free",
-          "file": ".mae-flow-work/grill-prep-{单号}.md",
+          "file": ".mae-flow-work/{单号}/grill-prep.md",
           "patterns": [
             "待填",
             "\\{\\{"
@@ -285,19 +279,13 @@
         {
           "type": "glob",
           "any": [
-            "docs/clarifications-{单号}.md"
+            ".mae-flow-work/{单号}/decisions.md"
           ]
         },
         {
           "type": "glob",
           "any": [
             ".mae-flow-work/{单号}/grill.md"
-          ]
-        },
-        {
-          "type": "clean_paths",
-          "paths": [
-            "docs/clarifications-{单号}.md"
           ]
         },
         {
@@ -391,18 +379,13 @@
       ],
       "evidence": [
         {
-          "type": "spec_field",
-          "field": "phase"
-        },
-        {
-          "type": "spec_validate",
-          "allow_empty": true
+          "type": "glob",
+          "any": [
+            ".mae-flow-work/{单号}/spec.md"
+          ]
         }
       ],
-      "next": "build_pace",
-      "require_sets": [
-        "CHANGE_NAME"
-      ]
+      "next": "build_pace"
     },
     "tw_open": {
       "title": "局部修改 — 确认修改范围",
@@ -412,18 +395,13 @@
       ],
       "evidence": [
         {
-          "type": "spec_field",
-          "field": "phase"
-        },
-        {
-          "type": "spec_validate",
-          "allow_empty": true
+          "type": "glob",
+          "any": [
+            ".mae-flow-work/{单号}/spec.md"
+          ]
         }
       ],
-      "next": "tw_pace",
-      "require_sets": [
-        "CHANGE_NAME"
-      ]
+      "next": "tw_pace"
     },
     "tw_pace": {
       "title": "局部修改 — 开发节奏确认",
@@ -547,9 +525,10 @@
       "title": "小改 — 对照需求检查",
       "evidence": [
         {
-          "type": "spec_field",
-          "field": "verify_result",
-          "equals": "pass"
+          "type": "glob",
+          "any": [
+            ".mae-flow-work/{单号}/verification.md"
+          ]
         }
       ],
       "next": "domain_archive"
@@ -594,9 +573,6 @@
       "evidence": [
         {
           "type": "tier_scope"
-        },
-        {
-          "type": "tasks_checked"
         },
         {
           "type": "commit_tagged_after_entry"
@@ -708,9 +684,10 @@
       "title": "验证 4/4 — 规格符合性",
       "evidence": [
         {
-          "type": "spec_field",
-          "field": "verify_result",
-          "equals": "pass"
+          "type": "glob",
+          "any": [
+            ".mae-flow-work/{单号}/verification.md"
+          ]
         }
       ],
       "next": "domain_archive"

@@ -6,6 +6,7 @@ from .shared import (
     workflow_advancement, write_text,
 )
 from .wiring import api
+from mae_flow_core.orchestration.work_package import ensure_work_package
 
 def _gitignore():
     gi = ".gitignore"
@@ -102,7 +103,9 @@ def advance(flow, st, sid, step, tag, note=""):
         if err:
             api.die(err, 2)
     if sid == "rf_triage":
-        review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
+        review_doc = os.path.join(ensure_work_package(
+            os.getcwd(), st.get("config", {}).get("单号", "")).root,
+            "review.md")
         try:
             review_text = read_text(review_doc, errors="replace")
         except OSError as exc:

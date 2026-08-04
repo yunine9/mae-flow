@@ -41,7 +41,7 @@ _TEMPLATE_TARGETS = (
         "GRILL-PREP-TEMPLATE.md",
         "GRILL-PREP",
     ),
-    (r"docs/review/REVIEW-.*\.md$", "REVIEW-TEMPLATE.md", "REVIEW"),
+    (r"(^|/)\.mae-flow-work/(?:\S+/)*review\.md$", "REVIEW-TEMPLATE.md", "REVIEW"),
 )
 
 

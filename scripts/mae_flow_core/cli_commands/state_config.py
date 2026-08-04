@@ -10,6 +10,7 @@ from .shared import (
     workflow_definition,
 )
 from .wiring import api
+from mae_flow_core.orchestration.work_package import ensure_work_package
 
 def find_project_root(start=None):
     """从 start(默认 cwd)向上定位项目根,消除"模型 cd 进子目录后调用"的错位:
@@ -338,7 +339,9 @@ def _ensure_review_base(st):
             break
     base = argv_out(["git", "rev-list", "-1", "--before=" + at, "HEAD"]) if at else ""
     if not base:
-        review_doc = "docs/review/REVIEW-" + st.get("config", {}).get("单号", "") + ".md"
+        review_doc = os.path.join(ensure_work_package(
+            os.getcwd(), st.get("config", {}).get("单号", "")).root,
+            "review.md")
         added = argv_out([
             "git", "log", "--diff-filter=A", "-1", "--format=%H", "--", review_doc])
         if added:

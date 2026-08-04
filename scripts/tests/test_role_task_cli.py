@@ -134,7 +134,7 @@ class RoleTaskCliTests(unittest.TestCase):
             )
             outside.write("OUTSIDE = True\n")
             outside.close()
-            os.makedirs(os.path.join(repository, ".mae-flow-work"))
+            os.makedirs(os.path.join(repository, ".mae-flow-work", "REQ-1"))
             os.makedirs(os.path.join(repository, "src"))
             with open(
                     os.path.join(repository, "src", "service.py"),
@@ -146,7 +146,7 @@ class RoleTaskCliTests(unittest.TestCase):
                     os.path.join(
                         repository,
                         ".mae-flow-work",
-                        "survey-REQ-1.md",
+                        "REQ-1", "survey.md",
                     ),
                     "w",
                     encoding="utf-8",
@@ -167,7 +167,7 @@ class RoleTaskCliTests(unittest.TestCase):
                 os.unlink(outside.name)
         body = "\n".join(refs)
         self.assertIn("/src/service.py | SHA256 ", body)
-        self.assertIn("/survey-REQ-1.md | SHA256 ", body)
+        self.assertIn("/REQ-1/survey.md | SHA256 ", body)
         self.assertNotIn(outside.name, body)
 
     def test_story_and_grill_commands_materialize_dispatchable_cards(self):

@@ -48,19 +48,14 @@ class WorkflowEvidenceRules:
     def __init__(self, ports):
         self.ports = ports
 
-    def domain_archive_complete(self, _spec, state):
-        record = (state or {}).get("domain_archive") or {}
-        if record.get("status") != "applied":
-            return EvidenceResult(
-                False,
-                "领域归档尚未完成；执行 domain-archive status 查看当前状态和唯一恢复动作",
-            )
+    @staticmethod
+    def _domain_archive_record_error(record):
         result = record.get("result")
         paths = record.get("applied_paths") or []
         if result not in {"changes", "unchanged"}:
-            return EvidenceResult(False, "领域归档结果无效；执行 domain-archive status")
+            return "领域归档结果无效；执行 domain-archive status"
         if result == "unchanged" and paths:
-            return EvidenceResult(False, "unchanged 归档不应包含上库文件")
+            return "unchanged 归档不应包含上库文件"
         invalid = [
             str(path) for path in paths
             if not (
@@ -71,9 +66,20 @@ class WorkflowEvidenceRules:
                 )
             )
         ]
-        if invalid:
+        return (
+            "领域归档包含非法过程文件: " + "、".join(invalid)
+            if invalid else "")
+
+    def domain_archive_complete(self, _spec, state):
+        record = (state or {}).get("domain_archive") or {}
+        if record.get("status") != "applied":
             return EvidenceResult(
-                False, "领域归档包含非法过程文件: " + "、".join(invalid))
+                False,
+                "领域归档尚未完成；执行 domain-archive status 查看当前状态和唯一恢复动作",
+            )
+        error = self._domain_archive_record_error(record)
+        if error:
+            return EvidenceResult(False, error)
         if self.ports is not None and self.ports.domain_archive_fresh is not None:
             fresh, reason = self.ports.domain_archive_fresh(state)
             if not fresh:

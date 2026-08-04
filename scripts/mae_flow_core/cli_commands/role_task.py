@@ -213,14 +213,18 @@ def _existing_context_paths(state, files):
     spec = state.get("spec") or {}
     package = ensure_work_package(os.getcwd(), ticket)
     survey = os.path.join(package.root, "survey.md")
+    legacy_survey = os.path.join(
+        ".mae-flow-work", "survey-%s.md" % ticket)
     candidates = (
         config.get("需求文档", ""),
         package.spec,
         spec.get("design_doc", ""),
         package.decisions,
         survey,
+        legacy_survey,
         "runtime/standards/comment-standard-v1.md",
         *_survey_neighbors(survey),
+        *_survey_neighbors(legacy_survey),
         *tuple(files),
     )
     result = []

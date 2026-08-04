@@ -471,12 +471,12 @@
   "evidence_archive_rejection": {
     "files": {
       ".mae-flow.json": {
-        "sha256": "6ce3ee7787bf184f2d01a55005a0d09353fac7d696a9589c78ac15e79499bcd1",
-        "size": 376
+        "sha256": "c848664a906ca96b9236640570a6fca3d1e86aec3e3358e568828464b7800534",
+        "size": 573
       },
       ".mae-flow.json.failures": {
-        "sha256": "f4f2083bfac41228c96906b77961d6621c723873795bf354c41732a0fa174e11",
-        "size": 80
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -488,7 +488,7 @@
       "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
       "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
     },
-    "returncode": 2,
+    "returncode": 0,
     "state": {
       ".mae-flow.json": {
         "choices": {
@@ -501,23 +501,27 @@
           "单号类型": "feat",
           "基线分支": "main"
         },
-        "current": "archive",
-        "history": [],
+        "current": "domain_archive",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "",
+            "result": "done",
+            "step": "archive"
+          }
+        ],
         "revision": 2,
         "schema_version": 2,
-        "spec": {},
         "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "domain_archive": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
         "updated_at": "2026-07-29 10:00:00"
       },
-      ".mae-flow.json.failures": {
-        "evidence:archive": {
-          "at": "2026-07-29 10:00:00",
-          "count": 1
-        }
-      }
+      ".mae-flow.json.failures": {}
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): openspec/changes/archive/*diff-change*\n  - 交付登记 phase=(空),需要 archived——按本步指引完成动作后用 mae-flow spec 登记,谎报无效\n  - 缺少本次定稿的精确产物清单；重新执行 spec archive，或由维护人核对旧在途状态后再推进\n",
-    "stdout": ""
+    "stderr": "",
+    "stdout": "[mae-flow] archive done → 进入 domain_archive\n\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 openspec/specs/ 真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "evidence_branch_rejection": {
     "files": {
@@ -863,8 +867,8 @@
   "evidence_spec_rejection": {
     "files": {
       ".mae-flow.json": {
-        "sha256": "2b32d9719ee720ef238d0262c1f930ffe8a74d470306fabbbf2d84d7871aa4f8",
-        "size": 376
+        "sha256": "d368adcf9ec3a96a57e02a6520da1af0251846973d9a0770f688ede36d0b2c40",
+        "size": 362
       },
       ".mae-flow.json.failures": {
         "sha256": "dfbd0226cb632b4211b93b6e226fe94a20a81fa5cbd7f72af8de3cc2c011de2d",
@@ -901,7 +905,6 @@
         "history": [],
         "revision": 2,
         "schema_version": 2,
-        "spec": {},
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
       },
@@ -920,7 +923,7 @@
         }
       ]
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 交付登记 phase 为空——本步产物尚未登记;完成后执行 mae-flow spec set phase \"<路径>\"\n  - 规格校验无法执行: change 'diff-change' 不存在；当前没有任何活跃 change\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/spec.md\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {

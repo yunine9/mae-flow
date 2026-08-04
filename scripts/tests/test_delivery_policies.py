@@ -94,21 +94,21 @@ class MoonlightPolicyTests(unittest.TestCase):
     def test_issue_id_and_finalize_target(self):
         self.assertEqual("ML-003", issue_id(2))
         self.assertEqual(
-            "end",
+            "domain_archive",
             finalize_target({
                 "choices": {"workflow": "review"},
                 "config": {"CHANGE_NAME": "change"},
             }),
         )
         self.assertEqual(
-            "end",
+            "domain_archive",
             finalize_target({
                 "choices": {"workflow": "full"},
                 "config": {},
             }),
         )
         self.assertEqual(
-            "archive_confirm",
+            "domain_archive",
             finalize_target({
                 "choices": {"workflow": "full"},
                 "config": {"CHANGE_NAME": "change"},

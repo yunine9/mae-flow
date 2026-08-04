@@ -74,7 +74,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 | **superpowers**（brainstorming/writing-plans/executing-plans 等） | design/build/verify/review | 固定 commit 的完整 skills 目录由 `render_pack()` 原文加载；brainstorming 带着 clarifications 进场（已拍板决策禁止重问，新需求缺口回流 grill 产物）；评审返工按 receiving-code-review 纪律先查证再裁决 |
 | **EARS**（Kiro / IBM 需求句法） | grill 答案 → delta spec Scenario → UT 蓝图 | 行为规格一律「WHEN <条件> THE SYSTEM SHALL <可观测行为>」，一句一测，贯穿"澄清→规格→用例"三级可追溯。**红线：只约束句式，不新增流程节点/确认点** |
 | **Ponytail** | build 全程 + verify 4.1 | 固定 commit 的官方 Skill 原文双用：build 写码时 full 档常驻预防（the ladder）+ verify 对 diff 做 review。**两条红线：YAGNI 不得砍 delta spec 要求的行为；禁 ultra 档** |
-| **compound-engineering**（EveryInc） | end 沉淀 → build/verify 装载 | 每单教训先集中展示，再由用户用 multiSelect 勾选后沉淀进 docs/delivery-notes.md（每卡最多 4 条），下单 build/codecheck/UT 开工前装载。**红线：只沉淀仓库事实（构建陷阱/告警高发点/mock 策略），禁流程规则——防与插件双源打架；上限 30 条，超限删最旧** |
+| **领域真相归档** | 最终质量 → 最终检视 | 只把确认、实现并验证的长期知识更新到 `docs/specs/`；过程经验不得另写 delivery-notes，`unchanged` 是合法结论 |
 
 ### 质量五维（一维一主，verify 顺序即理由：删 → 改 → 测 → 验）
 
@@ -144,14 +144,15 @@ Direct 模式重入使用退出记录中的真实消息 ID：`init --message-id`
 仓根可提交 `.mae-flow-defaults.json`（团队预设：编译方式/UT生成方式/UT运行命令等恒定项），
 require_sets 步骤的 `current` 会展示预填块；它只是候选值，配置阶段统一放进完整确认单一次确认，
 不再逐项要求用户签字。
-**过程区 `.mae-flow-work/`**（gitignored，2026-07-21 治"MR 里 md 泛滥"+STORY 误提交实战）：过程性产物的家——
-grill-prep 工作表、survey 代码勘察笔记、不入库 STORY，v5 起再加 superpowers 设计文档
-（design-{单号}.md）与实现计划（plan-{单号}.md）。CodeCheck 的 append-only Markdown 诊断及原始
+**过程区 `.mae-flow-work/<单号>/`**（gitignored）：过程性产物的唯一归宿——
+Spec、Grill、Story、decisions、grill-prep、survey、review、verification、UT handoff、CodeCheck 豁免和诊断。
+CodeCheck 的 append-only Markdown 诊断及原始
 stdout/stderr/report/Agent diff 同样放这里：主流程按单号+步骤归档，独立任务跟随 work_dir；
 单个大产物保存头尾并记录完整 SHA-256。诊断全程 best-effort，任何写入异常都不得成为新门禁。
 这些过程件物理上不可能被卷进提交。
-**提交候选**（交付物才 commit）：当前单 OpenSpec change/本次归档精确产物、clarifications（拍板审计）、codecheck-exempt（门禁豁免依据）、
-REVIEW（返工台账）、delivery-notes（团队沉淀）、STORY（仅用户选入库时）。
+**文档类提交候选只有领域真相源**：`domain-archive apply` 本次实际新增/更新的
+`docs/specs/<domain>.md`，以及新领域确实需要的 `docs/specs/index.md`。`unchanged` 不产生文档提交。
+OpenSpec change/archive、clarifications、REVIEW、codecheck-exempt、delivery-notes 和 STORY 一律不是交付候选。
 git add 一律精确路径，gate 硬拦 `-A/--all/.` 和整目录 `openspec/`（宽 add 是 STORY 跨单误提交的凶手）。
 Hook 另记本流程中 Agent 通过 Write/Edit/MultiEdit 成功改写的路径，作为“可能需要提交”的候选集，
 不是“都要提交”的白名单。COMPILE 任务另以任务签发时和合法收尾后的全路径指纹差，记录“编译改变、
@@ -162,8 +163,8 @@ Hook 另记本流程中 Agent 通过 Write/Edit/MultiEdit 成功改写的路径�
 COMPILE 归属。精确采集失败只记 Hook 日志并 fail-open，不拒绝已经合法收尾的 COMPILE；精确账缺失时，
 未命中 Agent 候选集仍只提示逐文件确认，只有新增的高置信临时编译产物作为第二层兼容兜底硬拦。
 流程启动前已存在、指纹未变且本单 Agent 未改写的路径属于跨单遗留，提交前硬拦，push 证据再兜底一次。
-Mae-Flow 自建 OpenSpec 例外只信任当前 `CHANGE_NAME` 和 `spec archive` 记录的精确路径，不再信任整个
-`openspec/`。
+Manifest 拒绝整个 `openspec/`、所有过程文档路径，以及任何未由本次领域归档实际应用的
+`docs/specs/` 文件。历史中已经提交的旧过程件不改写；升级时仅把尚未跟踪的旧过程件迁入本单过程区。
 
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
@@ -182,7 +183,7 @@ UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报
 把十分钟内的明确授权写入一次性 `.mae-flow.json.moonlight-intent`；脚本验真并消费后才建状态，解决首次
 启动的先后顺序问题。在途流程原地切换，已退出流程先恢复现场并清空旧质量证据。运行中 PreToolUse 硬拦
 AskUserQuestion；编译、CodeCheck、UT 和最终验证仍先执行，失败只能用 `moonlight defer` 记录真实问题，
-不能伪造通过。push 仍以本地 HEAD == 上游为硬证据，成功后停在 `moonlight_review`，规格定稿留给早晨。
+不能伪造通过。push 仍以本地 HEAD == 上游为硬证据；晨间 finalize 统一进入领域归档，不再进入 OpenSpec 定稿。
 报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，旧报告里的
 环境类遗留映射到该工作流的编译入口，不重跑需求和设计；`finalize` 才恢复普通归档流程。Stop Hook 在安全
 停点前拒绝主 Agent 自行收工；真实硬阻塞须先执行 `moonlight blocked` 留痕，递归触发时 fail-open 防死循环。
@@ -215,7 +216,7 @@ flow.json 步骤字段语义：
 | `glob` | 文件存在（`any` 数组任一命中；pattern 支持 `{配置键}` 占位） |
 | `branch_ok` | 正常路径校验当前分支名与基线起点；已有工作时仅接受用户明确选择沿用、且绑定当前分支/HEAD/基线的裁决收据 |
 | `env_ok` | 环境检查全绿（实测，带 24h 缓存，见 3.5） |
-| `tasks_checked` | 本 change 的实现清单无未勾选项（v5 = change.md 的「# 实现清单」节；旧布局在途单 = tasks.md，来源由引擎 `tasks_source` 统一裁决） |
+| `tasks_checked` | 仅供旧在途兼容节点校验历史 change 任务；当前可达编码链不使用 |
 | `tier_scope` | 轻量档范围硬校验:改动业务文件数超升级阈值(tweak>5/hotfix>3,与步骤文档升级条件一致)即拒,出路=升级工作流或 accept-risk tier_scope(绑 HEAD)。此前升级条件是纯提示词零机器锚点 |
 | `spec_validate` | 内置引擎 validate 通过作硬证据；`allow_empty` 允许无规格轻量单（hotfix/tweak），`placeholders` 数组配置要拦的骨架占位前缀（缺省「（待填」，design 步追加「（待设计」） |
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
@@ -223,6 +224,7 @@ flow.json 步骤字段语义：
 | `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送），并按 `.mae-flow.json.agent-writes` 与流程明确维护的交付产物核对尚未处理的候选；初始化后出现但没有 Agent 直接写入来源的 IDE/编译器目录只保留在工作区审计，不会被误判成必须提交；若绕过提交门夹带了指纹未变的初始脏文件，则在终态拒绝 |
 | `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
+| `domain_archive_complete` | 领域候选已经由用户确认并应用，结果为 changes/unchanged，路径只在 `docs/specs/` 且输入仍新鲜 |
 
 **CodeCheck/UT 覆盖口径（2026-07-27 用户拍板）**：检查/测试对象=**本次修改的函数**，不是整个变更文件——一单不背存量债，且与线上流水线的增量口径对齐。实现：`_changed_lines`（git diff -U0 的 +侧行集合）是范围数据源；CodeCheck 按变更行 ±`CODECHECK_LINE_SLACK`(3) 窗口做**预分类**，窗口内直接计入，窗口外逐条编号交用户确认是否涉及本次修改，未经确认不得排除、派修复 Agent 或 done；明细缺行号时保守全算。月光模式无法询问用户，故将全部候选保守计入。UT 任务卡携带"本次修改行范围"，agent 契约禁止为未修改的存量函数补测。窗口只是近似，不是真相——函数级规则、宏展开和定位漂移正是必须保留用户裁决的原因。
 | `clean_paths` | 指定路径 git 实测已提交且无未提交改动——硬化"产物必须 commit"义务（grill/open/design/review 在用） |
@@ -356,27 +358,27 @@ v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability
 
 | 约定 | 原因 | 现行落点 |
 |---|---|---|
-| mae-flow 独占节奏，阶段不自动衔接 | 每次推进都要有证据 | `spec phase` 逐级推进 + done 证据链 |
+| 当前需求过程件只在本地工作包 | 防止 MR 混入单号流水文档 | `.mae-flow-work/<单号>/` + Manifest 边界 |
 | review_mode=standard（full/hotfix；tweak 有意 off——tw 链另有 compile/CodeCheck/UT 兜底 + tw_verify 装载 verify 包做正确性核对） | 三维分工：comet review=正确性/漏洞，CodeCheck=规范，Ponytail=复杂度，互不替代 | build.md + verify_comet.md 装载的内嵌方法原文 |
 | isolation=branch、tdd=direct+direct_override、executing-plans | 不让 Agent 记五个字段 | build.md 的固定选择声明 |
 | comet verify 的分支处理选"保持分支" | 推送归 push 步，MR 人工建 | verify_comet.md |
-| 阶段/`design_doc`/`verify_result` 的数据源 | spec_field 证据可信 | `.mae-flow.json` spec 段（`mae-flow spec` 机器写入） |
+| 最终长期知识的数据源 | 用户确认后的领域归档事务 | `domain-archive prepare/show/apply/status` |
 | comet 方法文本锁 **0.3.9** | 内嵌方法原文按固定源码选段，不读取全局版本 | `runtime/vendor/manifest.json` + `CAPABILITY_PACKS` |
 | OpenSpec 锁 **1.6.0** | schema/templates/归档语义固定（引擎按其源码逐条移植并差分对拍） | vendored schema/templates + `specengine.py` |
 | 不创建 `.cac/.claude`、不 reload | 安装插件就应可用，不污染项目或个人目录 | `prepare_project()` 回归测试 |
-| tweak 也走归档 | 防僵尸活跃 change 干扰 comet 阶段检测 | flow.json + archive.md |
+| 所有交付路径只走一次领域归档 | 当前真相统一、无按单号历史副本 | flow.json + domain_archive.md |
 | verify 链固定顺序 Ponytail→CodeCheck→UT→Comet | 删→改→测→验：重构定稿后 UT 才覆盖得上最终形态 | flow.json + 各 verify step md |
 | ponytail 红线：YAGNI 不砍 spec、禁 ultra 档 | spec 是合同；质疑需求归 grill 阶段 | build.md + verify_ponytail.md |
-| grill 高度分层：WHAT 归 grill，HOW 归 brainstorming | 三层提问不撞车；交接物 = clarifications +「留给设计阶段」清单 | grill.md + open.md + design.md |
+| grill 高度分层：WHAT 归 grill，HOW 归 Story | 提问不撞车；交接物 = 本地 decisions + grill | grill.md + open.md + story.md |
 
 **用户话术对照表**（用户界面层彻底封装：用户所见一律左列，右列只活在实现层与维护文档；--choice 代号、目录名、命令是 comet/openspec 的实物，不改）：
 
 | 用户话术 | 上游/内部 |
 |---|---|
 | 完整开发 / 已定位问题修复 / 局部修改 / 处理评审意见 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
-| 提案与规格、规格条目 | v5 四合一 change.md 的「# 为什么」/「# 规格条目：<域>」节（规格条目节体=openspec delta spec 原格式；在途旧布局单为 proposal.md / specs/<域>/spec.md） |
-| 变更目录 | change（openspec/changes/<CHANGE_NAME>；v5 布局目录里只有一个 change.md） |
-| 规格定稿 | archive / 归档 |
+| 需求规格 | `.mae-flow-work/<单号>/spec.md` 本地过程件 |
+| 设计 | `.mae-flow-work/<单号>/story.md` 本地过程件 |
+| 领域归档 | `docs/specs/<domain>.md` 当前真相源 |
 | 方案讨论 | superpowers brainstorming |
 | 代码精简 | ponytail review |
 

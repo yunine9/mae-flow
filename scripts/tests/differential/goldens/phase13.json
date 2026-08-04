@@ -822,12 +822,12 @@
   "evidence_archive_rejection": {
     "files": {
       ".mae-flow.json": {
-        "sha256": "6ce3ee7787bf184f2d01a55005a0d09353fac7d696a9589c78ac15e79499bcd1",
-        "size": 376
+        "sha256": "c848664a906ca96b9236640570a6fca3d1e86aec3e3358e568828464b7800534",
+        "size": 573
       },
       ".mae-flow.json.failures": {
-        "sha256": "f4f2083bfac41228c96906b77961d6621c723873795bf354c41732a0fa174e11",
-        "size": 80
+        "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "size": 3
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -839,7 +839,7 @@
       "head": "9c6b2db726f49b708a5876d0b5a1c51c773e083b",
       "status": "?? .mae-flow.json\n?? .mae-flow.json.failures"
     },
-    "returncode": 2,
+    "returncode": 0,
     "state": {
       ".mae-flow.json": {
         "choices": {
@@ -852,23 +852,27 @@
           "单号类型": "feat",
           "基线分支": "main"
         },
-        "current": "archive",
-        "history": [],
+        "current": "domain_archive",
+        "history": [
+          {
+            "at": "2026-07-29 10:00:00",
+            "note": "",
+            "result": "done",
+            "step": "archive"
+          }
+        ],
         "revision": 2,
         "schema_version": 2,
-        "spec": {},
         "started": "2026-07-29 10:00:00",
+        "step_heads": {
+          "domain_archive": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+        },
         "updated_at": "2026-07-29 10:00:00"
       },
-      ".mae-flow.json.failures": {
-        "evidence:archive": {
-          "at": "2026-07-29 10:00:00",
-          "count": 1
-        }
-      }
+      ".mae-flow.json.failures": {}
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): openspec/changes/archive/*diff-change*\n  - 交付登记 phase=(空),需要 archived——按本步指引完成动作后用 mae-flow spec 登记,谎报无效\n  - 缺少本次定稿的精确产物清单；重新执行 spec archive，或由维护人核对旧在途状态后再推进\n",
-    "stdout": ""
+    "stderr": "",
+    "stdout": "[mae-flow] archive done → 进入 domain_archive\n\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 openspec/specs/ 真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "evidence_branch_rejection": {
     "files": {
@@ -1214,8 +1218,8 @@
   "evidence_spec_rejection": {
     "files": {
       ".mae-flow.json": {
-        "sha256": "2b32d9719ee720ef238d0262c1f930ffe8a74d470306fabbbf2d84d7871aa4f8",
-        "size": 376
+        "sha256": "d368adcf9ec3a96a57e02a6520da1af0251846973d9a0770f688ede36d0b2c40",
+        "size": 362
       },
       ".mae-flow.json.failures": {
         "sha256": "dfbd0226cb632b4211b93b6e226fe94a20a81fa5cbd7f72af8de3cc2c011de2d",
@@ -1252,7 +1256,6 @@
         "history": [],
         "revision": 2,
         "schema_version": 2,
-        "spec": {},
         "started": "2026-07-29 10:00:00",
         "updated_at": "2026-07-29 10:00:00"
       },
@@ -1271,7 +1274,7 @@
         }
       ]
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 交付登记 phase 为空——本步产物尚未登记;完成后执行 mae-flow spec set phase \"<路径>\"\n  - 规格校验无法执行: change 'diff-change' 不存在；当前没有任何活跃 change\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/spec.md\n",
     "stdout": ""
   },
   "guard_expired_permit": {
@@ -1528,12 +1531,12 @@
   "moonlight_finalize_clean": {
     "files": {
       ".mae-flow-work/moonlight-report.md": {
-        "sha256": "80a88f09acba99550d502621968bc82913674ea58f3187b93855340f527bae92",
-        "size": 844
+        "sha256": "1537501df1f8b79c5ac94a8e6887053043285b96cc62d45e91eb899f3e4494a3",
+        "size": 855
       },
       ".mae-flow.json": {
-        "sha256": "32554f2eb8c7af82193e63c18aaa522272055e099ed6e8d32cf1bb6d57c55815",
-        "size": 805
+        "sha256": "5d7ef05423666b858001357487f57035c60c3bac6af5f759aa796cd5807489df",
+        "size": 827
       },
       "README.md": {
         "sha256": "6d380c8d9fe907a780b25d3cb26cab9ae58e6cb6a055128708116a46a2b747a7",
@@ -1558,7 +1561,7 @@
           "单号类型": "feat",
           "基线分支": "main"
         },
-        "current": "end",
+        "current": "domain_archive",
         "history": [
           {
             "at": "2026-07-29 10:00:00",
@@ -1579,13 +1582,13 @@
         "schema_version": 2,
         "started": "2026-07-29 10:00:00",
         "step_heads": {
-          "end": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
+          "domain_archive": "9c6b2db726f49b708a5876d0b5a1c51c773e083b"
         },
         "updated_at": "2026-07-29 10:00:00"
       }
     },
     "stderr": "",
-    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。评审意见处理已完成。\n═══ 当前步骤: end — 交付完成 ═══\n允许: 仅本步指令内动作;禁止: 修改源码、写 openspec/specs/ 真相源、编辑 .comet.yaml\n流程已完成。\n收尾动作(一次性完成后结束回复),两件事按序做:\n\n一、**经验沉淀**(先于总结;本单没有值得记的就明说\"无\",禁止硬凑):\n回顾本单:codecheck 遗留/豁免的告警类型、UT 的 mock 策略与坑、构建/环境陷阱、grill 揪出的文档盲区、\n本单新增的 `ponytail:` 天花板标记(grep 源码盘点一次,有则列给用户——标注了升级路径却无人跟踪=白写)。\n有值得下单复用的 → 先一次性展示全部候选(每条一行,附出处),再用一张\nAskUserQuestion `multiSelect` 卡让用户勾选要沉淀的条目;候选超过 4 条时按每卡最多 4 条分批,\n禁止逐条串行停顿。同意的追加进 docs/delivery-notes.md:\n- 每条一行:`- [YYYY-MM-DD 单号] 事实描述(出处)`;\n- **只记仓库事实**(构建陷阱/告警高发点/mock 策略/环境坑),**禁止**流程规则与通用编码原则\n  (那些归插件和 CLAUDE.md 管,两处都写会双源打架);与 CLAUDE.md 或插件指令冲突的不记;\n- 全文件上限 30 条,超限先删最旧;\n- 落盘后 git add docs/delivery-notes.md && git commit -m \"[单号][类型]沉淀交付经验\" && git push\n  (push 步已完成,此 commit 须再推一次才能进 MR)。\n\n二、输出「交付总结」,固定包含四块:\n1. **概要表**:单号/类型(feat|fix)/分支/耗时(取自 mae-flow report)/状态;\n2. **实现内容**:改了什么、多少行实现+多少行测试、UT 通过情况;\n3. **交付物清单表**(逐项列位置与状态):实现代码、单元测试、规格定稿目录、\n   设计文档、验证报告、STORY(如生成,注明入库/本地)、沉淀条目(如有);\n4. **后续步骤**:分支已推送 → 请在代码平台用该分支创建 MR(目标=基线分支)→ 流水线与合入由公司流程跟进;\n   下一单直接说需求即可(init 自动备份本单状态为 .mae-flow.json.last)。\n"
+    "stdout": "[mae-flow] 月光宝盒晨间检查已结束。已恢复普通模式并进入规格定稿；定稿提交后还要再次 push。\n═══ 当前步骤: domain_archive — 领域知识归档 ═══\n允许: 写 openspec/specs/ 真相源;禁止: 修改源码、编辑 .comet.yaml\n──── 执行指令 ────\n质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。\n\n先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --domain \"<领域>\" --keyword \"<关键词>\"`\n\n首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive prepare --unchanged`\n\n用下列命令展示归档结论和 diff：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive show`\n\n只向用户确认一次。收到回答后先执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" messages` 取得当前回答 ID，再执行：\n\n`python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive apply --message-id \"<消息ID>\"`\n\n候选过期只重新 prepare，不回退编码、Reviewer、编译、CodeCheck 或 UT。命令失败时执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" domain-archive status`，按输出的唯一恢复动作处理；禁止猜参数、循环重试或改写流程状态。应用完成后 done。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "moonlight_push_failure": {
     "files": {

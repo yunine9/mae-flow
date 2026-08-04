@@ -197,7 +197,7 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
         self.write("docs/design.md", "# Design\nService owns orchestration.\n")
         self.write("src/service.py", "VALUE = 1\n")
         self.write(
-            ".mae-flow-work/survey-REQ-1.md",
+            ".mae-flow-work/REQ-1/survey.md",
             "关键邻近代码：`src/service.py`\n",
         )
         subprocess.run(
@@ -302,7 +302,7 @@ class Spec2CodeCliSequenceTests(unittest.TestCase):
     def test_retired_role_tasks_are_context_only_without_return_digest(self):
         test_card, _ = self.role("test-design")
         self.assertIn("docs/requirement.md", test_card)
-        self.assertIn("survey-REQ-1.md", test_card)
+        self.assertIn("/REQ-1/survey.md", test_card)
         self.assertIn("src/service.py | SHA256", test_card)
 
         blueprint_path = ".mae-flow-work/test-blueprint-REQ-1.md"

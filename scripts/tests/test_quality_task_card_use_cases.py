@@ -131,7 +131,7 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
         self.assertIn("涉及多个模块", body)
         self.assertIn("禁止退回项目根", body)
 
-    def test_requirement_sources_preserve_document_then_unique_globs(self):
+    def test_requirement_sources_ignore_legacy_openspec_globs(self):
         config = {
             "需求文档": "docs/req.md",
             "CHANGE_NAME": "change-a",
@@ -153,14 +153,8 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
             glob_paths=glob_paths,
         )
 
-        self.assertEqual(
-            (
-                "/repo/docs/req.md",
-                "/repo/openspec/changes/change-a/change.md",
-            ),
-            sources,
-        )
-        self.assertEqual(6, len(seen))
+        self.assertEqual(("/repo/docs/req.md",), sources)
+        self.assertEqual([], seen)
 
     def test_store_card_writes_plain_body_without_return_receipt(self):
         writes = []

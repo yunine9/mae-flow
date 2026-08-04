@@ -59,6 +59,18 @@ class ProjectResourceTests(unittest.TestCase):
             self.assertRegex(second.safe_ticket, r"^req-123-[0-9a-f]{8}$")
             self.assertEqual(second.safe_ticket, repeated.safe_ticket)
 
+    def test_pre_marker_exact_directory_is_adopted_in_place(self):
+        module = importlib.import_module(
+            "mae_flow_core.orchestration.work_package")
+        with tempfile.TemporaryDirectory() as root:
+            existing = os.path.join(root, ".mae-flow-work", "REQ-123")
+            os.makedirs(existing)
+            with open(os.path.join(existing, "survey.md"), "w", encoding="utf-8") as stream:
+                stream.write("legacy local context")
+            package = module.ensure_work_package(root, "REQ-123")
+            self.assertEqual(existing, package.root)
+            self.assertEqual("REQ-123", self._read(package.ticket_marker))
+
     @staticmethod
     def _read(path):
         with open(path, encoding="utf-8") as stream:

@@ -86,6 +86,10 @@ def resolve_ticket_segment(project_root, ticket):
     for name in matching:
         if _marker_ticket(os.path.join(work_root, name)) == original:
             return name
+    # Upgrade a pre-marker work package in place when its spelling is exact.
+    # Case-only aliases remain collisions on Windows/macOS-compatible paths.
+    if base in matching and not _marker_ticket(os.path.join(work_root, base)):
+        return base
     return base + "-" + _short_digest(original)
 
 

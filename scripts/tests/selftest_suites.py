@@ -5,6 +5,8 @@ import subprocess
 
 
 REFACTOR_SAFETY_SUITES = (
+    ("稳定基线恢复能力契约",
+     ("scripts/tests/test_stable_recovery_contract.py",), 90, 3000),
     ("Lean workflow state contract",
      ("scripts/tests/test_lean_state.py",), 90, 3000),
     ("Lean workflow migration contract",

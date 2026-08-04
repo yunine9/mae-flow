@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Redline liveness contracts for the stable subtractive workflow."""
+
+import json
+import os
+import sys
+import unittest
+
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+SCRIPTS = os.path.join(ROOT, "scripts")
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+from mae_flow_core.workflow.transitions import transition_targets  # noqa: E402
+
+
+with open(os.path.join(ROOT, "flow", "flow.json"), encoding="utf-8") as stream:
+    FLOW = json.load(stream)
+
+
+def reachable():
+    seen, pending = set(), [FLOW["start"]]
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(
+            target for target in transition_targets(FLOW["steps"][current])
+            if target not in seen)
+    return seen
+
+
+class FlowLivenessTests(unittest.TestCase):
+    def test_every_reachable_nonterminal_step_has_a_real_successor(self):
+        reached = reachable()
+        self.assertIn("end", reached)
+        for step_id in reached:
+            step = FLOW["steps"][step_id]
+            if not step.get("terminal"):
+                self.assertTrue(
+                    transition_targets(step),
+                    "%s 没有下一步，会卡死" % step_id)
+
+    def test_heavy_compatibility_steps_are_not_reachable(self):
+        reached = reachable()
+        for retired in FLOW.get("compatibility_entries", ()):
+            self.assertNotIn(retired, reached)
+
+    def test_story_review_is_single_pass_and_cannot_schedule_itself(self):
+        story = FLOW["steps"]["story"]
+        self.assertEqual("build_pace", story["next"])
+        self.assertEqual(1, sum(
+            item.get("agent") == "REVIEWER"
+            for item in story.get("evidence", ())))
+        for step_id in reachable():
+            step = FLOW["steps"][step_id]
+            if step_id != "open":
+                self.assertNotIn("story", transition_targets(step))
+
+    def test_staged_and_continuous_are_only_user_selected_pace_values(self):
+        pace = FLOW["steps"]["build_pace"]
+        self.assertTrue(pace["user_ack"])
+        self.assertEqual(
+            ["staged", "continuous", "adjust"], pace["choices"])
+        self.assertEqual("build", pace["next"]["staged"])
+        self.assertEqual("build", pace["next"]["continuous"])
+        self.assertEqual("build_pace", pace["next"]["adjust"])
+
+    def test_no_step_uses_agent_return_text_as_a_transition_choice(self):
+        for step_id, step in FLOW["steps"].items():
+            serialized = json.dumps(step, ensure_ascii=False)
+            for forbidden in (
+                    "_RESULT:", "TASK_CARD_SHA256", "reviewer_digest",
+                    "capability.retry"):
+                self.assertNotIn(forbidden, serialized, step_id)
+
+
+if __name__ == "__main__":
+    unittest.main()

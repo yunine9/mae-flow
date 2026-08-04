@@ -10,7 +10,8 @@
 不要 reset/cherry-pick 偷迁移，先展示当前分支、约定分支及提交差异，用 AskUserQuestion 让用户二选一：
 - 迁移到约定分支：按用户决定执行安全迁移，再回本步核对；
 - 在现有分支上继续：仅适用于当前是非基线分支且包含当前基线 HEAD。用户选择后执行
-  `python "{MAEFLOW_PATH}" goto branch_create --force --ack "用户选项原文"`。
+  先执行 `python "{MAEFLOW_PATH}" messages` 取得本步骤真实用户消息 ID，再执行
+  `python "{MAEFLOW_PATH}" goto branch_create --force --message-id "<消息ID>"`。
   该同步命令会把真实选择登记为本单分支并绑定当时 HEAD，随后再执行 done；禁止继续 goto 下一关绕过分支状态。
 若现有分支不包含当前基线，先同步/迁移后重新裁决，不能把无关历史直接带入本单。
 正常创建路径的分支名已在配置中,禁止重复询问；只有上述“现有分支已带工作”冲突才需要一次裁决。

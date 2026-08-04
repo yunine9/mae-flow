@@ -4,6 +4,7 @@ import copy
 import shlex
 
 from mae_flow_core.guard.manifest import DeliveryManifest
+from mae_flow_core.workflow.command_catalog import render_display
 
 from .shared import os
 from .wiring import api
@@ -147,8 +148,10 @@ def cmd_delivery_manifest(state, args):
         api.save_state(updated)
         _print_manifest(manifest)
         if not manifest["confirmed"]:
-            print("下一步: 请向用户展示以上清单；收到回答后执行 messages，"
-                  "再执行 manifest confirm --message-id <消息ID>。")
+            print("下一步: 请向用户展示以上清单；收到回答后执行 "
+                  + render_display("messages") + "，再执行 "
+                  + render_display(
+                      "manifest_confirm", {"message_id": "<消息ID>"}) + "。")
         return manifest
     try:
         updated = confirm_delivery_manifest(state, args.message_id)

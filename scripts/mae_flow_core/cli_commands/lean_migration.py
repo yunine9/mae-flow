@@ -9,6 +9,7 @@ import time
 
 from mae_flow_core.orchestration import recover_lean_flow
 from mae_flow_core.state_store import atomic_write_json
+from mae_flow_core.workflow.command_catalog import render_display
 
 from .shared import STATE_PATH
 
@@ -138,8 +139,10 @@ def _print_card(recovery, proposal):
         print("建议恢复到稳定流程步骤: " + recovery.safe_boundary)
         print("仅迁移单号、用户配置、分支、启动时修改和已确认产物路径；"
               "不会迁移令牌、哈希、指纹、检视摘要或交付收据。")
-    print("请用户明确确认后先执行 messages，再运行: "
-          "migrate-flow --confirm --message-id <消息ID>")
+    print("请用户明确确认后先执行 %s，再运行: %s" % (
+        render_display("messages"),
+        render_display("migrate_confirm", {"message_id": "<消息ID>"}),
+    ))
 
 
 def _terminal_lean_gate_bypasses():

@@ -293,14 +293,16 @@ if flow:
         cur = (nxt.get("review") if current_step.get("next_by") == "workflow"
                else nxt.get("continue") if isinstance(nxt, dict) else nxt)
     check("review-fix 质量链分阶段", got == review_chain, str(got))
+    compatibility_entries = set(flow.get("compatibility_entries", ()))
     actual_ack_steps = {
-        sid for sid, step in steps.items() if step.get("user_ack")}
+        sid for sid, step in steps.items()
+        if step.get("user_ack") and sid not in compatibility_entries}
     check("人工确认只保留真实选择、代码检视和不可逆决策",
           actual_ack_steps == {
               "config_confirm", "workflow_select", "code_reviewer_ask",
               "open", "story", "hf_open", "tw_open", "archive_confirm",
               "build_review", "tw_review", "rf_review",
-              "build_pace", "tw_pace", "rf_pace", "build_plan",
+              "build_pace", "tw_pace", "rf_pace",
           }, str(sorted(actual_ack_steps)))
     check("三条新流程均在写码前确认开发节奏且月光旁路",
           steps.get("hf_open", {}).get("next") == "build_pace"
@@ -346,7 +348,8 @@ if flow:
     check("批量确认与零待决分支都有明确步骤话术",
           "multiSelect" in step_text("end")
           and "每卡最多 4 条" in step_text("rf_triage")
-          and "②③类恰好为 0" in step_text("open")
+          and "local-spec validate" in step_text("open")
+          and "唯一一次确认" in step_text("open")
           and "候选题为 0" in step_text("grill")
           and "AskUserQuestion" in step_text("verify_comet"))
     check("review 编译只接受 OK",
@@ -382,12 +385,17 @@ if flow:
     check("三条流程共用 CodeCheck 机器协议",
           all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
               for x in ("verify_codecheck", "tw_codecheck", "rf_codecheck")))
-    # v5 防回退:四合一 change.md 的规格结构校验是 open/design 链的硬证据,
-    # 删掉它=规格质量门从机器上消失,退回"凭感觉写规格"。
-    check("v5 规格校验硬证据在位",
-          all(any(e.get("type") == "spec_validate"
-                  for e in steps.get(x, {}).get("evidence", []))
-              for x in ("open", "hf_open", "tw_open", "design")))
+    # 稳定恢复流程的业务 Spec 是本地过程件。旧 OpenSpec 的
+    # spec_validate 只服务 change.md，不能继续冒充本地 Spec 校验。
+    open_evidence = steps.get("open", {}).get("evidence", [])
+    check("本地 Spec 校验与 Grill 输入链在位",
+          any(
+              ".mae-flow-work/{单号}/spec.md" in e.get("any", [])
+              and ".mae-flow-work/{单号}/grill.md" in e.get("any", [])
+              for e in open_evidence
+          )
+          and "local-spec validate" in step_text("open")
+          and steps.get("open", {}).get("next") == "story")
 
     # CodeCheckCLI 的成功退出码/文案不稳定，至少守住三种已知输出
     parser_cases = [
@@ -2362,17 +2370,22 @@ if flow:
             for p in e.get("any", []) + e.get("paths", []) + ([e["file"]] if "file" in e else []):
                 ph |= set(re.findall(r"\{([^}]+)\}", p))
     check("证据占位符均为已知配置键", ph <= KNOWN, str(ph - KNOWN))
-    token_types = {"agent_ran", "agent_or_no_source", "review_agent_or_no_code"}
-    token_requirements = [
+    lifecycle_types = {
+        "agent_ran", "agent_or_no_source", "review_agent_or_no_code"}
+    lifecycle_requirements = [
         (step, "CODECHECK" if e.get("type") == "review_codecheck"
          else str(e.get("agent", "")).upper())
         for step in steps.values() for e in step.get("evidence", [])
-        if e.get("type") in token_types or e.get("type") == "review_codecheck"
+        if e.get("type") in lifecycle_types
+        or e.get("type") == "review_codecheck"
     ]
-    all_token_steps_covered = all(
+    all_lifecycle_steps_covered = all(
         kind in mf._step_agent_kinds(step) and kind in mf.RISK_AGENT_LABELS
-        for step, kind in token_requirements)
-    check("所有流程 Agent 令牌证据都能识别统一风险放行", all_token_steps_covered)
+        for step, kind in lifecycle_requirements)
+    check(
+        "所有流程 Agent 生命周期证据都能识别统一风险放行",
+        all_lifecycle_steps_covered,
+    )
 
 # push/done 的工作区范围必须与提交前 Gate 同源：初始化后出现不等于本单产物。
 with _TmpDir() as td:

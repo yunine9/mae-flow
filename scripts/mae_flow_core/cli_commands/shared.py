@@ -297,11 +297,12 @@ _BINARY_PREFIXES = (b"%PDF-", b"PK\x03\x04", b"\x89PNG", b"\xff\xd8\xff", b"GIF8
 
 RISK_AGENT_LABELS = {
     "COMPILE": "没有可验证的编译成功证据，代码可能无法构建",
-    "CODECHECK": "CodeCheck 修复 Agent 没有合法令牌；本次将只保留首检结果，缺少专项修复结论",
+    "CODECHECK": "CodeCheck 修复 Agent 没有可验证的正常返回；本次将只保留首检结果，缺少专项修复结论",
     "CODECHECK_TOOL": "CodeCheck CLI 自动安装或执行失败，本次将缺少代码规范检查结果",
     "UT": "没有可验证的 UT 生成/运行通过证据，回归问题可能进入后续阶段",
-    "STORY": "没有可验证的 STORY 专项 Agent 收尾证据",
-    "GRILL": "需求追问 Agent 没有合法收尾，需求边界可能仍有遗漏",
+    "STORY": "没有可验证的 Story Generator 正常返回记录",
+    "REVIEWER": "没有可验证的 Reviewer 正常返回记录，设计或代码问题可能遗漏",
+    "GRILL": "Grill Critic 没有正常返回，需求边界可能仍有遗漏",
     "ASKUSER": "宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话",
     "UTRUN": "没有观测到 UT 命令真实调起",
     "TIER_SCOPE": "本单改动文件数超过所选交付档的升级阈值，继续按轻量档走会绕过设计与规格环节",

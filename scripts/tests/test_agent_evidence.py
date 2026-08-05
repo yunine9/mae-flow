@@ -31,6 +31,7 @@ def make_ports(**overrides):
         "shell_output": lambda _command: "a" * 40,
         "argv_output": lambda _arguments: "commit",
         "blocking_dirty_source_paths": lambda _state: [],
+        "open_observation": lambda _kind, _step, _since: None,
     }
     values.update(overrides)
     return AgentEvidencePorts(**values)
@@ -46,6 +47,34 @@ class AgentEvidenceRuleTests(unittest.TestCase):
         self.assertIn("本步内未检测到 COMPILE 子 Agent 已返回", result.reason)
         self.assertNotIn("令牌", result.reason)
         self.assertNotIn("XXX_RESULT", result.reason)
+
+    def test_open_start_with_missing_return_forbids_automatic_redispatch(self):
+        ports = make_ports()
+        object.__setattr__(ports, "open_observation", lambda *_args: {
+                "kind": "GRILL_FINAL",
+                "step": "grill",
+                "lifecycle": "started",
+                "invocation_id": "toolu-final",
+                "at": "2026-07-29 10:01:00",
+            })
+
+        result = AgentEvidenceRules(ports).agent_ran(
+            {"agent": "GRILL_FINAL"}, {"current": "grill"})
+
+        self.assertFalse(result.passed)
+        self.assertIn("禁止自动重派", result.reason)
+        self.assertNotIn("请启动对应专项 Agent", result.reason)
+        self.assertNotIn("继续重跑", result.reason)
+
+    def test_quality_step_prompts_share_the_missing_return_anti_loop_rule(self):
+        for name in ("rf_compile.md", "verify_codecheck.md", "verify_ut.md"):
+            with self.subTest(name=name):
+                with open(
+                        os.path.join(ROOT, "flow", "steps", name),
+                        encoding="utf-8") as stream:
+                    content = stream.read()
+                self.assertIn("禁止自动重派", content)
+                self.assertNotIn("状态不确定就重启 agent", content)
 
     def test_returned_lifecycle_passes_regardless_of_declared_statuses(self):
         observation = {

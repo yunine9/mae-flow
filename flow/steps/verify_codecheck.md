@@ -30,7 +30,9 @@
 **大批量分批**:告警 >30 条或文件 >15 个 → 任务卡按文件划批，仍只派一轮修复；
 不要为每条告警重启全新实例。
 (本步在 Ponytail 之后——不给已删代码修规范;在 UT 之前——拆大函数等重构在此定稿,UT 才能覆盖到最终形态。)
-(FOUND/FIXED/REMAINING_COUNT 三数对账、复验摘录一致性、fullcheck 已由 SubagentStop hook 硬校验,打回会自动重答。)
+(Agent 返回自然语言仅供展示，不再解析 FOUND/FIXED/REMAINING_COUNT 或固定状态行；
+PreToolUse/SubagentStop/Agent PostToolUse 记录生命周期，harness 从真实 transcript 核对 fullcheck 调用和范围。
+检测到 started 但返回事件缺失时禁止自动重派，先执行 doctor。)
 CLEAN→done；REMAINING→展示一次遗留摘要并直接 done，写入最终交付风险，不逐条询问、
 不要求插件内豁免、不重启长任务。FAIL 且没有留下未验证源码改动时同样作为工具建议项收尾；
 若 FAIL 后留有源码变化，必须回退或完成编译后再收尾。

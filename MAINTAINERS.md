@@ -49,8 +49,8 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 8. **硬禁令必须配裁决出口**。gate 与契约拦的是"未经用户裁决的动作"，不是场景本身——工程现实里被禁动作往往有正当场景（UT 揭出源码真缺陷、既有用例被规格演进淘汰、实现揭出设计/spec 有误、AskUserQuestion 客观不可用）。每条禁令都要回答"该场景的正规出口是什么"：unlock source（UT 缺陷修复）、SUSPECTED_BUGS 呈报（agent 自查后升级）、goto --ack 回流（设计/spec 修订）、accept-risk（宿主/收尾异常导致单个 Agent 令牌无法签发）。禁令没有出口，弱模型只剩"卡死"或"作弊绕过"两个选项，都是事故（ImpossibleBench 实证：给正规弃权通道，作弊率 54%→9%）。新加任何禁令前先写出口，出口必须带用户裁决与留痕。
 9. **安装不是授权，逃生不能复用故障链**。没有 `.mae-flow.json` 时所有工具 Hook 必须旁路；仅安装插件绝不能阻止普通改码。`/mae-flow:mae-flow exit` 由 UserPromptSubmit 用户事件直接签发短时凭据并原子退出，不再依赖 `.usermsg` ack；若整个 Hook 通道损坏，真实 TTY 的 `exit --interactive` 是独立最后出口。任何新增门禁都必须证明这两条出口仍可用。
 10. **单项能力不是缩水版完整流程**。UT、CodeCheck、Grill 使用 `.mae-flow-work/standalone-action.json`
-    轻量控制层，不创建 `.mae-flow.json`，也不启用阶段源码门禁。三类任务共享任务卡、指纹、契约和报告机制；
-    只有匹配当前任务卡的 SubagentStop 会被校验，普通 Edit/Bash/子 Agent 继续放行。独立任务默认不 commit，
+    轻量控制层，不创建 `.mae-flow.json`，也不启用阶段源码门禁。三类任务共享任务卡、生命周期观察和报告机制；
+    只有匹配当前任务卡的 Agent 派发/返回会进入证据链，普通 Edit/Bash/子 Agent 继续放行。独立任务默认不 commit，
     24 小时失效，取消只移除控制指针并保留现场。UT/CodeCheck 必须先冻结并展示范围，再用提案之后捕获的
     用户事件确认；确认前不得执行工具或生成任务卡。UT 至少包含一个被测业务文件，CodeCheck 排除测试文件。
     用户调整范围一律取消重开，禁止原地静默扩张。禁止为增加第四个单项能力复制一套新状态机。
@@ -82,7 +82,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 |---|---|---|---|
 | 复杂度 | Ponytail | build 预防 + verify 4.1 | 先删：不给将死代码修规范/补测 |
 | 规范 | CodeCheck | verify 4.2 | 再改：CodeCheck 是建议型工具。每个源码版本真实首检一次；有告警时只派一轮修复 Agent，Hook 核对任务卡、真实 fullcheck、范围和三数；CLEAN/REMAINING 都如实留痕，工具 FAIL 且未留下源码变化也可继续。done 不再第三次重跑，工具不可用/输出未知保存诊断后继续；只查业务代码不查测试 |
-| 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；SubagentStop 硬校验 OK⇔零error + **numstat 亲算净产出不变量**（删代码换编译通过得不了分）+ BLOCKED 弃权出口 |
+| 编译 | compile-agent（全流程唯一编译执行者，隔离舱） | build 批次边界 + tw/rf 涉码时 | 主会话永不编译；路由=配置的编译方式（C++→build-fix skill/Java→mvn）；生命周期返回只证明 Agent 已结束，真实 transcript 中匹配任务输入的成功编译才是质量证据 |
 | 回归 | AutoUT | verify 4.3 | 后测：对定稿代码补测才不会被重构作废。C++ AutoUT 每任务卡只调用一轮，正常路径只跑一次最终全量 UT；仅在要认领非零 disabled/skipped 为存量时才选做修改前基线。PASS 至少真实运行 1 条测试；任务卡绑定蓝图时逐场景报告执行结果。明确失败、吞退出码、缩窄范围、删测试或存量基线下总数下降仍阻断。未知 runner 输出由 Skill/Agent 归一，Hook 不强套其他框架文案 |
 | 正确性/漏洞 | comet review（standard，full/hotfix）；tweak 有意 off，由 tw_verify 的 verify 包(requesting-code-review)承接 | verify_comet / tw_verify 单点（build 收尾无评审动作；verify_ponytail 出界的 correctness 发现须落盘实现清单备注交 verify_comet 核对） | 与规范/复杂度维度不重叠，这一维只有它管 |
 | 规格符合 | comet-verify | verify 4.4 | 终验对 spec；`verify_result: pass` 是硬证据 |
@@ -113,7 +113,7 @@ runtime/bin/openspec        Comet 归档脚本调用内嵌 OpenSpec 的稳定入
 scripts/comet_compat.py     只兼容旧项目残留的 Comet Hook；新项目不会创建项目级 Hook
 hooks/hooks.json            6 个 hook 注册(shell form + timeout 15s)
 hooks/dispatch.py           Hook 协议入口(防卡死 + 项目根定位 + application/adapters 装配)
-agents/*.md                 4 个子 agent 契约(XXX_RESULT 标记 + 任务卡指纹 + 幂等要求)
+agents/*.md                 7 个子 agent 职责契约（返回自然语言不参与验签）
 commands/mae-flow.md        /mae-flow:mae-flow 的完整流程、独立任务、月光宝盒与诊断入口
 skills/mae-flow/assets/     STORY / CHAIN / GRILL-PREP / REVIEW 四份模板
 ```
@@ -167,8 +167,8 @@ Manifest 拒绝整个 `openspec/`、所有过程文档路径，以及任何未�
 `docs/specs/` 文件。历史中已经提交的旧过程件不改写；升级时仅把尚未跟踪的旧过程件迁入本单过程区。
 
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
-`mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐并签
-SHA-256；SubagentStop 要求报告回传同一指纹并复算文件内容。主模型漏传配置、旧卡复用、手改任务卡均拿不到令牌。
+`mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐；
+PreToolUse 在派发前校验任务卡属于当前步骤，返回自然语言不要求回传指纹、令牌或固定状态行。
 新单的开发检查点存于主状态的 `development_review` 子树：计划确认只冻结业务边界与任务结构，
 勾选/备注不使计划漂移；每批 compile 任务卡额外绑定 CP 编号。分阶段模式的收据同时绑定固定 base、
 当前 HEAD 和真实上游 ref，返工不前移 base；连续模式只记录批次 HEAD，最终在 `delivery_review`
@@ -176,7 +176,7 @@ SHA-256；SubagentStop 要求报告回传同一指纹并复算文件内容。主
 必须跳过新插入的 pace 节点并走原有检视路径，不能升级后突然新增人工门。
 独立 Grill 的 prep/final 任务卡由 `action critic` 同样签名；PreToolUse 在 Task 派发时通过统一
 `_contract_state()` 先验任务卡，缺卡当场拦，不把错误拖到整只 agent 跑完。
-对配置声明为 AutoUT/java-autout/build-fix 的任务，SubagentStop 还从子会话 transcript 验真实 Skill 工具调用；
+对配置声明为 AutoUT/java-autout/build-fix 的任务，返回事件会从子会话 transcript 验真实 Skill 工具调用；
 UT/直接编译命令与 `codecheck fullcheck` 同理验真实 Bash 调用，报告里写“执行过”不算证据。
 
 **月光宝盒**是普通状态机上的显式运行策略，不是另一套流程。UserPromptSubmit 在新项目尚无状态文件时，
@@ -222,7 +222,7 @@ flow.json 步骤字段语义：
 | `commit_tagged` | 最新 commit 匹配 `[单号][feat|fix]` |
 | `spec_field` | 读 `.mae-flow.json` spec 段字段（v3 起阶段/产物指针的单一真相源）：`equals` 精确匹配或非空即过；指针字段登记时校验文件真实存在 + 现场复核（`yaml_field` 保留为在途兼容别名，指向同一实现） |
 | `pushed` | `git rev-parse --verify HEAD` == `@{u}`（实测已推送），并按 `.mae-flow.json.agent-writes` 与流程明确维护的交付产物核对尚未处理的候选；初始化后出现但没有 Agent 直接写入来源的 IDE/编译器目录只保留在工作区审计，不会被误判成必须提交；若绕过提交门夹带了指纹未变的初始脏文件，则在终态拒绝 |
-| `agent_ran` | 本步期间发生过 harness 签发的 `at/head/status` 令牌；证据可声明允许状态（编译只认 OK、UT 只认 PASS），FAIL/BLOCKED 是诚实报告但不再冒充通过。令牌绑定签发时 HEAD，签发后源码变化即过期。compile/codecheck/UT 还校验任务卡指纹和配置对账；AskUserQuestion 发 ASKUSER 令牌。用户可通过 `accept-risk` 只替代当前步骤的单个 Agent 令牌：ack 精确验真，绑定 step/task SHA/HEAD，代码变化或推进后失效；其他证据不受影响。**封杀主会话代工、伪确认、旧证据背新代码，同时避免宿主兼容问题形成无限重跑** |
+| `agent_ran` | 本步期间存在匹配 kind/step 的 `started → returned` 生命周期。PreToolUse 的 `tool_use_id` 与 SubagentStop 的 `agent_id` 属不同命名空间，通过 Agent PostToolUse 别名和唯一未闭合调用关联；两条返回通道幂等。返回文字不解析。compile/codecheck/UT 另核对与当前任务输入匹配的真实成功执行；AskUserQuestion 仍使用 ASKUSER 交互令牌。已有 started 但返回事件缺失时禁止自动重派，先 doctor；用户可用 `accept-risk` 只替代当前步骤该生命周期证据，其他机器证据不受影响。 |
 | `content_free` | 文件内容不得命中禁止正则——把"标注协议"变成机器可查终态（story 在用：零"待确认"+ 禁裸"不涉及"，破解指标博弈的职责锁） |
 | `domain_archive_complete` | 领域候选已经由用户确认并应用，结果为 changes/unchanged，路径只在 `docs/specs/` 且输入仍新鲜 |
 | `local_spec_valid` | 本单 `.mae-flow-work/<单号>/spec.md` 通过语义章节校验；仅有空文件或标题不能推进 |
@@ -262,9 +262,9 @@ flow.json 步骤字段语义：
   避免对移动、删除、生成源码和项目约定二进制误杀。精确采集异常只记日志并 fail-open，不反向拒绝
   COMPILE；正常命中只拒绝当前 commit 尝试，按提示移出暂存区或命令清单即可重试，不删除本地构建结果，
   也不产生持久锁。流程启动前已存在且指纹未变的候选属于跨单遗留，会硬拦；OpenSpec 另按当前
-  change/本次 archive 精确归属硬校验。COMPILE 任务卡明确禁止子 Agent commit/push；任务期间 HEAD
-  前进会使收尾失败，新任务会废弃旧令牌，令牌绑定当前任务卡 SHA。当前步骤任务尚无匹配令牌时，
-  `bash-compile-task-pending` 只瞬时拒绝 commit，不记 strike/permit；SubagentStop 合法收尾后由主流程提交。
+  change/本次 archive 精确归属硬校验。COMPILE 任务卡明确禁止子 Agent commit/push；当前步骤任务仍有
+  未闭合 started 时，`bash-compile-task-pending` 只瞬时拒绝 commit，不记 strike/permit；返回事件被
+  生命周期观察记录后由主流程提交。
   baseline 另带有效位，Git 采集失败不得把空字典当 clean；当前不存在的路径（含 tracked deletion）不入账。
   归因、transcript/PostToolUse 直接改写消账和 Gate 共用 slash 标准化 + Windows case-fold identity，消账与
   新增在同一次加锁原子更新中完成。sidecar 损坏诊断的预读只可能竞争日志措辞，权威更新仍加锁原子化。
@@ -295,8 +295,8 @@ flow.json 步骤字段语义：
 ### 3.4 hooks（dispatch.py）
 
 6 个事件：SessionStart / UserPromptSubmit（状态注入 + 用户输入捕获进 ack 验真存储）、PreToolUse（gate）、
-PostToolUse（STORY/CHAIN/GRILL-PREP 模板校验 + ASKUSER/UTRUN 令牌 + AskUserQuestion 应答捕获）、
-SubagentStop（契约校验 + 令牌绑 HEAD）、Stop（月光宝盒安全停点约束）。
+PostToolUse（模板校验 + ASKUSER/UTRUN + Agent/Task 返回兼容记录）、
+SubagentStop（Agent 生命周期与真实执行/写入范围观察）、Stop（月光宝盒安全停点约束）。
 
 **防卡死四件套**（历史上曾造成每条消息挂 10 分钟，动这里要极其小心）：
 - 看门狗 12s 强制 `os._exit(0)`
@@ -304,11 +304,11 @@ SubagentStop（契约校验 + 令牌绑 HEAD）、Stop（月光宝盒安全停�
 - 调 mae-flow 的子进程 8s 超时
 - 每次调用记 `%TEMP%\mae-flow-hook.log`：`start/end + rc + 耗时`；只有 start 没 end = 被看门狗击杀
 
-SubagentStop 契约校验：最终回复必须有且只有一个 `XXX_RESULT: <状态>`（仍建议放第一行；模型偶尔在前面多写一句或代码围栏时兼容接受）；CODECHECK 额外硬验三件事——
-`EXECUTED_COMMAND` 含 fullcheck、三数对账 `FOUND = FIXED + REMAINING_COUNT`（吞告警最常见形态是马虎遗漏，算术不平当场打回）、
-CLEAN ⇔ 遗留为 0 / REMAINING ⇔ 遗留 ≥1（FAIL 属诚实上报不苛求对账）。真实编译调用会留下绑定任务卡、步骤和源码版本的临时凭证；仅因报告格式重答时，同一源码版本可复用，不重复跑长编译，源码一变立即失效。`stop_hook_active` 时仍以 0 退出防打回死循环，但拒签原因写入受保护 sidecar，`done/doctor` 会展示真实原因，不再误报成“首行没标记”。
-UT 同样把真实 AutoUT/java-autout Skill 调用和 UT 命令分别记为临时凭证：报告重答可复用，源码或测试变化立即失效。
-机器字段解析兼容 Markdown bullet/同行字段，真实工具调用高于 `GENERATOR_USED/EXECUTED_UT` 的文字摘要。
+Agent 返回内容是不可解释的诊断文本，可以是任意自然语言、Markdown 或空文本。PreToolUse 用
+`tool_use_id` 记录 started；SubagentStop 用 `agent_id`，Agent/Task PostToolUse 同时提供 `tool_use_id`
+与 `agentId`，因此观察层维护别名并幂等闭合。旧版已经写出的空 kind/step returned 只在历史上唯一
+未闭合调用成立时自愈；并发歧义绝不猜测。真实编译、UT 和 CodeCheck 调用仍从 transcript 独立核对，
+返回文字中的 PASS/CLEAN/数字/令牌均不能替代机器执行。
 UT 已知输出解析只做额外加固：未知 C++ runner 不因文案不匹配被拒；实际命令额外追加
 filter/exclude/disable、明确失败/segfault，或可机器确认的新增 disabled/skipped 时仍不得 PASS。
 CodeCheck 完整成功输出会保存计数凭证；未知成功输出保存执行哈希，报告重答不重复 fullcheck。
@@ -334,14 +334,14 @@ CodeCheck 不属于公开运行时。`ensure_codecheck()` 先解析 PATH、Windo
 CodeCheck 时执行一次公司 npm 安装，registry 用命令行一次性参数，禁止永久修改 npm config。失败记录
 30 分钟冷却，普通流程给 `codecheck_tool` 风险出口，月光模式记入晨间报告。Windows 执行继续使用
 `shell=True` + PATHEXT，不手工拼 `cmd.exe /s /c`。
-扫描器和 SubagentStop 共享 `mae_flow_core.codecheck_log`：前者记录每批 argv/展示命令、退出码、
+扫描器和 Agent 返回观察共享 `mae_flow_core.codecheck_log`：前者记录每批 argv/展示命令、退出码、
 耗时、解析来源和原始产物；后者记录修复 Agent 的 Bash/Write/Edit/Skill 输入输出、最终报告、
-任务卡基点到当前工作区的 name-status/stat/diff、契约接受或拒签原因。日志只用于诊断，
+任务卡基点到当前工作区的 name-status/stat/diff、生命周期和范围裁决。日志只用于诊断，
 真实门禁仍由现有状态、任务卡、transcript 和 Git 证据决定，禁止反向依赖日志。
 
 ### 3.6 子 agent 契约
 
-三条不可违背：**唯一结果标记**（推荐第一行，SubagentStop 兼容小格式偏差但不接受多个冲突结果）、**无状态幂等**（先检查后动作，禁止"我下次再"话术——没有下次，是下一个实例接手）、**不能与用户对话**（决策进 PENDING_DECISIONS）。
+三条不可违背：**返回自然语言不参与验签**、**无状态幂等**（先检查后动作，禁止"我下次再"话术——没有下次，是下一个实例接手）、**不能与用户对话**（决策留给主会话呈现用户）。
 **派发三原则**（2026-07-20 轮次经济学实战定型，生产模型 Glm-5.1 且 thinking 关闭，每轮只干一小步）：
 ①**喂到嘴边**——原料原文进任务提示（spec 条目/文件清单/告警明细），不给路径让它自己花轮次读；
 ②**分批小实例**——复杂工作切批逐实例（UT 每批 3-5 方法带收口批、codecheck >30 告警按文件分批、编译按模块），单实例马拉松 60-80 轮后被上下文裁剪拖垮，加轮次预算救不了；
@@ -485,7 +485,7 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 
-- **verify_ut / verify_codecheck 无交付文件证据**——过程证据为受指纹保护的任务卡 + SubagentStop 状态令牌；最终报告仍需展示。
+- **verify_ut / verify_codecheck 无固定报告文件证据**——过程证据为当前任务卡、Agent 生命周期和真实工具执行；最终自然语言报告仍需展示。
 - **确认按风险分层**：普通流程选择读取当前步骤 AskUserQuestion 的按钮结果，`done` 不再要求重复
   `--ack`；若宿主只给 ASKUSER 令牌而不回传选项正文，允许信任本步真实交互和 Agent 提交的合法 choice，
   避免逼用户复读。goto / unlock / 豁免 / accept-risk 会改变流程或放宽约束，
@@ -496,4 +496,4 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **跨仓交付走"链路分解 + 各仓平等交付"两段式（v2，废除了主从概念）**——`/mae-flow:mae-flow chain` 由主模型做链路分解（事实自查：触点/接口/语言差异；决策问人：边界/契约/顺序——grill 哲学的跨仓同构，且必须主模型做因为子 agent 不能与用户对话），产出 CHAIN 文档；此后各仓地位平等、独立跑流程，以 CHAIN 文档为需求输入。**有意不做**跨仓联合状态机——chain 是直通模式无 done 硬校验（同 story 补生成的权衡）；痛点积累后 beads（依赖拓扑工单账本）是编排层候选。
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧流程的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。
-- **SubagentStop 二次失败对宿主返回 0**——这是防打回死循环的必要权衡；真实拒签原因已持久化并由 `done/doctor` 展示，返回 0 不再等于静默丢失诊断。
+- **返回事件丢失不自动重派**——已有 started 时由 `done/doctor` 明确展示 Hook 诊断和风险出口；禁止把宿主漏记变成 Critic/Reviewer/编译循环。

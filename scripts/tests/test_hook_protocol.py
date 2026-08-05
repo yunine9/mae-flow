@@ -88,6 +88,12 @@ class HookProtocolTests(unittest.TestCase):
         self.assertIn("CODEAGENT3_PLUGIN_ROOT", content)
         self.assertNotIn("CLAUDE_PLUGIN_ROOT", content)
         self.assertIn("AskUserQuestion|Task|Agent", content)
+        manifest = json.loads(content)
+        posttool = "|".join(
+            item.get("matcher", "")
+            for item in manifest["hooks"]["PostToolUse"])
+        self.assertIn("Task", posttool)
+        self.assertIn("Agent", posttool)
 
     def test_unexpected_top_level_exception_fails_open(self):
         with mock.patch.object(

@@ -129,6 +129,183 @@ class AgentObservationTests(unittest.TestCase):
         self.assertTrue(has_finished_observation(
             self.state, "STORY", "story"))
 
+    def test_official_subagentstop_agent_id_closes_pretool_tool_use_id(self):
+        state = {
+            "current": "grill",
+            "agent_tasks": {"GRILL_FINAL": {"step": "grill"}},
+        }
+        runtime = SimpleNamespace(_contract_state=lambda: state)
+        adapter = ActiveHookEventAdapter(
+            state=self.state,
+            maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name,
+            maeflow=lambda *_args: 0,
+            runtime_adapter=runtime,
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
+            log=lambda _message: None,
+        )
+        self.assertEqual(0, adapter.pretool({
+            "tool_name": "Agent",
+            "tool_use_id": "toolu-final",
+            "tool_input": {
+                "subagent_type": "mae-flow:grill-critic-agent",
+                "prompt": "读取 grill-critic-final.md",
+            },
+        }).exit_code)
+
+        adapter.subagentstop({
+            "agent_id": "agent-final",
+            "agent_type": "mae-flow:grill-critic-agent",
+            "last_assistant_message": "最终 Critic 已完成",
+        })
+
+        self.assertTrue(has_finished_observation(
+            self.state, "GRILL_FINAL", "grill"))
+        self.assertEqual(
+            "最终 Critic 已完成", self.records()[-1]["detail"])
+
+    def test_agent_posttool_completed_is_a_portable_completion_fallback(self):
+        state = {
+            "current": "story",
+            "agent_tasks": {"STORY": {"step": "story"}},
+        }
+        runtime = SimpleNamespace(_contract_state=lambda: state)
+        adapter = ActiveHookEventAdapter(
+            state=self.state,
+            maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name,
+            maeflow=lambda *_args: 0,
+            runtime_adapter=runtime,
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
+            log=lambda _message: None,
+        )
+        dispatch = {
+            "tool_name": "Agent",
+            "tool_use_id": "toolu-story",
+            "tool_input": {"subagent_type": "story-generator-agent"},
+        }
+        self.assertEqual(0, adapter.pretool(dispatch).exit_code)
+
+        adapter.posttool({
+            **dispatch,
+            "tool_response": {
+                "status": "completed",
+                "agentId": "agent-story",
+                "content": [{"type": "text", "text": "Story 已生成"}],
+            },
+        })
+
+        self.assertTrue(has_finished_observation(
+            self.state, "STORY", "story"))
+
+    def test_historical_orphan_return_self_heals_when_pair_is_unique(self):
+        record_agent_started(
+            self.state, "GRILL_PREP", "grill", "toolu-prep",
+            "2026-08-04 10:00:00")
+        record_agent_finished(
+            self.state, "agent-prep", "returned",
+            "2026-08-04 10:01:00", "旧版本写出的孤儿返回")
+
+        self.assertTrue(has_finished_observation(
+            self.state, "GRILL_PREP", "grill"))
+        self.assertEqual("", latest_started_invocation(
+            self.state, "GRILL_PREP", "grill"))
+
+    def test_background_agent_alias_disambiguates_parallel_grill_critics(self):
+        state = {
+            "current": "grill",
+            "agent_tasks": {
+                "GRILL_PREP": {"step": "grill"},
+                "GRILL_FINAL": {"step": "grill"},
+            },
+        }
+        runtime = SimpleNamespace(_contract_state=lambda: state)
+        adapter = ActiveHookEventAdapter(
+            state=self.state,
+            maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name,
+            maeflow=lambda *_args: 0,
+            runtime_adapter=runtime,
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
+            log=lambda _message: None,
+        )
+        prep = {
+            "tool_name": "Agent", "tool_use_id": "toolu-prep",
+            "tool_input": {
+                "subagent_type": "mae-flow:grill-critic-agent",
+                "prompt": "读取 grill-critic-prep.md",
+            },
+        }
+        final = {
+            "tool_name": "Agent", "tool_use_id": "toolu-final",
+            "tool_input": {
+                "subagent_type": "mae-flow:grill-critic-agent",
+                "prompt": "读取 grill-critic-final.md",
+            },
+        }
+        adapter.pretool(prep)
+        adapter.pretool(final)
+        adapter.posttool({
+            **prep,
+            "tool_response": {
+                "status": "async_launched", "agentId": "agent-prep"},
+        })
+
+        adapter.subagentstop({
+            "agent_id": "agent-prep",
+            "agent_type": "mae-flow:grill-critic-agent",
+            "last_assistant_message": "prep completed",
+        })
+
+        self.assertTrue(has_finished_observation(
+            self.state, "GRILL_PREP", "grill"))
+        self.assertFalse(has_finished_observation(
+            self.state, "GRILL_FINAL", "grill"))
+
+    def test_subagentstop_and_posttool_completion_are_idempotent(self):
+        state = {
+            "current": "story",
+            "agent_tasks": {"STORY": {"step": "story"}},
+        }
+        runtime = SimpleNamespace(_contract_state=lambda: state)
+        adapter = ActiveHookEventAdapter(
+            state=self.state,
+            maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name,
+            maeflow=lambda *_args: 0,
+            runtime_adapter=runtime,
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
+            log=lambda _message: None,
+        )
+        dispatch = {
+            "tool_name": "Agent", "tool_use_id": "toolu-story",
+            "tool_input": {"subagent_type": "story-generator-agent"},
+        }
+        adapter.pretool(dispatch)
+        adapter.subagentstop({
+            "agent_id": "agent-story",
+            "agent_type": "story-generator-agent",
+            "last_assistant_message": "done",
+        })
+        adapter.posttool({
+            **dispatch,
+            "tool_response": {
+                "status": "completed", "agentId": "agent-story",
+                "content": [{"type": "text", "text": "done"}],
+            },
+        })
+
+        returned = [
+            item for item in self.records()
+            if item.get("lifecycle") == "returned"
+            and item.get("kind") == "STORY"
+        ]
+        self.assertEqual(1, len(returned))
+
     def test_quality_completion_records_real_successful_command(self):
         state = {
             "current": "tw_compile",

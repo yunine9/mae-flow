@@ -20,6 +20,7 @@ class AgentEvidencePorts:
     shell_output: object
     argv_output: object
     blocking_dirty_source_paths: object
+    open_observation: object = None
 
 
 class AgentEvidenceRules:
@@ -34,7 +35,7 @@ class AgentEvidenceRules:
             if expired else "")
         return (
             prefix
-            + "如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择："
+            + "如果无法补齐证据但希望承担风险继续，可把以下风险原样展示给用户并让用户明确选择："
             + risk
             + "。用户确认承担风险后执行: python \""
             + os.path.abspath(self.ports.script_path())
@@ -88,6 +89,25 @@ class AgentEvidenceRules:
                     "返回文字不能替代机器执行。" % kind,
                 )
             return EvidenceResult(True, "")
+        open_observation = (
+            self.ports.open_observation(
+                kind, state.get("current", ""), entered)
+            if self.ports.open_observation is not None
+            else None
+        )
+        if open_observation:
+            return self._blocked(
+                kind,
+                accepted_why,
+                "%s 子 Agent 已启动（调用 %s），但宿主没有记录对应返回事件。"
+                "禁止自动重派同一任务；先执行 doctor 检查 Hook/观察记录，"
+                "等待中的 Agent 先等待其完成。若界面已明确显示正常返回但宿主"
+                "仍未补记，只能按后附风险确认通道处理。"
+                % (
+                    kind,
+                    str(open_observation.get("invocation_id", "未知")),
+                ),
+            )
         return self._blocked(
             kind,
             accepted_why,

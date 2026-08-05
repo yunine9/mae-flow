@@ -8,10 +8,6 @@ import tempfile
 import time
 
 from mae_flow_core import atomic_write_json
-from mae_flow_core.application.hooks.agent_completion import (
-    AgentCompletionPorts,
-    handle_agent_completion,
-)
 from mae_flow_core.application.hooks.event_policies import (
     active_pretool_decision,
     agent_kind,
@@ -31,9 +27,8 @@ from mae_flow_core.file_io import (
     read_text,
     write_text,
 )
+from mae_flow_core.adapters.hook_agent_lifecycle import HookAgentLifecycle
 from mae_flow_core.workflow.agent_observations import (
-    latest_started_invocation,
-    record_agent_finished,
     record_agent_started,
     started_observation,
 )
@@ -90,6 +85,14 @@ class ActiveHookEventAdapter:
         self.runtime = runtime_adapter
         self.task_card_ports = task_card_ports
         self.log = log
+        self.agent_lifecycle = HookAgentLifecycle(
+            state_path=state,
+            current_step=lambda: self.runtime._contract_state().get(
+                "current", ""),
+            record_execution=self._record_quality_execution,
+            scope_violation=self._scope_violation,
+            log=log,
+        )
         self.autopsy_path = os.path.join(
             tempfile.gettempdir(), "mae-flow-agent-autopsy.log")
 
@@ -305,19 +308,6 @@ class ActiveHookEventAdapter:
             if line.strip()
         ]
 
-    def _agent_completion_ports(self):
-        return AgentCompletionPorts(
-            state_path=self.state,
-            latest_started=lambda: latest_started_invocation(self.state),
-            record_finished=lambda state_path, invocation_id, lifecycle, detail:
-            record_agent_finished(
-                state_path, invocation_id, lifecycle,
-                time.strftime("%Y-%m-%d %H:%M:%S"), detail),
-            record_execution=self._record_quality_execution,
-            scope_violation=self._scope_violation,
-            log=self.log,
-        )
-
     @staticmethod
     def _explicit_transcript_path(payload):
         for key, value in payload.items():
@@ -402,8 +392,7 @@ class ActiveHookEventAdapter:
         return "" if decision.accepted else decision.reason
 
     def subagentstop(self, payload):
-        return handle_agent_completion(
-            payload, self._agent_completion_ports())
+        return self.agent_lifecycle.complete(payload)
 
     def _template_response(self, path):
         target = template_target(path)
@@ -439,6 +428,8 @@ class ActiveHookEventAdapter:
     def posttool(self, payload):
         tool = payload.get("tool_name")
         tool_input = payload.get("tool_input") or {}
+        if tool in ("Task", "Agent"):
+            return self.agent_lifecycle.posttool(payload)
         if tool in ("Write", "Edit", "MultiEdit"):
             path = (
                 tool_input.get("file_path", "")

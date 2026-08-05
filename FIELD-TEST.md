@@ -46,8 +46,9 @@
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
   - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
-  - **SubagentStop**:派一次 compile-agent 或 ut-generator-agent 后,`.mae-flow.json.agent-observations`
-    出现同一 invocation 的 started/returned 记录；质量 Agent 还应有匹配任务输入的真实 Skill/Bash 成功执行记录。
+  - **SubagentStop/PostToolUse**:派一次 compile-agent 或 ut-generator-agent 后,`.mae-flow.json.agent-observations`
+    出现已关联的 started/returned 记录（PreToolUse `tool_use_id` 与 SubagentStop `agent_id` 本来不同）；
+    质量 Agent 还应有匹配任务输入的真实 Skill/Bash 成功执行记录。
     返回文字可任意变化，不应因状态行、令牌、摘要或格式被打回；只读 Reviewer 故意改源码仍必须被真实写入边界拦截；
   - **Stop**:月光宝盒在非安全停点让主 Agent 结束回复，应被打回继续；执行 `moonlight blocked` 留痕后应允许停止，
     日志出现 stop start/end。若宿主根本不触发 Stop，月光模式降级为 Skill 软约束，必须回报维护人；
@@ -114,7 +115,7 @@
   rf_compile → rf_codecheck → rf_ut → commit 进原 MR。重点故意验证四个拦截:
   - CodeCheck 首检有告警时让主 agent 直接修 → 应被「首检前 HEAD/FOUND 对账」拒绝补手续;
   - 手写豁免文件但不问用户 → done 应报「没有用户审批令牌」;
-  - UT 派发故意漏 AutoUT/UT命令 → 子 agent 无任务卡指纹或无真实 Skill/Bash 调用,SubagentStop 应打回;
+  - UT 派发故意漏 AutoUT/UT命令 → 即使 Agent 正常返回，done 也应因无真实 Skill/Bash 成功执行而拒绝；
   - compile-agent 故意不传 build-fix → 无任务卡/无 build-fix Skill 调用应打回,FAIL/BLOCKED 令牌不能 done。
 - [ ] **2.3 unlock 裁决通道**:人为造一个 UT 能揪出的源码 bug → agent 自查报告六要素齐全 →
   三选一裁决 → unlock(伪造 ack 应被拒)→ 修复 → done 应自动回流完整质量链（review 回 rf_compile，主流程进 verify_recompile），不得直接去 push/verify_comet，也不得重做 comet-build。

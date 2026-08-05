@@ -40,7 +40,10 @@ def _invocation_id(payload):
 
 
 def _detail(payload):
-    value = payload.get("assistant_text", payload.get("detail", ""))
+    value = payload.get(
+        "assistant_text",
+        payload.get("last_assistant_message", payload.get("detail", "")),
+    )
     if isinstance(value, str):
         return value
     try:
@@ -51,10 +54,15 @@ def _detail(payload):
 
 def handle_agent_completion(payload, ports):
     """Record lifecycle metadata and enforce only observable write scope."""
-    invocation_id = _invocation_id(payload) or ports.latest_started()
+    supplied_id = _invocation_id(payload)
+    invocation_id = ports.latest_started(
+        invocation_id=supplied_id, payload=payload)
     if not invocation_id:
         ports.log("subagentstop: 未找到对应 started 观察，按 fail-open 跳过")
         return HookResponse()
+    if supplied_id and supplied_id != invocation_id:
+        ports.log("subagentstop id reconcile: %s -> %s" % (
+            supplied_id, invocation_id))
     lifecycle = _lifecycle(payload)
     try:
         ports.record_finished(

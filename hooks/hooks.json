@@ -14,7 +14,7 @@
                   "command": "R=\"$CODEAGENT3_PLUGIN_ROOT\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" pretooluse; else exit 0; fi", "timeout": 15}]}
     ],
     "PostToolUse": [
-      {"matcher": "Write|Edit|MultiEdit|AskUserQuestion|Bash",
+      {"matcher": "Write|Edit|MultiEdit|AskUserQuestion|Bash|Task|Agent",
        "hooks": [{"type": "command",
                   "command": "R=\"$CODEAGENT3_PLUGIN_ROOT\"; if [ -f \"$R/hooks/dispatch.py\" ]; then exec python \"$R/hooks/dispatch.py\" posttooluse; else exit 0; fi", "timeout": 15}]}
     ],

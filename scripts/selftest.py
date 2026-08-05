@@ -2866,7 +2866,7 @@ if hooks:
     m = ""
     for h in (hooks.get("hooks", {}).get("PostToolUse", []) or []):
         m = h.get("matcher", "") or m
-    for need in ("AskUserQuestion", "Bash", "Write"):
+    for need in ("AskUserQuestion", "Bash", "Write", "Task", "Agent"):
         check(f"PostToolUse matcher 含 {need}", need in m)
     pre = " ".join(
         h.get("matcher", "") or ""

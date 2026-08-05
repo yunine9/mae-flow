@@ -261,7 +261,7 @@
         }
       }
     },
-    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/review.md\n  - 未找到文件: .mae-flow-work/REQ-DIFF/review.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果不想继续重跑，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
+    "stderr": "[mae-flow] 证据不足,拒绝推进:\n  - 未找到证据文件(任一即可): .mae-flow-work/REQ-DIFF/review.md\n  - 未找到文件: .mae-flow-work/REQ-DIFF/review.md\n  - 本步内未发生过真实的 AskUserQuestion 用户交互(最近令牌: 无;本步始于 2026-07-29 10:00:00)。待确认项必须用 AskUserQuestion 真实呈现给用户拍板——自行改写标注/口头声称已确认均无效。 如果无法补齐证据但希望承担风险继续，可把以下风险原样展示给用户并让用户明确选择：宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话。用户确认承担风险后执行: python \"<IMPLEMENTATION>/scripts/mae-flow.py\" accept-risk askuser --reason \"宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话\" --message-id <messages输出的ID>；它只放行当前步骤的该 Agent 生命周期证据，其他机器检查仍照常执行。\n",
     "stdout": ""
   },
   "inactive_pretooluse_bypass": {
@@ -389,7 +389,7 @@
       ".mae-flow.json.failures": {}
     },
     "stderr": "",
-    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 docs/specs/ 领域真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. Agent 返回后读取真实同步编译退出状态；失败时展示根因并修复，输入未变化时禁止重复编译。\n\n任务卡指纹、实际编译命令和 OK 状态由 SubagentStop + done 双层校验；旧任务卡、猜测命令、FAIL 令牌均无效。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
+    "stdout": "[mae-flow] rf_verify done → 进入 rf_compile\n\n═══ 当前步骤: rf_compile — 处理评审意见 — 编译验证 ═══\n允许: 修改源码;禁止: 写 docs/specs/ 领域真相源、编辑 .comet.yaml\n──── 执行指令 ────\n评审意见处理阶段的独立编译步骤。harness 已冻结本轮基点，只验证本轮增量。\n\n先直接尝试 done：本轮没有业务代码改动时机器会自动放行，不要为了纯文档/台账启动编译。\n若证据提示需要 COMPILE：\n1. 执行 `python \"<IMPLEMENTATION>/scripts/mae-flow.py\" agent-task compile`；\n2. 把命令输出的**唯一一句启动话术原样**交给 compile-agent，禁止自行拼写/删减参数；\n3. compile-agent 必须读取任务卡。配置为 build-fix 时调用 Mae-Flow 插件自带 Skill；\n   主会话不编译、不猜命令；\n4. Agent 返回后读取真实同步编译退出状态；失败时展示根因并修复，输入未变化时禁止重复编译。\n\nPreToolUse 记录 Agent 启动，SubagentStop 与 Agent PostToolUse 幂等记录返回；done 另行核对当前任务输入下\n确有真实同步编译成功。Agent 返回文字不解析状态、令牌或指纹，旧任务卡和猜测命令仍不能替代真实执行。\n若已经记录 started 但宿主漏掉返回事件，禁止自动重派；先按证据报错执行 doctor 检查 Hook 状态。\n任务卡生成前若仍有未提交源码，按当前单号精确提交后重试；这是为了让任务范围与 HEAD 对得上，\n不是让模型用宽 `git add .` 把无关文件一起提交。\n新启动且已确认开发节奏的流程，done 后不重复进入旧检视节点：分阶段批次已经检视，\n一次完成模式留到质量链后统一检视。旧版在途流程仍按原行为进入用户代码检视；月光宝盒直接旁路。\n──── 完成后执行 ────\npython \"<IMPLEMENTATION>/scripts/mae-flow.py\" done\n"
   },
   "terminal_status": {
     "files": {

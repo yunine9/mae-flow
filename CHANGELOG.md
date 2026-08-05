@@ -1,5 +1,12 @@
 # 更新记录
 
+## 2026-08-05：修复子 Agent 返回漏记与重复执行
+
+- 修正 PreToolUse `tool_use_id` 与 SubagentStop `agent_id` 被错误视为同一标识的问题；
+- Agent/Task PostToolUse 作为精确、幂等的返回兜底，并为后台 Agent 记录 `agentId` 别名；
+- 旧版本已经产生的空 kind/step 返回记录在唯一配对成立时只读自愈，并发歧义不猜测；
+- 已启动但宿主漏记返回时禁止自动重派，避免 Critic、Reviewer、CP、编译、CodeCheck 和 UT 循环执行。
+
 ## 2026-08-04：领域真相成为唯一文档归档产物
 
 - 在最终质量之后、最终代码检视之前增加一次确定性的领域归档；候选先写入本单工作目录，用户确认后才原子应用；

@@ -849,7 +849,7 @@ if flow:
                     "text": json.dumps({
                         "answers": {
                             "是否启用独立 CODE Reviewer":
-                                "不启用独立 CODE Reviewer",
+                                "不需要 Agent 预检，我直接检视",
                         },
                     }, ensure_ascii=False),
                     "step": "code_reviewer_ask",
@@ -2680,8 +2680,8 @@ check("CodeCheck 三个步骤都先首检再决定是否派 Agent",
       } <= TASK_CARD_EXPECTED_STEPS["CODECHECK"])
 check("Bash 任意解释器不能直碰流程状态文件",
       "禁止经 Bash " in guard_bash_src
-      and "直接访问；查看请用" in guard_bash_src
-      and "mae-flow status/current/doctor" in guard_bash_src)
+      and "直接访问；查看请执行" in guard_bash_src
+      and "status/doctor/moonlight report 命令" in guard_bash_src)
 check("带短横线的一次性退出凭据也在状态黑名单内",
       r"(?:\.[\w-]+)*" in mf_src and "EXIT_INTENT_PATH" in mf_src)
 check("STORY 不入库会在推送前检查提交树",

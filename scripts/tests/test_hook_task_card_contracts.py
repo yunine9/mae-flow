@@ -80,7 +80,8 @@ class TaskCardContractTests(unittest.TestCase):
             "UT", "", self.state, self.ports())
         self.assertFalse(missing.accepted)
         self.assertEqual(
-            "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。",
+            "未生成 harness 任务卡。主 agent 必须先执行 python "
+            '"/repo/scripts/mae-flow.py" agent-task ut。',
             missing.reason,
         )
 

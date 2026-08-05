@@ -17,15 +17,15 @@ openspec/superpowers/brainstorming/ponytail/archive/change/delta spec 这些词�
 本流程**不由你解释和记忆**,由状态机工具驱动。你的职责只有一个循环:
 
 ```
-python "<插件目录>/scripts/mae-flow.py" current   # 拿当前步骤指令(用 python,不是 python3——Windows 无 python3 命令)
+python ".mae-flow-work/bin/mae-flow.py" current   # 拿当前步骤指令(用 python,不是 python3——Windows 无 python3 命令)
 → 严格按打印的指令执行(需要用户确认的,按铁律1:优先 AskUserQuestion,不可用才结束回复等待)
-→ python ".../mae-flow.py" done [--ack|--choice|--set]   # 声明完成,工具校验证据后给出下一步
+→ python ".mae-flow-work/bin/mae-flow.py" done [--ack|--choice|--set]   # 声明完成,工具校验证据后给出下一步
 ```
 
-首次触发:先 `mae-flow.py init`(已有 .mae-flow.json 则直接 `current` 续跑)。
-脚本路径优先从 hook 注入行读取(每条消息都带 `python "<绝对路径>"`,以它为准);
-注入行缺失时才 Glob 兜底——**注意插件不在项目树内,只在插件安装目录范围内搜,禁止全盘/主目录扫描**;
-还找不到就直接问用户。命令报"python 不存在"是解释器问题不是路径问题,勿因此去搜文件。
+首次触发:先执行 `python ".mae-flow-work/bin/mae-flow.py" init`（已有 `.mae-flow.json` 则直接执行
+同一路径的 `current` 续跑）。UserPromptSubmit/SessionStart Hook 会在项目根安装这个稳定入口；
+若它客观缺失，只使用当前 Hook 注入行给出的绝对脚本路径。禁止读取空环境变量、Glob 插件缓存、
+全盘搜索或猜测版本目录。命令报"python 不存在"是解释器问题不是路径问题,勿因此去搜文件。
 `python` 命令不可用时:**立即停止流程**,告知用户"请先自行安装 Python 3,装好后重新发起",不做任何变通。
 
 ## 月光宝盒（用户明确开启时覆盖所有“等待用户”指令）
@@ -33,7 +33,7 @@ python "<插件目录>/scripts/mae-flow.py" current   # 拿当前步骤指令(�
 用户消息明确包含“月光宝盒”或“moonlight”时，不走普通 init，直接执行：
 
 ```
-python "<插件目录>/scripts/mae-flow.py" moonlight on --ack "月光宝盒"
+python ".mae-flow-work/bin/mae-flow.py" moonlight on --ack "月光宝盒"
 ```
 
 若用户原文只有英文 `moonlight`，`--ack` 就原样传 `moonlight`。命令会在无状态时初始化、有在途状态时
@@ -47,7 +47,7 @@ Reviewer 明确标为“人工裁决”的 Finding 不属于无人值守授权�
 
 质量步骤必须先真实执行并尽力修复。确认继续尝试只会重复消耗时，按 current 给出的命令执行
 `moonlight defer --reason "<遗留+已尝试+风险>"`，把问题写入本地报告并继续；不能谎报 PASS/CLEAN/OK。
-build 只有 tasks 全部完成、实现已提交、仅剩编译问题时才允许 defer，不能拿“尽力而为”跳过需求实现。
+build 只有完整实现已经形成、仅剩外部编译问题时才允许 defer，不能拿“尽力而为”跳过需求实现。
 UT 自查后明确是源码缺陷时，先按 current 执行 `moonlight unlock-source --reason "<依据>"`，再修源码；
 done 会回流完整质量链。分支推送后停在 `moonlight_review`，不自动定稿规格。
 若需求材料、权限或外部依赖客观缺失，执行 current 给出的 `moonlight blocked --reason "<现场>"`；
@@ -83,7 +83,7 @@ UserPromptSubmit Hook 会把这条真实用户事件直接作为授权，原子�
 若 Hook/中文捕获本身已坏，把下面命令原样交给用户在**真实终端手动运行**（Agent 的 Bash 管道会被拒）：
 
 ```
-python "<插件目录>/scripts/mae-flow.py" exit --interactive --reason "切换为普通开发"
+python ".mae-flow-work/bin/mae-flow.py" exit --interactive --reason "切换为普通开发"
 ```
 
 退出只保留现场并解除接管，不回滚、不删除业务文件。命令成功后按普通开发请求执行，不再运行
@@ -96,7 +96,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
 ## 独立能力（明确点名时不启动完整流程）
 
 用户明确使用 `/mae-flow:mae-flow ut`、`/mae-flow:mae-flow codecheck` 或 `/mae-flow:mae-flow grill` 时，走
-`mae-flow.py action ...` 轻量任务控制层，**禁止执行 init**。独立任务只保护自己的任务卡和结果记录，
+`python ".mae-flow-work/bin/mae-flow.py" action ...` 轻量任务控制层，**禁止执行 init**。独立任务只保护自己的任务卡和结果记录，
 不启用阶段源码门禁；普通改码始终放行。任务状态位于 `.mae-flow-work/standalone-action.json`，
 24 小时自动失效，用户随时可用 `action cancel` 结束，取消只保留现场、不回滚代码。
 
@@ -155,7 +155,7 @@ current/done，也不再自行补流程检查。只有用户后来明确要求�
 任务卡指纹、源码指纹、状态数字或固定格式而拒绝、重答或重启。interrupted/timeout 如实留痕，
 只有继续执行确有价值时才重启，禁止无限自动重启。
 被 gate 拦到写入时 **禁止换工具硬绕**(Write 被拦就改 bash 是最坏反应,造成"时灵时不灵"的假象):
-先执行 mae-flow doctor 看当前步骤权限与在建区状态;拦截连续出现三次会在报错里给出用户放行令
+先执行 `python ".mae-flow-work/bin/mae-flow.py" doctor` 看当前步骤权限与在建区状态;拦截连续出现三次会在报错里给出用户放行令
 (`allow <编号> --message-id <ID>`)与整步跳过通道,按提示把风险交用户裁决,不要自己找绕路。
 **任何情况下禁止主会话代做子 Agent 的专职产出**(STORY/UT/codecheck 修复)——代做会整体绕过职责隔离,
 比失败更糟;产出可以晚,不能假。

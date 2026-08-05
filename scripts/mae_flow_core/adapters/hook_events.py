@@ -48,7 +48,7 @@ class HookEventAdapter:
                 and event in ("userprompt", "sessionstart")):
             print(
                 "[mae-flow] ⚠ 检测到流程状态冲突：%s。完整流程继续作为唯一控制源；"
-                "请执行 mae-flow doctor 查看并清理陈旧独立任务。"
+                "请执行 current 输出中的 doctor 命令查看并清理陈旧独立任务。"
                 % "、".join(runtime.conflicts))
         return HookResponse()
 
@@ -65,11 +65,13 @@ class HookEventAdapter:
         elif os.path.isfile(self.action_state):
             print(
                 "[mae-flow] ⚠ 独立任务状态损坏，Hook 已按 fail-open 放行普通开发。"
-                "执行 `mae-flow action cancel` 可保存坏现场并清理控制指针。")
+                "执行 `python \".mae-flow-work/bin/mae-flow.py\" action cancel` "
+                "可保存坏现场并清理控制指针。")
         else:
             print(
                 "[mae-flow] ⚠ 退出标记损坏，Hook 已按 fail-open 放行普通开发。"
-                "执行 `mae-flow doctor` 查看现场；不要直接删除文件。")
+                "执行 `python \".mae-flow-work/bin/mae-flow.py\" doctor` "
+                "查看现场；不要直接删除文件。")
         if os.path.isfile(self.state):
             return self._invoke(
                 self.inject_handler,
@@ -85,7 +87,7 @@ class HookEventAdapter:
                 print(
                     "[mae-flow] 流程已经完成且 Hook 门禁已解除，无需再次退出；"
                     "终态记录会保留给 current/status/report 和下一单自动滚动。"
-                    "不要再执行 mae-flow.py exit 或 exit --interactive。")
+                    "不要再执行 exit 或 exit --interactive。")
                 self.log("terminal flow: idempotent exit")
                 return HookResponse()
             if (

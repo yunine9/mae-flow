@@ -45,6 +45,22 @@ def resource_commands():
                 yield os.path.relpath(path, ROOT), command
 
 
+def production_guidance_texts():
+    patterns = [
+        "flow/steps/*.md",
+        "commands/*.md",
+        "README.md",
+        "FIELD-TEST.md",
+        "MAINTAINERS.md",
+        "skills/mae-flow/SKILL.md",
+        "scripts/mae_flow_core/**/*.py",
+    ]
+    for pattern in patterns:
+        for path in glob.glob(os.path.join(ROOT, pattern), recursive=True):
+            with open(path, encoding="utf-8") as stream:
+                yield os.path.relpath(path, ROOT), stream.read()
+
+
 class CommandPromptAgreementTests(unittest.TestCase):
     def test_every_catalog_command_is_built_then_parsed(self):
         for command_id in catalog_ids():
@@ -68,6 +84,18 @@ class CommandPromptAgreementTests(unittest.TestCase):
             with self.subTest(resource=resource):
                 self.assertNotRegex(
                     command, r"^(?:advance|decision)\s+(?:capability\.|grill-)")
+
+    def test_production_guidance_never_emits_path_dependent_cli_commands(self):
+        forbidden = re.compile(
+            r"`mae-flow\s+|`mae-flow\.py\s+|"
+            r"(?:执行|运行|先用|再用|先)\s+mae-flow\s+|"
+            r"(?<![/\w:-])mae-flow(?:\.py)?\s+"
+            r"(?:spec|current|doctor|messages|done|agent-task|role-task|"
+            r"codecheck|approve-exemption|unlock|action|gate|exit)\b"
+        )
+        for resource, content in production_guidance_texts():
+            with self.subTest(resource=resource):
+                self.assertNotRegex(content, forbidden)
 
 
 if __name__ == "__main__":

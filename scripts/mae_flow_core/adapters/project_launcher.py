@@ -42,6 +42,6 @@ def install_launcher_for_event(event):
     normalized = "".join(
         character for character in str(event).casefold()
         if character.isalnum())
-    if normalized in {"sessionstart", "userpromptsubmit"}:
+    if normalized in {"sessionstart", "userprompt", "userpromptsubmit"}:
         return install_project_launcher()
     return ""

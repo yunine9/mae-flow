@@ -237,14 +237,14 @@ class WorkflowEvidenceRules:
             return EvidenceResult(
                 False,
                 "交付登记 %s=%s,需要 %s"
-                "——按本步指引完成动作后用 mae-flow spec 登记,谎报无效"
+                "——按本步 current 指引完成动作并登记,谎报无效"
                 % (field, value or "(空)", expected),
             )
         if value in ("", "null", "~"):
             return EvidenceResult(
                 False,
                 "交付登记 %s 为空——本步产物尚未登记;"
-                "完成后执行 mae-flow spec set %s \"<路径>\""
+                "完成后执行 current 输出的 spec set 命令登记字段 %s"
                 % (field, field),
             )
         if (field in SPEC_REGISTER_FIELDS

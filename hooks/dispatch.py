@@ -26,8 +26,7 @@ from mae_flow_core import (
     find_project_root,
     resolve_runtime,
 )
-from mae_flow_core.file_io import read_text, write_text
-from mae_flow_core.application.hooks.task_cards import TaskCardPorts as _TaskCardPorts
+from mae_flow_core.file_io import write_text
 from mae_flow_core.application.hooks.events import handle_hook_event as _handle_hook_event
 from mae_flow_core.adapters.hook_active_events import ActiveHookEventAdapter
 from mae_flow_core.adapters.hook_events import HookEventAdapter
@@ -240,28 +239,15 @@ def __getattr__(name):
 
 
 def _task_card_ports():
-    return _TaskCardPorts(
-        read_text=read_text,
-        current_head=_runtime_adapter()._git_head,
-        merge_base=lambda head, _current: _runtime_adapter()._git_out(
-            f"git merge-base {head} HEAD").strip(),
-        changed_paths_since=_runtime_adapter()._changed_paths_since,
-        source_changed_since=_runtime_adapter()._source_changed_since_receipt,
-        source_snapshot=_runtime_adapter()._source_snapshot,
-        path_fingerprint=_runtime_adapter()._path_fingerprint,
-        review_path_fingerprint=_runtime_adapter()._review_path_fingerprint,
-        source_like=_runtime_adapter()._source_like,
-        test_like=_runtime_adapter()._test_like,
-        path_exists=os.path.exists,
-        script_path=lambda: os.path.abspath(MAEFLOW),
-    )
+    """Use the adapter's single authoritative production wiring."""
+    return _runtime_adapter()._task_card_ports()
 
 
 def _hook_event_ports():
     active = ActiveHookEventAdapter(
         state=STATE,
         maeflow_path=MAEFLOW,
-        repository_root=os.path.abspath(os.path.join(HERE, "..")),
+        repository_root=os.getcwd(),
         maeflow=maeflow,
         runtime_adapter=_runtime_adapter(),
         task_card_ports=_task_card_ports,

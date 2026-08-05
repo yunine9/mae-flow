@@ -9,6 +9,23 @@ _GATE_RULE_PATTERN = re.compile(
     r"^\[mae-flow-rule=([a-z0-9-]+)\]\r?\n?", re.I)
 
 
+def recent_hook_anomalies(lines, since="", limit=3):
+    """Return a bounded, privacy-safe view of Hook failures for this flow."""
+    result = []
+    for raw in lines or ():
+        line = str(raw or "").strip()
+        timestamp = line[:19] if re.match(
+            r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", line) else ""
+        if since and timestamp and timestamp < since:
+            continue
+        if not (
+                re.search(r"(?:^|\s)EXC(?:\(|:|\s)", line)
+                or "WATCHDOG" in line):
+            continue
+        result.append(line[:320])
+    return result[-max(1, int(limit or 1)):]
+
+
 class HookBlockDiagnostics:
     """Carry private CLI metadata into one attributed Hook log record."""
 

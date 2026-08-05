@@ -9,12 +9,30 @@ import tempfile
 import time
 import unittest
 
-
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DISPATCH = os.path.join(ROOT, "hooks", "dispatch.py")
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+from mae_flow_core.adapters.hook_diagnostics import recent_hook_anomalies
 
 
 class HookBlockDiagnosticsTests(unittest.TestCase):
+    def test_recent_hook_anomalies_reports_only_current_flow_failures(self):
+        lines = [
+            "2026-08-05 09:59:59 pid=1 old EXC(fail-open): old\n",
+            "2026-08-05 10:00:01 pid=2 agent dispatch gate EXC(fail-open): broken\n",
+            "2026-08-05 10:00:02 pid=2 WATCHDOG timeout(12s) — force exit 0\n",
+            "2026-08-05 10:00:02 pid=2 usermsg EXC: disk busy\n",
+            "2026-08-05 10:00:03 pid=2 normal end\n",
+        ]
+
+        anomalies = recent_hook_anomalies(
+            lines, since="2026-08-05 10:00:00")
+
+        self.assertEqual(3, len(anomalies))
+        self.assertIn("agent dispatch gate EXC", anomalies[0])
+        self.assertIn("WATCHDOG", anomalies[1])
+        self.assertIn("usermsg EXC:", anomalies[2])
+
     def _run_pretooluse(self, project, log_dir, command):
         payload = json.dumps({
             "cwd": project,

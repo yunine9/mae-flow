@@ -8,15 +8,16 @@
 
 当前生产实现以 `d32ccfb` 的稳定流程为底座，只接受小步减法式演进。后续文档若仍描述独立 Test Blueprint、
 Roadmap、详细 Build Plan、固定 Agent 返回字段、摘要重绑或 Lean 六阶段运行时，以本节为准：这些都不是新单的
-生产门禁。Story 严格保持原有业务模板；Mae-Flow 的 Grill 实现影响、关键函数详述、轻量 CP 和领域归档影响
+生产门禁。Story 严格保持原有业务模板；Mae-Flow 的 Grill 实现影响、关键函数详述和领域归档影响
 放在本地 `implementation.md`。Grill 和本地 Spec 是两者的强制输入；Spec/Grill/Story/implementation 留在
 `.mae-flow-work/<单号>/`，只有协调后的领域文档进入 `docs/specs/`。
 
 子 Agent 返回按不透明自然语言处理。Hook 只记录生命周期、真实 Bash/Skill 执行和真实文件写入；不得重新加入
 结果标记、令牌、任务卡/源码摘要或 Reviewer 文件指纹校验。这里的放松不影响 PreToolUse 路径授权、只读 Reviewer、
-CP 文件范围、UT/CodeCheck/Compile 的源码所有权和 Git 精确提交边界。
+UT/CodeCheck/Compile 的源码所有权和 Git 精确提交边界。
 
-用户在 Story 与实施附录后只确认一次并选择节奏：Staged 每个 CP 停靠，Continuous 只在全部 CP 完成后统一停靠。
+编码由主 Agent 结合本地 Spec、Grill、Story 与代码现场一次完成，不再拆开发批次或增加节奏选择。
+实现和 compile-agent 编译结束后，用户只检视一次未提交 diff；有意见继续修改并重编译，通过后才精确提交。
 任何文件时间戳、摘要变化或 Reviewer 后的主 Agent 修正，都不得自动重派 Reviewer、重问同一确认或把流程打回。
 所有步骤输出的命令必须能被生产 parser 直接解析；每个可达非终态都必须存在真实后继。这两项和 Stop Hook
 三次零进展 fail-open 共同构成“禁止卡死/循环”的发布红线。
@@ -91,7 +92,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 ### 确认点预算（人工停顿的取舍原则）
 
 人工停顿必须有明确决策价值，不能拿来证明“某阶段已经完成”。常规流程只保留：完整配置一次确认、
-工作流选择、是否质询、grill/规格中真正未决的问题、STORY 是否生成及入库方式、hotfix/tweak 修改范围、不可逆定稿。
+工作流选择、是否质询、grill/规格中真正未决的问题、hotfix/tweak 修改范围、人工代码检视和不可逆定稿。
 设计、编码、编译、CodeCheck、UT、评审修复和推送是否完成全部由文件、提交、任务卡和执行令牌判断。
 REMAINING 豁免、UT 判断源码缺陷、承担风险、强制回流属于异常高影响决策，继续使用强 ACK。
 普通选择点一次 AskUserQuestion 按钮即可推进，禁止再索要一条“确认××”。
@@ -168,13 +169,11 @@ Manifest 拒绝整个 `openspec/`、所有过程文档路径，以及任何未�
 `docs/specs/` 文件。历史中已经提交的旧过程件不改写；升级时仅把尚未跟踪的旧过程件迁入本单过程区。
 
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
-`mae-flow agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐；
+`python ".mae-flow-work/bin/mae-flow.py" agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐；
 PreToolUse 在派发前校验任务卡属于当前步骤，返回自然语言不要求回传指纹、令牌或固定状态行。
-新单的开发检查点存于主状态的 `development_review` 子树：计划确认只冻结业务边界与任务结构，
-勾选/备注不使计划漂移；每批 compile 任务卡额外绑定 CP 编号。分阶段模式的收据同时绑定固定 base、
-当前 HEAD 和真实上游 ref，返工不前移 base；连续模式只记录批次 HEAD，最终在 `delivery_review`
-统一检视。新初始化状态以 `protocols.development_checkpoints=1` 声明采用该协议；旧状态没有此标记时
-必须跳过新插入的 pace 节点并走原有检视路径，不能升级后突然新增人工门。
+主 Agent 不使用实现任务卡、不派实现子 Agent，也不拆开发批次；compile 任务卡覆盖本轮完整未提交实现。
+编译后只进入一次人工检视，检视期间保留 diff，用户通过后才提交；修改意见会回到同一实现/编译闭环，
+不会重新生成 Story 或重复确认设计。
 独立 Grill 的 prep/final 任务卡由 `action critic` 同样签名；PreToolUse 在 Task 派发时通过统一
 `_contract_state()` 先验任务卡，缺卡当场拦，不把错误拖到整只 agent 跑完。
 对配置声明为 AutoUT/java-autout/build-fix 的任务，返回事件会从子会话 transcript 验真实 Skill 工具调用；
@@ -188,8 +187,8 @@ AskUserQuestion；编译、CodeCheck、UT 和最终验证仍先执行，失败�
 报告位于 `.mae-flow-work/moonlight-report.md` 并受 gate 保护；`repair` 从对应质量链入口重跑，旧报告里的
 环境类遗留映射到该工作流的编译入口，不重跑需求和设计；`finalize` 才恢复普通归档流程。Stop Hook 在安全
 停点前拒绝主 Agent 自行收工；真实硬阻塞须先执行 `moonlight blocked` 留痕，递归触发时 fail-open 防死循环。
-完整启动原话持久化进 moonlight 状态；build defer 还会先验证 tasks_checked 与 commit_tagged_after_entry，
-确保只放过编译遗留，不放过未完成实现。
+完整启动原话持久化进 moonlight 状态；build defer 只允许在完整实现已经形成且仅剩外部编译问题时使用，
+确保不拿无人值守模式跳过需求实现。
 
 flow.json 步骤字段语义：
 
@@ -457,17 +456,19 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 
 ### 故障树
 
-- **模型说"流程未初始化"但明明有单** → `mae-flow doctor` 看第一行项目根对不对。项目根定位以最近的
+- **模型说"流程未初始化"但明明有单** → 运行
+  `python ".mae-flow-work/bin/mae-flow.py" doctor` 看第一行项目根对不对。项目根定位以最近的
   `.git` / `openspec` 为边界，不会再被更高层目录的杂散 `.mae-flow.json` 劫持；状态应放在项目根，
   不要靠扩大向上搜索范围兼容错误位置。
-- **gate 好像全失效了** → flow.json/状态文件 JSON 坏了会让 mae-flow 崩溃（exit 1 → fail-open）。手动跑 `python mae-flow.py gate edit src/x` 看 traceback。
+- **gate 好像全失效了** → flow.json/状态文件 JSON 坏了会让 mae-flow 崩溃（exit 1 → fail-open）。手动跑
+  `python ".mae-flow-work/bin/mae-flow.py" gate edit src/x` 看 traceback。
 - **done 一直被拒但产物明明在** → 看报错里的 pattern 是否含未解析占位符（对应配置没 `--set`）；yaml_field 类型看 `.comet.yaml` 字段实际值。
 - **证据实测行为**：所有证据都可手动复现——直接跑报错消息里提示的那条命令。
 
 ### 冒烟用例（改 gate/证据/hook 后必跑）
 
 **常驻探针已入库**（v5 起，selftest 点名跑）：`scripts/tests/probe_gate_smoke.py`
-（gate 拦/放抽样 + spec_validate/tasks_checked/glob/glob_absent 证据全路径）、
+（gate 拦/放抽样 + spec_validate/glob/glob_absent 证据全路径）、
 `scripts/tests/probe_spec_semantics.py`（spec 子命令三档端到端、布局混用、阶段机、
 伪造通道）。改 gate/证据后先跑这两个，再按下面的手工用例集补面。
 
@@ -481,16 +482,15 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **end 沉淀纪律零机器锚点**——逐条用户确认/只记仓库事实/30 条上限全是提示词约束（end 为终态步无证据）；兜底：装载侧把条目直接喂进 agent 任务提示，污染可在 report/复盘发现；机制化（拆出终态+ASKUSER 令牌+content_free 行数校验）留待实际出现污染再加。
 - **CodeCheck 是建议型工具**——REMAINING/工具故障不阻断插件内交付，最终流水线可能仍有自己的独立门禁；
   本地必须保留首检、Agent 报告或工具诊断，源码变化会让它们失效。`approve-exemption` 仅保留给旧在途流程兼容。
-- **ack / STORY入库 / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。配置确认是特殊强类型通道：`config-review` 先冻结完整配置、需求文档 SHA 与一次性收据 ID，用户最终回答必须绑定该收据；多问题的局部回答不能代替整单确认。连续失败只停止同命令自动重试，不形成永久锁，也不要求 exit/init。
-- **同一编码步骤内的多次检查点确认**还要绑定消息游标：收据呈现前已经存在的回答全部排除，
-  防止 CP1 的“继续”在 CP2 或最终检视被重复消费；宿主不回传新按钮正文时仍可让用户补一条纯文本选择。
+- **ack / goto --ack / 需求文档确认等"用户原话"类**——会与当前步骤开始后的 UserPromptSubmit / AskUserQuestion 应答原文匹配，旧步骤的“可以”不能复用。Hook 从 stdin 原始字节优先按 UTF-8 strict 解 JSON，禁止控制台代码页和 `errors=replace` 污染确认账；消息带 ID/编码/SHA 供 doctor 观测。配置确认是特殊强类型通道：`config-review` 先冻结完整配置、需求文档 SHA 与一次性收据 ID，用户最终回答必须绑定该收据；多问题的局部回答不能代替整单确认。连续失败只停止同命令自动重试，不形成永久锁，也不要求 exit/init。
+- **相邻选择不能复用旧回答**：每个选择只消费当前步骤实际返回的具体选项；只有 ASKUSER 令牌而没有答案正文时拒绝猜测，宿主客观缺失按钮正文才让用户补一条当前标准选项。
 - **各类"展示/告知"义务**（收尾摘要、报告展示）——纯 UX，失效不腐蚀正确性。
 - verify_ut 的"测试真跑过"：UTRUN 令牌已记录（PostToolUse-Bash 检出 UT运行命令被调起，doctor 可见），**尚未设为 done 硬证据**——须公司机金丝雀确认「子 agent 的 Bash 调用会触发 PostToolUse」后再加（否则 verify_ut 永远过不去）；确认后在 flow.json verify_ut 的 evidence 加 `{"type":"agent_ran","agent":"UTRUN"}` 一行即启用。原候选方案"done 现场跑 UT运行命令"作罢（真实套件耗时超 done 容忍度）。
 
 - **verify_ut / verify_codecheck 无固定报告文件证据**——过程证据为当前任务卡、Agent 生命周期和真实工具执行；最终自然语言报告仍需展示。
 - **确认按风险分层**：普通流程选择读取当前步骤 AskUserQuestion 的按钮结果，`done` 不再要求重复
-  `--ack`；若宿主只给 ASKUSER 令牌而不回传选项正文，允许信任本步真实交互和 Agent 提交的合法 choice，
-  避免逼用户复读。goto / unlock / 豁免 / accept-risk 会改变流程或放宽约束，
+  `--ack`；只有 ASKUSER 令牌而没有选项正文时，不能知道用户选择了什么，因此禁止信任 Agent 提交的 choice。
+  goto / unlock / 豁免 / accept-risk 会改变流程或放宽约束，
   仍只接受当前步骤捕获到的用户原话，不能跨关复用。
 - **一仓一单**——并行走 worktree；暂停/恢复仍未做。用户不再需要流程时直接 `/mae-flow:mae-flow exit`：
   用户事件授权、现场快照、项目标记和 Comet Hook 兼容一次完成，代码不回滚；Hook 故障时使用真实 TTY

@@ -33,7 +33,8 @@ def verify_completion_task(kind, report, state, ports):
     task = _task_for(state, kind)
     if not task:
         return rejected(
-            "未生成 harness 任务卡。主 agent 必须先执行 mae-flow agent-task。")
+            "未生成 harness 任务卡。主 agent 必须先执行 python \"%s\" "
+            "agent-task %s。" % (ports.script_path(), kind.lower()))
     if task.get("step") != state.get("current"):
         return rejected("任务卡属于旧步骤,禁止拿旧配置执行当前任务。", task)
     return accepted(task)

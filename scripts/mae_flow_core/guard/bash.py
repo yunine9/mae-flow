@@ -38,7 +38,7 @@ def _pre_repository(context):
         return _absolute(
             "bash-internal-state-read",
             "流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash "
-            "直接访问；查看请用 mae-flow status/current/doctor/moonlight report，"
+            "直接访问；查看请执行 current 输出中的 status/doctor/moonlight report 命令，"
             "修改只能走对应子命令。")
     baseline_checkout = (
         context.step == "branch_create"
@@ -177,7 +177,7 @@ def _post_repository(context):
     ):
         return _block(
             "bash-mkdir-openspec",
-            "禁止手动创建 openspec 目录：change 必须由 `mae-flow spec new` 创建，"
+            "禁止手动创建 openspec 目录：change 必须由 current 输出的 spec new 命令创建，"
             "它会在建目录的同时登记当前单与阶段；手搓空目录没有状态登记，"
             "后续证据校验会失败。先执行 current，并照本步骤给出的 spec 命令处理。",
         )

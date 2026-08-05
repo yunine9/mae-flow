@@ -97,7 +97,7 @@ def _repository_edit_decision(context):
         return _block(
             "edit-docs-req",
             "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码"
-            "不可作为需求真相源）。用户口述先执行 mae-flow messages，再用 "
+            "不可作为需求真相源）。用户口述先执行 current 输出中的 messages 命令，再用 "
             "requirement-record --message-id；已有文本用 requirement-record --source。",
         )
     if context.inside_plugin:
@@ -123,7 +123,7 @@ def _source_edit_decision(context):
     if not context.allow_source_edit:
         return _block(
             "edit-source",
-            "当前步骤 %s(%s)禁止修改源码;先 mae-flow current 查看该做什么。"
+            "当前步骤 %s(%s)禁止修改源码;先执行 current 输出查看该做什么。"
             % (context.step, context.step_title),
         )
     if (
@@ -138,7 +138,8 @@ def _source_edit_decision(context):
             "当前步骤 %s 仅允许写测试路径(当前生效规则: %s)。"
             "UT 暴露的疑似源码缺陷不是死路:自查确认后带报告呈用户裁决,"
             "用户判定确为代码缺陷时先执行 messages 取得回答 ID，再执行 "
-            "mae-flow unlock source --reason <裁决结论> "
+            "python \".mae-flow-work/bin/mae-flow.py\" unlock source "
+            "--reason <裁决结论> "
             "--message-id <ID> 解锁本步修复;"
             "禁止未经用户裁决自行改源码。"
             % (context.step, "|".join(context.tests_only_patterns)),
@@ -174,7 +175,7 @@ def _bash_absolute_decision(context):
     if re.search(r"COMET_FORCE_PHASE", command, re.I):
         return _absolute(
             "COMET_FORCE_PHASE 属于已退役的外部阶段引擎逃生口,本流程不再使用;"
-            "阶段由 mae-flow spec 管理,异常先执行 mae-flow doctor。",
+            "阶段由 mae-flow 管理,异常先执行 current 输出中的 doctor 命令。",
             rule="bash-retired-force-phase")
     if re.search(
         r"runtime/vendor/(comet|openspec|superpowers|ponytail)/\S*"
@@ -211,7 +212,8 @@ def _bash_repository_decision(context):
         return _block(
             "bash-docs-req",
             "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
-            "统一使用 mae-flow requirement-record 确定性写 UTF-8 并回读校验。",
+            "统一使用 `python \".mae-flow-work/bin/mae-flow.py\" "
+            "requirement-record` 确定性写 UTF-8 并回读校验。",
         )
     if (
         context.writeish
@@ -232,7 +234,7 @@ def _bash_source_decision(context):
         return _block(
             "bash-source",
             "当前步骤 %s 禁止经 Bash 写源码文件(命中: %s);"
-            "先 mae-flow current 查看该做什么。"
+            "先执行 current 输出查看该做什么。"
             % (context.step, "、".join(context.offenders[:3])),
         )
     if (

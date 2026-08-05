@@ -5,7 +5,8 @@
 
 ## 阶段 0 — 开机金丝雀(约 15 分钟,全部通过才进阶段 1)
 
-- [ ] **0.0 未启用绝不接管（发布阻断项）**：任选一个从未执行 mae-flow init 的普通仓，让 AI Edit 一行源码、
+- [ ] **0.0 未启用绝不接管（发布阻断项）**：任选一个从未执行
+  `python ".mae-flow-work/bin/mae-flow.py" init` 的普通仓，让 AI Edit 一行源码、
   执行 Bash、启动普通子 Agent，必须全部放行；日志应出现 `inactive: bypass`。仅安装插件就拦源码属于黑事件，
   本项失败立即停止推广。再在该仓父目录临时放一份测试用 `.mae-flow.json`，子仓仍必须按自己的最近 `.git`
   边界完整旁路，不能被父目录的旧流程误接管；测完删除测试状态。
@@ -17,7 +18,8 @@
 - [ ] **0.2 PostToolUse-Bash 延迟**:让 AI 连跑几条 Bash 命令,看日志里 posttooluse 的耗时与频度
   (Windows python 冷启动 + 杀软扫描可能放大)。不可接受 → 待办:把 UTRUN 检测收窄到 verify_ut 步。
 - [ ] **0.3 payload 字段三查**(决定三个机制的激活/降级状态):
-  - UserPromptSubmit 有无 `prompt` 字段:开单后发条消息,`mae-flow doctor` 看「ack 验真存储」条数(>0 = 激活);
+  - UserPromptSubmit 有无 `prompt` 字段:开单后发条消息，运行
+    `python ".mae-flow-work/bin/mae-flow.py" doctor` 看「ack 验真存储」条数(>0 = 激活);
   - AskUserQuestion 有无 `tool_response`:任一确认点弹框后,doctor 存储条数是否 +1(记录了应答);
   - **子 agent 的 Bash 是否触发 PostToolUse**:跑过 UT 后 doctor 看 UTRUN 行。**是 → 回头在
     flow.json 的 verify_ut evidence 加一行 `{"type":"agent_ran","agent":"UTRUN"}` 转硬证据**;否 → 保持观测。
@@ -44,7 +46,8 @@
   - **PreToolUse**:先在演练仓明确 init，再在禁止改源码的步骤让 AI"在 src/ 下随便加一行"→ 必须被拦；
     另在未 init 普通仓重复一次必须放行，证明 gate 只接管已授权仓;
   - **PostToolUse·A**:让 AI 写一个只有一章的 `docs/grill-prep-TEST.md` → 必须被打回"缺少章节"(测完删文件);
-  - **UserPromptSubmit**:开单后随便发条消息,`mae-flow doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
+  - **UserPromptSubmit**:开单后随便发条消息，运行
+    `python ".mae-flow-work/bin/mae-flow.py" doctor` 看「ack 验真存储」≥1 条(=prompt 字段到手);
   - **PostToolUse·B**:任一确认点弹框选择后,让 AI 展示 `.mae-flow.json.tokens`(读不拦)→ 有 ASKUSER 条目且带 head;
   - **SubagentStop/PostToolUse**:派一次 compile-agent 或 ut-generator-agent 后,`.mae-flow.json.agent-observations`
     出现已关联的 started/returned 记录（PreToolUse `tool_use_id` 与 SubagentStop `agent_id` 本来不同）；
@@ -54,10 +57,10 @@
     日志出现 stop start/end。若宿主根本不触发 Stop，月光模式降级为 Skill 软约束，必须回报维护人；
   - **SessionStart**:重启会话,开场自动出现"存在进行中的交付流程"提示。
   加分项(最强确认,防线不但活着还咬人):在 story/定稿步故意不弹框直接让 AI done → 应被 ASKUSER 证据拒绝。
-- [ ] **0.9 稳定基线减法回归（发布阻断项）**：用一个 3-4 CP 的完整开发需求验证：
+- [ ] **0.9 稳定基线减法回归（发布阻断项）**：用一个包含多个修改点的完整开发需求验证：
   - 中文配置卡和旧 Grill 八维质询仍可用，prep/final Critic 各一次且至少能形成衍生问题；Grill 结果进入 Story；
-  - Story 前没有独立 Test Blueprint、Roadmap 或详细 Build Plan；Story 后只确认一次，再由用户选择 Staged/Continuous；
-  - Staged 每个 CP 都停，Continuous 中间 CP 不停且最终只停一次；不能由 Agent 自行合并用户选择的停点；
+  - Story 前没有独立 Test Blueprint、Roadmap 或详细 Build Plan；Story 后不再选择开发批次；
+  - 主 Agent 基于 Spec/Grill/Story 一次实现，compile-agent 编译后只停一次供用户检视未提交 diff；
   - Story/Reviewer 后由主 Agent 修正文档或代码，不得因时间戳/摘要变化自动重审、重复确认或回退阶段；
   - 故意执行一次 current 输出中的命令，必须原样可解析；任务卡缺失时错误消息给出的恢复命令也必须可直接执行；
   - Lightcheck 自动获取精确变更范围，检查嵌套深度和魔鬼数字但不阻断；Compile 只有一次同步调用且无 sleep/轮询；
@@ -67,14 +70,14 @@
 
 - [ ] **1.1 安装即用（发布阻断项）**:
   - 新建一个带空格和中文路径的 Git 仓，只安装插件，不运行任何 setup/reload/init；普通 Edit/Bash 必须放行；
-  - 执行 `mae-flow envcheck`，Python/Git/Git Bash 显示真实版本与路径（必需项），Node.js 在可选项
+  - 执行 `python ".mae-flow-work/bin/mae-flow.py" envcheck`，Python/Git/Git Bash 显示真实版本与路径（必需项），Node.js 在可选项
     （缺失不判失败——v4 起规格引擎纯 Python 内化），「内置规格引擎」与各阶段内嵌规则全部为 ✅，
     CodeCheck 缺失不能把插件判失败；
-  - 执行 `mae-flow init`，应自动创建 `openspec/config.yaml`（v4 后不再有 `.comet/` 目录）后直接进入配置确认，
+  - 执行 `python ".mae-flow-work/bin/mae-flow.py" init`，应自动创建 `openspec/config.yaml`（v4 后不再有 `.comet/` 目录）后直接进入配置确认，
     项目中不得出现 `.cac/.claude/.cursor/.windsurf` 等平台目录；
   - 删除流程状态后连续两次执行 `capability prepare`，两次都成功且第二次不新增杂项、不产生
     `openspec/config.yaml` 以外的配置文件；
-  - 用 Git worktree 再执行一次 `mae-flow init`，`.git` 为文件也必须正常识别；临时让 Git Bash
+  - 用 Git worktree 再执行一次 `python ".mae-flow-work/bin/mae-flow.py" init`，`.git` 为文件也必须正常识别；临时让 Git Bash
     不可见时，初始化应在创建 `.mae-flow.json` 前失败并列出缺失依赖（Node 不可见不得失败），
     普通开发仍不受 Hook 影响；
   - 让 AI 尝试全局 `comet init`，必须被拦并明确说明“内嵌运行时无需手动初始化”，不能再给用户迁移或
@@ -107,9 +110,9 @@
 
 - [ ] **2.0 Spec2Code 编码质量 A/B**：选择一个已有真实交付，以相同需求、基线、编译和 UT 口径
   分别执行旧流程与新流程；使用
-  `docs/field-tests/spec2code-quality-ab.md` 记录 CP、角色 Agent 读取范围、用户修改轮次、
+  `docs/field-tests/spec2code-quality-ab.md` 记录主 Agent 读取范围、用户修改轮次、
   Reviewer 有效/拒绝意见、最终独立盲审、蓝图映射、耗时和返工阶段。只记录证据，不计算综合质量分。
-- [ ] **2.1 /clear 恢复**:编码实现中途 /clear → 说"继续" → 看它是否按恢复清单先读 计划/tasks/设计/diff 再动手。
+- [ ] **2.1 /clear 恢复**:编码实现中途 /clear → 说"继续" → 看它是否按恢复清单先读本地 Spec/Story/implementation/diff 再动手。
 - [ ] **2.2 review-fix 全链**:对首单 MR 造 3-4 条评审意见(混入一条该反驳的、一条涉及行为变更的)→
   rf_triage 逐条"先查证再裁决"、反驳有依据、行为变更被分诊转常规轮次 → 修复 →
   rf_compile → rf_codecheck → rf_ut → commit 进原 MR。重点故意验证四个拦截:

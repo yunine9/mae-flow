@@ -13,8 +13,8 @@ FAIL→按 Fallback(隔离失败 UT,展示 KNOWN_FAILURES 等用户裁决)。
 UT 发现真缺陷是它的价值所在,不是异常。逐项用 AskUserQuestion 呈用户裁决,每项必须呈现 agent 的
 自查报告(失败用例、期望 vs 实际、spec 依据、自查过程、倾向判断)——没有自查报告的项先打回 agent 补查。
 三个选项与去向:
-- **确认代码缺陷,本单修** → 先执行 `messages` 取得当前回答 ID，再执行
-  `mae-flow unlock source --reason "<第N项:结论>" --message-id "<消息ID>"`
+- **确认代码缺陷,本单修** → 先执行 `python "{MAEFLOW_PATH}" messages` 取得当前回答 ID，再执行
+  `python "{MAEFLOW_PATH}" unlock source --reason "<第N项:结论>" --message-id "<消息ID>"`
   (解锁仅本步有效)→ 修复源码 → 执行 done。Harness 会保持未提交改动，回流 compile-agent 和统一用户检视；
   确认提交后从 CodeCheck 继续，Ponytail 不会重跑。
 - **判定 UT 理解有误,修测试** → 重启 agent 修订该用例(把用户结论原文带给它,作为修订授权);

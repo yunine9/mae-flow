@@ -208,9 +208,8 @@ class QualityEvidenceRules:
                 False,
                 "豁免文件覆盖了告警,但以下本轮豁免没有用户审批令牌: "
                 + "、".join(unauthorized[:5])
-                + "。逐项 AskUserQuestion 后执行 mae-flow "
-                "approve-exemption --rule <规则ID> --file <文件> "
-                "--reason <理由> --message-id <messages输出的ID>；"
+                + "。逐项 AskUserQuestion 后执行 current 输出的 "
+                "approve-exemption 命令（规则ID、文件、理由和消息ID必须完整）；"
                 "手写豁免文件不再算授权",
             )
         return EvidenceResult(True, "")
@@ -349,7 +348,7 @@ class QualityEvidenceRules:
         if scan.get("step") != state.get("current"):
             return EvidenceResult(
                 False,
-                "尚未执行本步的机器首检。先运行 mae-flow codecheck-scan，"
+                "尚未执行本步的机器首检。先运行 current 输出的 codecheck-scan 命令，"
                 "禁止主会话自行修复",
             )
         result = self._review_scan_result(state, scan)

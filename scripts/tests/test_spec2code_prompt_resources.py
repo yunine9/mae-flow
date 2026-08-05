@@ -83,6 +83,25 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("role-task code-review", review)
         self.assertIn("不代替用户人工检视", review)
 
+    def test_live_operator_docs_have_no_checkpoint_or_story_commit_protocol(self):
+        operator_docs = "\n".join(read(path) for path in (
+            "README.md", "MAINTAINERS.md", "FIELD-TEST.md",
+            "commands/mae-flow.md", "skills/mae-flow/SKILL.md",
+        ))
+        for retired in (
+                "Staged", "Continuous", "development_review",
+                "development_checkpoints", "CP 编号", "每个 CP",
+                "CP1", "CP2", "STORY入库",
+                "tasks 全部完成", "实现 tasks"):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, operator_docs)
+
+        command = read("commands/mae-flow.md")
+        self.assertNotIn("docs/story/STORY-", command)
+        self.assertNotIn("用户选择入库", command)
+        self.assertNotIn("由你决定是否入库", read("README.md"))
+        self.assertNotIn("只给 ASKUSER 令牌", read("MAINTAINERS.md"))
+
 
 if __name__ == "__main__":
     unittest.main()

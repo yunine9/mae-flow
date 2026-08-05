@@ -311,7 +311,7 @@ def _implicit_ack_verified(step, st):
     return False, why + _ack_retry_guidance(count)
 
 def _choice_verified(step, st, choice, ack_cursor=None):
-    """Bind --choice to the answer when readable; trust a fresh UI token as fallback."""
+    """Bind --choice to the concrete answer returned by Claude Code/CodeAgent."""
     # 一卡合一:开场三个选择步同时接受配置确认卡期间捕获的真实答案。
     extra = (("config_confirm",)
              if st.get("current") in (
@@ -369,11 +369,6 @@ def _choice_verified(step, st, choice, ack_cursor=None):
                 "请按按钮真实结果执行，禁止替用户改选。" % (candidate, choice)
             )
 
-    if ack_cursor is None and _fresh_askuser(st):
-        # Some CodeAgent builds emit the interaction token but omit the selected label.
-        # The UI interaction is still stronger evidence than forcing the user to type it again.
-        _ack_failure(st, success=True)
-        return True, ""
     scope_why = _out_of_scope_ack_reason(st) if not rows else ""
     if scope_why:
         return False, scope_why

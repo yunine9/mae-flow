@@ -1,5 +1,9 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
+import tempfile
+
+from mae_flow_core.adapters.hook_diagnostics import recent_hook_anomalies
+
 from .shared import (
     COMET_COMPAT_BEGIN, FAILURE_PATH, GATE_STRIKES_PATH, GATE_STRIKE_LIMIT, STATE_PATH,
     capability_diagnostics, comet_guard_paths, globmod, json, load_json, os, read_text,
@@ -147,6 +151,20 @@ def cmd_doctor(flow, st, args):
     for error in runtime.errors:
         print("⚠ 非主控状态不可读: " + error)
     print(f"当前步骤: {sid} — {step['title']}")
+    try:
+        hook_log = os.path.join(tempfile.gettempdir(), "mae-flow-hook.log")
+        anomalies = recent_hook_anomalies(
+            read_text(hook_log, errors="replace").splitlines(),
+            since=str(st.get("started", "") or ""),
+        ) if os.path.isfile(hook_log) else []
+        if anomalies:
+            print("❌ 本单 Hook 内部异常（最近 %d 条）:" % len(anomalies))
+            for anomaly in anomalies:
+                print("   - " + anomaly)
+        else:
+            print("✅ 本单 Hook 内部异常: 未发现")
+    except Exception as exc:
+        print("⚠ Hook 异常日志不可读: " + str(exc)[:160])
     cur = api.sh("git branch --show-current")
     want = st["config"].get("分支名", "(未设置)")
     print(("✅" if cur == want else "❌") + f" 分支: 当前 {cur or '未知'} / 约定 {want}")

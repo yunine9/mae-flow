@@ -106,6 +106,8 @@ class HookAgentLifecycle:
             return HookResponse()
         completion = dict(payload)
         completion["invocation_id"] = tool_use_id
+        if agent_id:
+            completion["agent_id"] = agent_id
         completion["assistant_text"] = self._response_detail(response)
         completion["lifecycle"] = (
             "interrupted"

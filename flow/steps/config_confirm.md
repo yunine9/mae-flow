@@ -18,11 +18,11 @@
     "提取自 <原文件路径>",原路径留档备查)。**禁止假装读懂了二进制、禁止凭文件名猜内容**——
     需求文档是需求质询与提案规格步的输入,读不了的文件喂进去,后面全流程都在编;
   ② 用户只有一段描述(对话中粘贴/口述) → **禁止用 Bash/PowerShell/echo/重定向自行写文件**
-    (Windows 默认编码曾把中文写成乱码并导致确认死循环)。先执行 `mae-flow messages`，找到承载需求原文的
-    消息 ID，再执行 `mae-flow requirement-record --message-id <ID> --ticket <单号>`。工具会原文照录为
+    (Windows 默认编码曾把中文写成乱码并导致确认死循环)。先执行 `python "{MAEFLOW_PATH}" messages`，找到承载需求原文的
+    消息 ID，再执行 `python "{MAEFLOW_PATH}" requirement-record --message-id <ID> --ticket <单号>`。工具会原文照录为
     UTF-8、写入正文指纹并回读校验；把生成文件路径与内容摘录放进最终配置确认单;
     如果已有的是 GBK/UTF-16 文本，执行
-    `mae-flow requirement-record --source "<原文件>" --ticket <单号>` 规范化；二进制仍按 ① 处理。
+    `python "{MAEFLOW_PATH}" requirement-record --source "<原文件>" --ticket <单号>` 规范化；二进制仍按 ① 处理。
   ③ 用户没有任何需求材料 → 停:需求是交付的前提,请用户提供路径或口述;**禁止替用户发明需求**。
   候选列举纪律:**默认不扫描仓库凑候选清单**(选择空间本身就是引导);仅当用户明说"帮我找找"
   才定向搜索,列出的每个候选必须标注来源并附摘录供核对。

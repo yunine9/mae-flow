@@ -38,7 +38,7 @@ Mae-Flow 把流程进度、允许做的事和检查结果都记在项目里。AI
 完整交付里还会自动处理这些容易漏掉的事情：
 
 - 按团队规则创建分支、组织提交并推送；
-- 根据需求说明生成给测试使用的 STORY，由你决定是否入库；
+- 根据需求说明生成给测试使用的本地 STORY，始终保留在过程区、不进入交付提交；
 - 精简 AI 写出的重复和膨胀代码；
 - 在状态栏持续显示单号、步骤和分支；
 - 会话中断后从原步骤恢复，不用让新会话重新理解全量历史；
@@ -367,7 +367,7 @@ AI 会先查代码和规格，再逐条给出结论：需要修、可以有依�
 
 Mae-Flow 真正依赖的宿主基础环境只有 Python 3.8+、Git 和 Windows 下随 Git for Windows 提供的
 Git Bash（v4 起规格引擎纯 Python 内化，Node.js 降为可选件，仅开发期差分对拍用，缺失不影响交付）。
-`mae-flow envcheck` 会实际执行版本命令，并显示各项的版本和真实路径；首次开启完整流程时也会复用同一套
+`python ".mae-flow-work/bin/mae-flow.py" envcheck` 会实际执行版本命令，并显示各项的版本和真实路径；首次开启完整流程时也会复用同一套
 检查。缺少必需依赖会在创建流程状态前明确报错，因此不会激活 Hook 把普通开发锁住。Git worktree 的
 `.git` 文件形式也支持。
 
@@ -396,7 +396,7 @@ JavaScript/TypeScript（含现代模块扩展名）和 Python
 工具异常、生成代码以及基线已经存在的问题只在 `.mae-flow-work/lightcheck/latest.md`
 留痕并继续，Agent 无需主动执行预检命令，最终仍以公司 CodeCheck 为准。
 
-需要检查插件自身是否完整时，可以让 AI 执行 `mae-flow envcheck`。它会检查上述四个基础运行时和插件内嵌
+需要检查插件自身是否完整时，可以让 AI 执行 `python ".mae-flow-work/bin/mae-flow.py" envcheck`。它会检查上述四个基础运行时和插件内嵌
 能力，但不安装项目编译环境。CodeCheck 缺失会提示，但不会把插件判为不可用。
 
 团队可以把稳定的项目配置写进 `.mae-flow-defaults.json` 并提交：
@@ -418,7 +418,7 @@ JavaScript/TypeScript（含现代模块扩展名）和 Python
 ### 为什么 AI 停下来了？
 
 先看它最后展示的是“需要你决定的问题”还是机器证据错误。真实选择直接点按钮；编译、检查、测试等阶段
-不应等待人工确认。如果仍要求你手动输入“确认××”，执行 `mae-flow doctor` 查看按钮结果是否被宿主回传。
+不应等待人工确认。如果仍要求你手动输入“确认××”，执行 `python ".mae-flow-work/bin/mae-flow.py" doctor` 查看按钮结果是否被宿主回传。
 
 ### 为什么提示“证据不足，拒绝推进”？
 
@@ -427,7 +427,7 @@ JavaScript/TypeScript（含现代模块扩展名）和 Python
 
 ### 中文需求文件乱码，怎么确认都过不去？
 
-不要继续说“我确认”，确认不能修复坏文件。让 AI 执行 `mae-flow doctor`。口述需求会通过确定性命令写成
+不要继续说“我确认”，确认不能修复坏文件。让 AI 执行 `python ".mae-flow-work/bin/mae-flow.py" doctor`。口述需求会通过确定性命令写成
 UTF-8；已有 GBK/UTF-16 文本也可以规范化后再进入完整配置确认。连续失败会停止重复命令，但流程不会锁死。
 
 ### AI 在不该改代码的阶段被拦了
@@ -450,12 +450,12 @@ UTF-8；已有 GBK/UTF-16 文本也可以规范化后再进入完整配置确认
 
 | 你说的话 | 用途 |
 |---|---|
-| `执行 mae-flow current` | 看当前步骤该做什么 |
-| `执行 mae-flow status` | 看原始状态 |
-| `执行 mae-flow doctor` | 做完整体检，排障首选 |
-| `执行 mae-flow report` | 看本单各阶段耗时和流程摩擦 |
-| `执行 mae-flow report --all` | 看本仓历史交付统计 |
-| `执行 mae-flow envcheck` | 检查插件内嵌运行时是否完整 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" current` | 看当前步骤该做什么 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" status` | 看原始状态 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" doctor` | 做完整体检，排障首选 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" report` | 看本单各阶段耗时和流程摩擦 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" report --all` | 看本仓历史交付统计 |
+| `执行 python ".mae-flow-work/bin/mae-flow.py" envcheck` | 检查插件内嵌运行时是否完整 |
 
 Hook 通用日志位于 `%TEMP%\mae-flow-hook.log`。CodeCheck 问题优先提供扫描输出中打印的专项详细日志；
 其他无法解释的拦截，把 `doctor` 输出和 Hook 日志最后几十行一起交给维护者。

@@ -171,6 +171,7 @@ def render_pack(name):
         "直接把这些规则与本步骤上方更具体的公司约束一起执行。"
         "两者冲突时，以本步骤上方的 Mae-Flow 约束为准。",
     ]
+    maeflow = os.path.join(PLUGIN_ROOT, "scripts", "mae-flow.py")
     for entry in entries:
         title, relative = entry[:2]
         wanted_sections = entry[2] if len(entry) > 2 else None
@@ -180,7 +181,6 @@ def render_pack(name):
                 body = stream.read()
         except OSError as exc:
             raise CapabilityError("%s 缺失: %s" % (title, exc))
-        maeflow = os.path.join(PLUGIN_ROOT, "scripts", "mae-flow.py")
         body = _extract_markdown_sections(
             _strip_frontmatter(body), wanted_sections)
         body = _adapt_embedded_method(body, maeflow)
@@ -189,6 +189,7 @@ def render_pack(name):
         "\n## 内嵌方法收口",
         "上面的原始方法只提供本步骤需要的思考与执行纪律。不要按其中的“下一步”、"
         "“调用其他 Skill”或“结束工作流”自行跳转；完成后回到本步骤正文，"
-        "由 `mae-flow.py done` 决定下一步。",
+        "由本步骤正文给出的完成命令决定下一步；若正文要求收口，使用 "
+        "`python \"%s\" done`。" % maeflow,
     ))
     return "\n".join(sections).rstrip()

@@ -350,6 +350,94 @@ class AgentObservationTests(unittest.TestCase):
             self.state, "COMPILE", "build",
             quality_input_snapshot(state, "COMPILE", "build")))
 
+    def test_transcript_fallback_binds_the_returned_claude_code_agent(self):
+        main = os.path.join(self.temporary.name, "session.jsonl")
+        subagents = os.path.join(
+            os.path.splitext(main)[0], "subagents")
+        os.makedirs(subagents)
+        wanted = os.path.join(subagents, "agent-agent-42.jsonl")
+        unrelated = os.path.join(subagents, "agent-agent-99.jsonl")
+        for path in (wanted, unrelated):
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("{}\n")
+        os.utime(unrelated, (2_000_000_000, 2_000_000_000))
+
+        resolved = ActiveHookEventAdapter._explicit_transcript_path(
+            {"transcript_path": main, "agent_id": "agent-42"},
+            invocation_id="toolu-42",
+        )
+
+        self.assertEqual(wanted, resolved)
+
+    def test_transcript_fallback_never_uses_latest_unrelated_agent(self):
+        main = os.path.join(self.temporary.name, "session.jsonl")
+        subagents = os.path.join(
+            os.path.splitext(main)[0], "subagents")
+        os.makedirs(subagents)
+        unrelated = os.path.join(subagents, "agent-someone-else.jsonl")
+        with open(unrelated, "w", encoding="utf-8") as stream:
+            stream.write("{}\n")
+
+        resolved = ActiveHookEventAdapter._explicit_transcript_path(
+            {"transcript_path": main, "agent_id": "agent-42"},
+            invocation_id="toolu-42",
+        )
+
+        self.assertEqual("", resolved)
+
+    def test_codeagent_posttool_agent_id_binds_quality_transcript(self):
+        state = {
+            "current": "build",
+            "config": {"编译方式": "make module"},
+            "agent_tasks": {"COMPILE": {
+                "step": "build", "head": "abc",
+                "task_files": ["src/a.cpp"], "execution_roots": ["src"],
+            }},
+        }
+        adapter = ActiveHookEventAdapter(
+            state=self.state, maeflow_path="/repo/scripts/mae-flow.py",
+            repository_root=self.temporary.name, maeflow=lambda *_args: 0,
+            runtime_adapter=SimpleNamespace(_contract_state=lambda: state),
+            task_card_ports=lambda: SimpleNamespace(
+                script_path=lambda: "/repo/scripts/mae-flow.py"),
+            log=lambda _message: None,
+        )
+        main = os.path.join(self.temporary.name, "session.jsonl")
+        subagents = os.path.join(os.path.splitext(main)[0], "subagents")
+        os.makedirs(subagents)
+        transcript = os.path.join(subagents, "agent-build-42.jsonl")
+        rows = (
+            {"message": {"role": "assistant", "content": [{
+                "type": "tool_use", "id": "build", "name": "Bash",
+                "input": {"command": "make module"},
+            }]}},
+            {"message": {"role": "user", "content": [{
+                "type": "tool_result", "tool_use_id": "build",
+                "content": "exit_code: 0\nbuild succeeded",
+            }]}},
+        )
+        with open(transcript, "w", encoding="utf-8") as stream:
+            for row in rows:
+                stream.write(json.dumps(row) + "\n")
+        dispatch = {
+            "tool_name": "Agent", "tool_use_id": "toolu-build-42",
+            "transcript_path": main,
+            "tool_input": {"subagent_type": "compile-agent"},
+        }
+        adapter.pretool(dispatch)
+
+        adapter.posttool({
+            **dispatch,
+            "tool_response": {
+                "status": "completed", "agentId": "build-42",
+                "content": [{"type": "text", "text": "done"}],
+            },
+        })
+
+        self.assertIsNotNone(successful_quality_execution(
+            self.state, "COMPILE", "build",
+            quality_input_snapshot(state, "COMPILE", "build")))
+
 
 if __name__ == "__main__":
     unittest.main()

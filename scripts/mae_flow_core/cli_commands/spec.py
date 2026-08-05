@@ -309,9 +309,10 @@ def cmd_spec(flow, st, args):
                 "等于跳过实现与检查。先按步骤指引把阶段推进到 verify。" % (cur or "未初始化"), 2)
         report = str(data.get("verification_report", "") or "")
         if not report or not os.path.isfile(report):
+            script = api.norm(os.path.abspath(sys.argv[0]))
             api.die("verify-pass 要求先登记真实存在的验证报告:"
-                "mae-flow spec set verification_report \"<路径>\"。"
-                "验证结论不能凭口头产生。", 2)
+                "python \"%s\" spec set verification_report \"<路径>\"。"
+                "验证结论不能凭口头产生。" % script, 2)
         # 校准实锤:0 字节报告与零任务清单曾可满足"三重硬校验"——空产物
         # 不能证明任何事。
         try:

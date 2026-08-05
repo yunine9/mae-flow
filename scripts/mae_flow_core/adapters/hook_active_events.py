@@ -1,6 +1,5 @@
 """Platform adapter for active Flow and Standalone Hook events."""
 
-import glob
 import json
 import os
 import re
@@ -29,6 +28,9 @@ from mae_flow_core.file_io import (
     write_text,
 )
 from mae_flow_core.adapters.hook_agent_lifecycle import HookAgentLifecycle
+from mae_flow_core.adapters.hook_transcript_paths import (
+    explicit_agent_transcript_path,
+)
 from mae_flow_core.workflow.agent_observations import (
     record_agent_started,
     started_observation,
@@ -65,7 +67,7 @@ _ACTION_BASH_BLOCKED = (
 )
 _STOP_BLOCKED = (
     "[mae-flow] 月光宝盒仍在执行，当前步骤 %s，禁止提前结束回复或等待用户。"
-    "继续执行 mae-flow current 给出的动作；质量问题尽力后用 moonlight defer，"
+    "继续执行 current 输出给出的动作；质量问题尽力后用 moonlight defer，"
     "确实缺少需求/权限/外部条件而无法继续时用 moonlight blocked --reason "
     "留痕后再停止。\n"
 )
@@ -85,7 +87,9 @@ class ActiveHookEventAdapter:
             runtime_adapter, task_card_ports, log):
         self.state = state
         self.maeflow_path = maeflow_path
-        self.repository_root = repository_root
+        self.repository_root = os.path.realpath(repository_root)
+        self.plugin_root = os.path.abspath(os.path.join(
+            os.path.dirname(maeflow_path), ".."))
         self.maeflow = maeflow
         self.runtime = runtime_adapter
         self.task_card_ports = task_card_ports
@@ -195,17 +199,17 @@ class ActiveHookEventAdapter:
                 "不要再运行 current/done。\n"))
         return HookResponse(stderr=(
             "[mae-flow] 自动退出未完成(流程状态仍在)。不要重复要求用户确认；"
-            "请执行 doctor 查看原因，用户始终可在真实终端运行 "
-            "`mae-flow exit --interactive`；若插件脚本本身不可用,恢复插件后"
+            "请执行 current 输出中的 doctor 命令查看原因，用户始终可在真实终端运行 "
+            "`python \"%s\" exit --interactive`；若插件脚本本身不可用,恢复插件后"
             "重试,或(确认放弃流程时)由用户手动删除项目根的 .mae-flow.json* "
-            "文件。\n"))
+            "文件。\n" % os.path.abspath(self.maeflow_path)))
 
     def _active_injection(self, session_start):
         self.maeflow("status", "--inject")
         if not session_start:
             return HookResponse()
         readme = os.path.abspath(
-            os.path.join(self.repository_root, "README.md"))
+            os.path.join(self.plugin_root, "README.md"))
         return HookResponse(stdout=(
             "[mae-flow] 存在进行中的交付流程。续跑先执行 python "
             "\"%s\" current 获取当前步骤指令。"
@@ -246,7 +250,7 @@ class ActiveHookEventAdapter:
                     or os.path.isdir(".comet"))):
             script = os.path.abspath(self.maeflow_path)
             readme = os.path.abspath(
-                os.path.join(self.repository_root, "README.md"))
+                os.path.join(self.plugin_root, "README.md"))
             return HookResponse(stdout=(
                 "[mae-flow] 本项目适用 mae-flow 交付流程:开新单直接说"
                 "「交付 <单号> + SE 文档」或敲 /mae-flow:mae-flow;"
@@ -299,13 +303,6 @@ class ActiveHookEventAdapter:
         return clue
 
     @staticmethod
-    def _latest_subagent_transcript(main_path):
-        stem = os.path.splitext(main_path)[0]
-        candidates = glob.glob(
-            os.path.join(stem, "subagents", "agent-*.jsonl"))
-        return max(candidates, key=os.path.getmtime) if candidates else ""
-
-    @staticmethod
     def _load_agent_transcript(path):
         return [
             json.loads(line)
@@ -314,13 +311,8 @@ class ActiveHookEventAdapter:
         ]
 
     @staticmethod
-    def _explicit_transcript_path(payload):
-        for key, value in payload.items():
-            if (isinstance(value, str) and "transcript" in key.lower()
-                    and "agent" in key.lower()):
-                return value
-        main = payload.get("transcript_path", "")
-        return ActiveHookEventAdapter._latest_subagent_transcript(main)
+    def _explicit_transcript_path(payload, invocation_id=""):
+        return explicit_agent_transcript_path(payload, invocation_id)
 
     @staticmethod
     def _quality_call(kind, calls, config, task=None):
@@ -348,7 +340,7 @@ class ActiveHookEventAdapter:
         if kind not in ("COMPILE", "CODECHECK", "UT"):
             return
         state = self.runtime._contract_state()
-        path = self._explicit_transcript_path(payload)
+        path = self._explicit_transcript_path(payload, invocation_id)
         calls = ()
         if path:
             try:
@@ -385,7 +377,7 @@ class ActiveHookEventAdapter:
         if not task:
             return ""
         direct_write_paths = ()
-        path = self._explicit_transcript_path(payload)
+        path = self._explicit_transcript_path(payload, invocation_id)
         if path:
             try:
                 calls = parse_transcript(
@@ -413,7 +405,7 @@ class ActiveHookEventAdapter:
             return HookResponse()
         template_name, label = target
         resolved_template = template_path(
-            self.repository_root, template_name)
+            self.plugin_root, template_name)
         if not os.path.exists(resolved_template):
             self.log(label + " 模板缺失: " + resolved_template)
             return HookResponse()

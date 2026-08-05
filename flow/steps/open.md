@@ -7,4 +7,4 @@
 5. 执行 `python "{MAEFLOW_PATH}" local-spec validate`。校验失败时修改本地 Spec 后重试，不提交该文件。
 6. 展示简洁 Spec 摘要，让用户执行本步骤唯一一次确认；确认后直接进入 Story。
 
-Spec 永远留在 `.mae-flow-work/<单号>/spec.md`。本步骤禁止 `git add` Spec、禁止另建 Design/Test Blueprint/Roadmap/Build Plan。
+Spec 永远留在 `.mae-flow-work/<单号>/spec.md`。本步骤禁止 `git add` Spec，也禁止另建编码前计划过程件。

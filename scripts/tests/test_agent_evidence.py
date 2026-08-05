@@ -41,7 +41,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
     def test_missing_return_has_actionable_message_without_receipt_language(self):
         result = AgentEvidenceRules(make_ports()).agent_ran(
             {"agent": "COMPILE", "statuses": ["OK"]},
-            {"current": "tw_compile"},
+            {"current": "build"},
         )
         self.assertFalse(result.passed)
         self.assertIn("本步内未检测到 COMPILE 子 Agent 已返回", result.reason)
@@ -67,7 +67,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
         self.assertNotIn("继续重跑", result.reason)
 
     def test_quality_step_prompts_share_the_missing_return_anti_loop_rule(self):
-        for name in ("rf_compile.md", "verify_codecheck.md", "verify_ut.md"):
+        for name in ("build.md", "verify_codecheck.md", "verify_ut.md"):
             with self.subTest(name=name):
                 with open(
                         os.path.join(ROOT, "flow", "steps", name),
@@ -78,7 +78,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
 
     def test_returned_lifecycle_passes_regardless_of_declared_statuses(self):
         observation = {
-            "kind": "COMPILE", "step": "tw_compile",
+            "kind": "COMPILE", "step": "build",
             "lifecycle": "returned", "at": "2026-07-29 10:01:00",
             "detail": "任意自然语言；甚至说 FAIL 也不由这里裁决",
         }
@@ -87,7 +87,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
             quality_execution=lambda _kind, _step, _state: {"succeeded": True}))
         self.assertTrue(rules.agent_ran(
             {"agent": "COMPILE", "statuses": ["OK"]},
-            {"current": "tw_compile"},
+            {"current": "build"},
         ).passed)
 
     def test_quality_return_without_real_execution_is_not_enough(self):
@@ -120,7 +120,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
         rules = AgentEvidenceRules(make_ports(
             changed_source_files=lambda _state: ([], "")))
         self.assertTrue(rules.agent_or_no_source(
-            {"agent": "COMPILE"}, {"current": "tw_compile"}).passed)
+            {"agent": "COMPILE"}, {"current": "build"}).passed)
 
     def test_review_snapshot_safety_is_unchanged(self):
         rules = AgentEvidenceRules(make_ports())

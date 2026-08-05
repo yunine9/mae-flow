@@ -20,9 +20,6 @@ from mae_flow_core.guard.ownership import (  # noqa: E402
 class OwnershipPolicyTests(unittest.TestCase):
     def facts(self, **overrides):
         values = {
-            "review_required": False,
-            "expected_snapshot": {},
-            "current_snapshot": {},
             "candidate_paths": (),
             "inherited": (),
             "foreign_openspec": (),
@@ -35,28 +32,6 @@ class OwnershipPolicyTests(unittest.TestCase):
         }
         values.update(overrides)
         return OwnershipFacts(**values)
-
-    def test_review_snapshot_and_file_set_are_checked_first(self):
-        changed = decide_ownership(self.facts(
-            review_required=True,
-            expected_snapshot={"src/a.py": "old"},
-            current_snapshot={"src/a.py": "new"},
-            candidate_paths=("src/a.py",),
-            inherited=("legacy.txt",),
-        ))
-        self.assertEqual(
-            "bash-checkpoint-reviewed-snapshot", changed.block.rule)
-
-        mismatch = decide_ownership(self.facts(
-            review_required=True,
-            expected_snapshot={"src/a.py": "same"},
-            current_snapshot={"src/a.py": "same"},
-            candidate_paths=("src/b.py",),
-        ))
-        self.assertEqual(
-            "bash-checkpoint-reviewed-files", mismatch.block.rule)
-        self.assertIn("漏掉 src/a.py", mismatch.block.message)
-        self.assertIn("夹带 src/b.py", mismatch.block.message)
 
     def test_non_authorizable_blocks_precede_and_summarize_user_exits(self):
         result = decide_ownership(self.facts(

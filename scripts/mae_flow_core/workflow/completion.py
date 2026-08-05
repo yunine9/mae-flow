@@ -5,7 +5,6 @@ import re
 
 from ..moonlight import enabled as moonlight_enabled
 from ..moonlight import step_kind as moonlight_step_kind
-from .advancement import PACE_STEPS
 from .evidence import EvidenceRegistry, evaluate_step_evidence
 
 
@@ -142,27 +141,6 @@ def _story_is_local(state):
     )
 
 
-def _spec2code_confirmation_events(step_id, state, choice):
-    if choice != "continue":
-        return
-    kinds = {
-        "test_blueprint": "blueprint",
-        "build_plan": "roadmap,plan",
-    }.get(step_id)
-    if not kinds:
-        return
-    actor = (
-        "moonlight"
-        if moonlight_enabled(state)
-        else "user"
-    )
-    yield CompletionEvent(
-        "confirm_spec2code",
-        kinds,
-        actor,
-    )
-
-
 def completion_events(
     step_id,
     step,
@@ -171,24 +149,6 @@ def completion_events(
     ack,
 ):
     """Yield ordered adapter actions after Evidence has succeeded."""
-    yield from _spec2code_confirmation_events(
-        step_id,
-        state,
-        choice,
-    )
-
-    if step_id in PACE_STEPS and not moonlight_enabled(state):
-        if choice == "adjust":
-            yield CompletionEvent("adjust_checkpoint")
-            return
-        yield CompletionEvent(
-            "activate_checkpoint",
-            choice,
-        )
-
-    if step_id == "build_plan" and moonlight_enabled(state):
-        yield CompletionEvent("prepare_moonlight_checkpoint")
-
     kind = moonlight_step_kind(step_id)
     if kind:
         yield CompletionEvent("resolve_moonlight", kind)

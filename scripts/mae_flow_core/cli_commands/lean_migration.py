@@ -4,10 +4,11 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
-from mae_flow_core.orchestration import recover_lean_flow
+from mae_flow_core.orchestration.stable_recovery import recover_lean_flow
 from mae_flow_core.state_store import atomic_write_json
 from mae_flow_core.workflow.command_catalog import render_display
 
@@ -16,6 +17,23 @@ from .shared import STATE_PATH
 
 _BACKUP_DIRECTORY = os.path.join(".mae-flow-work", "state-backups")
 _PROPOSAL_PATH = os.path.join(_BACKUP_DIRECTORY, "lean-v3-recovery.json")
+
+# One-time retirement bridge.  These names are intentionally isolated here;
+# no active command, transition, hook or evidence rule understands the old
+# batch-development protocol.
+_RETIRED_BATCH_TARGETS = {
+    "test_blueprint": "story",
+    "build_plan": "build",
+    "build_pace": "build",
+    "tw_pace": "build",
+    "rf_pace": "build",
+    "tw_change": "build",
+    "tw_compile": "build",
+    "tw_review": "build_review",
+    "rf_fix": "build",
+    "rf_compile": "build",
+    "rf_review": "build_review",
+}
 
 
 def _read_bytes(path):
@@ -148,6 +166,58 @@ def _print_card(recovery, proposal):
 def _terminal_lean_gate_bypasses():
     if not os.path.isfile(STATE_PATH):
         return False
+
+
+def retire_legacy_batch_state(path=STATE_PATH):
+    """Strip the retired batch protocol and resume at whole-change build."""
+    if not os.path.isfile(path):
+        return False
+    try:
+        raw = _read_bytes(path)
+        document = _parse_json(raw)
+    except Exception:
+        return False
+    if not isinstance(document, dict) or _is_lean(document):
+        return False
+    has_legacy = (
+        document.get("current") in _RETIRED_BATCH_TARGETS
+        or "development_review" in document
+        or "development_pace" in (document.get("choices") or {})
+        or "development_checkpoints" in (document.get("protocols") or {})
+        or "CP_IMPLEMENT" in (document.get("agent_tasks") or {})
+        or any(role in (document.get("role_tasks") or {}) for role in (
+            "cp-implement", "task-analysis", "craft-plan", "craft-code"))
+    )
+    if not has_legacy:
+        return False
+    document.pop("development_review", None)
+    choices = document.get("choices") or {}
+    choices.pop("development_pace", None)
+    protocols = document.get("protocols") or {}
+    protocols.pop("development_checkpoints", None)
+    tasks = document.get("agent_tasks") or {}
+    tasks.pop("CP_IMPLEMENT", None)
+    roles = document.get("role_tasks") or {}
+    for role in ("cp-implement", "task-analysis", "craft-plan", "craft-code"):
+        roles.pop(role, None)
+    if document.get("current") in _RETIRED_BATCH_TARGETS:
+        document["current"] = _RETIRED_BATCH_TARGETS[document["current"]]
+    if not document.get("implementation_base_head"):
+        try:
+            document["implementation_base_head"] = subprocess.check_output(
+                ["git", "rev-parse", "--verify", "HEAD"],
+                text=True, stderr=subprocess.DEVNULL).strip()
+        except (OSError, subprocess.CalledProcessError):
+            document["implementation_base_head"] = ""
+    document.setdefault("migrations", []).append({
+        "type": "retire-batch-development",
+        "target": "build",
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    if _read_bytes(path) != raw:
+        return False
+    atomic_write_json(path, document)
+    return True
     try:
         _raw, document = _lean_document(STATE_PATH)
         recovery = recover_lean_flow(document)

@@ -7,9 +7,6 @@ from .gate import GateDecision
 
 @dataclass(frozen=True)
 class OwnershipFacts:
-    review_required: bool
-    expected_snapshot: dict
-    current_snapshot: dict
     candidate_paths: tuple
     inherited: tuple
     foreign_openspec: tuple
@@ -52,36 +49,6 @@ def decide_compile_task_commit(step, task, token, completed=False):
         "当前步骤的编译任务已签发，但尚未同时观察到 Agent 正常返回和"
         "对应输入上的真实成功执行。先完成当前 COMPILE 任务；compile-agent 的"
         "直接修复保持未提交，随后由主流程按正常候选规则提交。",
-    )
-
-
-def _review_block(facts):
-    if not facts.review_required:
-        return None
-    if facts.current_snapshot != facts.expected_snapshot:
-        return GateDecision(
-            "block",
-            "bash-checkpoint-reviewed-snapshot",
-            "检视后的未提交代码已经变化，禁止拿旧确认提交新 diff。"
-            "保留现场并重新进入调整、编译和检视。",
-        )
-    expected = set(facts.expected_snapshot)
-    actual = set(facts.candidate_paths)
-    if actual == expected:
-        return None
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected)
-    detail = []
-    if missing:
-        detail.append("漏掉 " + "、".join(missing[:8]))
-    if extra:
-        detail.append("夹带 " + "、".join(extra[:8]))
-    return GateDecision(
-        "block",
-        "bash-checkpoint-reviewed-files",
-        "本次 commit 必须精确等于用户刚检视的文件；"
-        + "；".join(detail)
-        + "。按 checkpoint status 输出的精确 git add/commit 执行。",
     )
 
 
@@ -180,7 +147,6 @@ def _ownership_blocks(facts):
     # They must win before inherited/foreign ownership choices that do have an
     # exact authorization route.
     return tuple(block for block in (
-        _review_block(facts),
         (
             _compile_side_effect_block(facts)
             if facts.compile_side_effects else None

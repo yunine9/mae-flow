@@ -4,11 +4,8 @@
 
 import json
 import os
-import subprocess
 import sys
-import tempfile
 import unittest
-from unittest import mock
 
 
 SCRIPTS = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -22,11 +19,6 @@ from mae_flow_core.orchestration.models import (  # noqa: E402
     Phase,
 )
 from mae_flow_core.orchestration.guidance import render_guidance  # noqa: E402
-from mae_flow_core import state_store  # noqa: E402
-import lean_harness  # noqa: E402
-
-
-HARNESS = os.path.join(os.path.dirname(__file__), "lean_harness.py")
 
 
 def state_for(phase):
@@ -35,7 +27,6 @@ def state_for(phase):
         path=DeliveryPath.FULL,
         phase=phase,
         commit_pace=CommitPace.STAGED,
-        current_cp="CP2",
         artifacts=(
             ("request", "docs/requests/REQ-42.md"),
             ("spec", "openspec/changes/req-42/change.md"),
@@ -54,7 +45,6 @@ class LeanGuidanceTests(unittest.TestCase):
                 self.assertIn("Ticket: REQ-42", text)
                 self.assertIn("Path: full", text)
                 self.assertIn("Phase: %s" % phase.value, text)
-                self.assertIn("CP: CP2", text)
                 self.assertIn("Objective", text)
                 self.assertIn("Inspect", text)
                 self.assertIn("Stop for the user", text)
@@ -87,7 +77,7 @@ class LeanGuidanceTests(unittest.TestCase):
         quality = render_guidance(state_for(Phase.QUALITY))
         self.assertIn("WHAT", spec)
         self.assertIn("HOW", story)
-        self.assertIn("cumulative UT handoff", construction)
+        self.assertIn("whole-change UT handoff", construction)
         self.assertIn("at most once", quality)
         self.assertIn("meaningful change", quality)
         self.assertIn("user chooses", quality)
@@ -106,119 +96,12 @@ class LeanGuidanceTests(unittest.TestCase):
             self.assertIn("without automatic retry", guidance)
             self.assertIn("real reviewer tradeoff", guidance)
 
-    def test_construction_plans_testability_without_running_formal_ut(self):
+    def test_construction_keeps_implementation_direct_and_ut_in_quality(self):
         construction = render_guidance(state_for(Phase.CONSTRUCTION))
-        self.assertIn("testability seams early", construction)
-        self.assertIn("cumulative UT handoff", construction)
-        self.assertIn("does not write, compile, or run formal UT", construction)
-        self.assertNotIn("tests leading each behavior change", construction)
-
-
-class LeanHarnessTests(unittest.TestCase):
-    def run_harness(self, state_path, *arguments):
-        return subprocess.run(
-            [sys.executable, HARNESS, "--state", state_path, *arguments],
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
-
-    def test_end_to_end_commands_persist_direct_orchestration_results(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "flow.json")
-            started = self.run_harness(
-                path, "start", "REQ-9", "focused", "continuous")
-            advanced = self.run_harness(
-                path, "advance", "startup-confirmed")
-            decided = self.run_harness(
-                path, "decision", "construction.scope", "Keep the fix local.")
-            current = self.run_harness(path, "current")
-            exited = self.run_harness(path, "exit")
-
-            self.assertEqual(0, started.returncode, started.stderr)
-            self.assertEqual(0, advanced.returncode, advanced.stderr)
-            self.assertEqual(0, decided.returncode, decided.stderr)
-            self.assertEqual(0, current.returncode, current.stderr)
-            self.assertEqual(0, exited.returncode, exited.stderr)
-            self.assertIn("Phase: construction", current.stdout)
-            with open(path, encoding="utf-8") as stream:
-                persisted = json.load(stream)
-            self.assertEqual("exited", persisted["status"])
-            self.assertEqual("construction", persisted["phase"])
-            self.assertIn(
-                {"key": "construction.scope", "value": "Keep the fix local."},
-                persisted["decisions"],
-            )
-
-    def test_exit_succeeds_from_every_phase(self):
-        with tempfile.TemporaryDirectory() as root:
-            for phase in Phase:
-                with self.subTest(phase=phase):
-                    path = os.path.join(root, "%s.json" % phase.value)
-                    with open(path, "w", encoding="utf-8") as stream:
-                        json.dump(state_for(phase).to_dict(), stream)
-                    result = self.run_harness(path, "exit")
-                    self.assertEqual(0, result.returncode, result.stderr)
-                    with open(path, encoding="utf-8") as stream:
-                        persisted = json.load(stream)
-                    self.assertEqual("exited", persisted["status"])
-                    self.assertEqual(phase.value, persisted["phase"])
-
-    def test_invalid_command_does_not_rewrite_caller_state(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "flow.json")
-            with open(path, "w", encoding="utf-8") as stream:
-                json.dump(state_for(Phase.SPEC).to_dict(), stream)
-            with open(path, "rb") as stream:
-                before = stream.read()
-
-            result = self.run_harness(path, "advance", "")
-
-            self.assertEqual(2, result.returncode)
-            self.assertIn("error:", result.stderr)
-            with open(path, "rb") as stream:
-                self.assertEqual(before, stream.read())
-
-    def test_encoding_failure_preserves_state_and_leaves_no_temp_file(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "flow.json")
-            seeded = b'{"known":"recovery cursor"}\n'
-            with open(path, "wb") as stream:
-                stream.write(seeded)
-            state = state_for(Phase.CONSTRUCTION).with_decision(
-                "construction.note", "invalid surrogate: \ud800")
-
-            with self.assertRaises(UnicodeEncodeError):
-                lean_harness._save(path, state)
-
-            with open(path, "rb") as stream:
-                self.assertEqual(seeded, stream.read())
-            self.assertEqual(["flow.json"], os.listdir(root))
-
-    def test_save_retries_windows_replace_in_the_caller_directory(self):
-        with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "flow.json")
-            real_replace = os.replace
-            calls = []
-
-            def flaky_replace(source, destination):
-                calls.append((source, destination))
-                if len(calls) == 1:
-                    raise PermissionError("temporary Windows file lock")
-                real_replace(source, destination)
-
-            with mock.patch.object(
-                    state_store.os, "replace", side_effect=flaky_replace), \
-                    mock.patch.object(state_store.time, "sleep"):
-                lean_harness._save(path, state_for(Phase.QUALITY))
-
-            self.assertEqual(2, len(calls))
-            for temporary, destination in calls:
-                self.assertEqual(root, os.path.dirname(temporary))
-                self.assertEqual(path, destination)
-            self.assertEqual(["flow.json"], os.listdir(root))
+        self.assertIn("main Agent implements the whole", construction)
+        self.assertIn("whole-change UT handoff", construction)
+        self.assertIn("formal UT remains in Quality", construction)
+        self.assertIn("compile-agent", construction)
 
 
 if __name__ == "__main__":

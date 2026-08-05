@@ -39,10 +39,6 @@ class RefactorCompletionContractTests(unittest.TestCase):
                 "architecture": [
                     "python scripts/tests/test_architecture.py",
                 ],
-                "differential": [
-                    "python scripts/tests/differential/runner.py "
-                    "--implementation-root .",
-                ],
                 "fault_injection": [
                     "python scripts/tests/test_fault_injection.py",
                 ],
@@ -50,7 +46,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
                     "python -W error::ResourceWarning "
                     "scripts/tests/test_state_core.py",
                     "python -W error::ResourceWarning "
-                    "scripts/tests/test_checkpoints.py",
+                    "scripts/tests/test_quality_task_cards.py",
                 ],
                 "selftest": [
                     "python scripts/selftest.py",
@@ -95,7 +91,7 @@ class RefactorCompletionContractTests(unittest.TestCase):
     def test_contract_rejects_relaxed_or_missing_required_verification(self):
         contract = load_contract(os.path.join(
             TESTS, "refactor_completion_contract.json"))
-        contract["required_verifications"]["differential"] = []
+        contract["required_verifications"]["architecture"] = []
         self.assertIn(
             "required_verifications must match the approved release gates",
             validate_contract(ROOT, contract),
@@ -105,77 +101,6 @@ class RefactorCompletionContractTests(unittest.TestCase):
             "required_verifications must match the approved release gates",
             validate_contract(ROOT, contract),
         )
-
-
-from differential.coverage import (  # noqa: E402
-    load_coverage,
-    validate_coverage,
-)
-from differential.runner import load_goldens  # noqa: E402
-from differential.scenarios import SCENARIOS  # noqa: E402
-
-
-class DifferentialCoverageContractTests(unittest.TestCase):
-    def test_registered_scenarios_have_complete_coverage_metadata(self):
-        coverage = load_coverage(os.path.join(
-            TESTS, "differential", "coverage.json"))
-        self.assertEqual(
-            [],
-            validate_coverage(coverage, set(SCENARIOS)),
-        )
-
-    def test_current_golden_covers_every_registered_scenario(self):
-        goldens = load_goldens(os.path.join(
-            TESTS, "differential", "goldens", "phase15.json"))
-        self.assertEqual(set(SCENARIOS), set(goldens))
-
-    def test_coverage_rejects_unknown_domain_and_missing_scenario(self):
-        coverage = {
-            "schema": 1,
-            "scenarios": {
-                "ghost": {
-                    "domain": "unknown",
-                    "runtime": "inactive",
-                    "workflow": "none",
-                    "transition": "none",
-                    "delivery": "none",
-                    "fault": "none",
-                }
-            },
-        }
-        self.assertEqual(
-            [
-                "coverage missing registered scenario action_status",
-                "coverage references unknown scenario ghost",
-                "ghost: unknown domain unknown",
-            ],
-            validate_coverage(coverage, {"action_status"}),
-        )
-
-    def test_coverage_rejects_invalid_schema_values_and_extra_fields(self):
-        coverage = {
-            "schema": 999,
-            "extra": True,
-            "scenarios": {
-                "action_status": {
-                    "domain": "quality",
-                    "runtime": None,
-                    "workflow": "",
-                    "transition": "typo",
-                    "delivery": [],
-                    "fault": "none",
-                    "surprise": "ignored",
-                }
-            },
-        }
-        errors = validate_coverage(coverage, {"action_status"})
-        self.assertIn("coverage schema must be 1", errors)
-        self.assertIn("coverage has unknown top-level fields extra", errors)
-        self.assertIn("action_status: unknown fields surprise", errors)
-        self.assertIn("action_status: invalid runtime None", errors)
-        self.assertIn("action_status: invalid workflow ", errors)
-        self.assertIn("action_status: invalid transition typo", errors)
-        self.assertIn("action_status: invalid delivery []", errors)
 
 
 if __name__ == "__main__":

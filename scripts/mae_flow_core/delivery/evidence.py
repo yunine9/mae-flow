@@ -10,10 +10,7 @@ from ..workflow.evidence import legacy_result
 @dataclass(frozen=True)
 class DeliveryEvidencePorts:
     moonlight: object
-    development_review: object
     source_changed_since: object
-    review_before_commit: object
-    final_review_delta: object
     archive_delivery_paths: object
     shell_output: object
     argv_output: object
@@ -77,130 +74,9 @@ def review_has_confirmed_fix(text):
     return review_status_count(text, "修复(已确认)") > 0
 
 
-def _checkpoint_next_action(data, item):
-    checkpoint = str(item.get("id", "当前 CP") or "当前 CP")
-    status = str(item.get("status", "") or "")
-    actions = {
-        "planned": (
-            "先展开本 CP 的生产代码 Task，并执行 checkpoint prepare"),
-        "plan_review_pending": (
-            "展示当前计划并执行 checkpoint plan-decide continue|revise"),
-        "coding": (
-            "完成生产代码修改和本批 compile-agent 后执行 "
-            "checkpoint ready %s" % checkpoint),
-        "craft_pending": (
-            "执行 role-task craft-code --checkpoint %s，走读完成后执行 "
-            "checkpoint craft-reviewed %s" % (checkpoint, checkpoint)),
-        "craft_decision_pending": (
-            "先执行 checkpoint craft-decide %s --review "
-            "\"<已登记 CODE Review 路径>\"；源码已提前修改也可直接执行，"
-            "命令会保留修改并安全回到 coding" % checkpoint),
-        "review_pending": (
-            "展示当前 CP 差异并执行 checkpoint decide "
-            "continue|revise|continuous"),
-        "commit_pending": (
-            "执行 checkpoint status，按输出精确提交已检视快照；"
-            "不要 amend 或重新 ready"),
-        "commit_recovery": (
-            "执行 checkpoint status，按输出让用户选择调整并安全拆回"),
-        "reset_pending": (
-            "执行 checkpoint status，按输出完成安全拆回"),
-        "push_pending": (
-            "执行 git push -u origin HEAD，成功后执行 checkpoint status"),
-    }
-    return actions.get(
-        status,
-        "执行 checkpoint status 获取当前状态的唯一恢复动作",
-    )
-
-
 class DeliveryEvidenceRules:
     def __init__(self, ports):
         self.ports = ports
-
-    def checkpoint_plan(self, _spec, state):
-        if self.ports.moonlight(state):
-            return EvidenceResult(True, "")
-        data = self.ports.development_review(state)
-        if not data or data.get("status") != "plan_pending":
-            return EvidenceResult(
-                False,
-                "尚未生成开发检查点方案。先按本步指令执行 "
-                "checkpoint plan --item ...，让用户看到具体批次后再选择开发节奏",
-            )
-        if data.get("plan_step") != state.get("current"):
-            return EvidenceResult(
-                False, "检查点方案属于旧步骤，重新分析并生成本步方案")
-        items = data.get("checkpoints") or []
-        if not 1 <= len(items) <= 6:
-            return EvidenceResult(
-                False,
-                "检查点数量必须为 1-6 个；小改可 1 个，常规任务建议 2-4 个",
-            )
-        changed, error = self.ports.source_changed_since(
-            data.get("plan_head", ""), state)
-        if error:
-            return EvidenceResult(
-                False, "检查点方案基点无法核实:" + error)
-        if changed:
-            return EvidenceResult(
-                False,
-                "检查点方案呈现后代码已经变化: "
-                + "、".join(changed[:5])
-                + "。必须在写码前重新生成方案，不能确认旧划分",
-            )
-        return EvidenceResult(True, "")
-
-    def checkpoint_plan_complete(self, _spec, state):
-        data = self.ports.development_review(state)
-        if not data or self.ports.moonlight(state):
-            return EvidenceResult(True, "")
-        if data.get("status") != "active":
-            return EvidenceResult(False, "开发节奏尚未完成用户确认")
-        mode = data.get("mode")
-        items = data.get("checkpoints") or []
-        closed = (
-            (lambda item: item.get("status") == "accepted")
-            if mode == "staged"
-            else (lambda item: item.get("status")
-                  in ("completed", "accepted"))
-        )
-        pending = [
-            item.get("id", "?") for item in items
-            if not closed(item)
-        ]
-        if not pending:
-            return EvidenceResult(True, "")
-        index = int(data.get("current_index", 0) or 0)
-        current = items[index] if 0 <= index < len(items) else None
-        action = (
-            _checkpoint_next_action(data, current)
-            if current
-            else "执行 checkpoint status 获取当前状态的唯一恢复动作"
-        )
-        return EvidenceResult(
-            False,
-            "检查点尚未闭环: %s。%s"
-            % ("、".join(pending), action),
-        )
-
-    def final_review_clear(self, _spec, state):
-        data = self.ports.development_review(state)
-        if not data or self.ports.moonlight(state):
-            return EvidenceResult(True, "")
-        changed, error = self.ports.final_review_delta(state)
-        if error:
-            return EvidenceResult(
-                False, "最终检视基点无法核实:" + error)
-        if changed:
-            return EvidenceResult(
-                False,
-                "质量链后仍有未检视代码增量: "
-                + "、".join(changed[:8])
-                + "。执行 checkpoint final；所有普通模式都先检视本地增量，"
-                "用户确认后才进入最终 push",
-            )
-        return EvidenceResult(True, "")
 
     def archive_paths_clean(self, _spec, state):
         paths = self.ports.archive_delivery_paths(state)
@@ -294,7 +170,7 @@ class DeliveryEvidenceRules:
                 "本地 HEAD 与远端上游不一致(未推送/推送失败/远端有新提交):"
                 "先尝试普通 git push -u origin HEAD；若远端领先，执行 git fetch "
                 "后展示分叉，不要自动 rebase、reset 或 force-push"
-                "（可能改写已检视检查点）",
+                "（可能改写已检视代码）",
             )
         return None
 

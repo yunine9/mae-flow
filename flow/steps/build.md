@@ -1,21 +1,6 @@
-读取本单 `spec.md`、`grill.md`、`story.md`、`implementation.md` 和当前 CP。禁止另建 Test Blueprint、Roadmap、详细 Build Plan 或 Task 分析文档。
+主 Agent 直接读取本单 `spec.md` 与 `story.md`，一次完成需求涉及的全部生产代码。不要派实现子 Agent，
+不要拆开发批次，不要创建额外的编码前计划或实现任务文档。
 
-每个 CP 执行固定顺序：
-
-1. `role-task cp-implement --checkpoint CPn`：任务卡给出精确输入路径、当前 CP 范围和允许修改的源码路径。
-2. `agent-task compile --checkpoint CPn --scope "<当前 CP 范围>"`：一轮只执行一次同步编译；构建输入未变化时不得重跑。
-3. 开场启用 CODE Reviewer 时，用 `role-task craft-code --checkpoint CPn` 生成精确任务卡并按节奏派发 craft-reviewer-agent：
-   - Staged：当前 CP 最多一次；
-   - Continuous：中间 CP 不派发，所有 CP 完成后统一一次。
-4. 处理真实问题后重新编译；修正动作不自动触发第二轮 Reviewer。
-5. 由现有 checkpoint 命令登记当前快照并推进。
-
-Staged：每个 CP 完成后必须停下展示精确 diff、编译结果和检视结论，等待用户确认后才进入下一 CP。不得因为一起实现更高效而越过停点。
-
-Continuous：所有 CP 连续完成，中间不询问、不推送；全部完成后展示一次最终代码增量供用户检视。
-
-Adjust：不得进入编码，返回实施附录的 CP 小节调整后重新选择节奏。
-
-实现中发现 Spec、Grill 决策、Story 或实施附录有实质错误时，停下说明问题、影响和最小修法，由用户决定是否回到对应上游；普通格式、注释或摘要变化不得触发流程回退。
-
-{{CAPABILITY_PACK:build}}
+实现完成后执行 `python "{MAEFLOW_PATH}" agent-task compile --scope "本需求完整代码增量"`，按任务卡启动
+compile-agent。编译成功后执行 `done`。此时保持代码未提交，供用户统一检视。
+如果任务卡已经启动但没有收到返回，先检查已记录的 Agent 生命周期；禁止自动重派或重复编译。

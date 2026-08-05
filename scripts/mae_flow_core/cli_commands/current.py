@@ -1,10 +1,5 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-from mae_flow_core.quality.spec2code_recovery import (
-    recovery_guidance,
-)
-from mae_flow_core.delivery.checkpoints import misplaced_checkpoint_step
-
 from .shared import (
     CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STEPS_DIR, json,
     load_json, os, re, read_text, render_pack, subst, sys, time, workflow_transitions,
@@ -129,43 +124,30 @@ def _step_md_text(sid, st):
     return subst(_with_lightcheck_prompt(sid, txt), st)
 
 def _review_receipt_lines(st, step):
-    """生成编译后人工检视收据；只展示机器解析出的本轮精确 Git 范围。"""
-    evidence = next(
-        (item for item in step.get("evidence", [])
-         if item.get("type") == "review_snapshot"), {})
-    base_step = evidence.get("base_step", "")
-    base = (st.get("step_heads", {}) or {}).get(base_step, "")
+    """展示待用户检视的完整未提交增量。"""
+    base = str(st.get("implementation_base_head", "") or "HEAD")
     head = api.sh("git rev-parse --verify HEAD")
-    if (not base or not head
-            or api.argv_out(["git", "cat-file", "-t", base]) != "commit"):
-        return ["❌ 无法生成本轮检视收据：缺少可信 Git 基点；done 会安全拒绝。"]
-    commits = api.argv_out([
-        "git", "-c", "core.quotepath=false", "log", "--format=%h %s",
-        base + ".." + head,
-    ]).splitlines()
+    if not head:
+        return ["❌ 无法读取当前 Git 状态。"]
     files = api.argv_out([
-        "git", "-c", "core.quotepath=false", "diff", "--name-status",
-        base, head,
+        "git", "-c", "core.quotepath=false", "status", "--short",
+        "--untracked-files=all",
     ]).splitlines()
     stat = api.argv_out([
         "git", "-c", "core.quotepath=false", "diff", "--shortstat",
-        base, head,
+        base,
     ])
     lines = [
-        "🔎 本轮代码检视收据（确认只对这一版有效）",
-        f"  范围: {base[:10]}..{head[:10]}（入口步骤 {base_step} → 编译通过）",
-        "  提交:",
+        "🔎 待人工检视的完整未提交增量",
+        f"  基点: {base[:10]}  当前 HEAD: {head[:10]}",
+        "  文件:",
     ]
-    lines += ["    " + item for item in commits[:30]] or ["    （本轮没有新提交）"]
-    if len(commits) > 30:
-        lines.append(f"    …另有 {len(commits) - 30} 个提交")
-    lines.append("  文件:")
-    lines += ["    " + item for item in files[:80]] or ["    （本轮没有文件差异）"]
+    lines += ["    " + item for item in files[:80]] or ["    （没有未提交差异）"]
     if len(files) > 80:
         lines.append(f"    …另有 {len(files) - 80} 个文件")
     if stat:
         lines.append("  统计: " + stat)
-    lines.append(f"  完整差异命令: git diff {base} {head}")
+    lines.append(f"  完整差异命令: git diff {base}")
     return lines
 
 def _defaults():
@@ -179,25 +161,6 @@ def _defaults():
         return None, f"⚠ {DEFAULTS_PATH} 解析失败,已忽略(修复该 JSON 或删除): {e}"
 
 def print_current(flow, st):
-    recovery_step = misplaced_checkpoint_step(st)
-    if recovery_step:
-        previous = st.get("current", "")
-        item = api._checkpoint_current(st)
-        if item:
-            item["legacy_forced_goto_recovered"] = True
-        st["current"] = recovery_step
-        st.setdefault("history", []).append({
-            "step": previous,
-            "result": "checkpoint:auto-recover:" + recovery_step,
-            "note": "旧版本曾绕过未闭环 CP，自动恢复到所属编码步骤",
-            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        api.save_state(st)
-        print(
-            "[mae-flow] 检测到旧版本把未闭环检查点跳到了 %s；"
-            "已保留全部文件和提交，自动恢复到 %s。"
-            % (previous, recovery_step)
-        )
     sid = st["current"]
     step = flow["steps"][sid]
     print(f"═══ 当前步骤: {sid} — {step['title']} ═══")
@@ -222,80 +185,7 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
-    if st.get("spec2code") and sid in {
-            "test_blueprint", "build_plan", "build", "verify_ut"}:
-        print("\n".join(recovery_guidance(
-            st,
-            is_file=os.path.isfile,
-            read_text=lambda path: read_text(
-                path, encoding="utf-8"),
-        )))
-    checkpoint_state = api._development_review(st)
-    if checkpoint_state and checkpoint_state.get("status") == "active":
-        mode_label = ("分阶段先检视、后提交并 push"
-                      if checkpoint_state.get("mode") == "staged"
-                      else "一次完成、最终统一检视")
-        print("🧭 开发节奏: " + mode_label)
-        current_checkpoint = api._checkpoint_current(st)
-        if sid == api._checkpoint_expected_code_step(st) and current_checkpoint:
-            print("   当前检查点: %s [%s] %s" % (
-                current_checkpoint.get("id"),
-                current_checkpoint.get("status"),
-                current_checkpoint.get("title")))
-            if current_checkpoint.get("status") == "push_pending":
-                if api._review_before_commit(checkpoint_state):
-                    print("   用户检视过的精确提交待推送；普通 push 后执行 checkpoint status 验真。")
-                else:
-                    print("   编译已通过；完成普通 push 后执行 checkpoint status 冻结远端检视收据。")
-            elif current_checkpoint.get("status") == "commit_pending":
-                base = str((current_checkpoint.get("receipt") or {}).get(
-                    "base", ""))
-                if api.sh("git rev-parse --verify HEAD") == base:
-                    add, commit = api._checkpoint_commit_command(
-                        st, current_checkpoint)
-                    print("   用户已确认未提交 diff；现在精确提交后执行 checkpoint status：")
-                    print("     " + add)
-                    print("     " + commit)
-                else:
-                    print("   检查点提交已产生但尚未核验；禁止再次 commit/push，"
-                          "直接执行 checkpoint status。")
-            elif current_checkpoint.get("status") == "commit_recovery":
-                print("   提交核验失败且 push 已冻结："
-                      + str(current_checkpoint.get("verification_error", "")))
-                print("   展示现场后让用户选择「需要调整代码」，再执行 checkpoint decide revise。")
-            elif current_checkpoint.get("status") == "reset_pending":
-                base = str((current_checkpoint.get("receipt") or {}).get(
-                    "base", ""))
-                print("   用户已授权拆回错误提交；执行 git reset --mixed %s，"
-                      "然后 checkpoint status。" % base)
-            elif current_checkpoint.get("status") in {
-                    "planned", "plan_review_pending",
-                    "craft_pending", "craft_decision_pending",
-                    "review_pending"}:
-                api._show_checkpoint_review(
-                    st, checkpoint_state, current_checkpoint)
-        elif (sid == api._checkpoint_expected_code_step(st)
-              and (checkpoint_state.get("final_rework") or {}).get("status")
-              == "coding"):
-            print("   当前是最终检视返工，不新增或重开原 CP。按本步骤提交修改并走正常编译/质量链，"
-                  "不要再执行 checkpoint ready；回到 delivery_review 后会重新展示完整增量。")
-        if sid == "delivery_review":
-            final = api._final_review_active(checkpoint_state)
-            if final:
-                api._show_final_review_receipt(st, checkpoint_state, final)
-            else:
-                changed, review_err = api._final_review_delta(st)
-                if review_err:
-                    print("❌ 最终检视基点异常: " + review_err)
-                elif changed:
-                    print("🔎 质量链后仍有未检视代码增量: "
-                          + "、".join(changed[:8]))
-                    print("   执行 checkpoint final 生成最终收据；"
-                          "不能直接进入不可逆规格定稿。")
-                else:
-                    print("✅ 当前最终代码已被既有检查点/最终收据完整覆盖，无需重复确认。")
-    if any(e.get("type") == "review_snapshot"
-           for e in step.get("evidence", [])):
+    if sid == "build_review":
         print("\n".join(_review_receipt_lines(st, step)))
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:

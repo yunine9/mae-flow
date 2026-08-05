@@ -130,7 +130,7 @@ class ActiveHookEventAdapter:
             decision = (
                 verify_dispatch_task(kind, state, self.task_card_ports())
                 if kind in (
-                    "STORY", "REVIEWER", "CP_IMPLEMENT",
+                    "STORY", "REVIEWER",
                     "COMPILE", "CODECHECK", "UT",
                     "GRILL", "GRILL_PREP", "GRILL_FINAL",
                 )

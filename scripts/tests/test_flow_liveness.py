@@ -50,7 +50,7 @@ class FlowLivenessTests(unittest.TestCase):
 
     def test_story_review_is_single_pass_and_cannot_schedule_itself(self):
         story = FLOW["steps"]["story"]
-        self.assertEqual("build_pace", story["next"])
+        self.assertEqual("build", story["next"])
         self.assertEqual(1, sum(
             item.get("agent") == "REVIEWER"
             for item in story.get("evidence", ())))
@@ -59,14 +59,18 @@ class FlowLivenessTests(unittest.TestCase):
             if step_id != "open":
                 self.assertNotIn("story", transition_targets(step))
 
-    def test_staged_and_continuous_are_only_user_selected_pace_values(self):
-        pace = FLOW["steps"]["build_pace"]
-        self.assertTrue(pace["user_ack"])
+    def test_build_has_one_compile_then_optional_precheck_and_human_review(self):
+        build = FLOW["steps"]["build"]
+        self.assertIn("COMPILE", [
+            item.get("agent") for item in build.get("evidence", ())])
+        self.assertEqual("build_review", build["next"]["disabled"])
+        self.assertEqual("build_agent_review", build["next"]["enabled"])
         self.assertEqual(
-            ["staged", "continuous", "adjust"], pace["choices"])
-        self.assertEqual("build", pace["next"]["staged"])
-        self.assertEqual("build", pace["next"]["continuous"])
-        self.assertEqual("build_pace", pace["next"]["adjust"])
+            "build_review", FLOW["steps"]["build_agent_review"]["next"])
+        self.assertEqual(
+            "build_commit", FLOW["steps"]["build_review"]["next"]["continue"])
+        self.assertEqual(
+            "build_rework", FLOW["steps"]["build_review"]["next"]["revise"])
 
     def test_no_step_uses_agent_return_text_as_a_transition_choice(self):
         for step_id, step in FLOW["steps"].items():

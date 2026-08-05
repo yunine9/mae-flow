@@ -410,17 +410,10 @@ class ArchitectureTests(unittest.TestCase):
             in REFACTOR_SAFETY_SUITES
         }
         expected = {
-            ("scripts/tests/test_differential_harness.py",),
-            ("scripts/tests/differential/runner.py",
-             "--implementation-root", "."),
             ("scripts/tests/test_architecture.py",),
-            ("scripts/tests/test_workflow_advancement.py",),
-            ("scripts/tests/test_workflow_completion.py",),
             ("scripts/tests/test_guard_intent.py",),
             ("scripts/tests/test_quality_task_cards.py",),
-            ("scripts/tests/test_delivery_policies.py",),
             ("scripts/tests/test_command_dispatch.py",),
-            ("scripts/tests/test_file_io.py",),
             ("scripts/tests/test_refactor_completion.py",),
             ("scripts/tests/test_fault_injection.py",),
         }

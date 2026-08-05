@@ -249,9 +249,6 @@ class CommitOwnershipTests(unittest.TestCase):
          strong_artifacts, unproven_paths, artifact_hints) = (
              mf._pending_commit_files("", state))
         decision = decide_ownership(OwnershipFacts(
-            review_required=False,
-            expected_snapshot={},
-            current_snapshot={},
             candidate_paths=tuple(mf._pending_commit_candidates()["paths"]),
             inherited=tuple(inherited),
             foreign_openspec=tuple(foreign_openspec),

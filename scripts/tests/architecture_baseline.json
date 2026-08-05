@@ -10,7 +10,7 @@
       "invoke": 3
     },
     "scripts/mae_flow_core/cli_commands/advancement.py": {
-      "advance": 17
+      "advance": 19
     },
     "scripts/mae_flow_core/cli_commands/done_status.py": {
       "cmd_done": 6

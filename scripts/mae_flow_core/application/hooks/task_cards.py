@@ -38,19 +38,10 @@ def verify_completion_task(kind, report, state, ports):
     return accepted(task)
 
 
-def _current_checkpoint(state):
-    review = state.get("development_review") or {}
-    items = review.get("checkpoints") or []
-    index = int(review.get("current_index", 0) or 0)
-    return str(items[index].get("id", "CP1")) if index < len(items) else "CP1"
-
-
 def _dispatch_missing_message(kind, script_path, state):
     ticket = str((state.get("config") or {}).get("单号", "单号") or "单号")
-    checkpoint = _current_checkpoint(state)
     commands = {
         "STORY": "role-task story-generate",
-        "CP_IMPLEMENT": "role-task cp-implement --checkpoint " + checkpoint,
         "GRILL_PREP": (
             'role-task grill-critic --stage prep --document '
             '".mae-flow-work/grill-prep-%s.md"' % ticket),
@@ -62,7 +53,7 @@ def _dispatch_missing_message(kind, script_path, state):
         command = (
             "role-task story-review"
             if state.get("current") == "story"
-            else "role-task craft-code --checkpoint " + checkpoint)
+            else "role-task code-review")
     elif kind == "GRILL":
         command = "action status"
     else:
@@ -243,20 +234,6 @@ def _scope_rejection(kind, task, changed, ports, direct_write_paths):
             "grill-critic-agent 是只读审查角色，却修改了文件: "
             + "、".join(changed[:5])
         )
-    if kind == "CP_IMPLEMENT":
-        allowed = {
-            repository_path_identity(path, case_insensitive=True)
-            for path in task.get("task_files", [])
-        }
-        bad = [
-            path for path in changed
-            if repository_path_identity(
-                path, case_insensitive=True) not in allowed
-        ]
-        if bad:
-            return (
-                "cp-implementer-agent 修改了任务卡范围外文件: "
-                + "、".join(bad[:5]))
     if kind == "REVIEWER" and changed:
         return (
             "craft-reviewer-agent 是只读审查角色，却修改了文件: "

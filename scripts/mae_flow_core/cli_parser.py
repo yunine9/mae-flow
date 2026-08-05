@@ -21,7 +21,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
             "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
-            "agent-task|checkpoint|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
+            "agent-task|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "story-localize|local-spec|domain-docs|domain-archive|manifest|codecheck-scan|"
             "codecheck-scope|codecheck-record|approve-exemption|"
             "migrate-flow|exit"
@@ -219,71 +219,20 @@ def parse_args(argv=None):
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")
-    task.add_argument(
-        "--checkpoint",
-        help="编译任务所属检查点，如 CP1；仅开发节奏已确认的编码步骤使用")
-    quality_artifact = sub.add_parser("quality-artifact")
-    quality_artifact_actions = quality_artifact.add_subparsers(
-        dest="quality_action", required=True)
-    quality_register = quality_artifact_actions.add_parser("register")
-    quality_register.add_argument(
-        "kind", choices=["blueprint", "roadmap", "plan"])
-    quality_register.add_argument("path")
-    quality_present = quality_artifact_actions.add_parser("present")
-    quality_present.add_argument(
-        "kind", choices=["blueprint", "plan"])
-    quality_artifact_actions.add_parser("show")
     role_task = sub.add_parser("role-task")
     role_task.add_argument("role", choices=[
-        "test-design",
-        "task-analysis",
-        "craft-plan",
-        "cp-implement",
-        "craft-code",
+        "code-review",
         "story-generate",
         "story-review",
         "grill-critic",
     ])
-    role_task.add_argument("--checkpoint")
     role_task.add_argument("--stage", choices=["prep", "final"])
     role_task.add_argument("--document")
+    role_task.add_argument("--feedback")
     lightcheck = sub.add_parser("lightcheck")
     lightcheck.add_argument(
         "--quiet", action="store_true",
         help="CLEAN/安全降级时静默；仅发现高置信问题才提示")
-    checkpoint = sub.add_parser("checkpoint")
-    checkpoint_actions = checkpoint.add_subparsers(
-        dest="checkpoint_action", required=True)
-    checkpoint_plan = checkpoint_actions.add_parser("plan")
-    checkpoint_plan.add_argument(
-        "--item", action="append", default=[],
-        help="按顺序给出检查点标题/范围；可重复 1-6 次")
-    checkpoint_plan.add_argument("--roadmap")
-    checkpoint_plan.add_argument("--plan")
-    checkpoint_actions.add_parser("status")
-    checkpoint_ready = checkpoint_actions.add_parser("ready")
-    checkpoint_ready.add_argument("checkpoint_id", help="当前检查点，如 CP1")
-    checkpoint_prepare = checkpoint_actions.add_parser("prepare")
-    checkpoint_prepare.add_argument("checkpoint_id", help="当前检查点，如 CP1")
-    checkpoint_prepare.add_argument("--plan", required=True)
-    checkpoint_prepare.add_argument("--review", required=True)
-    checkpoint_plan_decide = checkpoint_actions.add_parser("plan-decide")
-    checkpoint_plan_decide.add_argument(
-        "choice", choices=["continue", "revise"])
-    checkpoint_craft = checkpoint_actions.add_parser("craft-reviewed")
-    checkpoint_craft.add_argument("checkpoint_id", help="当前检查点，如 CP1")
-    checkpoint_craft.add_argument(
-        "--review",
-        help="旧版在途流程的 CODE Review 过程件；Story 流程不需要",
-    )
-    checkpoint_craft_decide = checkpoint_actions.add_parser("craft-decide")
-    checkpoint_craft_decide.add_argument(
-        "checkpoint_id", help="当前检查点，如 CP1")
-    checkpoint_craft_decide.add_argument("--review", required=True)
-    checkpoint_actions.add_parser("final")
-    checkpoint_decide = checkpoint_actions.add_parser("decide")
-    checkpoint_decide.add_argument(
-        "choice", choices=["continue", "revise", "continuous"])
     sub.add_parser("codecheck-scan")
     codecheck_scope = sub.add_parser("codecheck-scope")
     codecheck_scope.add_argument(

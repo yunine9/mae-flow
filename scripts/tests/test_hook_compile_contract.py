@@ -104,7 +104,7 @@ def compile_task(root, head, worktree_snapshot, baseline_valid=True):
         stream.write(body)
         stream.write("TASK_CARD_SHA256: %s\n" % digest)
     return {
-        "step": "tw_compile",
+        "step": "build",
         "path": task_path,
         "sha256": digest,
         "head": head,
@@ -117,7 +117,7 @@ def save_compile_state(root, task):
     save_versioned_json(
         os.path.join(root, ".mae-flow.json"),
         {
-            "current": "tw_compile",
+            "current": "build",
             "config": {"编译方式": "python build.py"},
             "choices": {},
             "history": [],
@@ -145,7 +145,7 @@ class CompileContractTests(unittest.TestCase):
             kind="COMPILE",
             status=status,
             report=report,
-            task={"step": "tw_compile"},
+            task={"step": "build"},
             config={"编译方式": build or "python build.py"},
             calls=tuple(calls),
             changed_paths=(),

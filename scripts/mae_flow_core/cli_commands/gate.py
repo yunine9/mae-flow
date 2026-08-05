@@ -55,7 +55,6 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
     rel = api._repo_rel_for_match(p)
     pm = rel if rel is not None else p
     plugin_root = api.norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
-    item = api._checkpoint_locked_item(st) or {}
     patterns = (
         tuple(api._effective_test_patterns(st))
         if step.get("tests_only") else ())
@@ -70,9 +69,6 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
         specs_truth=flow["specs_truth"],
         allow_specs_write=bool(step.get("allow_specs_write")),
         is_source=api._is_source_path(p, st, flow),
-        checkpoint_locked=api._checkpoint_review_locked(st),
-        checkpoint_label=item.get(
-            "id", item.get("title", "最终检视")),
         allow_source_edit=bool(step.get("allow_source_edit")),
         tests_only_patterns=patterns,
         source_unlocked=(
@@ -112,8 +108,7 @@ def _enforce_commit_ownership(decision, jdie):
         if decision.block.rule in {
                 "bash-compile-side-effects",
                 "bash-build-artifacts",
-                "bash-checkpoint-reviewed-snapshot",
-                "bash-checkpoint-reviewed-files"}:
+                }:
             # Integrity/provenance hard blocks are not user-decision permits.
             # Keep their recovery local and write no strike/permit state.
             _die_decision(decision.block)
@@ -198,22 +193,12 @@ def _gate_confirmed_manifest_add(st, add_paths):
 def _gate_commit_candidates(c, st, jdie):
     candidate_snapshot = api._pending_commit_candidates(c)
     _gate_confirmed_manifest_candidates(st, candidate_snapshot)
-    item = api._checkpoint_locked_item(st) or {}
-    receipt = item.get("receipt") or {}
-    review_required = (
-        item.get("status") == "commit_pending"
-        and bool(receipt.get("snapshot")))
     (inherited, foreign_openspec, compile_side_effects, strong_artifacts,
      unproven_paths, artifact_hints) = api._pending_commit_files(
          c, st, candidate_snapshot)
     (staged_compile_side_effects, command_compile_side_effects) = (
         _compile_candidate_groups(candidate_snapshot, compile_side_effects))
     decision = decide_ownership(OwnershipFacts(
-        review_required=review_required,
-        expected_snapshot=receipt.get("snapshot") or {},
-        current_snapshot=(
-            api._reviewed_snapshot_current(st, item)
-            if review_required else {}),
         candidate_paths=tuple(candidate_snapshot.get("paths") or []),
         inherited=tuple(inherited),
         foreign_openspec=tuple(foreign_openspec),
@@ -251,7 +236,6 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
             pattern, (api._repo_rel_for_match(path) or path), re.I)
             for pattern in patterns)
     ] if patterns and not source_unlocked else []
-    item = api._checkpoint_current(st) or {}
     decision = decide_bash_write(BashWriteContext(
         command=c,
         tokens=tuple(toks),
@@ -270,8 +254,6 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
         allow_specs_write=bool(step.get("allow_specs_write")),
         offenders=tuple(offenders),
         source_tokens=tuple(source_toks),
-        checkpoint_locked=api._checkpoint_review_locked(st),
-        checkpoint_label=item.get("id", "?"),
         allow_source_edit=bool(step.get("allow_source_edit")),
         tests_only_patterns=patterns,
         source_unlocked=source_unlocked,
@@ -356,7 +338,7 @@ def _gate_head_actions(actions, st, jdie):
     ]
     if commit_present or revert_actions:
         # Issued COMPILE is a transient child-task boundary. It must win
-        # before format/branch/checkpoint rules that create strikes.
+        # before format/branch rules that create strikes.
         _gate_compile_task_window(st)
     if revert_actions:
         target = revert_actions[-1].commit or "非精确提交"
@@ -409,7 +391,6 @@ def cmd_gate(flow, st, args):
             r"\.mae-flow-history\.jsonl|\.mae-flow-need-reload"
             r"|\.mae-flow-work/moonlight-report\.md)$")
         branch = intent.branch
-        item = api._checkpoint_locked_item(st) or {}
         message_present, commit_message = (
             git_intent.git_commit_message(git_command))
         wanted = st["config"].get("分支名", "")
@@ -424,10 +405,6 @@ def cmd_gate(flow, st, args):
             step=sid or "",
             wanted_branch=wanted,
             base_branch=st["config"].get("基线分支", ""),
-            checkpoint_locked=api._checkpoint_review_locked(st),
-            checkpoint_label=item.get(
-                "id", item.get("title", "最终检视")),
-            checkpoint_status=item.get("status", ""),
             ticket=st["config"].get("单号", ""),
             commit_message_present=message_present,
             commit_message=commit_message,

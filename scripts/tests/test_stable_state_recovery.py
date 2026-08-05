@@ -63,7 +63,7 @@ class StableStateRecoveryTests(unittest.TestCase):
                     self.assertEqual(raw, stream.read())
                 with open(proposal["backup_path"], "rb") as stream:
                     self.assertEqual(raw, stream.read())
-                self.assertEqual("build_pace", recovery.safe_boundary)
+                self.assertEqual("build", recovery.safe_boundary)
             finally:
                 os.chdir(previous)
 
@@ -100,11 +100,11 @@ class StableStateRecoveryTests(unittest.TestCase):
                     ".mae-flow.json", "msg-1")
 
                 self.assertEqual(first["backup_path"], second["backup_path"])
-                self.assertEqual("build_pace", recovery.safe_boundary)
+                self.assertEqual("build", recovery.safe_boundary)
                 with open(".mae-flow.json", encoding="utf-8") as stream:
                     stable = json.load(stream)
                 self.assertEqual(2, stable["schema_version"])
-                self.assertEqual("build_pace", stable["current"])
+                self.assertEqual("build", stable["current"])
                 with open(first["backup_path"], "rb") as stream:
                     self.assertEqual(raw, stream.read())
             finally:

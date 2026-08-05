@@ -7,10 +7,7 @@ import hashlib
 EXPECTED_STEPS = {
     "COMPILE": {
         "build",
-        "rf_fix",
-        "rf_compile",
-        "tw_change",
-        "tw_compile",
+        "build_rework",
         "verify_recompile",
         "verify_post_ponytail_compile",
     },
@@ -72,7 +69,6 @@ def task_record(
     digest,
     head,
     scope,
-    checkpoint,
     precommit_review,
     initial_compile_net,
     source_snapshot,
@@ -86,14 +82,12 @@ def task_record(
     unchanged_initial_dirty,
     at,
     issuance_id="",
-    blueprint=None,
 ):
     record = {
         "step": step,
         "path": path,
         "head": head,
         "scope": scope,
-        "checkpoint": checkpoint,
         "precommit_review": precommit_review,
         "initial_compile_net": initial_compile_net,
         "source_snapshot": dict(source_snapshot),
@@ -111,11 +105,4 @@ def task_record(
             unchanged_initial_dirty),
         "at": at,
     }
-    if blueprint:
-        record["blueprint"] = {
-            "path": str(blueprint.get("path", "")),
-            "sha256": str(blueprint.get("sha256", "")),
-            "scenario_ids": list(
-                blueprint.get("scenario_ids") or ()),
-        }
     return record

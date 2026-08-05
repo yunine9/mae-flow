@@ -78,7 +78,6 @@ class FlowState:
     phase: Phase
     commit_pace: CommitPace
     status: str = "active"
-    current_cp: str = ""
     artifacts: tuple = ()
     decisions: tuple = ()
     risks: tuple = ()

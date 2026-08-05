@@ -80,7 +80,7 @@
     },
     {
       "source": "comet",
-      "capability": "跨 CP 集成正确性审查",
+      "capability": "完整增量集成正确性审查",
       "new_home": "runtime/guidance/review.md",
       "semantic_tests": [
         "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_reviewer_cadence_and_conditional_integration_are_semantic"
@@ -357,8 +357,8 @@
       "status": "thin-replacement"
     },
     {
-      "source": "role:cp-implementer-agent",
-      "capability": "CP implementer",
+      "source": "main-agent",
+      "capability": "整体生产代码实现",
       "new_home": "runtime/guidance/construction.md",
       "semantic_tests": [
         "scripts/tests/test_native_guidance.py:NativeGuidanceSemanticTests.test_story_and_construction_define_engineering_boundaries",
@@ -395,8 +395,7 @@
       "description": "Design Reviewer is introduced by the approved lean redesign and its Story phase contract; it is not an existing agent prompt.",
       "sources": [
         "docs/mae-flow/requirements/2026-08-01-workflow-redesign/spec.md",
-        "flow/phases/story.md",
-        "scripts/mae_flow_core/orchestration/transitions.py"
+        "flow/phases/story.md"
       ]
     }
   }

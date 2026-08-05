@@ -14,6 +14,29 @@ def read(path):
 
 
 class Spec2CodePromptResourceTests(unittest.TestCase):
+    def test_checkpoint_runtime_and_cp_agent_are_removed(self):
+        removed = (
+            "flow/steps/build_pace.md",
+            "flow/steps/tw_pace.md",
+            "flow/steps/rf_pace.md",
+            "agents/cp-implementer-agent.md",
+            "scripts/mae_flow_core/cli_commands/checkpoint_commands.py",
+            "scripts/mae_flow_core/cli_commands/checkpoint_facts.py",
+            "scripts/mae_flow_core/cli_commands/checkpoint_plan.py",
+            "scripts/mae_flow_core/delivery/checkpoints.py",
+            "scripts/mae_flow_core/application/delivery/checkpoints.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_status.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_recovery.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_quality.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_decisions.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_ready_recovery.py",
+            "scripts/mae_flow_core/application/delivery/checkpoint_final.py",
+        )
+        self.assertEqual([], [
+            path for path in removed
+            if os.path.exists(os.path.join(ROOT, path))
+        ])
+
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")
         self.assertIn("新增业务注释统一使用简体中文", text)
@@ -25,7 +48,7 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         text = read("agents/story-generator-agent.md")
         self.assertIn("测试设计", text)
         self.assertIn("implementation.md", text)
-        self.assertIn("不生成 Roadmap", text)
+        self.assertIn("不生成额外的编码前计划过程件", text)
         self.assertFalse(os.path.exists(os.path.join(
             ROOT, "agents", "test-design-agent.md")))
         self.assertFalse(os.path.exists(os.path.join(
@@ -39,27 +62,26 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             self.assertIn(field, text)
         self.assertNotIn("TASK_CARD_SHA256", text)
 
-    def test_cp_implementer_stops_at_checkpoint_boundary(self):
-        text = read("agents/cp-implementer-agent.md")
-        self.assertIn("只允许修改任务卡", text)
-        self.assertIn("自然语言报告计划合同错误", text)
-        self.assertNotIn("CP_IMPLEMENT_RESULT:", text)
+    def test_main_agent_implements_without_implementation_subagent(self):
+        self.assertFalse(os.path.exists(os.path.join(
+            ROOT, "agents", "implementer-agent.md")))
+        build = read("flow/steps/build.md")
+        self.assertIn("主 Agent", build)
+        self.assertIn("不要派实现子 Agent", build)
 
     def test_ut_generator_retains_behavior_driven_execution(self):
         text = read("agents/ut-generator-agent.md")
         self.assertIn("禁止重新发明测试场景", text)
 
-    def test_build_prompts_use_story_cp_and_existing_checkpoint_runtime(self):
-        pace = read("flow/steps/build_pace.md")
-        self.assertIn("implementation.md", pace)
-        self.assertIn("checkpoint plan --item", pace)
-        self.assertNotIn("--roadmap", pace)
+    def test_build_prompt_is_one_whole_change_with_optional_precheck(self):
         build = read("flow/steps/build.md")
-        self.assertIn("role-task cp-implement", build)
-        self.assertIn("Staged", build)
-        self.assertIn("Continuous", build)
-        self.assertNotIn("role-task task-analysis", build)
-        self.assertNotIn("role-task craft-plan", build)
+        self.assertIn("spec.md", build)
+        self.assertIn("story.md", build)
+        self.assertIn("agent-task compile", build)
+        self.assertNotIn("CP", build)
+        review = read("flow/steps/build_agent_review.md")
+        self.assertIn("role-task code-review", review)
+        self.assertIn("不代替用户人工检视", review)
 
 
 if __name__ == "__main__":

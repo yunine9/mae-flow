@@ -90,7 +90,7 @@ def cmd_init(flow, args):
     api._gitignore()
     dirty = api._dirty_paths()
     st = {"current": flow["start"], "config": {}, "choices": {},
-          "protocols": {"development_checkpoints": 1},
+          "protocols": {},
           "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),
           "initial_dirty": dirty,
           "initial_dirty_fingerprints": {p: api._path_fingerprint(p) for p in dirty}}

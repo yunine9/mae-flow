@@ -36,10 +36,10 @@ class TaskCardContractTests(unittest.TestCase):
                 newline="\n") as stream:
             stream.write(self.body)
         self.state = {
-            "current": "tw_compile",
+            "current": "build",
             "agent_tasks": {
                 "COMPILE": {
-                    "step": "tw_compile",
+                    "step": "build",
                     "head": HEAD,
                     "path": self.card_path,
                 },
@@ -116,12 +116,6 @@ class TaskCardContractTests(unittest.TestCase):
                 "grill-critic-agent 是只读审查角色",
             ),
             (
-                "CP_IMPLEMENT",
-                {"head": HEAD, "task_files": ["src/allowed.py"]},
-                ("src/other.py",),
-                "cp-implementer-agent 修改了任务卡范围外文件",
-            ),
-            (
                 "REVIEWER",
                 {"head": HEAD},
                 ("src/main.py",),
@@ -163,11 +157,6 @@ class TaskCardContractTests(unittest.TestCase):
 
     def test_writable_agent_scopes_compare_canonical_repository_paths(self):
         cases = (
-            (
-                "CP_IMPLEMENT",
-                {"head": HEAD, "task_files": [r"SRC\allowed.py"]},
-                (),
-            ),
             (
                 "CODECHECK",
                 {"head": HEAD, "allowed_files": [r"SRC\allowed.py"]},
@@ -235,7 +224,7 @@ class TaskCardContractTests(unittest.TestCase):
     def test_dispatch_rejects_missing_but_not_fingerprint_drift(self):
         missing = verify_dispatch_task(
             "COMPILE",
-            {"current": "tw_compile", "agent_tasks": {}},
+            {"current": "build", "agent_tasks": {}},
             self.ports(),
         )
         self.assertFalse(missing.accepted)
@@ -253,7 +242,6 @@ class TaskCardContractTests(unittest.TestCase):
         cases = (
             ("STORY", "story", "role-task story-generate"),
             ("REVIEWER", "story", "role-task story-review"),
-            ("CP_IMPLEMENT", "build", "role-task cp-implement --checkpoint CP1"),
             ("GRILL_PREP", "grill", "role-task grill-critic --stage prep"),
             ("GRILL_FINAL", "grill", "role-task grill-critic --stage final"),
         )
@@ -262,10 +250,6 @@ class TaskCardContractTests(unittest.TestCase):
                 "current": step,
                 "config": {"单号": "REQ-1"},
                 "agent_tasks": {},
-                "development_review": {
-                    "current_index": 0,
-                    "checkpoints": [{"id": "CP1"}],
-                },
             }
             decision = verify_dispatch_task(kind, state, self.ports())
             self.assertFalse(decision.accepted)

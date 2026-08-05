@@ -51,7 +51,7 @@ def _append_file_scope(document, groups):
 
 def _append_precommit(document):
     document.extend([
-        "检视/提交策略: 当前是分阶段“先检视、后提交”检查点。",
+        "检视/提交策略: 当前是整体实现后的“先检视、后提交”流程。",
         "任务卡范围是当前未提交工作区（含 staged/unstaged/untracked）；"
         "允许为真实编译错误修复业务源码，但禁止 git commit、git push。",
         "编译成功后保留全部代码为未提交状态，由主流程冻结快照并让用户在 IDE 检视；"
@@ -135,18 +135,7 @@ def _append_full_codecheck(document, scan):
         "主会话不得代修；修复后按任务卡编译方式验证并复验。")
 
 
-def _append_full_ut(document, groups, targets, blueprint=None):
-    blueprint = blueprint or {}
-    if blueprint:
-        document.extend([
-            "已确认 UT 行为蓝图: " + blueprint.get("path", ""),
-            "UT 蓝图 SHA256: " + blueprint.get("sha256", ""),
-            "必须完整映射的蓝图场景: "
-            + "、".join(blueprint.get("scenario_ids") or ()),
-            "注释规范: runtime/standards/comment-standard-v1.md",
-            "最终报告必须输出 BLUEPRINT_SHA256 和逐行 BLUEPRINT_MAPPING；"
-            "每行格式为 场景 ID | 测试文件::用例名 | PASS|FAIL|BLOCKED。",
-        ])
+def _append_full_ut(document, groups, targets):
     document.append("UT覆盖目标（硬边界，不等于整个文件）:")
     if groups.business:
         for business_file in groups.business:
@@ -206,11 +195,6 @@ def build_full_task_document(facts):
         "本轮检查范围: " + facts["diff"],
         "本次子任务范围: "
         + (facts["scope"] or "任务卡文件清单全部"),
-        "开发检查点: "
-        + (
-            facts["checkpoint_id"]
-            or "无（主流程质量节点）"
-        ),
         "编译方式: " + config.get("编译方式", ""),
         "UT生成方式: " + config.get("UT生成方式", ""),
         "UT运行命令: " + config.get("UT运行命令", ""),
@@ -248,12 +232,7 @@ def build_full_task_document(facts):
         _append_full_codecheck(
             document, facts["scan"])
     elif kind == "UT":
-        _append_full_ut(
-            document,
-            facts["groups"],
-            facts["ut_targets"],
-            facts.get("blueprint"),
-        )
+        _append_full_ut(document, facts["groups"], facts["ut_targets"])
     else:
         document.append(
             "职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 Mae-Flow"

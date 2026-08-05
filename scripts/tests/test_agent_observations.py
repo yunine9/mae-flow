@@ -69,16 +69,16 @@ class AgentObservationTests(unittest.TestCase):
         for invocation, lifecycle in (("run-1", "interrupted"),
                                       ("run-2", "timeout")):
             record_agent_started(
-                self.state, "COMPILE", "tw_compile", invocation,
+                self.state, "COMPILE", "build", invocation,
                 "2026-08-04 10:00:00")
             record_agent_finished(
                 self.state, invocation, lifecycle,
                 "2026-08-04 10:01:00")
 
         self.assertFalse(has_finished_observation(
-            self.state, "COMPILE", "tw_compile"))
+            self.state, "COMPILE", "build"))
         self.assertEqual("", latest_started_invocation(
-            self.state, "COMPILE", "tw_compile"))
+            self.state, "COMPILE", "build"))
 
     def test_latest_open_started_invocation_is_recoverable(self):
         record_agent_started(
@@ -308,10 +308,10 @@ class AgentObservationTests(unittest.TestCase):
 
     def test_quality_completion_records_real_successful_command(self):
         state = {
-            "current": "tw_compile",
+            "current": "build",
             "config": {"编译方式": "make module"},
             "agent_tasks": {"COMPILE": {
-                "step": "tw_compile", "head": "abc",
+                "step": "build", "head": "abc",
                 "task_files": ["src/a.cpp"], "execution_roots": ["src"],
             }},
         }
@@ -347,8 +347,8 @@ class AgentObservationTests(unittest.TestCase):
             "agent_transcript_path": transcript,
         })
         self.assertIsNotNone(successful_quality_execution(
-            self.state, "COMPILE", "tw_compile",
-            quality_input_snapshot(state, "COMPILE", "tw_compile")))
+            self.state, "COMPILE", "build",
+            quality_input_snapshot(state, "COMPILE", "build")))
 
 
 if __name__ == "__main__":

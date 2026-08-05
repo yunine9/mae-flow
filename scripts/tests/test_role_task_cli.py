@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""role-task CLI 表面回归。"""
+"""Thin role-task surface regressions."""
 
+import contextlib
+import io
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
-import contextlib
-import io
-
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -20,249 +19,66 @@ from mae_flow_core.quality.role_tasks import role_allowed  # noqa: E402
 
 
 class RoleTaskCliTests(unittest.TestCase):
-    def test_document_paths_normalize_code_locations_to_repository_files(self):
-        with tempfile.TemporaryDirectory() as repository:
-            os.makedirs(os.path.join(repository, "src"))
-            source = os.path.join(repository, "src", "service.cpp")
-            with open(source, "w", encoding="utf-8") as stream:
-                stream.write("int service();\n")
-            implementation = os.path.join(repository, "implementation.md")
-            with open(implementation, "w", encoding="utf-8") as stream:
-                stream.write(
-                    "- 注释：`src/service.cpp:484`\n"
-                    "- 函数：`src/service.cpp::getBandType`\n"
-                    "- 定位：[实现](src/service.cpp#L484)\n"
-                )
-            previous = os.getcwd()
-            try:
-                os.chdir(repository)
-                paths = role_task_cli._document_paths(implementation)
-            finally:
-                os.chdir(previous)
-        self.assertEqual(("src/service.cpp",), paths)
+    def test_only_review_story_and_grill_roles_exist(self):
+        for role in ("code-review", "story-generate", "story-review"):
+            self.assertEqual(role, parse_args(["role-task", role]).role)
+        args = parse_args([
+            "role-task", "grill-critic", "--stage", "prep",
+            "--document", ".mae-flow-work/REQ-1/grill.md",
+        ])
+        self.assertEqual("prep", args.stage)
+        self.assertFalse(hasattr(args, "checkpoint"))
 
-    def test_parser_accepts_all_roles_and_checkpoint(self):
-        for role in (
-            "test-design",
-            "task-analysis",
-            "craft-plan",
-            "cp-implement",
-            "craft-code",
-        ):
-            args = parse_args([
-                "role-task",
-                role,
-                "--checkpoint",
-                "CP2",
-            ])
-            self.assertEqual(role, args.role)
-            self.assertEqual("CP2", args.checkpoint)
-
-    def test_parser_accepts_story_and_two_grill_critic_stages(self):
-        for role in ("story-generate", "story-review"):
-            args = parse_args(["role-task", role])
-            self.assertEqual(role, args.role)
-            self.assertIsNone(args.checkpoint)
-        for stage in ("prep", "final"):
-            args = parse_args([
-                "role-task", "grill-critic",
-                "--stage", stage,
-                "--document", ".mae-flow-work/REQ-1/grill.md",
-            ])
-            self.assertEqual("grill-critic", args.role)
-            self.assertEqual(stage, args.stage)
-
-    def test_role_stage_matrix_is_narrow(self):
-        self.assertTrue(role_allowed("test-design", "test_blueprint"))
-        self.assertTrue(role_allowed("craft-plan", "build_plan"))
-        self.assertTrue(role_allowed("cp-implement", "build"))
+    def test_role_stage_matrix_has_no_implementation_or_batch_roles(self):
+        self.assertTrue(role_allowed("code-review", "build_agent_review"))
         self.assertTrue(role_allowed("story-generate", "story"))
         self.assertTrue(role_allowed("story-review", "story"))
         self.assertTrue(role_allowed("grill-critic", "grill"))
-        self.assertFalse(role_allowed("cp-implement", "build_plan"))
-        self.assertFalse(role_allowed("craft-code", "verify_ut"))
+        for role in ("implement", "cp-implement", "task-analysis", "craft-plan"):
+            self.assertFalse(role_allowed(role, "build"))
 
-    def test_staged_code_review_receives_tracked_and_untracked_content(self):
+    def test_code_review_card_contains_whole_uncommitted_change(self):
         with tempfile.TemporaryDirectory() as repository:
-            subprocess.run(
-                ["git", "init", "-q"], cwd=repository, check=True)
-            subprocess.run(
-                ["git", "config", "user.email", "role@test.invalid"],
-                cwd=repository,
-                check=True,
-            )
-            subprocess.run(
-                ["git", "config", "user.name", "Role Test"],
-                cwd=repository,
-                check=True,
-            )
-            os.makedirs(os.path.join(repository, "src"))
-            tracked = os.path.join(repository, "src", "service.py")
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "role@test.invalid"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Role Test"], cwd=repository, check=True)
+            os.makedirs(os.path.join(repository, ".mae-flow-work", "REQ-1"))
+            tracked = os.path.join(repository, "service.py")
             with open(tracked, "w", encoding="utf-8") as stream:
                 stream.write("VALUE = 1\n")
-            subprocess.run(
-                ["git", "add", "src/service.py"],
-                cwd=repository,
-                check=True,
-            )
-            subprocess.run(
-                ["git", "commit", "-qm", "base"],
-                cwd=repository,
-                check=True,
-            )
+            subprocess.run(["git", "add", "service.py"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=repository, check=True)
+            base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository, text=True).strip()
             with open(tracked, "w", encoding="utf-8") as stream:
                 stream.write("VALUE = 2\n")
-            with open(
-                    os.path.join(repository, "src", "new.py"),
-                    "w",
-                    encoding="utf-8",
-            ) as stream:
+            with open(os.path.join(repository, "new.py"), "w", encoding="utf-8") as stream:
                 stream.write("NEW = True\n")
+            package = role_task_cli.ensure_work_package(repository, "REQ-1")
+            for path in (package.spec, package.story):
+                with open(path, "w", encoding="utf-8") as stream:
+                    stream.write("confirmed\n")
             state = {
-                "development_review": {
-                    "version": 2,
-                    "current_index": 0,
-                    "checkpoints": [{
-                        "id": "CP1",
-                        "receipt": {"snapshot": {
-                            "src/service.py": "tracked",
-                            "src/new.py": "untracked",
-                        }},
-                    }],
-                },
+                "current": "build_agent_review",
+                "config": {"单号": "REQ-1"},
+                "implementation_base_head": base,
             }
             previous = os.getcwd()
             try:
                 os.chdir(repository)
-                body = role_task_cli._role_diff(
-                    state,
-                    "craft-code",
-                    ("src/service.py", "src/new.py"),
-                )
-            finally:
-                os.chdir(previous)
-        self.assertIn("-VALUE = 1", body)
-        self.assertIn("+VALUE = 2", body)
-        self.assertIn("### 未跟踪文件: src/new.py", body)
-        self.assertIn("NEW = True", body)
-
-    def test_survey_neighbor_files_are_frozen_as_context_refs(self):
-        with tempfile.TemporaryDirectory() as repository:
-            outside = tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                delete=False,
-            )
-            outside.write("OUTSIDE = True\n")
-            outside.close()
-            os.makedirs(os.path.join(repository, ".mae-flow-work", "REQ-1"))
-            os.makedirs(os.path.join(repository, "src"))
-            with open(
-                    os.path.join(repository, "src", "service.py"),
-                    "w",
-                    encoding="utf-8",
-            ) as stream:
-                stream.write("VALUE = 1\n")
-            with open(
-                    os.path.join(
-                        repository,
-                        ".mae-flow-work",
-                        "REQ-1", "survey.md",
-                    ),
-                    "w",
-                    encoding="utf-8",
-            ) as stream:
-                stream.write(
-                    "关键邻近代码：`src/service.py`\n"
-                    "禁止扩展：`%s`\n" % outside.name
-                )
-            previous = os.getcwd()
-            try:
-                os.chdir(repository)
-                refs = role_task_cli._existing_context_paths(
-                    {"config": {"单号": "REQ-1"}},
-                    (),
-                )
-            finally:
-                os.chdir(previous)
-                os.unlink(outside.name)
-        body = "\n".join(refs)
-        self.assertIn("/src/service.py | SHA256 ", body)
-        self.assertIn("/REQ-1/survey.md | SHA256 ", body)
-        self.assertNotIn(outside.name, body)
-
-    def test_story_and_grill_commands_materialize_dispatchable_cards(self):
-        with tempfile.TemporaryDirectory() as repository:
-            previous = os.getcwd()
-            try:
-                os.chdir(repository)
-                state = {
-                    "current": "story",
-                    "config": {"单号": "REQ-1", "需求文档": "req.md"},
-                }
-                with open("req.md", "w", encoding="utf-8") as stream:
-                    stream.write("支持 NRPRACH SUL。\n")
-                os.makedirs("docs/specs")
-                with open("docs/specs/index.md", "w", encoding="utf-8") as stream:
-                    stream.write("# 领域文档索引\n")
-                package = role_task_cli.ensure_work_package(
-                    repository, "REQ-1")
-                for path in (package.spec, package.grill):
-                    with open(path, "w", encoding="utf-8") as stream:
-                        stream.write("已确认内容\n")
                 with contextlib.redirect_stdout(io.StringIO()):
                     role_task_cli.cmd_role_task(
-                        {}, state, parse_args(["role-task", "story-generate"]))
-                card = state["agent_tasks"]["STORY"]
-                self.assertTrue(os.path.isfile(card["path"]))
-                with open(card["path"], encoding="utf-8") as stream:
-                    body = stream.read()
-                self.assertIn(os.path.abspath(package.spec), body)
-                self.assertIn(os.path.abspath(package.grill), body)
-                self.assertIn(os.path.abspath(package.implementation), body)
-                self.assertNotIn("SHA256", body)
-
-                state["current"] = "grill"
-                with contextlib.redirect_stdout(io.StringIO()):
-                    role_task_cli.cmd_role_task(
-                        {}, state, parse_args([
-                            "role-task", "grill-critic", "--stage", "prep",
-                            "--document", package.grill,
-                        ]))
-                self.assertEqual(
-                    "prep", state["agent_tasks"]["GRILL_PREP"]["stage"])
+                        {}, state, parse_args(["role-task", "code-review"]))
             finally:
                 os.chdir(previous)
-
-    def test_invalid_domain_index_stops_with_recovery_command(self):
-        with tempfile.TemporaryDirectory() as repository:
-            previous = os.getcwd()
-            try:
-                os.chdir(repository)
-                os.makedirs("docs/specs")
-                with open("docs/specs/index.md", "w", encoding="utf-8") as stream:
-                    stream.write(
-                        "| 领域 | 关键词 | 文档 |\n"
-                        "| --- | --- | --- |\n"
-                        "| radio | SUL | docs/wrong.md |\n")
-                state = {
-                    "current": "story",
-                    "config": {"单号": "REQ-1"},
-                }
-                package = role_task_cli.ensure_work_package(
-                    repository, "REQ-1")
-                for path in (package.spec, package.grill):
-                    with open(path, "w", encoding="utf-8") as stream:
-                        stream.write("SUL\n")
-                stderr = io.StringIO()
-                with contextlib.redirect_stderr(stderr):
-                    with self.assertRaises(SystemExit):
-                        role_task_cli.cmd_role_task(
-                            {}, state,
-                            parse_args(["role-task", "story-generate"]))
-                self.assertIn("domain-docs validate", stderr.getvalue())
-            finally:
-                os.chdir(previous)
+            with open(
+                    state["agent_tasks"]["REVIEWER"]["path"],
+                    encoding="utf-8") as stream:
+                body = stream.read()
+            self.assertIn("-VALUE = 1", body)
+            self.assertIn("+VALUE = 2", body)
+            self.assertIn("### 未跟踪文件: new.py", body)
+            self.assertIn(os.path.abspath(package.spec), body)
+            self.assertIn(os.path.abspath(package.story), body)
 
 
 if __name__ == "__main__":

@@ -5,9 +5,7 @@
     "rf_verify",
     "grill_ask",
     "design",
-    "test_blueprint",
     "story_ask",
-    "build_plan",
     "archive_confirm",
     "archive"
   ],
@@ -67,10 +65,10 @@
       ],
       "choice_answers": {
         "disabled": [
-          "不启用独立 CODE Reviewer"
+          "不需要 Agent 预检，我直接检视"
         ],
         "enabled": [
-          "启用独立 CODE Reviewer"
+          "需要，人工检视前先由 Agent 预检"
         ]
       },
       "next": "branch_create",
@@ -114,96 +112,7 @@
           "agent": "ASKUSER"
         }
       ],
-      "next": "rf_pace"
-    },
-    "rf_pace": {
-      "title": "处理评审意见 — 开发节奏确认",
-      "user_ack": true,
-      "choice_key": "development_pace",
-      "choices": [
-        "staged",
-        "continuous",
-        "adjust"
-      ],
-      "choice_answers": {
-        "staged": [
-          "按检查点分阶段开发、推送和检视"
-        ],
-        "continuous": [
-          "一次完成全部代码，最终统一检视"
-        ],
-        "adjust": [
-          "调整检查点划分"
-        ]
-      },
-      "evidence": [
-        {
-          "type": "checkpoint_plan"
-        }
-      ],
-      "next": {
-        "staged": "rf_fix",
-        "continuous": "rf_fix",
-        "adjust": "rf_pace"
-      },
-      "skip_in_moonlight": true,
-      "moonlight_choice": "continuous"
-    },
-    "rf_fix": {
-      "title": "处理评审意见 — 修改代码",
-      "allow_source_edit": true,
-      "evidence": [
-        {
-          "type": "review_fix_committed"
-        },
-        {
-          "type": "checkpoint_plan_complete"
-        }
-      ],
-      "next": "rf_compile"
-    },
-    "rf_compile": {
-      "title": "处理评审意见 — 编译验证",
-      "allow_source_edit": true,
-      "evidence": [
-        {
-          "type": "agent_or_no_source",
-          "agent": "COMPILE",
-          "statuses": [
-            "OK"
-          ]
-        }
-      ],
-      "next": "rf_review"
-    },
-    "rf_review": {
-      "title": "处理评审意见 — 用户检视代码",
-      "user_ack": true,
-      "choice_key": "rf_review_decision",
-      "choices": [
-        "continue",
-        "revise"
-      ],
-      "choice_answers": {
-        "continue": [
-          "我已认真检视并完成自验证，继续"
-        ],
-        "revise": [
-          "需要调整代码"
-        ]
-      },
-      "evidence": [
-        {
-          "type": "review_snapshot",
-          "base_step": "rf_fix"
-        }
-      ],
-      "next": {
-        "continue": "rf_codecheck",
-        "revise": "rf_fix"
-      },
-      "skip_in_moonlight": true,
-      "moonlight_choice": "continue"
+      "next": "build"
     },
     "rf_codecheck": {
       "title": "处理评审意见 — 规范检查",
@@ -219,7 +128,7 @@
       "title": "处理评审意见 — 增量单元测试",
       "allow_source_edit": true,
       "tests_only": true,
-      "source_change_recheck": "rf_compile",
+      "source_change_recheck": "build_rework",
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -233,7 +142,7 @@
     },
     "rf_verify": {
       "title": "处理评审意见 — 旧版验证迁移",
-      "next": "rf_compile"
+      "next": "build"
     },
     "grill_ask": {
       "title": "需求澄清询问",
@@ -326,10 +235,6 @@
       "title": "旧版方案设计恢复入口",
       "next": "story"
     },
-    "test_blueprint": {
-      "title": "旧版 UT 蓝图恢复入口",
-      "next": "story"
-    },
     "story_ask": {
       "title": "旧版 Story 选择恢复入口",
       "next": "story"
@@ -338,7 +243,7 @@
       "title": "Story 与实施附录生成及一次设计检视",
       "user_ack": true,
       "confirmation_answers": [
-        "Story 与实施附录已确认，进入开发节奏选择"
+        "Story 与实施附录已确认，进入编码实现"
       ],
       "evidence": [
         {
@@ -381,11 +286,7 @@
           "note": "实施附录仍有待确认内容；先展示给用户拍板，再完成本步骤唯一一次确认。"
         }
       ],
-      "next": "build_pace"
-    },
-    "build_plan": {
-      "title": "旧版编码计划恢复入口",
-      "next": "build_pace"
+      "next": "build"
     },
     "hf_open": {
       "title": "已定位问题修复 — 确认修改范围",
@@ -398,7 +299,7 @@
           "type": "local_spec_valid"
         }
       ],
-      "next": "build_pace"
+      "next": "build"
     },
     "tw_open": {
       "title": "局部修改 — 确认修改范围",
@@ -411,99 +312,7 @@
           "type": "local_spec_valid"
         }
       ],
-      "next": "tw_pace"
-    },
-    "tw_pace": {
-      "title": "局部修改 — 开发节奏确认",
-      "user_ack": true,
-      "choice_key": "development_pace",
-      "choices": [
-        "staged",
-        "continuous",
-        "adjust"
-      ],
-      "choice_answers": {
-        "staged": [
-          "按检查点分阶段开发、推送和检视"
-        ],
-        "continuous": [
-          "一次完成全部代码，最终统一检视"
-        ],
-        "adjust": [
-          "调整检查点划分"
-        ]
-      },
-      "evidence": [
-        {
-          "type": "checkpoint_plan"
-        }
-      ],
-      "next": {
-        "staged": "tw_change",
-        "continuous": "tw_change",
-        "adjust": "tw_pace"
-      },
-      "skip_in_moonlight": true,
-      "moonlight_choice": "continuous"
-    },
-    "tw_change": {
-      "title": "局部修改 — 修改代码",
-      "allow_source_edit": true,
-      "evidence": [
-        {
-          "type": "tier_scope"
-        },
-        {
-          "type": "commit_tagged_after_entry"
-        },
-        {
-          "type": "checkpoint_plan_complete"
-        }
-      ],
-      "next": "tw_compile"
-    },
-    "tw_compile": {
-      "title": "小改 — 编译验证",
-      "allow_source_edit": true,
-      "evidence": [
-        {
-          "type": "agent_or_no_source",
-          "agent": "COMPILE",
-          "statuses": [
-            "OK"
-          ]
-        }
-      ],
-      "next": "tw_review"
-    },
-    "tw_review": {
-      "title": "小改 — 用户检视代码",
-      "user_ack": true,
-      "choice_key": "tw_review_decision",
-      "choices": [
-        "continue",
-        "revise"
-      ],
-      "choice_answers": {
-        "continue": [
-          "我已认真检视并完成自验证，继续"
-        ],
-        "revise": [
-          "需要调整代码"
-        ]
-      },
-      "evidence": [
-        {
-          "type": "review_snapshot",
-          "base_step": "tw_change"
-        }
-      ],
-      "next": {
-        "continue": "tw_codecheck",
-        "revise": "tw_change"
-      },
-      "skip_in_moonlight": true,
-      "moonlight_choice": "continue"
+      "next": "build"
     },
     "tw_codecheck": {
       "title": "小改 — 规范检查",
@@ -519,7 +328,7 @@
       "title": "小改 — 单元测试",
       "allow_source_edit": true,
       "tests_only": true,
-      "source_change_recheck": "tw_compile",
+      "source_change_recheck": "build_rework",
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -540,59 +349,46 @@
       ],
       "next": "domain_archive"
     },
-    "build_pace": {
-      "title": "编码前开发节奏确认",
-      "user_ack": true,
-      "choice_key": "development_pace",
-      "choices": [
-        "staged",
-        "continuous",
-        "adjust"
-      ],
-      "choice_answers": {
-        "staged": [
-          "按检查点分阶段开发、推送和检视"
-        ],
-        "continuous": [
-          "一次完成全部代码，最终统一检视"
-        ],
-        "adjust": [
-          "调整检查点划分"
-        ]
-      },
-      "evidence": [
-        {
-          "type": "checkpoint_plan"
-        }
-      ],
-      "next": {
-        "staged": "build",
-        "continuous": "build",
-        "adjust": "build_pace"
-      },
-      "skip_in_moonlight": true,
-      "moonlight_choice": "continuous"
-    },
     "build": {
       "title": "编码实现",
       "clear_hint": true,
       "allow_source_edit": true,
       "evidence": [
         {
-          "type": "tier_scope"
-        },
+          "type": "agent_or_no_source",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
+        }
+      ],
+      "next_by": "code_reviewer",
+      "next": {
+        "disabled": "build_review",
+        "enabled": "build_agent_review"
+      }
+    },
+    "build_agent_review": {
+      "title": "编码完成 — 可选 Agent 预检",
+      "evidence": [
         {
-          "type": "commit_tagged_after_entry"
-        },
+          "type": "agent_ran",
+          "agent": "REVIEWER"
+        }
+      ],
+      "next": "build_review"
+    },
+    "build_rework": {
+      "title": "按用户意见调整代码",
+      "clear_hint": true,
+      "allow_source_edit": true,
+      "evidence": [
         {
           "type": "agent_or_no_source",
           "agent": "COMPILE",
           "statuses": [
             "OK"
           ]
-        },
-        {
-          "type": "checkpoint_plan_complete"
         }
       ],
       "next": "build_review"
@@ -613,18 +409,28 @@
           "需要调整代码"
         ]
       },
-      "evidence": [
-        {
-          "type": "review_snapshot",
-          "base_step": "build"
-        }
-      ],
+      "evidence": [],
       "next": {
-        "continue": "verify_ponytail",
-        "revise": "build"
+        "continue": "build_commit",
+        "revise": "build_rework"
       },
       "skip_in_moonlight": true,
       "moonlight_choice": "continue"
+    },
+    "build_commit": {
+      "title": "用户检视通过 — 精确提交",
+      "evidence": [
+        {
+          "type": "commit_tagged_after_entry"
+        }
+      ],
+      "next_by": "workflow",
+      "next": {
+        "full": "verify_ponytail",
+        "hotfix": "verify_ponytail",
+        "tweak": "tw_codecheck",
+        "review": "rf_codecheck"
+      }
     },
     "verify_ponytail": {
       "title": "验证 1/4 — 代码精简(先删)",
@@ -708,11 +514,7 @@
     },
     "delivery_review": {
       "title": "最终代码增量检视",
-      "evidence": [
-        {
-          "type": "final_review_clear"
-        }
-      ],
+      "evidence": [],
       "next": "push",
       "skip_in_moonlight": true
     },

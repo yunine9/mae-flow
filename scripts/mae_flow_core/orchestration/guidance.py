@@ -33,14 +33,12 @@ def render_guidance(state):
         "Ticket: %s\n"
         "Path: %s\n"
         "Phase: %s\n"
-        "CP: %s\n"
         "%s\n"
         "%s"
     ) % (
         state.ticket,
         state.path.value,
         state.phase.value,
-        state.current_cp or "none",
         _items("Artifacts", artifacts),
         _items("Unresolved risks", state.risks),
     )

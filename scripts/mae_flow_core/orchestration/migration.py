@@ -339,21 +339,6 @@ def _commit_pace(raw):
     return CommitPace.STAGED if value == "staged" else CommitPace.CONTINUOUS
 
 
-def _current_cp(raw):
-    for container in (raw, _mapping(raw.get("development_review"))):
-        for key in ("current_cp", "checkpoint_id", "current"):
-            value = _string(container.get(key))
-            if value and value != _string(raw.get("current")):
-                return value
-    review = _mapping(raw.get("development_review"))
-    checkpoints = review.get("checkpoints")
-    index = review.get("current_index")
-    if (isinstance(checkpoints, list) and type(index) is int
-            and 0 <= index < len(checkpoints)):
-        return _string(_mapping(checkpoints[index]).get("id"))
-    return ""
-
-
 def _capabilities(raw):
     source = raw.get("capabilities")
     if source is None:
@@ -436,7 +421,6 @@ def migrate_legacy_flow(raw):
         phase=phase,
         commit_pace=_commit_pace(raw),
         status=status,
-        current_cp=_current_cp(raw),
         artifacts=_artifacts(raw, ticket, workflow),
         decisions=_decisions(raw),
         risks=_risks(raw),

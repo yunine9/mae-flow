@@ -1,10 +1,5 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
-import hashlib
-
-from mae_flow_core.quality.spec2code_artifacts import (
-    blueprint_scenario_ids,
-)
 from mae_flow_core.orchestration.work_package import ensure_work_package
 from mae_flow_core.orchestration.behavior_baseline import (
     load_relevant_domain_context,
@@ -111,55 +106,6 @@ def _compile_worktree_snapshot(kind, head):
         return {}, False
 
 
-def _approved_blueprint(state, kind):
-    if kind != "UT":
-        return {}
-    process = state.get("spec2code") or {}
-    registered = process.get("blueprint") or {}
-    new_full = (
-        process.get("version") == 1
-        and (state.get("choices") or {}).get("workflow") == "full"
-    )
-    if not registered:
-        if new_full:
-            api.die(
-                "新 full 流程缺少已确认 UT 蓝图；"
-                "回到 test_blueprint Loop 生成并登记。",
-                2,
-            )
-        return {}
-    if new_full and (
-        not registered.get("revision")
-        or registered.get("confirmed_revision")
-        != registered.get("revision")
-        or registered.get("confirmed_sha256")
-        != registered.get("sha256")
-        or registered.get("confirmed_by")
-        not in ("user", "moonlight")
-        or not registered.get("confirmed_at")
-    ):
-        api.die(
-            "UT 蓝图尚未按当前版本确认，或确认绑定已失效；"
-            "回到 test_blueprint Loop 重新检视并选择 continue。",
-            2,
-        )
-    path = str(registered.get("path", "") or "")
-    if not path or not os.path.isfile(path):
-        api.die("已登记的 UT 蓝图不存在；重新生成并登记 blueprint。", 2)
-    try:
-        body = read_text(path, encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        api.die("已登记的 UT 蓝图无法读取: %s" % exc, 2)
-    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    if digest != registered.get("sha256"):
-        api.die("UT 蓝图登记后已变化；必须重新执行 quality-artifact register。", 2)
-    return {
-        "path": os.path.abspath(path),
-        "sha256": digest,
-        "scenario_ids": blueprint_scenario_ids(body),
-    }
-
-
 def _store_agent_task(flow, st, args, context):
     kind = context["kind"]
     sid = context["sid"]
@@ -188,7 +134,7 @@ def _store_agent_task(flow, st, args, context):
         _compile_worktree_snapshot(kind, context["task_head"]))
     st.setdefault("agent_tasks", {})[kind] = quality_task_cards.task_record(
         step=sid, path=path, digest=digest, head=context["task_head"],
-        scope=args.scope or "", checkpoint=context["checkpoint_id"],
+        scope=args.scope or "",
         precommit_review=context["precommit_review"],
         initial_compile_net=(
             api._working_source_net(context["task_head"], st, flow)
@@ -212,8 +158,7 @@ def _store_agent_task(flow, st, args, context):
         } if lightcheck_result is not None else {}),
         ut_targets=context["ut_targets"] if kind == "UT" else {},
         unchanged_initial_dirty=context["inherited_dirty"],
-        at=time.strftime("%Y-%m-%d %H:%M:%S"),
-        blueprint=context["blueprint"])
+        at=time.strftime("%Y-%m-%d %H:%M:%S"))
     if kind == "CODECHECK":
         append_codecheck_event(
             os.getcwd(), st, "agent.task_created", {
@@ -238,58 +183,26 @@ def cmd_agent_task(flow, st, args):
     """由代码生成完整子 Agent 任务卡，主模型不再临时拼参数。"""
     kind = args.kind.upper()
     sid = st["current"]
-    checkpoint_id = str(getattr(args, "checkpoint", "") or "")
     task_diff_override = ""
-    precommit_review = False
+    precommit_review = kind == "COMPILE" and sid in {"build", "build_rework"}
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if not quality_task_cards.task_allowed(kind, sid):
         api.die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
-    if checkpoint_id:
-        if kind != "COMPILE":
-            api.die("--checkpoint 只用于 compile 任务卡。", 2)
-        item = api._checkpoint_current(st)
-        review_state = api._development_review(st) or {}
-        if (not item
-                and (review_state.get("final_rework") or {}).get("status")
-                == "coding"):
-            api.die("当前是最终检视返工，原检查点已闭环；不要传 --checkpoint，"
-                "按本步骤正常生成编译任务卡并重走质量链。", 2)
-        if (not item or item.get("id") != checkpoint_id
-                or sid != api._checkpoint_expected_code_step(st)):
-            api.die("检查点编译目标不匹配：当前应为 %s@%s，收到 %s@%s。"
-                % ((item or {}).get("id", "无"), api._checkpoint_expected_code_step(st),
-                   checkpoint_id, sid), 2)
-        if item.get("status") != "coding":
-            api.die("检查点 %s 当前状态为 %s，不能重复生成编译任务卡。"
-                % (checkpoint_id, item.get("status", "未知")), 2)
-        checkpoint_base = item.get("fixed_base", "")
-        precommit_review = bool(
-            review_state.get("mode") == "staged"
-            and api._review_before_commit(review_state))
-        if precommit_review:
-            current_head = api.sh("git rev-parse --verify HEAD")
-            if current_head != checkpoint_base:
-                api.die("当前检查点采用先检视后提交，但 HEAD 已偏离固定基点。"
-                    "禁止拿已提交代码伪装成 IDE 未提交差异；保留现场让用户归因。", 2)
-            task_diff_override = "HEAD"
-        elif checkpoint_base and api.argv_out(
-                ["git", "cat-file", "-t", checkpoint_base]) == "commit":
-            task_diff_override = checkpoint_base + "..HEAD"
     dirty_source = api._blocking_dirty_source_paths(st, flow)
     inherited_dirty = api._unchanged_initial_dirty_source_paths(st, flow)
     if dirty_source and not precommit_review:
         api.die("生成任务卡前仍有未提交源码/测试/构建文件: " + "、".join(dirty_source[:8])
             + "。任务卡只信 Git 可追踪范围；先按单号格式精确提交，或回退不属于本单的改动。", 2)
     if precommit_review:
-        checkpoint_snapshot = api._checkpoint_worktree_snapshot(st, flow)
+        implementation_snapshot = api._worktree_snapshot_since(
+            str(st.get("implementation_base_head", "") or "HEAD"))
         source_files = [
-            path for path in checkpoint_snapshot
+            path for path in implementation_snapshot
             if api._is_source_path(path, st, flow)
         ]
         if not source_files:
-            api.die("当前检查点只有配置、资源、文档或夹具等非代码交付差异，"
-                "无需生成空编译任务卡；直接执行 checkpoint ready %s，"
-                "流程会跳过编译并进入未提交 diff 检视。" % checkpoint_id, 2)
+            api.die("本轮只有配置、资源、文档或夹具等非代码交付差异，"
+                    "无需生成空编译任务卡；直接 done。", 2)
         diff = "HEAD"
         changes = api.argv_out([
             "git", "-c", "core.quotepath=false", "status", "--short",
@@ -315,7 +228,7 @@ def cmd_agent_task(flow, st, args):
                 if precommit_review else
                 api._run_lightcheck_diff(
                     diff, source_files,
-                    "编译前兜底：" + (checkpoint_id or sid)))
+                    "编译前兜底：" + sid))
         except Exception as exc:
             lightcheck_result = api._lightcheck_tool_error(
                 "编译前轻量检查异常；已记录诊断，不阻断流程: " + str(exc))
@@ -370,7 +283,6 @@ def cmd_agent_task(flow, st, args):
             st, groups["business"])
         if target_err:
             api.die("无法计算 UT 函数级范围：" + target_err, 2)
-    blueprint = _approved_blueprint(st, kind)
     lines = quality_task_card_documents.build_full_task_document({
         "kind": kind,
         "sid": sid,
@@ -379,7 +291,6 @@ def cmd_agent_task(flow, st, args):
         "config": cfg,
         "diff": diff,
         "scope": args.scope or "",
-        "checkpoint_id": checkpoint_id,
         "precommit_review": precommit_review,
         "inherited_dirty": tuple(inherited_dirty),
         "sources": tuple(sources),
@@ -395,14 +306,12 @@ def cmd_agent_task(flow, st, args):
         "notes": tuple(notes),
         "scan": scan,
         "ut_targets": ut_targets,
-        "blueprint": blueprint,
     })
     _store_agent_task(flow, st, args, {
         "kind": kind, "sid": sid, "document": lines,
-        "task_head": task_head, "checkpoint_id": checkpoint_id,
+        "task_head": task_head,
         "precommit_review": precommit_review, "scan": scan,
         "task_files": task_files, "execution_files": execution_files,
         "lightcheck_result": lightcheck_result, "ut_targets": ut_targets,
         "inherited_dirty": inherited_dirty,
-        "blueprint": blueprint,
     })

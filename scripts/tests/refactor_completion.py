@@ -18,10 +18,6 @@ APPROVED_REQUIRED_VERIFICATIONS = {
     "architecture": [
         "python scripts/tests/test_architecture.py",
     ],
-    "differential": [
-        "python scripts/tests/differential/runner.py "
-        "--implementation-root .",
-    ],
     "fault_injection": [
         "python scripts/tests/test_fault_injection.py",
     ],
@@ -29,7 +25,7 @@ APPROVED_REQUIRED_VERIFICATIONS = {
         "python -W error::ResourceWarning "
         "scripts/tests/test_state_core.py",
         "python -W error::ResourceWarning "
-        "scripts/tests/test_checkpoints.py",
+        "scripts/tests/test_quality_task_cards.py",
     ],
     "selftest": [
         "python scripts/selftest.py",

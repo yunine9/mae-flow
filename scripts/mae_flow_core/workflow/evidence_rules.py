@@ -1,12 +1,10 @@
 """Generic workflow Evidence rules with explicit I/O ports."""
 
-import hashlib
 import os
 import re
 from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
-from .evidence import legacy_result
 from ..quality.implementation_tasks import implementation_task_progress
 
 
@@ -38,7 +36,6 @@ class WorkflowEvidencePorts:
     spec_data: object
     risk_acceptance: object
     business_changed_files: object
-    spec2code_plan_review: object
     domain_archive_fresh: object = None
     local_spec_valid: object = None
     verification_passed: object = None
@@ -258,43 +255,6 @@ class WorkflowEvidenceRules:
                 "重新生成产物并重新登记" % (field, value),
             )
         return EvidenceResult(True, "")
-
-    def spec2code_artifact(self, spec, state):
-        kind = str(spec.get("kind", "") or "")
-        record = (state.get("spec2code") or {}).get(kind) or {}
-        path = str(record.get("path", "") or "")
-        expected = str(record.get("sha256", "") or "")
-        if not path or not expected:
-            return EvidenceResult(
-                False,
-                "未登记 Spec2Code 过程件 %s；先生成、校验并执行 "
-                "quality-artifact register。" % (kind or "(空)"),
-            )
-        if not self.ports.is_file(path):
-            return EvidenceResult(
-                False,
-                "Spec2Code 过程件 %s 已登记但文件不存在: %s"
-                % (kind, path),
-            )
-        try:
-            text = self.ports.read_text(path)
-        except Exception as exc:
-            return EvidenceResult(
-                False,
-                "Spec2Code 过程件 %s 无法读取: %s" % (kind, exc),
-            )
-        actual = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        if actual != expected:
-            return EvidenceResult(
-                False,
-                "Spec2Code 过程件 %s 登记后摘要已变化；重新校验并登记，"
-                "旧检视结论不能复用。" % kind,
-            )
-        return EvidenceResult(True, "")
-
-    def spec2code_plan_review(self, spec, state):
-        return legacy_result(
-            self.ports.spec2code_plan_review(spec, state))
 
     def tier_scope(self, _spec, state):
         workflow = (

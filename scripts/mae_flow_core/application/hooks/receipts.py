@@ -111,7 +111,6 @@ def plan_compile_run_receipt(
     receipt = dict(
         _common(task, context),
         task_issuance_id=task.get("issuance_id", ""),
-        checkpoint=task.get("checkpoint", ""),
         build=build,
         status=status,
         result_sha256=digest,
@@ -167,8 +166,6 @@ def reusable_compile_run_receipt(
     if (
             receipt.get("task_issuance_id", "")
             != task.get("issuance_id", "")
-            or receipt.get("checkpoint", "")
-            != task.get("checkpoint", "")
             or not same_config(receipt.get("build", ""), expected_build)
             or receipt.get("status") != status):
         return None

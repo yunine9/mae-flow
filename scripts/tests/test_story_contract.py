@@ -21,17 +21,17 @@ def read(relative):
 
 
 class StoryContractTests(unittest.TestCase):
-    def test_full_path_uses_grill_local_spec_story_and_pace_directly(self):
+    def test_full_path_uses_grill_local_spec_story_and_build_directly(self):
         flow = json.loads(read("flow/flow.json"))
         chain = workflow_chain(flow, "full")
-        ordered = ["grill", "open", "story", "build_pace", "build"]
+        ordered = ["grill", "open", "story", "build"]
         self.assertEqual(ordered, [step for step in chain if step in ordered])
         for removed in (
                 "grill_ask", "design", "test_blueprint",
                 "story_ask", "build_plan"):
             self.assertNotIn(removed, chain)
         self.assertEqual("story", flow["steps"]["open"]["next"])
-        self.assertEqual("build_pace", flow["steps"]["story"]["next"])
+        self.assertEqual("build", flow["steps"]["story"]["next"])
         story_evidence = json.dumps(
             flow["steps"]["story"]["evidence"], ensure_ascii=False)
         self.assertIn(".mae-flow-work/{单号}/story.md", story_evidence)
@@ -80,7 +80,7 @@ class StoryContractTests(unittest.TestCase):
         sections = (
             "Grill 决策与实现影响",
             "关键函数与方法修改详述",
-            "CP 划分与轻量实施说明",
+            "整体实现与验证说明",
             "风险、回滚与领域归档影响",
         )
         positions = [template.index(section) for section in sections]
@@ -120,15 +120,16 @@ class StoryContractTests(unittest.TestCase):
         self.assertIn("role-task grill-critic --stage final", grill)
         self.assertIn("role-task story-generate", story)
         self.assertIn("role-task story-review", story)
-        self.assertIn("role-task cp-implement --checkpoint CPn", build)
-        self.assertIn("role-task craft-code --checkpoint CPn", build)
+        self.assertIn("主 Agent", build)
+        self.assertIn("agent-task compile", build)
+        self.assertIn("compile-agent", build)
+        self.assertNotIn("role-task cp-implement", build)
 
-    def test_only_seven_approved_agents_remain(self):
+    def test_only_six_approved_agents_remain(self):
         expected = {
             "grill-critic-agent.md",
             "story-generator-agent.md",
             "craft-reviewer-agent.md",
-            "cp-implementer-agent.md",
             "compile-agent.md",
             "codecheck-fix-agent.md",
             "ut-generator-agent.md",
@@ -139,14 +140,14 @@ class StoryContractTests(unittest.TestCase):
         }
         self.assertEqual(expected, actual)
 
-    def test_pace_is_user_selected_and_cp_stops_are_deterministic(self):
-        pace = read("flow/steps/build_pace.md")
+    def test_main_agent_implements_once_and_compile_agent_is_mandatory(self):
         build = read("flow/steps/build.md")
-        self.assertIn("用户选择是唯一依据", pace)
-        self.assertIn("Staged：每个 CP", build)
-        self.assertIn("Continuous：所有 CP", build)
-        self.assertNotIn("roadmap-", pace)
-        self.assertNotIn("plan-", pace)
+        compile_agent = read("agents/compile-agent.md")
+        self.assertIn("一次完成需求涉及的全部生产代码", build)
+        self.assertIn("不要派实现子 Agent", build)
+        self.assertIn("compile-agent", build)
+        self.assertIn("编译方式", compile_agent)
+        self.assertIn("Skill", compile_agent)
         self.assertNotIn("role-task task-analysis", build)
         self.assertNotIn("role-task craft-plan", build)
 

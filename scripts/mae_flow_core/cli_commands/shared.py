@@ -56,41 +56,6 @@ from mae_flow_core.foundation.fingerprints import (
 from mae_flow_core.foundation import source_paths
 from mae_flow_core.foundation import git_intent
 from mae_flow_core.file_io import load_json, read_bytes, read_lines, read_text, write_text
-from mae_flow_core.delivery import checkpoints as delivery_checkpoints
-from mae_flow_core.application.delivery.checkpoints import (
-    CheckpointPlanPorts,
-    CheckpointReadyPorts,
-    plan_checkpoint,
-    ready_checkpoint,
-)
-from mae_flow_core.application.delivery.checkpoint_decisions import (
-    CheckpointDecisionPorts,
-    commit_commands as checkpoint_commit_commands,
-    decide_checkpoint,
-)
-from mae_flow_core.application.delivery.checkpoint_final import (
-    FinalReviewPorts,
-    prepare_final_review,
-)
-from mae_flow_core.application.delivery.checkpoint_status import (
-    inspect_checkpoint_status,
-)
-from mae_flow_core.application.delivery.checkpoint_recovery import (
-    CheckpointRecoveryPorts,
-    activate_final_rework,
-    refresh_checkpoint,
-    refresh_final_review,
-    reviewed_worktree_fresh,
-)
-from mae_flow_core.application.delivery.checkpoint_quality import (
-    PLAN_CONTINUE_ACK,
-    PLAN_REVISE_ACK,
-    CheckpointQualityPorts,
-    decide_craft_review,
-    decide_checkpoint_plan,
-    prepare_checkpoint_plan,
-    record_craft_review,
-)
 from mae_flow_core.application.delivery.standalone import (
     cancel_standalone,
     confirm_standalone_scope,
@@ -170,14 +135,6 @@ from mae_flow_core.guard.bash import (
     decide_pre_commit,
 )
 from mae_flow_core.quality import task_cards as quality_task_cards
-from mae_flow_core.quality.spec2code_artifacts import (
-    artifact_path as spec2code_artifact_path,
-    checkpoint_review_context,
-    review_requires_human_decision as
-        spec2code_review_requires_human_decision,
-    review_requires_rework as spec2code_review_requires_rework,
-    validate_review as validate_spec2code_review,
-)
 from mae_flow_core.foundation.models import EvidenceResult
 from mae_flow_core.quality import codecheck as quality_codecheck
 from mae_flow_core.quality.evidence import (
@@ -236,12 +193,6 @@ ACTION_PATH = os.path.join(".mae-flow-work", "standalone-action.json")
 
 CONFIG_CONFIRM_ACK = "确认以上全部配置"
 
-CHECKPOINT_CONTINUE_ACK = "我已认真检视并完成自验证，继续"
-
-CHECKPOINT_REVISE_ACK = "需要调整代码"
-
-CHECKPOINT_CONTINUOUS_ACK = "当前批次先不确认，剩余代码一次完成后统一检视"
-
 HISTORY_PATH = ".mae-flow-history.jsonl"
 
 DEFAULTS_PATH = ".mae-flow-defaults.json"
@@ -249,10 +200,6 @@ DEFAULTS_PATH = ".mae-flow-defaults.json"
 FLOW = None
 
 MOONLIGHT_REPORT_PATH = os.path.join(".mae-flow-work", "moonlight-report.md")
-
-PACE_STEPS = workflow_advancement.PACE_STEPS
-
-CHECKPOINT_CODE_STEPS = delivery_checkpoints.CODE_STEPS
 
 SOURCE_EXTS = source_paths.SOURCE_EXTENSIONS
 
@@ -305,13 +252,10 @@ RISK_AGENT_LABELS = {
     "GRILL": "Grill Critic 没有正常返回，需求边界可能仍有遗漏",
     "GRILL_PREP": "Grill 备课 Critic 没有正常返回，初始问题树可能存在遗漏",
     "GRILL_FINAL": "Grill 收尾 Critic 没有正常返回，衍生问题可能存在遗漏",
-    "CP_IMPLEMENT": "当前 CP 没有可验证的实现 Agent 正常返回记录",
     "ASKUSER": "宿主没有签发用户交互令牌；本次风险确认本身仍必须匹配用户真实原话",
     "UTRUN": "没有观测到 UT 命令真实调起",
     "TIER_SCOPE": "本单改动文件数超过所选交付档的升级阈值，继续按轻量档走会绕过设计与规格环节",
 }
-
-CHECKPOINT_LOCKED_STATUSES = delivery_checkpoints.LOCKED_STATUSES
 
 CODE_EXTS = (
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",

@@ -79,7 +79,7 @@ class LeanMigrationCliTests(unittest.TestCase):
         proposal = self.proposal()
         with open(os.path.join(self.root, proposal["backup_path"]), "rb") as stream:
             self.assertEqual(original, stream.read())
-        self.assertIn("建议恢复到稳定流程步骤: build_pace", result.stdout)
+        self.assertIn("建议恢复到稳定流程步骤: build", result.stdout)
         self.assertIn("--confirm --message-id", result.stdout)
 
     def test_confirmation_writes_stable_v2_at_safe_boundary(self):

@@ -1,28 +1,10 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    PACE_STEPS, WORKFLOW_LABELS, json, os, sys, time, workflow_completion,
+    WORKFLOW_LABELS, json, os, sys, time, workflow_completion,
     workflow_transitions,
 )
 from .wiring import api
-
-def _done_handle_legacy_pace(flow, st, sid, step):
-    if (sid in PACE_STEPS and not api._development_checkpoints_enabled(st)
-            and not api._development_review(st)):
-        now = time.strftime("%Y-%m-%d %H:%M:%S")
-        target = api._next_from_step(step, st, "continuous")
-        st.setdefault("history", []).append({
-            "step": sid, "result": "legacy:skipped-development-pace",
-            "note": "旧版在途状态恢复升级前路径", "at": now})
-        st["current"] = target
-        st.setdefault("step_heads", {})[target] = api.sh(
-            "git rev-parse --verify HEAD")
-        api.save_state(st)
-        print("[mae-flow] 检测到升级前在途状态；本单不追加开发节奏确认，"
-              "已按原流程进入 %s。\n" % target)
-        api.print_current(flow, st)
-        return True
-    return False
 
 def _done_pending_config(step, st, args, sid):
     review = st.get("config_review") if sid == "config_confirm" else None
@@ -60,19 +42,6 @@ def _done_pending_config(step, st, args, sid):
     return pending_config
 
 
-def _pace_choice_cursor(st, cursor):
-    """Expose only a latest pre-plan button answer, never the whole cursor."""
-    rows = api._current_ack_messages(st)
-    known = set(cursor or [])
-    if any(api._ack_message_signature(item) not in known for item in rows):
-        return cursor
-    if not rows:
-        return cursor
-    latest = api._ack_message_signature(rows[-1])
-    return tuple(signature for signature in (cursor or ())
-                 if signature != latest)
-
-
 def _done_validate_choice_and_ack(step, st, args, sid):
     error = workflow_completion.choice_error(step, args.choice)
     if error:
@@ -81,24 +50,7 @@ def _done_validate_choice_and_ack(step, st, args, sid):
             or api._moonlight(st)):
         return
     if step.get("choice_key"):
-        if sid in ("test_blueprint", "build_plan"):
-            ack_cursor = api._spec2code_confirmation_cursor(st, sid)
-        else:
-            pace_state = (
-                api._development_review(st)
-                if sid in PACE_STEPS else None
-            )
-            ack_cursor = (
-                (pace_state or {}).get("ack_cursor")
-                if pace_state else None
-            )
-            if (
-                    ack_cursor is not None
-                    and (pace_state or {}).get("status") == "plan_pending"):
-                ack_cursor = _pace_choice_cursor(st, ack_cursor)
-        ok, why = api._choice_verified(
-            step, st, args.choice,
-            ack_cursor)
+        ok, why = api._choice_verified(step, st, args.choice)
     elif step.get("confirmation_answers"):
         ok, why = api._implicit_ack_verified(step, st)
     elif args.ack:
@@ -228,30 +180,6 @@ def _done_require_evidence(step, st, args, sid):
         os.path.abspath(sys.argv[0])), 2)
 
 
-def _done_guard_checkpoint(step, st):
-    """Let the CP state machine own recovery before generic step evidence."""
-    spec = next(
-        (
-            item for item in step.get("evidence", [])
-            if item.get("type") == "checkpoint_plan_complete"
-        ),
-        None,
-    )
-    if not spec:
-        return
-    result = api._EVIDENCE_REGISTRY.evaluate(
-        "checkpoint_plan_complete", spec, st)
-    if result.passed:
-        return
-    api.save_state(st)
-    api.die(
-        "[mae-flow] CP 结束校验未完成。\n  - " + result.reason
-        + "\n只执行上述恢复动作；不要 accept-risk、allow 或 goto "
-          "跳过当前检查点。",
-        2,
-    )
-
-
 def _done_resolve_moonlight_branch(flow, st, sid):
     if sid == "branch_create" and api._resolve_moonlight_branch(flow, st):
         # A recorded hard blocker is a successful safe stop, not failed
@@ -259,39 +187,10 @@ def _done_resolve_moonlight_branch(flow, st, sid):
         raise SystemExit(0)
 
 
-def _done_adjust_checkpoint(flow, st, sid):
-    st.pop("development_review", None)
-    st.get("choices", {}).pop("development_pace", None)
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    st.setdefault("history", []).append({
-        "step": sid, "result": "checkpoint-plan:adjust",
-        "note": "用户要求调整检查点划分", "at": now})
-    st.setdefault("step_heads", {})[sid] = api.sh("git rev-parse --verify HEAD")
-    api.save_state(st)
-    print("[mae-flow] 用户选择调整检查点；旧方案已失效，代码仍未解锁。"
-          "结合用户意见重新执行 checkpoint plan --item ...。")
-    api.print_current(flow, st)
-
 def _done_finalize(flow, st, args, sid, step):
     for event in workflow_completion.completion_events(
             sid, step, st, args.choice, args.ack or ""):
-        if event.kind == "adjust_checkpoint":
-            _done_adjust_checkpoint(flow, st, sid)
-            return
-        if event.kind == "activate_checkpoint":
-            api._activate_checkpoint_plan(st, event.value)
-        elif event.kind == "confirm_spec2code":
-            api._confirm_spec2code_artifacts(
-                st,
-                tuple(
-                    kind for kind in event.value.split(",")
-                    if kind
-                ),
-                event.note,
-            )
-        elif event.kind == "prepare_moonlight_checkpoint":
-            api._prepare_moonlight_checkpoint_plan(st)
-        elif event.kind == "resolve_moonlight":
+        if event.kind == "resolve_moonlight":
             api._moonlight_resolve_kind(st, event.value)
         elif event.kind == "localize_story":
             api._localize_story(event.value)
@@ -303,8 +202,6 @@ def cmd_done(flow, st, args):
     step = flow["steps"][sid]
     if step.get("terminal"):
         api.die("流程已在终态。")
-    if _done_handle_legacy_pace(flow, st, sid, step):
-        return
     if sid == "moonlight_review":
         api.die("月光宝盒已推送并等待早晨处理。请执行 moonlight report、moonlight repair 或 moonlight finalize，"
             "不能用 done 跳过报告闭环。", 2)
@@ -313,7 +210,6 @@ def cmd_done(flow, st, args):
     _done_validate_choice_and_ack(step, st, args, sid)
     _done_commit_inputs(step, st, args, sid, pending_config)
     _done_guard_branch(st, sid)
-    _done_guard_checkpoint(step, st)
     if (_done_source_change(flow, st, sid, step)
             or _done_source_recheck(flow, st, sid, step)):
         return
@@ -400,7 +296,6 @@ def cmd_accept_risk(flow, st, args):
                         "源码快照变化后必须重新签发任务卡，再让用户确认风险。", 2)
         rec.update({
             "task_issuance_id": task.get("issuance_id", ""),
-            "checkpoint": task.get("checkpoint", ""),
             "source_snapshot": current_snapshot,
         })
     st.setdefault("risk_acceptances", {})[kind] = rec
@@ -412,11 +307,7 @@ def cmd_accept_risk(flow, st, args):
     if inherited_dirty:
         print("审计:以下流程启动前已脏文件指纹未变，不算本单变化: "
               + "、".join(inherited_dirty[:8]))
-    if precommit_compile:
-        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
-              "本次放行自动失效。现在执行 checkpoint ready %s。"
-              % (task.get("checkpoint", "") or "<当前检查点>"))
-    elif compile_task_snapshot and dirty:
+    if compile_task_snapshot and dirty:
         print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
               "本次放行自动失效。现在按本单清单精确提交当前修复，再执行 done。")
     else:

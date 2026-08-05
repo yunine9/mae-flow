@@ -82,11 +82,6 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/quality/codecheck.py",
           "scripts/mae_flow_core/application/__init__.py",
           "scripts/mae_flow_core/application/delivery/__init__.py",
-          "scripts/mae_flow_core/application/delivery/checkpoints.py",
-          "scripts/mae_flow_core/application/delivery/checkpoint_decisions.py",
-          "scripts/mae_flow_core/application/delivery/checkpoint_final.py",
-          "scripts/mae_flow_core/application/delivery/checkpoint_recovery.py",
-          "scripts/mae_flow_core/application/delivery/checkpoint_status.py",
           "scripts/mae_flow_core/application/delivery/standalone.py",
           "scripts/mae_flow_core/application/delivery/moonlight.py",
           "scripts/mae_flow_core/application/delivery/moonlight_defer.py",
@@ -114,7 +109,6 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/mae_flow_core/adapters/hook_runtime_contracts.py",
           "scripts/mae_flow_core/adapters/hook_runtime_dependencies.py",
           "scripts/mae_flow_core/delivery/__init__.py",
-          "scripts/mae_flow_core/delivery/checkpoints.py",
           "scripts/mae_flow_core/delivery/evidence.py",
           "scripts/mae_flow_core/delivery/models.py",
           "scripts/mae_flow_core/delivery/moonlight.py",
@@ -144,8 +138,6 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_state_core.py",
           "scripts/tests/test_capabilities.py",
           "scripts/tests/test_specengine.py",
-          "scripts/tests/test_checkpoints.py",
-          "scripts/tests/test_full_checkpoint_compile_recovery.py",
           "scripts/tests/test_compile_wait_instructions.py",
           "scripts/tests/test_stable_recovery_contract.py",
           "scripts/tests/test_agent_observations.py",
@@ -163,52 +155,28 @@ for f in ("scripts/mae-flow.py", "scripts/comet_compat.py", "hooks/dispatch.py",
           "scripts/tests/test_guard_permits.py",
           "scripts/tests/test_guard_ownership.py",
           "scripts/tests/test_guard_bash.py",
-          "scripts/tests/test_guard_permit_integration.py",
           "scripts/tests/test_quality_task_cards.py",
           "scripts/tests/test_quality_codecheck.py",
           "scripts/tests/test_quality_codecheck_use_cases.py",
           "scripts/tests/test_quality_codecheck_state.py",
           "scripts/tests/test_quality_task_card_use_cases.py",
           "scripts/tests/test_quality_evidence.py",
-          "scripts/tests/test_delivery_policies.py",
-          "scripts/tests/test_delivery_evidence.py",
           "scripts/tests/test_delivery_models.py",
-          "scripts/tests/test_delivery_checkpoint_use_cases.py",
-          "scripts/tests/test_delivery_checkpoint_decisions.py",
-          "scripts/tests/test_delivery_checkpoint_final.py",
-          "scripts/tests/test_delivery_checkpoint_status.py",
-          "scripts/tests/test_delivery_checkpoint_recovery.py",
           "scripts/tests/test_delivery_standalone_use_cases.py",
           "scripts/tests/test_delivery_moonlight_use_cases.py",
           "scripts/tests/test_command_dispatch.py",
           "scripts/tests/test_cli_runtime_facade.py",
-          "scripts/tests/test_task_scope.py",
-          "scripts/tests/test_workflow_advancement.py",
-          "scripts/tests/test_workflow_completion.py",
           "scripts/tests/test_workflow_definition.py",
-          "scripts/tests/test_differential_harness.py",
           "scripts/tests/test_architecture.py",
           "scripts/tests/test_file_io.py",
           "scripts/tests/test_refactor_completion.py",
           "scripts/tests/test_fault_injection.py",
           "scripts/tests/test_evidence.py",
           "scripts/tests/test_agent_evidence.py",
-          "scripts/tests/test_evidence_rules.py",
           "scripts/tests/selftest_suites.py",
           "scripts/tests/architecture_rules.py",
           "scripts/tests/refactor_completion.py",
           "scripts/tests/fault_injection.py",
-          "scripts/tests/differential/__init__.py",
-          "scripts/tests/differential/coverage.py",
-          "scripts/tests/differential/normalize.py",
-          "scripts/tests/differential/snapshot.py",
-          "scripts/tests/differential/scenarios.py",
-          "scripts/tests/differential/stage0_scenarios.py",
-          "scripts/tests/differential/stage1_evidence_scenarios.py",
-          "scripts/tests/differential/stage2_guard_scenarios.py",
-          "scripts/tests/differential/stage3_delivery_scenarios.py",
-          "scripts/tests/differential/stage4_quality_scenarios.py",
-          "scripts/tests/differential/runner.py",
           "scripts/tests/probe_gate_smoke.py",
           "scripts/tests/probe_spec_semantics.py") + tuple(
               os.path.relpath(path, ROOT)
@@ -281,18 +249,13 @@ if flow:
     unreg = used - set(mf.EVIDENCE)
     check("证据类型全部注册", not unreg, str(unreg))
 
-    # 4.5 review-fix 质量链必须保持拆分，禁止退化回一个 rf_verify 大步骤
-    review_chain = [
-        "rf_fix", "rf_compile", "rf_review", "rf_codecheck", "rf_ut",
-        "domain_archive", "delivery_review", "push"]
-    got, cur = [], "rf_fix"
-    for _ in range(len(review_chain)):
-        got.append(cur)
-        current_step = steps.get(cur, {})
-        nxt = current_step.get("next")
-        cur = (nxt.get("review") if current_step.get("next_by") == "workflow"
-               else nxt.get("continue") if isinstance(nxt, dict) else nxt)
-    check("review-fix 质量链分阶段", got == review_chain, str(got))
+    # 4.5 review-fix 使用统一实现/编译/检视链，再进入专属质量链
+    check("review-fix 复用整体实现和质量链",
+          steps["rf_triage"].get("next") == "build"
+          and steps["build_review"]["next"]["continue"] == "build_commit"
+          and steps["build_commit"]["next"]["review"] == "rf_codecheck"
+          and steps["rf_codecheck"].get("next") == "rf_ut"
+          and steps["rf_ut"].get("next") == "domain_archive")
     compatibility_entries = set(flow.get("compatibility_entries", ()))
     actual_ack_steps = {
         sid for sid, step in steps.items()
@@ -301,47 +264,24 @@ if flow:
           actual_ack_steps == {
               "config_confirm", "workflow_select", "code_reviewer_ask",
               "open", "story", "hf_open", "tw_open",
-              "build_review", "tw_review", "rf_review",
-              "build_pace", "tw_pace", "rf_pace",
+              "build_review",
           }, str(sorted(actual_ack_steps)))
-    check("三条新流程均在写码前确认开发节奏且月光旁路",
-          steps.get("hf_open", {}).get("next") == "build_pace"
-          and steps.get("tw_open", {}).get("next") == "tw_pace"
-          and steps.get("rf_triage", {}).get("next") == "rf_pace"
-          and all(
-              x.get("choices") == ["staged", "continuous", "adjust"]
-              and x.get("skip_in_moonlight")
-              and x.get("moonlight_choice") == "continuous"
-              and any(e.get("type") == "checkpoint_plan"
-                      for e in x.get("evidence", []))
-              for x in (
-                  steps.get("build_pace", {}),
-                  steps.get("tw_pace", {}),
-                  steps.get("rf_pace", {}),
-              )))
-    check("三条编码链均在编译后停靠用户代码检视",
-          steps.get("build", {}).get("next") == "build_review"
-          and steps.get("tw_compile", {}).get("next") == "tw_review"
-          and steps.get("rf_compile", {}).get("next") == "rf_review"
-          and steps.get("build_review", {}).get("next", {}).get("continue") == "verify_ponytail"
-          and steps.get("tw_review", {}).get("next", {}).get("continue") == "tw_codecheck"
-          and steps.get("rf_review", {}).get("next", {}).get("continue") == "rf_codecheck")
-    check("代码检视收据绑定本轮快照且月光直接旁路",
-          all(
-              step.get("skip_in_moonlight")
-              and step.get("moonlight_choice") == "continue"
-              and any(e.get("type") == "review_snapshot"
-                      for e in step.get("evidence", []))
-              for step in (
-                  steps.get("build_review", {}),
-                  steps.get("tw_review", {}),
-                  steps.get("rf_review", {}),
-              )))
+    check("所有工作流直接进入整体编码",
+          steps.get("hf_open", {}).get("next") == "build"
+          and steps.get("tw_open", {}).get("next") == "build"
+          and steps.get("rf_triage", {}).get("next") == "build")
+    check("整体编码强制编译并停靠用户代码检视",
+          any(e.get("agent") == "COMPILE" for e in steps.get("build", {}).get("evidence", []))
+          and steps.get("build", {}).get("next", {}).get("disabled") == "build_review"
+          and steps.get("build", {}).get("next", {}).get("enabled") == "build_agent_review"
+          and steps.get("build_agent_review", {}).get("next") == "build_review"
+          and steps.get("build_review", {}).get("next", {}).get("continue") == "build_commit"
+          and steps.get("build_review", {}).get("next", {}).get("revise") == "build_rework")
     check("完整开发固定执行 Grill、本地 Spec 和 Story",
           steps.get("branch_create", {}).get("next", {}).get("full") == "grill"
           and steps.get("grill", {}).get("next") == "open"
           and steps.get("open", {}).get("next") == "story"
-          and steps.get("story", {}).get("next") == "build_pace")
+          and steps.get("story", {}).get("next") == "build")
     step_text = lambda name: open(
         os.path.join(ROOT, "flow", "steps", name + ".md"),
         encoding="utf-8").read()
@@ -353,32 +293,22 @@ if flow:
           and "只向用户裁决一次" in step_text("verify_comet")
           and "只向用户确认一次" in step_text("domain_archive")
           and "domain-archive apply --message-id" in step_text("domain_archive"))
-    check("review 编译只接受 OK",
-          steps.get("rf_compile", {}).get("evidence", [{}])[0].get("statuses") == ["OK"])
     check("review UT 只接受 PASS",
           steps.get("rf_ut", {}).get("evidence", [{}])[0].get("statuses") == ["PASS"])
-    check("review UT 改源码后回流编译链",
-          steps.get("rf_ut", {}).get("source_change_recheck") == "rf_compile")
+    check("review UT 改源码后回流整体返工与编译",
+          steps.get("rf_ut", {}).get("source_change_recheck") == "build_rework")
     check("主流程 UT 改源码后回流专用编译节点",
           steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
           and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
-    tweak_chain = ["tw_change", "tw_compile", "tw_review", "tw_codecheck", "tw_ut",
-                   "tw_verify", "domain_archive", "delivery_review", "push"]
-    got, cur = [], "tw_change"
-    for _ in range(len(tweak_chain)):
-        got.append(cur)
-        current_step = steps.get(cur, {})
-        nxt = current_step.get("next")
-        cur = (nxt.get("tweak") if current_step.get("next_by") == "workflow"
-               else nxt.get("continue") if isinstance(nxt, dict) else nxt)
-    check("小改流程也经过编译、规范检查和 UT", got == tweak_chain, str(got))
-    check("三条质量链均在不可逆定稿/最终推送前核对最终代码增量",
+    check("小改流程在统一实现提交后进入规范检查和 UT",
+          steps.get("build_commit", {}).get("next", {}).get("tweak") == "tw_codecheck"
+          and steps.get("tw_codecheck", {}).get("next") == "tw_ut"
+          and steps.get("tw_ut", {}).get("next") == "tw_verify")
+    check("三条质量链均在最终推送前生成精确交付清单",
           steps.get("verify_comet", {}).get("next") == "domain_archive"
           and steps.get("tw_verify", {}).get("next") == "domain_archive"
           and steps.get("rf_ut", {}).get("next") == "domain_archive"
           and steps.get("domain_archive", {}).get("next") == "delivery_review"
-          and any(e.get("type") == "final_review_clear"
-                  for e in steps.get("delivery_review", {}).get("evidence", []))
           and steps.get("delivery_review", {}).get("skip_in_moonlight"))
     check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
     check("精简改源码后自动进入专用编译步骤",
@@ -962,8 +892,7 @@ if flow:
             check("旧 Story 节点只作恢复别名且不再制造二次询问",
                   flow["steps"]["story_ask"].get("next") == "story"
                   and not flow["steps"]["story_ask"].get("user_ack")
-                  and flow["steps"]["design"].get("next") == "story"
-                  and flow["steps"]["test_blueprint"].get("next") == "story")
+                  and flow["steps"]["design"].get("next") == "story")
 
             os.makedirs(".mae-flow-work/REQ1", exist_ok=True)
             open(".mae-flow-work/REQ1/review.md", "w", encoding="utf-8").write(
@@ -972,7 +901,7 @@ if flow:
                 "| 1 | 空指针 | 属实 | 转规格轮次(已确认) |\n"
                 "| 2 | 行为变化 | 属实 | 修复(已确认) |\n")
             rf_state = {
-                "current": "rf_fix", "config": {"单号": "REQ1"},
+                "current": "rf_triage", "config": {"单号": "REQ1"},
                 "choices": {"workflow": "review"}, "history": [], "started": now,
                 "review_triage_transfer_count": 1,
                 "review_triage_statuses": mf._review_statuses(
@@ -982,7 +911,7 @@ if flow:
                     "| 2 | 行为变化 | 属实 | 转规格轮次(已确认) |\n"),
             }
             rf_ok, rf_why = mf.ev_review_fix_committed({}, rf_state)
-            check("rf_fix 交换意见身份但总数不变仍会被 ASKUSER 闸拦截",
+            check("评审意见交换身份但总数不变仍会被 ASKUSER 闸拦截",
                   not rf_ok and "1" in rf_why and "AskUserQuestion" in rf_why)
         finally:
             os.chdir(old_cwd)
@@ -2119,34 +2048,6 @@ if flow:
                   mf.load_state().get("current") == "config_confirm"
                   and not (mf.load_state().get("moonlight") or {}).get("hard_blocked"))
 
-            build_state = mf.load_state()
-            build_state["current"] = "build"
-            build_state["config"].update({"单号": "REQMOONBUILD", "单号类型": "feat",
-                                           "CHANGE_NAME": "moon-build"})
-            build_state["choices"]["workflow"] = "full"
-            build_state.setdefault("step_heads", {})["build"] = mf.sh("git rev-parse --verify HEAD")
-            os.makedirs(os.path.join("openspec", "changes", "moon-build"))
-            tasks_path = os.path.join("openspec", "changes", "moon-build", "tasks.md")
-            open(tasks_path, "w", encoding="utf-8").write("- [ ] 实现功能\n")
-            mf.save_state(build_state)
-            premature_defer = False
-            try:
-                mf.cmd_moonlight(flow, build_state, types.SimpleNamespace(
-                    action="defer", ack=None,
-                    reason="编译暂时失败，已经检查日志但尚未完成全部实现任务"))
-            except SystemExit as exc:
-                premature_defer = exc.code == 2
-            check("build不能借尽力而为跳过未完成实现", premature_defer)
-
-            open(tasks_path, "w", encoding="utf-8").write("- [x] 实现功能\n")
-            open("biz.cpp", "a", encoding="utf-8").write("int done = 2;\n")
-            subprocess.run(["git", "add", "biz.cpp", tasks_path], check=True)
-            subprocess.run(["git", "commit", "-qm", "[REQMOONBUILD][feat]完成需求实现"], check=True)
-            mf.cmd_moonlight(flow, build_state, types.SimpleNamespace(
-                action="defer", ack=None,
-                reason="需求实现任务已全部完成并提交，仅剩公司编译环境不可用，已重试两次"))
-            check("build实现完成后可仅对编译遗留尽力放行",
-                  mf.load_state().get("current") == "verify_ponytail")
             quality_state = mf.load_state()
             quality_state["current"] = "rf_codecheck"
             mf.save_state(quality_state)
@@ -2322,7 +2223,7 @@ if flow:
                 action="repair", ack=None, reason=None))
             env_repair = mf.load_state()
             check("旧版环境遗留不再把修复轮送回已删除的 setup",
-                  env_repair.get("current") == "rf_compile"
+                  env_repair.get("current") == "build_rework"
                   and not (env_repair.get("moonlight") or {}).get("repair_after_environment"))
 
             # 这里是在同一个临时仓库中构造另一条晨间修复分支，不是拿生产中的
@@ -2335,7 +2236,7 @@ if flow:
                 action="repair", ack=None, reason=None))
             repairing = mf.load_state()
             check("月光宝盒按报告从工作流编译入口开启修复轮",
-                  repairing.get("current") == "rf_compile"
+                  repairing.get("current") == "build_rework"
                   and (repairing.get("moonlight") or {}).get("cycle") == 2
                   and "agent_tasks" not in repairing and "quality" not in repairing)
             mf._moonlight_resolve_kind(repairing, "codecheck")
@@ -2894,7 +2795,6 @@ for f in ("skills/mae-flow/SKILL.md", "skills/mae-flow/assets/STORY-TEMPLATE.md"
           "scripts/tests/test_commit_ownership.py",
           "scripts/tests/test_codecheck_logging.py",
           "scripts/tests/test_lightcheck.py",
-          "scripts/tests/test_task_scope.py",
           "runtime/vendor/manifest.json", "runtime/vendor/openspec/LICENSE",
           "runtime/vendor/comet/LICENSE", "runtime/vendor/superpowers/LICENSE",
           "runtime/vendor/ponytail/LICENSE", "runtime/vendor/lizard/LICENSE.txt",

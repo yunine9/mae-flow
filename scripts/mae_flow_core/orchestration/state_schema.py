@@ -19,7 +19,6 @@ _FIELDS = {
     "phase",
     "commit_pace",
     "status",
-    "current_cp",
     "artifacts",
     "decisions",
     "risks",
@@ -126,7 +125,6 @@ def encode_flow_state(state):
         "commit_pace": _enum_value(
             state.commit_pace, CommitPace, "commit_pace"),
         "status": _status(state.status),
-        "current_cp": _string(state.current_cp, "current_cp"),
         "artifacts": _encoded_pairs(
             state.artifacts, "artifacts", "kind", "path"),
         "decisions": _encoded_pairs(
@@ -188,7 +186,6 @@ def decode_flow_state(raw):
         phase=phase,
         commit_pace=pace,
         status=_status(raw["status"]),
-        current_cp=_string(raw["current_cp"], "current_cp"),
         artifacts=_pair_objects(
             raw["artifacts"], "artifacts", "kind", "path"),
         decisions=_pair_objects(

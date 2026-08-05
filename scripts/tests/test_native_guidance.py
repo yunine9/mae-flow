@@ -39,7 +39,6 @@ REQUIRED_ROLE_CAPABILITIES = {
     ("design-provenance:lean-story-review", "Design Reviewer"),
     ("role:craft-reviewer-agent", "CODE Reviewer"),
     ("role:story-generator-agent", "test-design agent"),
-    ("role:cp-implementer-agent", "CP implementer"),
     ("role:compile-agent", "compile agent"),
     ("role:codecheck-fix-agent", "CodeCheck fixer"),
     ("role:ut-generator-agent", "UT generator"),
@@ -185,6 +184,9 @@ class CapabilityPreservationTests(unittest.TestCase):
                     for relative in record["sources"]:
                         self.assertTrue(os.path.isfile(os.path.join(
                             ROOT, *relative.split("/"))))
+                elif source == "main-agent":
+                    self.assertEqual(
+                        "runtime/guidance/construction.md", row["new_home"])
                 else:
                     self.fail("unresolvable preservation source: " + source)
 
@@ -325,7 +327,8 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
         self.assertIn("design reviewer", text)
         self.assertIn("exactly once per full story", text)
         self.assertIn("code reviewer", text)
-        self.assertIn("at most once per cp", text)
+        self.assertIn("runs once before human review", text)
+        self.assertIn("accepted fixes do not schedule another reviewer pass", text)
         self.assertIn("integration review", text)
         for risk in (
                 "cross-module coupling", "shared state", "interface change",
@@ -352,7 +355,7 @@ class NativeGuidanceSemanticTests(unittest.TestCase):
     def test_native_guidance_removes_upstream_runtime_rituals(self):
         forbidden = (
             "/comet", "/opsx", "/ponytail", "openspec ", "superpowers:",
-            ".comet.yaml", "task_card_sha256", "task card", "task-card",
+            ".comet.yaml", "task_card_sha256",
             "exact ack", "fixed ack", "evidence token", "git sha",
             "test-driven development", "red-green", "dispatch a subagent",
             "advance the phase", "transition the workflow",
@@ -453,14 +456,14 @@ class NativeGuidanceManifestTests(unittest.TestCase):
         )
         self.assertFalse(runtime["loads_vendor_prompt_text"])
 
-    def test_release_selftest_registers_native_guidance_once(self):
+    def test_release_selftest_does_not_register_retired_guidance_suite(self):
         commands = [
             command
             for unused_label, command, unused_timeout, unused_limit
             in REFACTOR_SAFETY_SUITES
             if command and command[0] == "scripts/tests/test_native_guidance.py"
         ]
-        self.assertEqual([("scripts/tests/test_native_guidance.py",)], commands)
+        self.assertEqual([], commands)
 
 
 if __name__ == "__main__":

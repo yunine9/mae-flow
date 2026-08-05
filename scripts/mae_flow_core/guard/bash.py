@@ -16,9 +16,6 @@ class BashGateContext:
     step: str
     wanted_branch: str
     base_branch: str
-    checkpoint_locked: bool
-    checkpoint_label: str
-    checkpoint_status: str
     ticket: str
     commit_message_present: bool
     commit_message: str
@@ -62,38 +59,8 @@ def _pre_repository(context):
     return None
 
 
-def _pre_checkpoint(context):
+def _pre_wide_add(context):
     command = context.command
-    if (
-        context.checkpoint_locked
-        and re.search(
-            r"(?:^|[\s;&|(])git\s+commit\b", command, re.I)
-        and context.checkpoint_status != "commit_pending"
-    ):
-        return _absolute(
-            "bash-checkpoint-review-commit",
-            "检查点 %s 的检视收据已冻结，当前状态 %s 不允许新增提交。"
-            "等待检视时先取得用户裁决；待推送时只允许 push。"
-            % (
-                context.checkpoint_label or "最终检视",
-                context.checkpoint_status or "?",
-            ),
-        )
-    if (
-        context.checkpoint_locked
-        and re.search(
-            r"(?:^|[\s;&|(])git\s+push\b", command, re.I)
-        and context.checkpoint_status != "push_pending"
-    ):
-        return _absolute(
-            "bash-checkpoint-push-before-verify",
-            "检查点 %s 当前为 %s；提交内容尚未通过 checkpoint status "
-            "核验，禁止提前 push 或把 commit/push 合成一条命令。"
-            % (
-                context.checkpoint_label or "最终检视",
-                context.checkpoint_status or "?",
-            ),
-        )
     if re.search(r"git\s+add\s+(-A\b|--all\b|\.(\s|$))", command):
         return _absolute(
             "bash-wide-add",
@@ -147,7 +114,7 @@ def decide_commit_branch(context):
 def decide_pre_commit(context):
     for evaluator in (
         _pre_repository,
-        _pre_checkpoint,
+        _pre_wide_add,
         _pre_commit_format,
     ):
         decision = evaluator(context)

@@ -67,7 +67,7 @@ class QualityTaskInputTests(unittest.TestCase):
                 "基线分支": "main", "编译方式": "mcde build -i",
                 "UT生成方式": "AutoUT", "UT运行命令": "mcde test",
             },
-            "diff": "main..HEAD", "scope": "CP1", "checkpoint_id": "CP1",
+            "diff": "main..HEAD", "scope": "完整实现",
             "precommit_review": False, "inherited_dirty": (),
             "sources": sources,
             "groups": task_file_groups(
@@ -79,7 +79,7 @@ class QualityTaskInputTests(unittest.TestCase):
                 "unresolved": (),
             })(),
             "lightcheck": None, "notes": (), "scan": {},
-            "ut_targets": {}, "blueprint": {},
+            "ut_targets": {},
         }).body()
         for value in sources + ("src/radio/prach.cpp", "src/radio"):
             self.assertIn(value, document)

@@ -101,7 +101,6 @@ class LeanHookAdapterTests(unittest.TestCase):
             path=DeliveryPath.FULL,
             phase=Phase.QUALITY,
             commit_pace=CommitPace.STAGED,
-            current_cp="CP-2",
             artifacts=(
                 ("spec", "docs/mae-flow/requirements/REQ-5/spec.md"),
                 ("story", ".mae-flow-work/REQ-5/story.md"),
@@ -124,7 +123,7 @@ class LeanHookAdapterTests(unittest.TestCase):
         self.assertEqual(0, first.returncode, first.stderr.decode("utf-8"))
         text = first.stdout.decode("utf-8")
         for fact in (
-                "Mode: full", "Phase: quality", "CP: CP-2",
+                "Mode: full", "Phase: quality",
                 "spec=docs/mae-flow/requirements/REQ-5/spec.md",
                 "database compatibility", "build", "opaque-return",
                 "latest"):
@@ -222,7 +221,6 @@ class LeanHookAdapterTests(unittest.TestCase):
             path=DeliveryPath.FULL,
             phase=Phase.DELIVERY,
             commit_pace=CommitPace.STAGED,
-            current_cp="CP-FINAL-" + long_text,
             artifacts=tuple(
                 ("artifact-%02d-%s" % (index, long_text),
                  "path/%02d/%s" % (index, long_text))
@@ -246,7 +244,6 @@ class LeanHookAdapterTests(unittest.TestCase):
 
         self.assertLessEqual(len(response.stdout), 1200)
         self.assertIn("Phase: delivery", response.stdout)
-        self.assertIn("CP: CP-FINAL-", response.stdout)
         self.assertEqual(2, response.stdout.count("另有 18 项"))
         self.assertIn("Last capability: build-opaque-", response.stdout)
         self.assertIn("outcome=returned-opaque-", response.stdout)

@@ -21,10 +21,23 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
         steps = self.flow["steps"]
         self.assertEqual("grill", steps["branch_create"]["next"]["full"])
         self.assertEqual("story", steps["open"]["next"])
-        self.assertEqual("build_pace", steps["story"]["next"])
+        self.assertEqual("build", steps["story"]["next"])
         self.assertEqual("story", steps["design"]["next"])
-        self.assertEqual("story", steps["test_blueprint"]["next"])
         self.assertEqual("story", steps["story_ask"]["next"])
+
+    def test_all_workflows_use_one_implementation_and_precommit_review(self):
+        steps = self.flow["steps"]
+        self.assertEqual("build", steps["hf_open"]["next"])
+        self.assertEqual("build", steps["tw_open"]["next"])
+        self.assertEqual("build", steps["rf_triage"]["next"])
+        self.assertEqual({
+            "disabled": "build_review",
+            "enabled": "build_agent_review",
+        }, steps["build"]["next"])
+        self.assertEqual("build_review", steps["build_agent_review"]["next"])
+        self.assertEqual("build_commit", steps["build_review"]["next"]["continue"])
+        self.assertEqual("build_rework", steps["build_review"]["next"]["revise"])
+        self.assertEqual("build_review", steps["build_rework"]["next"])
 
     def test_story_loop_binds_local_spec_grill_and_story(self):
         steps = self.flow["steps"]
@@ -52,8 +65,8 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
         self.assertEqual("hf_open", steps["branch_create"]["next"]["hotfix"])
         self.assertEqual("tw_open", steps["branch_create"]["next"]["tweak"])
         self.assertEqual("rf_triage", steps["branch_create"]["next"]["review"])
-        self.assertEqual("build_pace", steps["hf_open"]["next"])
-        self.assertEqual("tw_pace", steps["tw_open"]["next"])
+        self.assertEqual("build", steps["hf_open"]["next"])
+        self.assertEqual("build", steps["tw_open"]["next"])
 
     def test_branch_prompt_explains_moonlight_noninteractive_resolution(self):
         with open(

@@ -9,8 +9,74 @@ from mae_flow_core.guard.manifest import (
 )
 from mae_flow_core.workflow.command_catalog import render_display
 
-from .shared import os
+from .shared import os, re, subprocess
 from .wiring import api
+
+
+def _archive_delivery_paths(st):
+    """Return only paths produced by this delivery's archive operation."""
+    data = (st or {}).get("spec", {}) or {}
+    paths = [
+        re.sub(r"^(?:\./)+", "", api.norm(path))
+        for path in data.get("archive_paths", []) or []
+        if isinstance(path, str) and path.strip()
+    ]
+    if paths:
+        return list(dict.fromkeys(paths))
+
+    # One-way compatibility for archive state written before exact archive
+    # paths were persisted.  Derive only current outputs, never old dirt.
+    archive_name = str(data.get("archived_to", "") or "")
+    if archive_name:
+        paths.append("openspec/changes/archive/" + archive_name)
+    paths.extend(
+        path for path in api._dirty_paths()
+        if path.startswith("openspec/specs/")
+        and not api._unchanged_initial_dirty(path, st or {})
+    )
+    return list(dict.fromkeys(paths))
+
+
+def _committed_delivery_paths(st):
+    """List paths committed inside the current delivery's quality scope."""
+    scope, err = api._scope_diff(st)
+    if err:
+        return [], err
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--name-only",
+             "--no-renames", "--diff-filter=ACMRTUXB", scope, "--"],
+            shell=False, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+    except Exception as exc:
+        return [], str(exc)
+    if result.returncode != 0:
+        return [], (result.stderr or result.stdout or "git diff 失败").strip()
+    changed = {
+        re.sub(r"^(?:\./)+", "", api.norm(path))
+        for path in result.stdout.splitlines() if path.strip()
+    }
+    return sorted(changed), ""
+
+
+def _committed_initial_carryover(st):
+    """Find unchanged pre-flow dirt accidentally committed in this delivery."""
+    if not st or not st.get("initial_dirty"):
+        return [], ""
+    changed, err = _committed_delivery_paths(st)
+    if err:
+        return [], err
+    changed = set(changed)
+    written = api._agent_written_paths()
+    carried = [
+        path for path in (st.get("initial_dirty", []) or [])
+        if path in changed
+        and api._unchanged_initial_dirty(path, st)
+        and api._repo_path_identity(path) not in written
+        and not api._authorized_delivery_path(path, st)
+    ]
+    return carried, ""
 
 
 def _identity(path):

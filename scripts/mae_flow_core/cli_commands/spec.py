@@ -366,15 +366,6 @@ def cmd_allow(flow, st, args):
     if rec.get("step") != st.get("current"):
         api.die("拦截编号 %s 属于步骤 %s,当前步骤是 %s;放行令只能在拦截发生的步骤签发。"
             % (bid, rec.get("step", "?"), st.get("current", "?")), 2)
-    if rec.get("rule") in {
-            "bash-checkpoint-review-commit",
-            "bash-checkpoint-push-before-verify"}:
-        api.die(
-            "该拦截属于检查点状态机完整性规则，不能签发 allow 放行令。"
-            "执行 checkpoint status 获取唯一恢复动作；"
-            "旧版本生成的拦截编号也不会绕过本限制。",
-            2,
-        )
     ok, authorization, authorization_receipt, why = (
         api._authorization_message(st, args.message_id))
     if not ok:

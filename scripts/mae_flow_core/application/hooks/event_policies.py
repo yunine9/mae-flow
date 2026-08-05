@@ -28,7 +28,6 @@ class PretoolDecision:
 _AGENT_KINDS = (
     ("story-generator-agent", "STORY"),
     ("craft-reviewer-agent", "REVIEWER"),
-    ("cp-implementer-agent", "CP_IMPLEMENT"),
     ("compile-agent", "COMPILE"),
     ("codecheck-fix-agent", "CODECHECK"),
     ("ut-generator-agent", "UT"),

@@ -11,7 +11,7 @@ Stop for a real reviewer tradeoff. CLEAR or approval continues without a user st
 
 ## Outputs
 Produce the reviewed Story in its established template and a separate implementation
-companion containing Grill impact, key functions, checkpoints, and archive impact.
+companion containing Grill impact, key functions, whole-change constraints, and archive impact.
 Record reviewer failure without automatic retry.
 
 ## Next

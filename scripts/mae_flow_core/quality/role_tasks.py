@@ -2,11 +2,7 @@
 
 
 ROLE_STEPS = {
-    "test-design": {"test_blueprint"},
-    "task-analysis": {"build_plan", "build"},
-    "craft-plan": {"build_plan", "build"},
-    "cp-implement": {"build"},
-    "craft-code": {"build"},
+    "code-review": {"build_agent_review"},
     "story-generate": {"story"},
     "story-review": {"story"},
     "grill-critic": {"grill"},

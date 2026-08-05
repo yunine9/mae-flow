@@ -135,7 +135,6 @@ class LeanMigrationTests(unittest.TestCase):
 
         self.assertEqual("REQ-42", state.ticket)
         self.assertEqual(CommitPace.STAGED, state.commit_pace)
-        self.assertEqual("CP2", state.current_cp)
         self.assertEqual(
             (
                 ("request", "docs/requests/REQ-42.md"),

@@ -24,8 +24,6 @@ class EditGateContext:
     specs_truth: str
     allow_specs_write: bool
     is_source: bool
-    checkpoint_locked: bool
-    checkpoint_label: str
     allow_source_edit: bool
     tests_only_patterns: tuple
     source_unlocked: bool
@@ -45,8 +43,6 @@ class BashWriteContext:
     allow_specs_write: bool
     offenders: tuple
     source_tokens: tuple
-    checkpoint_locked: bool
-    checkpoint_label: str
     allow_source_edit: bool
     tests_only_patterns: tuple
     source_unlocked: bool
@@ -124,14 +120,6 @@ def _source_edit_decision(context):
     match_path = context.match_path
     if not context.is_source:
         return None
-    if context.checkpoint_locked:
-        return _block(
-            "edit-checkpoint-review",
-            "检查点 %s 的检视快照已经冻结，Agent 不能继续改源码。"
-            "用户选择“需要调整代码”后执行 checkpoint decide revise，"
-            "状态回到 coding 才能修改。"
-            % (context.checkpoint_label or "最终检视"),
-        )
     if not context.allow_source_edit:
         return _block(
             "edit-source",
@@ -240,13 +228,6 @@ def _bash_repository_decision(context):
 
 
 def _bash_source_decision(context):
-    if context.offenders and context.checkpoint_locked:
-        return _block(
-            "bash-checkpoint-review-source",
-            "检查点 %s 的检视快照已经冻结，禁止经 Bash 改源码。"
-            "先由用户选择继续或调整。"
-            % (context.checkpoint_label or "?"),
-        )
     if context.offenders and not context.allow_source_edit:
         return _block(
             "bash-source",

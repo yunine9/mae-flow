@@ -137,7 +137,10 @@ def advance(flow, st, sid, step, tag, note=""):
         ml["pushed_head"] = api.sh("git rev-parse --verify HEAD")
     st["current"] = nxt
     if nxt:
-        st.setdefault("step_heads", {})[nxt] = api.sh("git rev-parse --verify HEAD")
+        current_head = api.sh("git rev-parse --verify HEAD")
+        st.setdefault("step_heads", {})[nxt] = current_head
+        if nxt == "build" and not st.get("implementation_base_head"):
+            st["implementation_base_head"] = current_head
     api.save_state(st)
     if api._moonlight(st) and nxt == "moonlight_review":
         api._write_moonlight_report(flow, st)

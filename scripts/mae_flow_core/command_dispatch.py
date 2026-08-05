@@ -32,12 +32,8 @@ FLOW_ROUTES = MappingProxyType({
     "moonlight": CommandRoute(
         "cmd_moonlight", ("flow", "state", "args")),
     "current": CommandRoute("print_current", ("flow", "state")),
-    "checkpoint": CommandRoute(
-        "cmd_checkpoint", ("flow", "state", "args")),
     "agent-task": CommandRoute(
         "cmd_agent_task", ("flow", "state", "args")),
-    "quality-artifact": CommandRoute(
-        "cmd_quality_artifact", ("flow", "state", "args")),
     "role-task": CommandRoute(
         "cmd_role_task", ("flow", "state", "args")),
     "codecheck-scan": CommandRoute(

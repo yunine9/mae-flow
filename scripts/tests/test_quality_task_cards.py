@@ -44,7 +44,6 @@ class QualityTaskCardTests(unittest.TestCase):
             digest="abc",
             head="deadbeef",
             scope="core",
-            checkpoint="CP-1",
             precommit_review=True,
             initial_compile_net=2,
             source_snapshot={"src/main.cpp": "hash"},
@@ -71,37 +70,6 @@ class QualityTaskCardTests(unittest.TestCase):
         self.assertTrue(record["worktree_snapshot_valid"])
         self.assertNotIn("sha256", record)
         self.assertNotIn("issuance_id", record)
-
-    def test_task_record_detaches_blueprint_binding(self):
-        blueprint = {
-            "path": ".mae-flow-work/test-blueprint-REQ-1.md",
-            "sha256": "a" * 64,
-            "scenario_ids": ["SC-1"],
-        }
-        record = task_record(
-            step="verify_ut",
-            path="/tmp/card.md",
-            digest="abc",
-            head="deadbeef",
-            scope="",
-            checkpoint="",
-            precommit_review=False,
-            initial_compile_net=0,
-            source_snapshot={},
-            worktree_snapshot={},
-            worktree_snapshot_valid=False,
-            allowed_files=[],
-            task_files=["src/main.cpp"],
-            execution_roots=["src"],
-            lightcheck={},
-            ut_targets={},
-            unchanged_initial_dirty=[],
-            at="2026-07-30 10:00:00",
-            blueprint=blueprint,
-        )
-        blueprint["scenario_ids"].append("SC-2")
-        self.assertEqual(["SC-1"], record["blueprint"]["scenario_ids"])
-        self.assertEqual("a" * 64, record["blueprint"]["sha256"])
 
 
 if __name__ == "__main__":

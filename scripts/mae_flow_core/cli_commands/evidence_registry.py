@@ -6,11 +6,9 @@ from .shared import (
     AgentEvidencePorts, AgentEvidenceRules, DeliveryEvidencePorts,
     DeliveryEvidenceRules, QualityEvidencePorts, QualityEvidenceRules,
     RISK_AGENT_LABELS, WorkflowEvidencePorts, WorkflowEvidenceRules,
-    append_codecheck_event, build_evidence_registry, globmod, hashlib, os,
+    append_codecheck_event, build_evidence_registry, globmod, os,
     read_bytes,
-    read_text, STATE_PATH, spec2code_artifact_path, spec2code_review_requires_rework,
-    spec2code_review_requires_human_decision, specengine, sys, time,
-    validate_spec2code_review, EvidenceResult,
+    read_text, STATE_PATH, specengine, sys, time,
 )
 from .wiring import api
 from mae_flow_core.workflow.agent_observations import (
@@ -146,11 +144,8 @@ ev_review_snapshot = _AGENT_EVIDENCE.review_snapshot
 
 _DELIVERY_EVIDENCE = DeliveryEvidenceRules(DeliveryEvidencePorts(
     moonlight=lambda state: api._moonlight(state),
-    development_review=lambda state: api._development_review(state),
     source_changed_since=lambda head, state: api._source_changed_since(
         head, state),
-    review_before_commit=lambda data: api._review_before_commit(data),
-    final_review_delta=lambda state: api._final_review_delta(state),
     archive_delivery_paths=lambda state: api._archive_delivery_paths(state),
     shell_output=lambda command: api.sh(command),
     argv_output=lambda arguments: api.argv_out(arguments),
@@ -172,9 +167,6 @@ _DELIVERY_EVIDENCE = DeliveryEvidenceRules(DeliveryEvidencePorts(
         "review.md"),
 ))
 
-ev_checkpoint_plan = _DELIVERY_EVIDENCE.checkpoint_plan
-ev_checkpoint_plan_complete = _DELIVERY_EVIDENCE.checkpoint_plan_complete
-ev_final_review_clear = _DELIVERY_EVIDENCE.final_review_clear
 ev_archive_paths_clean = _DELIVERY_EVIDENCE.archive_paths_clean
 ev_pushed = _DELIVERY_EVIDENCE.pushed
 ev_commit_tagged = _DELIVERY_EVIDENCE.commit_tagged
@@ -219,80 +211,6 @@ ev_codecheck_clean = _QUALITY_EVIDENCE.codecheck_clean
 ev_review_codecheck = _QUALITY_EVIDENCE.review_codecheck
 
 
-def _spec2code_plan_review(spec, state):
-    checkpoint = str(spec.get("checkpoint", "CP1") or "CP1")
-    ticket = str((state.get("config") or {}).get("单号", "") or "")
-    plan = (state.get("spec2code") or {}).get("plan") or {}
-    task = (state.get("role_tasks") or {}).get("craft-plan") or {}
-    expected_plan = str(plan.get("sha256", "") or "")
-    if (
-        not expected_plan
-        or task.get("checkpoint") != checkpoint
-        or task.get("review_target_sha256") != expected_plan
-        or not task.get("sha256")
-    ):
-        return EvidenceResult(
-            False,
-            "PLAN Reviewer 任务卡未签发或已随 plan 修订失效；"
-            "重新生成 role-task craft-plan。",
-        )
-    plan_path = str(plan.get("path", "") or "")
-    if not plan_path or not os.path.isfile(plan_path):
-        return EvidenceResult(False, "已登记 plan 文件不存在。")
-    try:
-        plan_text = read_text(plan_path, encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return EvidenceResult(False, "已登记 plan 无法读取: %s" % exc)
-    if hashlib.sha256(
-            plan_text.encode("utf-8")).hexdigest() != expected_plan:
-        return EvidenceResult(
-            False,
-            "plan 登记后内容已变化；重新登记并重新签发 PLAN Reviewer。",
-        )
-    try:
-        review_path = spec2code_artifact_path(
-            "review", ticket, checkpoint, "plan")
-    except ValueError as exc:
-        return EvidenceResult(False, "PLAN Review 路径无效: %s" % exc)
-    if not os.path.isfile(review_path):
-        return EvidenceResult(
-            False,
-            "缺少 PLAN Review 记录: " + review_path,
-        )
-    try:
-        review_text = read_text(review_path, encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return EvidenceResult(False, "PLAN Review 无法读取: %s" % exc)
-    errors = validate_spec2code_review(
-        review_text,
-        "plan",
-        checkpoint,
-        str(task.get("sha256")),
-        expected_plan,
-    )
-    if errors:
-        return EvidenceResult(
-            False,
-            "PLAN Review 记录无效: " + "；".join(errors),
-        )
-    if (
-        api._moonlight(state)
-        and spec2code_review_requires_human_decision(review_text)
-    ):
-        return EvidenceResult(
-            False,
-            "PLAN Reviewer 存在“人工裁决”项，月光宝盒不得代替用户拍板；"
-            "执行 moonlight blocked --reason "
-            '"<CP、Finding、候选方案和当前风险>"，保留现场到早晨处理。',
-        )
-    if spec2code_review_requires_rework(review_text):
-        return EvidenceResult(
-            False,
-            "PLAN Reviewer 仍有已接受待处理项。",
-        )
-    return EvidenceResult(True, "")
-
-
 _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     cwd=os.getcwd,
     glob_paths=globmod.glob,
@@ -310,8 +228,6 @@ _WORKFLOW_EVIDENCE = WorkflowEvidenceRules(WorkflowEvidencePorts(
     spec_data=lambda state: api._spec_data(state),
     risk_acceptance=lambda kind, state: api._risk_acceptance(kind, state),
     business_changed_files=lambda state: api._biz_changed_files(state),
-    spec2code_plan_review=lambda spec, state:
-        _spec2code_plan_review(spec, state),
     domain_archive_fresh=_domain_archive_fresh,
     local_spec_valid=_local_spec_valid,
     verification_passed=_verification_passed,
@@ -322,8 +238,6 @@ ev_glob = _WORKFLOW_EVIDENCE.glob
 ev_branch_ok = _WORKFLOW_EVIDENCE.branch_ok
 ev_tasks_checked = _WORKFLOW_EVIDENCE.tasks_checked
 ev_spec_field = _WORKFLOW_EVIDENCE.spec_field
-ev_spec2code_artifact = _WORKFLOW_EVIDENCE.spec2code_artifact
-ev_spec2code_plan_review = _WORKFLOW_EVIDENCE.spec2code_plan_review
 ev_tier_scope = _WORKFLOW_EVIDENCE.tier_scope
 ev_spec_validate = _WORKFLOW_EVIDENCE.spec_validate
 ev_content_free = _WORKFLOW_EVIDENCE.content_free

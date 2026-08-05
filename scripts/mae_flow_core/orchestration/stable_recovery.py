@@ -18,7 +18,7 @@ SAFE_BOUNDARY_BY_PHASE = {
     "startup": "config_confirm",
     "spec": "open",
     "story": "story",
-    "construction": "build_pace",
+    "construction": "build",
     "quality": "verify_ponytail",
     "delivery": "delivery_review",
 }
@@ -26,7 +26,13 @@ SAFE_BOUNDARY_BY_PHASE = {
 
 def recover_lean_flow(raw):
     """Project durable semantics without importing any evidence contract."""
-    lean = decode_flow_state(raw)
+    # Lean v3 once persisted a batch-development cursor.  It has no semantic
+    # value in the whole-change workflow, so the one-way recovery bridge drops
+    # it before strict decoding instead of reintroducing it into active state.
+    document = dict(raw) if isinstance(raw, dict) else raw
+    if isinstance(document, dict):
+        document.pop("current_cp", None)
+    lean = decode_flow_state(document)
     if lean.status in {"complete", "exited"}:
         return StableRecoveryResult(None, "", terminal=True)
     phase = lean.phase.value
@@ -43,11 +49,10 @@ def recover_lean_flow(raw):
             config[key[len("config."):]] = value
         elif key in {
                 "workflow", "grill", "STORY入库", "code_reviewer",
-                "development_pace"}:
+                }:
             choices[key] = value
     choices.setdefault(
         "workflow", "full" if lean.path == DeliveryPath.FULL else "tweak")
-    choices.setdefault("development_pace", lean.commit_pace.value)
 
     artifact_fields = {
         "request": "需求文档", "spec": "SPEC路径", "story": "STORY路径",
@@ -66,11 +71,9 @@ def recover_lean_flow(raw):
                 "hotfix": "hf_open", "review": "rf_triage",
             }.get(workflow, "tw_open")
         elif phase == "construction":
-            boundary = {
-                "hotfix": "hf_open", "review": "rf_pace",
-            }.get(workflow, "tw_pace")
+            boundary = "build"
         elif phase == "quality":
-            boundary = "rf_verify" if workflow == "review" else "tw_compile"
+            boundary = "rf_verify" if workflow == "review" else "tw_codecheck"
 
     stable = {
         "schema_version": 2,
@@ -78,7 +81,7 @@ def recover_lean_flow(raw):
         "current": boundary,
         "config": config,
         "choices": choices,
-        "protocols": {"development_checkpoints": 1},
+        "protocols": {},
         "history": [{
             "step": boundary,
             "result": "从 Lean v3 安全恢复；旧质量证据未复用",

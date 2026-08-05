@@ -1,19 +1,23 @@
+# Construction
+
 ## Objective
-Implement the approved outcome in coherent checkpoints and create testability seams early for the later formal UT chain.
+
+The main Agent implements the whole approved production-code change directly from the local Spec and Story.
 
 ## Inspect
-Read the current checkpoint, approved story or focused scope, changed interfaces,
-planned testability seams, cumulative UT handoff, and repository state.
+
+Read the confirmed behavior, design boundaries, affected code, repository build configuration, and intended test seam. Do not delegate implementation, split it into batches, or create extra planning artifacts.
 
 ## Stop for the user
-Stop for a real ambiguity, a meaningful design deviation, an irreversible risk,
-or an agreed Full-flow checkpoint confirmation.
+
+Keep the complete change uncommitted for the optional one-time read-only Agent precheck and mandatory user review. A requested revision returns to main-Agent editing and compile-agent verification, then to user review.
 
 ## Outputs
-Record changed files, checkpoint decisions, unresolved risks, and the cumulative
-UT handoff for all completed work.
-CP Construction does not write, compile, or run formal UT.
+
+- Complete uncommitted production-code change.
+- A compile-agent result from the task card's configured Skill or exact repository build method.
+- A whole-change UT handoff; formal UT remains in Quality.
 
 ## Next
-Proceed to Quality when construction and its cumulative UT handoff are complete.
-The next meaningful action is the current checkpoint.
+
+After user approval, commit the exact reviewed change and enter the existing Quality chain.

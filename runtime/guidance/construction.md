@@ -1,14 +1,13 @@
-# Construction
+# Construction Guidance
 
-Implement the approved behavior one coherent CP at a time.
+The main Agent implements the complete approved change from local `spec.md` and `story.md`; no implementation subagent or batch plan is used.
 
-- For a localized change with a concise confirmed scope, proceed directly. Upgrade to Full when semantic risk reveals unclear behavior, cross-module design, compatibility, security, data, public interface, shared state, or concurrency concerns. This decision is not file or line count.
-- Confirm the current behavior boundary and fix the root cause instead of masking a symptom.
-- Use the simplest design that is clear under actual constraints. Reuse existing components and prefer the standard library; avoid duplicate mechanisms and speculative abstraction.
-- Keep dependency direction and ownership explicit. Define error propagation, cleanup, resource lifetime, concurrency, compatibility, and public behavior at the boundary.
-- Create each planned test seam during coding. Extract deterministic decisions from framework boundary plumbing so the later formal UT can control inputs and observe outputs without imitating the framework.
-- Keep the seam narrow and production-meaningful. Do not add a public hook used only by tests or mock stable infrastructure merely to increase coverage.
-- Run low-cost checks for the touched code and repair safe local issues. Leave high-risk restructuring visible for quality disposition.
-- When coding reveals an implementation deviation, record it and compare it with the confirmed Spec and behavior baseline. Align the implementation when the artifacts remain correct; otherwise propose an artifact update for user review. Never silently rewrite either authority.
+For a localized change with concise confirmed scope, proceed directly. Upgrade to full workflow when semantic risk appears: unclear behavior, cross-module impact, compatibility, security, data, public interface, shared state, or concurrency. The decision follows semantic risk, not file or line count.
 
-Construction records natural-language UT handoff facts: behavior completed, deterministic logic, seam created, real framework boundary retained, and implementation deviation. A CP does not write, compile, or run formal UT.
+During coding, preserve ownership, error, lifetime, concurrency, compatibility, and reuse boundaries. Prefer the standard library, simplest design, and no speculative abstraction. Create a deterministic test seam during coding; isolate each framework boundary and hand the complete change to formal UT later.
+
+If implementation exposes a real deviation from the confirmed Spec or Story, record the implementation deviation and compare it with the behavior baseline. Align the implementation when possible; otherwise propose an artifact update for user judgment. Never silently rewrite confirmed behavior.
+
+Compilation is mandatory and delegated to compile-agent. Its generated task card must identify the exact project root, changed source/build files, execution roots, and configured build Skill or command. The main Agent must not replace this evidence with an ad-hoc local build.
+
+Keep code uncommitted for the optional one-time read-only CODE Agent precheck and the user's IDE review. Revisions return to main-Agent editing and compile-agent verification before another user review.

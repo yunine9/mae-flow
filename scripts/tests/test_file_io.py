@@ -5,7 +5,6 @@
 import gc
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -56,36 +55,6 @@ class ManagedFileIOTests(unittest.TestCase):
                 if issubclass(item.category, ResourceWarning)
             ],
         )
-
-    def test_checkpoint_runtime_emits_no_resource_warnings(self):
-        cases = (
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_new_staged_plan_reviews_uncommitted_diff_then_"
-            "commits_exact_snapshot",
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_dirty_final_delta_is_reviewed_then_exactly_"
-            "committed_and_rechecked",
-            "scripts.tests.test_checkpoints.CheckpointTests."
-            "test_new_state_skips_legacy_review_while_old_state_keeps_it",
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-W",
-                "always::ResourceWarning",
-                "-m",
-                "unittest",
-                *cases,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
-        )
-        output = result.stdout + result.stderr
-        self.assertEqual(0, result.returncode, output)
-        self.assertNotIn("ResourceWarning", output)
-
 
 if __name__ == "__main__":
     unittest.main()

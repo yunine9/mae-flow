@@ -205,10 +205,9 @@ class LeanHookAdapter:
     def _session_due(self, payload, state):
         session = payload.get("session_id") or payload.get("sessionId")
         if not isinstance(session, str) or not session:
-            session = "cursor\0%s\0%s\0%s\0%s" % (
+            session = "cursor\0%s\0%s\0%s" % (
                 state.ticket,
                 state.phase.value,
-                state.current_cp,
                 state.status,
             )
         identity = hashlib.sha256(
@@ -236,7 +235,6 @@ class LeanHookAdapter:
             "[mae-flow] Recovery context",
             "Mode: %s" % state.path.value,
             "Phase: %s" % state.phase.value,
-            "CP: %s" % (_clip(state.current_cp, 100) or "none"),
             "Artifacts: %s" % artifacts,
             "Unresolved risks: %s" % risks,
         ]

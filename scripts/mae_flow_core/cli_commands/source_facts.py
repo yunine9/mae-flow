@@ -6,6 +6,38 @@ from .shared import (
 )
 from .wiring import api
 
+
+def _risk_acceptance(kind, st):
+    record = (st.get("risk_acceptances", {}) or {}).get(kind, {})
+    if not record:
+        return False, ""
+    if record.get("step") != st.get("current"):
+        return False, "旧风险确认属于步骤 %s" % record.get("step", "?")
+    if record.get("at", "") < api._step_entered_at(st):
+        return False, "旧风险确认早于当前步骤"
+    task = (st.get("agent_tasks", {}) or {}).get(kind, {})
+    if (record.get("task_sha256")
+            and record.get("task_sha256") != task.get("sha256", "")):
+        return False, "风险确认绑定的任务卡已经变化"
+    if (record.get("task_issuance_id")
+            and record.get("task_issuance_id") != task.get("issuance_id", "")):
+        return False, "风险确认绑定的任务卡签发批次已经变化"
+    snapshot = record.get("source_snapshot")
+    if isinstance(snapshot, dict):
+        head = task.get("head", "")
+        if not head:
+            return False, "风险确认缺少任务卡源码基线"
+        if api._source_snapshot_since(head, st) != snapshot:
+            return False, "风险确认后未提交代码快照发生变化"
+        return True, ""
+    head = record.get("head", "")
+    changed, error = api._source_changed_since(head, st) if head else ([], "风险确认缺少 HEAD")
+    if error:
+        return False, "风险确认新鲜度无法核实:" + error
+    if changed:
+        return False, "风险确认后代码发生变化:" + "、".join(changed[:5])
+    return True, ""
+
 def _branch_adoption_requested(text):
     """Whether the user explicitly chose to keep working on the current branch."""
     value = re.sub(r"[（(]推荐[）)]", "", str(text or "")).strip()
@@ -328,27 +360,22 @@ def _provenance_changed_paths_since_head(head):
         api.norm(path) for path in paths if path))
 
 
-def _checkpoint_candidate_path(path, st, flow=None):
-    if api._is_source_path(path, st, flow or api.FLOW):
-        return True
-    if api._repo_path_identity(path) in api._agent_written_paths():
-        return True
-    return api._trusted_harness_commit_path(path, st)
+def _source_files_for_diff(diff, st, include_tests=True):
+    """Return changed source/build paths for one Git diff range."""
+    out = api.argv_out([
+        "git", "-c", "core.quotepath=false", "diff", "--name-only", diff])
+    files = [path for path in out.splitlines()
+             if path and api._is_source_path(path, st)]
+    if not include_tests:
+        files = [path for path in files if not api._is_test_file(path, st)]
+    return files, ""
 
-def _checkpoint_delivery_snapshot(st, head, flow=None):
-    """Fingerprint all reviewable delivery candidates, not just code suffixes."""
-    result = {}
-    for path in _changed_paths_since_head(head):
-        if _unchanged_initial_dirty(path, st):
-            continue
-        if _checkpoint_candidate_path(path, st, flow):
-            result[path] = api._review_path_fingerprint(path)
-    return result
 
-def _checkpoint_worktree_snapshot(st, flow=None):
-    """Return the exact uncommitted delivery snapshot shown in the IDE."""
-    head = api.sh("git rev-parse --verify HEAD")
-    return _checkpoint_delivery_snapshot(st, head, flow)
+def _changed_source_files(st, include_tests=True):
+    diff, error = api._scope_diff(st)
+    if error:
+        return None, error
+    return _source_files_for_diff(diff, st, include_tests)
 
 def _numstat_line_net(line, st=None, flow=None):
     fields = line.split("\t")

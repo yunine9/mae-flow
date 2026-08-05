@@ -5,8 +5,7 @@ import time
 
 QUALITY_STEPS = {
     "build": "compile",
-    "rf_compile": "compile",
-    "tw_compile": "compile",
+    "build_rework": "compile",
     "verify_post_ponytail_compile": "compile",
     "verify_recompile": "compile",
     "rf_codecheck": "codecheck",
@@ -20,8 +19,8 @@ QUALITY_STEPS = {
 }
 
 REPAIR_ENTRY = {
-    "review": "rf_compile",
-    "tweak": "tw_compile",
+    "review": "build_rework",
+    "tweak": "build_rework",
     "full": "verify_recompile",
     "hotfix": "verify_recompile",
 }

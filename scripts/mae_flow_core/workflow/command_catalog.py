@@ -20,7 +20,6 @@ def render_command(command_id, context=None):
         "messages": lambda: ["messages"],
         "local_spec_init": lambda: ["local-spec", "init"],
         "local_spec_validate": lambda: ["local-spec", "validate"],
-        "checkpoint_final": lambda: ["checkpoint", "final"],
         "manifest_set": lambda: [
             "manifest", "set", "--file", _required(context, "file"),
             "--message", _required(context, "message"),
@@ -57,6 +56,6 @@ def render_display(command_id, context=None, executable="mae-flow"):
 def catalog_ids():
     return (
         "current", "messages", "local_spec_init", "local_spec_validate",
-        "checkpoint_final", "manifest_set", "manifest_confirm",
+        "manifest_set", "manifest_confirm",
         "migrate_confirm", "compile_task", "codecheck_task", "ut_task",
     )

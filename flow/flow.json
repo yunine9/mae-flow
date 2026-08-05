@@ -335,16 +335,22 @@
       "next": "story"
     },
     "story": {
-      "title": "Story 生成与一次设计检视",
+      "title": "Story 与实施附录生成及一次设计检视",
       "user_ack": true,
       "confirmation_answers": [
-        "Story 已确认，进入开发节奏选择"
+        "Story 与实施附录已确认，进入开发节奏选择"
       ],
       "evidence": [
         {
           "type": "glob",
           "any": [
             ".mae-flow-work/{单号}/story.md"
+          ]
+        },
+        {
+          "type": "glob",
+          "any": [
+            ".mae-flow-work/{单号}/implementation.md"
           ]
         },
         {
@@ -365,6 +371,14 @@
             "待确认"
           ],
           "note": "Story 仍有待确认内容；先展示给用户拍板，再完成本步骤唯一一次确认。"
+        },
+        {
+          "type": "content_free",
+          "file": ".mae-flow-work/{单号}/implementation.md",
+          "patterns": [
+            "待确认"
+          ],
+          "note": "实施附录仍有待确认内容；先展示给用户拍板，再完成本步骤唯一一次确认。"
         }
       ],
       "next": "build_pace"

@@ -21,6 +21,7 @@ class RoleTaskContext:
     review_output: str = ""
     review_target_sha256: str = ""
     write_output: str = ""
+    companion_output: str = ""
     lifecycle_only: bool = False
 
 
@@ -106,16 +107,20 @@ def _append_review_contract(document, context, user_decision=False):
 def _append_stable_role_contract(document, role, context, checkpoint):
     if role == "story-generate":
         document.extend([
-            "职责:根据本地 Grill、Spec、相关领域文档、模板和真实代码生成 Story。",
-            "唯一允许写入的过程件: "
+            "职责:根据本地 Grill、Spec、相关领域文档、两个模板和真实代码生成 Story 与实施附录。",
+            "仅允许写入的过程件:",
+            "- Story: "
             + (context.write_output or "（缺失；返回 NEEDS_INPUT）"),
+            "- 实施附录: "
+            + (context.companion_output or "（缺失；返回 NEEDS_INPUT）"),
+            "Story 必须严格保持模板既有结构；Grill 实现影响、关键函数详述、CP 和领域归档影响只写入实施附录。",
             "不得创建 Design、Test Blueprint、Roadmap 或详细 Build Plan。",
         ])
     elif role == "story-review":
         document.extend([
-            "模式: Story 设计检视，只读。",
-            "职责:核对业务验收、接口边界、关键函数设计、测试设计和 CP 划分。",
-            "本轮只执行一次；返回真实 Finding，不修改 Story 或其他文件。",
+            "模式: Story 与实施附录设计检视，只读。",
+            "职责:核对 Story 模板结构、业务验收和接口边界，并核对实施附录中的 Grill 追踪、关键函数、CP、风险和领域归档影响。",
+            "本轮只执行一次；返回真实 Finding，不修改 Story、实施附录或其他文件。",
         ])
     elif role == "grill-critic":
         document.extend([

@@ -7,7 +7,7 @@ model: inherit
 
 # UT Generator Agent
 
-读取主会话给出的任务卡。任务卡必须给出项目根、本地 Spec、Grill、Story、候选源码、
+读取主会话给出的任务卡。任务卡必须给出项目根、本地 Spec、Grill、Story、实施附录、候选源码、
 本次函数或行范围、UT 生成方式、UT 运行命令和执行目录；缺项时如实报告，不对着实现猜需求。
 
 ## 执行边界

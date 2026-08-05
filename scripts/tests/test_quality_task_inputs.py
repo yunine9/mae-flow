@@ -34,7 +34,9 @@ class QualityTaskInputTests(unittest.TestCase):
     def test_local_spec_grill_story_precede_legacy_sources(self):
         with tempfile.TemporaryDirectory() as root:
             package = ensure_work_package(root, "REQ-123")
-            for path in (package.spec, package.grill, package.story):
+            for path in (
+                    package.spec, package.grill, package.story,
+                    package.implementation):
                 with open(path, "w", encoding="utf-8") as stream:
                     stream.write("confirmed\n")
             sources = requirement_sources(
@@ -44,10 +46,13 @@ class QualityTaskInputTests(unittest.TestCase):
                 absolute=lambda path: (
                     path if os.path.isabs(path) else os.path.join(root, path)),
                 glob_paths=lambda _pattern: (),
-                local_sources=(package.spec, package.grill, package.story),
+                local_sources=(
+                    package.spec, package.grill, package.story,
+                    package.implementation),
             )
             self.assertEqual(
-                (package.spec, package.grill, package.story), sources[:3])
+                (package.spec, package.grill, package.story,
+                 package.implementation), sources[:4])
 
     def test_rendered_card_names_every_artifact_and_candidate(self):
         sources = (
@@ -86,7 +91,8 @@ class QualityTaskInputTests(unittest.TestCase):
             for path, content in (
                     (package.spec, "NRPRACH 支持 SUL"),
                     (package.grill, "SUL 决策"),
-                    (package.story, "无线接入实现")):
+                    (package.story, "无线接入设计"),
+                    (package.implementation, "无线接入实现")):
                 with open(path, "w", encoding="utf-8") as stream:
                     stream.write(content)
             specs = os.path.join(root, "docs", "specs")

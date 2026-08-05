@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Story is the sole reviewed pre-code design artifact."""
+"""Story keeps its legacy structure while Mae-Flow uses a local companion."""
 
 import json
 import os
@@ -32,35 +32,71 @@ class StoryContractTests(unittest.TestCase):
             self.assertNotIn(removed, chain)
         self.assertEqual("story", flow["steps"]["open"]["next"])
         self.assertEqual("build_pace", flow["steps"]["story"]["next"])
+        story_evidence = json.dumps(
+            flow["steps"]["story"]["evidence"], ensure_ascii=False)
+        self.assertIn(".mae-flow-work/{单号}/story.md", story_evidence)
+        self.assertIn(".mae-flow-work/{单号}/implementation.md", story_evidence)
 
-    def test_story_template_has_approved_semantic_sections(self):
+    def test_story_template_preserves_legacy_structure_without_process_additions(self):
         template = read("skills/mae-flow/assets/STORY-TEMPLATE.md")
-        sections = (
-            "业务目标与范围",
-            "Grill 决策与未决项",
-            "可观察行为与验收条件",
-            "性能规格",
-            "对外及跨组件接口设计",
-            "关键函数与方法修改详述",
-            "数据与兼容性",
-            "测试设计",
-            "CP 划分与轻量实施说明",
-            "风险、回滚与领域文档影响",
+        legacy_sections = (
+            "## 1 概述",
+            "### 1.1 客户场景（必选）",
+            "### 1.2 外部依赖（可选）",
+            "## 2 方案设计",
+            "### 2.1 场景分析",
+            "#### 2.1.1 场景设计（必选）",
+            "#### 2.1.2 性能规格（必选）",
+            "#### 2.1.3 验收标准（必选）",
+            "### 2.2 详细设计",
+            "#### 2.2.1 逻辑模型设计（按需必选）",
+            "#### 2.2.2 接口设计（按需必选）",
+            "#### 2.2.3 数据模型设计（按需必选）",
+            "#### 2.2.4 运行视图设计（按需必选）",
+            "#### 2.2.5 UI交互设计（按需必选）",
+            "#### 2.2.6 模拟仿真设计（按需必选）",
+            "## 3 测试设计",
+            "### 3.1 UT测试设计（必选）",
+            "### 3.2 接口测试设计（按需必选）",
+            "## 4 安全红线自检表",
+            "## 5 Story转测自检表",
         )
-        positions = [template.index(section) for section in sections]
+        positions = [template.index(section) for section in legacy_sections]
         self.assertEqual(sorted(positions), positions)
         self.assertIn("仅填写容量、时延、吞吐、并发或资源上限", template)
         self.assertIn("REST、CORBA", template)
+        self.assertIn("| 1 | 串讲&反串 |", template)
+        for process_addition in (
+                "Grill 决策与未决项", "关键函数/方法设计",
+                "CP 划分与轻量实施说明", "领域文档影响"):
+            self.assertNotIn(process_addition, template)
+        self.assertEqual([
+            "## 1 概述", "## 2 方案设计", "## 3 测试设计",
+            "## 4 安全红线自检表", "## 5 Story转测自检表",
+        ], [line for line in template.splitlines() if line.startswith("## ")])
+
+    def test_implementation_template_owns_process_additions(self):
+        template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
+        sections = (
+            "Grill 决策与实现影响",
+            "关键函数与方法修改详述",
+            "CP 划分与轻量实施说明",
+            "风险、回滚与领域归档影响",
+        )
+        positions = [template.index(section) for section in sections]
+        self.assertEqual(sorted(positions), positions)
+        self.assertIn("docs/specs/<domain>.md", template)
 
     def test_story_generator_requires_exact_local_inputs(self):
         generator = read("agents/story-generator-agent.md")
         for required in (
                 "spec.md", "grill.md", "docs/specs/index.md",
-                "STORY-TEMPLATE.md", "代码路径"):
+                "STORY-TEMPLATE.md", "IMPLEMENTATION-TEMPLATE.md", "代码路径"):
             self.assertIn(required, generator)
         self.assertNotIn("openspec/changes", generator)
         self.assertNotIn("STORY_RESULT:", generator)
         self.assertIn(".mae-flow-work/<单号>/story.md", generator)
+        self.assertIn(".mae-flow-work/<单号>/implementation.md", generator)
 
     def test_story_reviewer_runs_once_without_digest_reentry(self):
         flow = json.loads(read("flow/flow.json"))

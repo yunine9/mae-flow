@@ -54,6 +54,7 @@ diff --git a/src/service.py b/src/service.py
                 "/repo/.mae-flow-work/reviews/REQ-1/CP1-code.md"),
             review_target_sha256="d" * 64,
             write_output="/repo/.mae-flow-work/plan-REQ-1.md",
+            companion_output="/repo/.mae-flow-work/REQ-1/implementation.md",
         ),
     ).body()
 
@@ -79,10 +80,13 @@ class RoleTaskDocumentTests(unittest.TestCase):
                 "/repo/.mae-flow-work/REQ-1/spec.md",
                 "/repo/.mae-flow-work/REQ-1/grill.md",
                 "/repo/.mae-flow-work/REQ-1/story.md",
+                "/repo/.mae-flow-work/REQ-1/implementation.md",
                 "/repo/docs/specs/radio.md",
                 "/repo/.mae-flow-work/plugin-resources/assets/STORY-TEMPLATE.md",
+                "/repo/.mae-flow-work/plugin-resources/assets/IMPLEMENTATION-TEMPLATE.md",
             ),
             write_output="/repo/.mae-flow-work/REQ-1/story.md",
+            companion_output="/repo/.mae-flow-work/REQ-1/implementation.md",
         )
         generated = build_role_task_document(
             role="story-generate", project_root="/repo", ticket="REQ-1",
@@ -90,8 +94,9 @@ class RoleTaskDocumentTests(unittest.TestCase):
         reviewed = build_role_task_document(
             role="story-review", project_root="/repo", ticket="REQ-1",
             checkpoint="", context=context).body()
-        self.assertIn("唯一允许写入", generated)
+        self.assertIn("仅允许写入", generated)
         self.assertIn("/repo/.mae-flow-work/REQ-1/story.md", generated)
+        self.assertIn("/repo/.mae-flow-work/REQ-1/implementation.md", generated)
         self.assertIn("只读", reviewed)
         self.assertIn("只执行一次", reviewed)
 

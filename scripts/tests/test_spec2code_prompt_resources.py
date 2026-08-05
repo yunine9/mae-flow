@@ -21,10 +21,10 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("单行不超过 120 列", text)
         self.assertIn("逐行翻译代码", text)
 
-    def test_story_absorbs_test_design_and_light_cp_boundaries(self):
+    def test_story_and_implementation_companion_replace_heavy_plans(self):
         text = read("agents/story-generator-agent.md")
         self.assertIn("测试设计", text)
-        self.assertIn("CP", text)
+        self.assertIn("implementation.md", text)
         self.assertIn("不生成 Roadmap", text)
         self.assertFalse(os.path.exists(os.path.join(
             ROOT, "agents", "test-design-agent.md")))
@@ -51,6 +51,7 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
 
     def test_build_prompts_use_story_cp_and_existing_checkpoint_runtime(self):
         pace = read("flow/steps/build_pace.md")
+        self.assertIn("implementation.md", pace)
         self.assertIn("checkpoint plan --item", pace)
         self.assertNotIn("--roadmap", pace)
         build = read("flow/steps/build.md")

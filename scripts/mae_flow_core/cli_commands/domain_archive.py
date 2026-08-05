@@ -27,7 +27,10 @@ def _ticket(state):
 
 
 def _package_inputs(package):
-    return (package.spec, package.grill, package.story, package.decisions)
+    return (
+        package.spec, package.grill, package.story,
+        package.implementation, package.decisions,
+    )
 
 
 def _git_facts():

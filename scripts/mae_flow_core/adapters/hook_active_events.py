@@ -14,6 +14,7 @@ from mae_flow_core.application.hooks.event_policies import (
     standalone_pretool_decision,
     stop_decision,
     template_decision,
+    template_path,
     template_target,
 )
 from mae_flow_core.application.hooks.models import HookResponse
@@ -399,19 +400,14 @@ class ActiveHookEventAdapter:
         if not target:
             return HookResponse()
         template_name, label = target
-        template_path = os.path.join(
-            self.repository_root,
-            "skills",
-            "mae-flow",
-            "assets",
-            template_name,
-        )
-        if not os.path.exists(template_path):
-            self.log(label + " 模板缺失: " + template_path)
+        resolved_template = template_path(
+            self.repository_root, template_name)
+        if not os.path.exists(resolved_template):
+            self.log(label + " 模板缺失: " + resolved_template)
             return HookResponse()
         try:
             decision = template_decision(
-                read_text(template_path), read_text(path))
+                read_text(resolved_template), read_text(path))
         except Exception:
             return HookResponse()
         if decision.accepted:

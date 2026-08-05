@@ -31,6 +31,11 @@ class ProjectResourceTests(unittest.TestCase):
                 "assets", "DOMAIN-SPEC-TEMPLATE.md")
             self.assertIn(domain_template, paths)
             self.assertTrue(os.path.isfile(domain_template))
+            implementation_template = os.path.join(
+                root, ".mae-flow-work", "plugin-resources",
+                "assets", "IMPLEMENTATION-TEMPLATE.md")
+            self.assertIn(implementation_template, paths)
+            self.assertTrue(os.path.isfile(implementation_template))
 
     def test_ordinary_ticket_keeps_readable_work_directory(self):
         self.assertIsNotNone(importlib.util.find_spec(
@@ -45,6 +50,10 @@ class ProjectResourceTests(unittest.TestCase):
                 package.root,
             )
             self.assertEqual("REQ-123", self._read(package.ticket_marker))
+            self.assertEqual(
+                os.path.join(package.root, "implementation.md"),
+                package.implementation,
+            )
 
     def test_case_collision_gets_short_stable_suffix(self):
         self.assertIsNotNone(importlib.util.find_spec(

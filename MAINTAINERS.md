@@ -8,14 +8,15 @@
 
 当前生产实现以 `d32ccfb` 的稳定流程为底座，只接受小步减法式演进。后续文档若仍描述独立 Test Blueprint、
 Roadmap、详细 Build Plan、固定 Agent 返回字段、摘要重绑或 Lean 六阶段运行时，以本节为准：这些都不是新单的
-生产门禁。Story 是编码前唯一设计产物，Grill 和本地 Spec 是它的强制输入；Spec/Grill/Story 留在
+生产门禁。Story 严格保持原有业务模板；Mae-Flow 的 Grill 实现影响、关键函数详述、轻量 CP 和领域归档影响
+放在本地 `implementation.md`。Grill 和本地 Spec 是两者的强制输入；Spec/Grill/Story/implementation 留在
 `.mae-flow-work/<单号>/`，只有协调后的领域文档进入 `docs/specs/`。
 
 子 Agent 返回按不透明自然语言处理。Hook 只记录生命周期、真实 Bash/Skill 执行和真实文件写入；不得重新加入
 结果标记、令牌、任务卡/源码摘要或 Reviewer 文件指纹校验。这里的放松不影响 PreToolUse 路径授权、只读 Reviewer、
 CP 文件范围、UT/CodeCheck/Compile 的源码所有权和 Git 精确提交边界。
 
-用户在 Story 后只确认一次并选择节奏：Staged 每个 CP 停靠，Continuous 只在全部 CP 完成后统一停靠。
+用户在 Story 与实施附录后只确认一次并选择节奏：Staged 每个 CP 停靠，Continuous 只在全部 CP 完成后统一停靠。
 任何文件时间戳、摘要变化或 Reviewer 后的主 Agent 修正，都不得自动重派 Reviewer、重问同一确认或把流程打回。
 所有步骤输出的命令必须能被生产 parser 直接解析；每个可达非终态都必须存在真实后继。这两项和 Stop Hook
 三次零进展 fail-open 共同构成“禁止卡死/循环”的发布红线。
@@ -145,7 +146,7 @@ Direct 模式重入使用退出记录中的真实消息 ID：`init --message-id`
 require_sets 步骤的 `current` 会展示预填块；它只是候选值，配置阶段统一放进完整确认单一次确认，
 不再逐项要求用户签字。
 **过程区 `.mae-flow-work/<单号>/`**（gitignored）：过程性产物的唯一归宿——
-Spec、Grill、Story、decisions、grill-prep、survey、review、verification、UT handoff、CodeCheck 豁免和诊断。
+Spec、Grill、Story、implementation、decisions、grill-prep、survey、review、verification、UT handoff、CodeCheck 豁免和诊断。
 CodeCheck 的 append-only Markdown 诊断及原始
 stdout/stderr/report/Agent diff 同样放这里：主流程按单号+步骤归档，独立任务跟随 work_dir；
 单个大产物保存头尾并记录完整 SHA-256。诊断全程 best-effort，任何写入异常都不得成为新门禁。
@@ -371,7 +372,7 @@ v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability
 | 所有交付路径只走一次领域归档 | 当前真相统一、无按单号历史副本 | flow.json + domain_archive.md |
 | verify 链固定顺序 Ponytail→CodeCheck→UT→Comet | 删→改→测→验：重构定稿后 UT 才覆盖得上最终形态 | flow.json + 各 verify step md |
 | ponytail 红线：YAGNI 不砍 spec、禁 ultra 档 | spec 是合同；质疑需求归 grill 阶段 | build.md + verify_ponytail.md |
-| grill 高度分层：WHAT 归 grill，HOW 归 Story | 提问不撞车；交接物 = 本地 decisions + grill | grill.md + open.md + story.md |
+| grill 高度分层：WHAT 归 grill，业务设计归 Story，流程实施细节归附录 | 提问不撞车；Story 模板稳定 | grill.md + story.md + implementation.md |
 
 **用户话术对照表**（用户界面层彻底封装：用户所见一律左列，右列只活在实现层与维护文档；--choice 代号、目录名、命令是 comet/openspec 的实物，不改）：
 
@@ -379,7 +380,8 @@ v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability
 |---|---|
 | 完整开发 / 已定位问题修复 / 局部修改 / 处理评审意见 | full / hotfix / tweak / review（--choice 代号，与 comet workflow 对齐） |
 | 需求规格 | `.mae-flow-work/<单号>/spec.md` 本地过程件 |
-| 设计 | `.mae-flow-work/<单号>/story.md` 本地过程件 |
+| 业务设计 | `.mae-flow-work/<单号>/story.md` 本地过程件 |
+| 实施附录 | `.mae-flow-work/<单号>/implementation.md` 本地过程件 |
 | 领域归档 | `docs/specs/<domain>.md` 当前真相源 |
 | 方案讨论 | superpowers brainstorming |
 | 代码精简 | ponytail review |

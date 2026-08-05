@@ -198,6 +198,7 @@ class RoleTaskCliTests(unittest.TestCase):
                     body = stream.read()
                 self.assertIn(os.path.abspath(package.spec), body)
                 self.assertIn(os.path.abspath(package.grill), body)
+                self.assertIn(os.path.abspath(package.implementation), body)
                 self.assertNotIn("SHA256", body)
 
                 state["current"] = "grill"

@@ -1,10 +1,10 @@
-质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。
+质量验证已经完成。现在只把本次最终代码中已经确认、实现并验证的长期知识归档到领域真相源；Spec、Grill、Story、实施附录、评审和验证过程件都留在 `.mae-flow-work/<单号>/`，不得提交。
 
 先按 `docs/specs/index.md` 判断本次涉及的领域。每个领域分别执行：
 
 `python "{MAEFLOW_PATH}" domain-archive prepare --domain "<领域>" --keyword "<关键词>"`
 
-首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：
+首次执行只会在本单 `domain-archive/` 下初始化候选。根据本地 Spec、Grill、Story、实施附录、最终代码和测试补充长期事实，删除模板草稿标记，然后原样重跑该命令。多个领域逐个准备；没有任何长期知识变化时执行：
 
 `python "{MAEFLOW_PATH}" domain-archive prepare --unchanged`
 

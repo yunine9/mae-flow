@@ -19,6 +19,7 @@ from mae_flow_core.application.hooks.event_policies import (  # noqa: E402
     standalone_pretool_decision,
     stop_decision,
     template_decision,
+    template_path,
     template_target,
 )
 from mae_flow_core.application.hooks.events import (  # noqa: E402
@@ -219,11 +220,39 @@ class HookEventTests(unittest.TestCase):
             template_target("docs/story/STORY-123.md"),
         )
         self.assertEqual(
+            ("STORY-TEMPLATE.md", "STORY"),
+            template_target(".mae-flow-work/REQ-123/story.md"),
+        )
+        self.assertEqual(
+            ("IMPLEMENTATION-TEMPLATE.md", "IMPLEMENTATION"),
+            template_target(".mae-flow-work/REQ-123/implementation.md"),
+        )
+        self.assertEqual(
             ("GRILL-PREP-TEMPLATE.md", "GRILL-PREP"),
             template_target(
                 ".mae-flow-work/standalone/x/grill-prep.md"),
         )
         self.assertIsNone(template_target("src/main.py"))
+
+    def test_template_path_prefers_materialized_project_resource(self):
+        local = os.path.join(
+            "/repo", ".mae-flow-work", "plugin-resources",
+            "assets", "STORY-TEMPLATE.md")
+        source = os.path.join(
+            "/repo", "skills", "mae-flow", "assets",
+            "STORY-TEMPLATE.md")
+        self.assertEqual(
+            local,
+            template_path(
+                "/repo", "STORY-TEMPLATE.md",
+                exists=lambda path: path in {local, source}),
+        )
+        self.assertEqual(
+            source,
+            template_path(
+                "/repo", "STORY-TEMPLATE.md",
+                exists=lambda path: path == source),
+        )
 
 
 if __name__ == "__main__":

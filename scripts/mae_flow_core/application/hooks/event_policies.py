@@ -1,6 +1,7 @@
 """Pure policies shared by Hook event use cases."""
 
 from dataclasses import dataclass
+import os
 import re
 
 
@@ -35,6 +36,16 @@ _AGENT_KINDS = (
 
 _TEMPLATE_TARGETS = (
     (r"docs/story/STORY-.*\.md$", "STORY-TEMPLATE.md", "STORY"),
+    (
+        r"(^|/)\.mae-flow-work/(?:[^/]+/)+story\.md$",
+        "STORY-TEMPLATE.md",
+        "STORY",
+    ),
+    (
+        r"(^|/)\.mae-flow-work/(?:[^/]+/)+implementation\.md$",
+        "IMPLEMENTATION-TEMPLATE.md",
+        "IMPLEMENTATION",
+    ),
     (r"docs/chain/CHAIN-.*\.md$", "CHAIN-TEMPLATE.md", "CHAIN"),
     (
         r"(^|/)\.mae-flow-work/(?:\S+/)*grill-prep[^/]*\.md$",
@@ -115,6 +126,19 @@ def template_target(path):
         ),
         None,
     )
+
+
+def template_path(repository_root, template_name, exists=os.path.exists):
+    """Resolve the materialized consumer template before source-tree fallback."""
+    candidates = (
+        os.path.join(
+            repository_root, ".mae-flow-work", "plugin-resources",
+            "assets", template_name),
+        os.path.join(
+            repository_root, "skills", "mae-flow", "assets",
+            template_name),
+    )
+    return next((path for path in candidates if exists(path)), candidates[0])
 
 
 def _moonlight_safe_point(step, moonlight):

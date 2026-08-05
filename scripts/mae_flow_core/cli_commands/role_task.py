@@ -193,11 +193,16 @@ def _stable_story_context(state, role, document=""):
         os.path.join("docs", "specs", "index.md"), *domain_paths,
     ]
     if role in ("story-review", "cp-implement", "craft-code"):
-        common.append(package.story)
+        common.extend((package.story, package.implementation))
     if role in ("story-generate", "story-review"):
-        common.append(os.path.join(
-            ".mae-flow-work", "plugin-resources", "assets",
-            "STORY-TEMPLATE.md"))
+        common.extend((
+            os.path.join(
+                ".mae-flow-work", "plugin-resources", "assets",
+                "STORY-TEMPLATE.md"),
+            os.path.join(
+                ".mae-flow-work", "plugin-resources", "assets",
+                "IMPLEMENTATION-TEMPLATE.md"),
+        ))
     if document:
         common.append(document)
     return package, _plain_existing(common)
@@ -385,7 +390,10 @@ def cmd_role_task(_flow, state, args):
     package = ensure_work_package(os.getcwd(), ticket)
     story_mode = os.path.isfile(package.story)
     plan_files = (
-        _document_paths(package.story)
+        tuple(dict.fromkeys(
+            _document_paths(package.story)
+            + _document_paths(package.implementation)
+        ))
         if story_mode and role in ("cp-implement", "craft-code")
         else _plan_files(state, checkpoint)
     )
@@ -412,6 +420,9 @@ def cmd_role_task(_flow, state, args):
             write_output=(
                 package.story if role == "story-generate"
                 else _write_output(ticket, role)
+            ),
+            companion_output=(
+                package.implementation if role == "story-generate" else ""
             ),
             lifecycle_only=bool(
                 story_mode and role in ("cp-implement", "craft-code")),

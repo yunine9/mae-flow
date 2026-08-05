@@ -1,4 +1,4 @@
-读取本单 `spec.md`、`grill.md`、`story.md` 和当前 CP。禁止另建 Test Blueprint、Roadmap、详细 Build Plan 或 Task 分析文档。
+读取本单 `spec.md`、`grill.md`、`story.md`、`implementation.md` 和当前 CP。禁止另建 Test Blueprint、Roadmap、详细 Build Plan 或 Task 分析文档。
 
 每个 CP 执行固定顺序：
 
@@ -14,8 +14,8 @@ Staged：每个 CP 完成后必须停下展示精确 diff、编译结果和检�
 
 Continuous：所有 CP 连续完成，中间不询问、不推送；全部完成后展示一次最终代码增量供用户检视。
 
-Adjust：不得进入编码，返回 Story 的 CP 小节调整后重新选择节奏。
+Adjust：不得进入编码，返回实施附录的 CP 小节调整后重新选择节奏。
 
-实现中发现 Spec、Grill 决策或 Story 有实质错误时，停下说明问题、影响和最小修法，由用户决定是否回到对应上游；普通格式、注释或摘要变化不得触发流程回退。
+实现中发现 Spec、Grill 决策、Story 或实施附录有实质错误时，停下说明问题、影响和最小修法，由用户决定是否回到对应上游；普通格式、注释或摘要变化不得触发流程回退。
 
 {{CAPABILITY_PACK:build}}

@@ -67,7 +67,8 @@ def _resolve_requirement_sources_from_runtime(st):
     if ticket:
         package = ensure_work_package(os.getcwd(), ticket)
         local_sources = (
-            package.spec, package.grill, package.story, package.decisions)
+            package.spec, package.grill, package.story,
+            package.implementation, package.decisions)
         terms = []
         for path in (config.get("需求文档", ""), *local_sources):
             if path and os.path.isfile(path):

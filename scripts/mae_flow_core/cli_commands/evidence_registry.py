@@ -45,7 +45,10 @@ def _domain_archive_fresh(state):
         )
         actual = input_digest(
             root,
-            (package.spec, package.grill, package.story, package.decisions),
+            (
+                package.spec, package.grill, package.story,
+                package.implementation, package.decisions,
+            ),
             git_facts,
             entries,
         )

@@ -1,7 +1,7 @@
 ---
 name: ut-generator-agent
 description: 针对任务卡限定的本次行为生成并真实运行单元测试
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 model: inherit
 ---
 
@@ -13,8 +13,9 @@ model: inherit
 ## 执行边界
 
 - 只覆盖本次修改函数/行为和 Story 验收条件，禁止重新发明测试场景，不给整个文件或存量功能补测。
-- 按配置调用 Mae-Flow 自带 AutoUT/java-autout 或仓库既有写法。
-- 保留旧版的一次逻辑调用和内部批处理能力；每一批都必须真实运行测试。
+- 按配置调用 Mae-Flow 自带 AutoUT/java-autout Skill；配置为仓库既有明确命令时原样执行，禁止互相替换。
+- 按 Harness 当前签发的自适应批次工作：小范围一次完成；大范围每个实例只处理任务卡列出的当前一批，
+  不自行跨批扩展。返回后由主会话重新生成下一批任务卡。批间不提交、不询问用户、不重读无关材料。
 - 每批测试使用单次同步调用及宿主允许的最大超时（目标十分钟）；命令返回就是完成信号。
   timeout/transport failure 如实报告失败；源码和构建输入未变化时不得重跑。
 - 只能修改测试及明确的测试构建文件，禁止修改被测源码、删除失败测试或缩小范围。

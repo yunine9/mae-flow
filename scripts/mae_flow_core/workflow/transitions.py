@@ -1,6 +1,44 @@
 """Pure transition policy for Mae-Flow workflow definitions."""
 
 
+_QUALITY_REVIEW_ROUTES = {
+    "ponytail-source": ("verify_codecheck", "quality_recompile"),
+    "codecheck-source": ("verify_codecheck", "quality_recompile"),
+    "ut-source": ("verify_codecheck", "quality_recompile"),
+    "ut-test": ("verify_comet", "verify_ut"),
+}
+
+
+def quality_review_context(
+        origin, changed_files, entered_head, resume="", rework=""):
+    """Create the semantic quality-review cursor without content digests."""
+    if origin not in _QUALITY_REVIEW_ROUTES:
+        raise ValueError("unknown quality review origin: %s" % origin)
+    default_resume, default_rework = _QUALITY_REVIEW_ROUTES[origin]
+    resume = str(resume or default_resume)
+    rework = str(rework or default_rework)
+    files = tuple(dict.fromkeys(
+        str(path) for path in changed_files if str(path).strip()))
+    if not files:
+        raise ValueError("quality review requires changed files")
+    return {
+        "origin": origin,
+        "resume": resume,
+        "rework": rework,
+        "changed_files": list(files),
+        "entered_head": str(entered_head or ""),
+    }
+
+
+def _state_value(state, dotted_path):
+    value = state
+    for part in str(dotted_path or "").split("."):
+        if not part or not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value if isinstance(value, str) and value else None
+
+
 def transition_targets(step):
     targets = []
 
@@ -27,6 +65,8 @@ def transition_targets(step):
 
 
 def next_step(step, state, choice_override=""):
+    if step.get("next_from_state"):
+        return _state_value(state, step["next_from_state"])
     nxt = step.get("next")
     try:
         if step.get("next_by"):

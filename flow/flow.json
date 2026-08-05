@@ -7,7 +7,8 @@
     "design",
     "story_ask",
     "archive_confirm",
-    "archive"
+    "archive",
+    "verify_recompile"
   ],
   "source_patterns": [
     "(^|/)(service|src|include|lib|app|modules?)/"
@@ -117,6 +118,10 @@
     "rf_codecheck": {
       "title": "处理评审意见 — 规范检查",
       "allow_source_edit": true,
+      "source_change_next": "quality_recompile",
+      "quality_review_origin": "codecheck-source",
+      "quality_review_resume": "rf_codecheck",
+      "quality_review_rework": "quality_recompile",
       "evidence": [
         {
           "type": "review_codecheck"
@@ -128,7 +133,13 @@
       "title": "处理评审意见 — 增量单元测试",
       "allow_source_edit": true,
       "tests_only": true,
-      "source_change_recheck": "build_rework",
+      "source_change_recheck": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "rf_codecheck",
+      "quality_review_rework": "quality_recompile",
+      "test_change_review_origin": "ut-test",
+      "test_change_review_resume": "domain_archive",
+      "test_change_review_rework": "rf_ut",
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -136,6 +147,9 @@
           "statuses": [
             "PASS"
           ]
+        },
+        {
+          "type": "ut_session_complete"
         }
       ],
       "next": "domain_archive"
@@ -317,6 +331,10 @@
     "tw_codecheck": {
       "title": "小改 — 规范检查",
       "allow_source_edit": true,
+      "source_change_next": "quality_recompile",
+      "quality_review_origin": "codecheck-source",
+      "quality_review_resume": "tw_codecheck",
+      "quality_review_rework": "quality_recompile",
       "evidence": [
         {
           "type": "review_codecheck"
@@ -328,7 +346,13 @@
       "title": "小改 — 单元测试",
       "allow_source_edit": true,
       "tests_only": true,
-      "source_change_recheck": "build_rework",
+      "source_change_recheck": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "tw_codecheck",
+      "quality_review_rework": "quality_recompile",
+      "test_change_review_origin": "ut-test",
+      "test_change_review_resume": "tw_verify",
+      "test_change_review_rework": "tw_ut",
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -336,6 +360,9 @@
           "statuses": [
             "PASS"
           ]
+        },
+        {
+          "type": "ut_session_complete"
         }
       ],
       "next": "tw_verify"
@@ -432,16 +459,89 @@
         "review": "rf_codecheck"
       }
     },
+    "quality_review": {
+      "title": "质量改动 — 用户统一检视",
+      "user_ack": true,
+      "choice_key": "quality_review_decision",
+      "choices": [
+        "continue",
+        "revise"
+      ],
+      "choice_answers": {
+        "continue": [
+          "我已检视本轮质量改动，继续提交"
+        ],
+        "revise": [
+          "需要调整质量改动"
+        ]
+      },
+      "evidence": [],
+      "next": {
+        "continue": "quality_commit",
+        "revise": "quality_rework"
+      },
+      "skip_in_moonlight": true,
+      "moonlight_choice": "continue"
+    },
+    "quality_rework": {
+      "title": "按用户意见调整质量改动",
+      "clear_hint": true,
+      "allow_source_edit": true,
+      "dynamic_next": [
+        "quality_recompile",
+        "verify_ut"
+      ],
+      "next_from_state": "quality_review.rework"
+    },
+    "quality_recompile": {
+      "title": "质量源码改动 — 重新编译",
+      "allow_source_edit": true,
+      "allow_dirty_compile": true,
+      "evidence": [
+        {
+          "type": "agent_or_no_source",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
+        }
+      ],
+      "next": "quality_review",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
+    },
+    "quality_commit": {
+      "title": "质量改动检视通过 — 精确提交",
+      "evidence": [
+        {
+          "type": "quality_review_committed"
+        }
+      ],
+      "dynamic_next": [
+        "verify_codecheck",
+        "tw_codecheck",
+        "rf_codecheck",
+        "verify_comet",
+        "tw_verify",
+        "domain_archive"
+      ],
+      "next_from_state": "quality_review.resume"
+    },
     "verify_ponytail": {
       "title": "验证 1/4 — 代码精简(先删)",
       "clear_hint": true,
       "allow_source_edit": true,
       "source_change_next": "verify_post_ponytail_compile",
+      "quality_review_origin": "ponytail-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile",
       "next": "verify_codecheck"
     },
     "verify_post_ponytail_compile": {
       "title": "验证 — 精简后重新编译",
       "allow_source_edit": true,
+      "allow_dirty_compile": true,
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -451,11 +551,15 @@
           ]
         }
       ],
-      "next": "verify_codecheck"
+      "next": "quality_review",
+      "quality_review_origin": "ponytail-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
     },
     "verify_recompile": {
       "title": "验证回流 — 重新编译",
       "allow_source_edit": true,
+      "allow_dirty_compile": true,
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -465,11 +569,18 @@
           ]
         }
       ],
-      "next": "verify_ponytail"
+      "next": "quality_review",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
     },
     "verify_codecheck": {
       "title": "验证 2/4 — 规范检查(代码定稿)",
       "allow_source_edit": true,
+      "source_change_next": "quality_recompile",
+      "quality_review_origin": "codecheck-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile",
       "evidence": [
         {
           "type": "review_codecheck"
@@ -481,7 +592,13 @@
       "title": "验证 3/4 — 补充单元测试",
       "allow_source_edit": true,
       "tests_only": true,
-      "source_change_recheck": "verify_recompile",
+      "source_change_recheck": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile",
+      "test_change_review_origin": "ut-test",
+      "test_change_review_resume": "verify_comet",
+      "test_change_review_rework": "verify_ut",
       "evidence": [
         {
           "type": "agent_or_no_source",
@@ -489,6 +606,9 @@
           "statuses": [
             "PASS"
           ]
+        },
+        {
+          "type": "ut_session_complete"
         }
       ],
       "next": "verify_comet"
@@ -514,9 +634,12 @@
     },
     "delivery_review": {
       "title": "最终代码增量检视",
-      "evidence": [],
-      "next": "push",
-      "skip_in_moonlight": true
+      "evidence": [
+        {
+          "type": "delivery_manifest_committed"
+        }
+      ],
+      "next": "push"
     },
     "archive_confirm": {
       "title": "旧规格定稿确认恢复",

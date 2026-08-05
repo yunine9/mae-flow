@@ -39,6 +39,27 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
         self.assertEqual("build_rework", steps["build_review"]["next"]["revise"])
         self.assertEqual("build_review", steps["build_rework"]["next"])
 
+    def test_quality_changes_share_one_review_and_commit_corridor(self):
+        steps = self.flow["steps"]
+        self.assertEqual(
+            "quality_review", steps["verify_post_ponytail_compile"]["next"])
+        self.assertEqual(
+            "quality_review", steps["quality_recompile"]["next"])
+        self.assertEqual(
+            "quality_commit", steps["quality_review"]["next"]["continue"])
+        self.assertEqual(
+            "quality_rework", steps["quality_review"]["next"]["revise"])
+        self.assertEqual(
+            {
+                "verify_codecheck", "tw_codecheck", "rf_codecheck",
+                "verify_comet", "tw_verify", "domain_archive",
+            },
+            set(steps["quality_commit"]["dynamic_next"]),
+        )
+        self.assertTrue(steps["quality_review"]["skip_in_moonlight"])
+        self.assertEqual(
+            "continue", steps["quality_review"]["moonlight_choice"])
+
     def test_story_loop_binds_local_spec_grill_and_story(self):
         steps = self.flow["steps"]
         evidence = steps["open"]["evidence"]

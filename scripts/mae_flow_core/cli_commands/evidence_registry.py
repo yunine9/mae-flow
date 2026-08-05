@@ -171,6 +171,8 @@ ev_archive_paths_clean = _DELIVERY_EVIDENCE.archive_paths_clean
 ev_pushed = _DELIVERY_EVIDENCE.pushed
 ev_commit_tagged = _DELIVERY_EVIDENCE.commit_tagged
 ev_commit_tagged_after_entry = _DELIVERY_EVIDENCE.commit_tagged_after_entry
+ev_delivery_manifest_committed = _DELIVERY_EVIDENCE.delivery_manifest_committed
+ev_quality_review_committed = _DELIVERY_EVIDENCE.quality_review_committed
 ev_review_fix_committed = _DELIVERY_EVIDENCE.review_fix_committed
 
 
@@ -206,6 +208,7 @@ _QUALITY_EVIDENCE = QualityEvidenceRules(QualityEvidencePorts(
             os.getcwd(), (state.get("config") or {}).get("单号", "")).root,
         "codecheck-exemptions.md"),
 ))
+ev_ut_session_complete = _QUALITY_EVIDENCE.ut_session_complete
 
 ev_codecheck_clean = _QUALITY_EVIDENCE.codecheck_clean
 ev_review_codecheck = _QUALITY_EVIDENCE.review_codecheck

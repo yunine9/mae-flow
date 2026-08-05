@@ -59,6 +59,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_command_prompt_agreement.py",), 180, 5000),
     ("Workflow 状态图活性红线",
      ("scripts/tests/test_flow_liveness.py",), 180, 5000),
+    ("质量返工、检视、提交与月光闭环红线",
+     ("scripts/tests/test_quality_flow_redlines.py",), 180, 5000),
     ("Gate 请求解析策略回归",
      ("scripts/tests/test_guard_intent.py",), 180, 5000),
     ("Gate 编辑裁决策略回归",

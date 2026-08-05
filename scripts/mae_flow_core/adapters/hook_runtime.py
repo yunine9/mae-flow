@@ -5,6 +5,7 @@ import os
 from mae_flow_core import ACTION_FILE, EXIT_FILE, FLOW_FILE
 from mae_flow_core.application.hooks.task_cards import TaskCardPorts
 from mae_flow_core.file_io import read_text
+from mae_flow_core.foundation import source_paths
 
 from .hook_runtime_contract_support import HookContractSupportMixin
 from .hook_runtime_contracts import HookContractsMixin
@@ -55,6 +56,7 @@ class HookRuntimeAdapter(
             review_path_fingerprint=self._review_path_fingerprint,
             source_like=self._source_like,
             test_like=self._test_like,
+            build_like=source_paths.is_build_path,
             path_exists=os.path.exists,
             script_path=lambda: os.path.abspath(self.MAEFLOW),
         )

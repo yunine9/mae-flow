@@ -335,7 +335,7 @@ class MoonlightUseCaseTests(unittest.TestCase):
             "kind": "blocker",
         }]
         result = repair_moonlight(
-            state, repair_target="tw_change", head="head", now="later")
+            state, repair_target="build_rework", head="head", now="later")
         updated = self.updated(result)
         self.assertEqual("verify_ut", updated["current"])
         self.assertEqual(2, updated["moonlight"]["cycle"])

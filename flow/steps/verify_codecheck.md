@@ -22,7 +22,7 @@
 **N = 0(干净)→ 不派任何 agent,直接 done**(源码变化会让首检失效)。
 这是最常见的正常路径,别把它走成"派个 agent 空跑一趟"。
 
-**N > 0(有告警)→ 才派 codecheck-fix-agent 去修**:
+**N > 0(有告警)→ 才派 codecheck-fix-agent 去修**。整个需求最多执行两轮扫描/修复/复验：
 执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 agent；
 传入单号类型、基线分支、编译方式配置原文、项目根绝对路径、测试路径配置(如有);
 **喂到嘴边**:把上面算好的文件清单 + 首检告警明细直接附进任务提示(省它重算的轮次,与复核同口径);
@@ -33,7 +33,8 @@
 (Agent 返回自然语言仅供展示，不再解析 FOUND/FIXED/REMAINING_COUNT 或固定状态行；
 PreToolUse/SubagentStop/Agent PostToolUse 记录生命周期，harness 从真实 transcript 核对 fullcheck 调用和范围。
 检测到 started 但返回事件缺失时禁止自动重派，先执行 doctor。)
-CLEAN→done；REMAINING→展示一次遗留摘要并直接 done，写入最终交付风险，不逐条询问、
+CLEAN→done；修复产生源码改动时保持未提交，done 会先进入 compile-agent 和统一用户检视，确认提交后
+回到 CodeCheck；已消耗轮次不会重置。两轮后仍有 REMAINING→展示一次遗留摘要并直接 done，写入最终交付风险，不逐条询问、
 不要求插件内豁免、不重启长任务。FAIL 且没有留下未验证源码改动时同样作为工具建议项收尾；
 若 FAIL 后留有源码变化，必须回退或完成编译后再收尾。
 done 只核对首检/Agent 证据仍绑定当前源码，不再第三次现场重跑 CodeCheck。

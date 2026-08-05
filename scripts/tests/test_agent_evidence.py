@@ -124,11 +124,11 @@ class AgentEvidenceRuleTests(unittest.TestCase):
 
     def test_review_snapshot_safety_is_unchanged(self):
         rules = AgentEvidenceRules(make_ports())
-        state = {"current": "tw_review", "step_heads": {}}
-        self.assertIn("缺少 tw_review 的检视入口 HEAD", rules.review_snapshot(
-            {"base_step": "tw_change"}, state).reason)
+        state = {"current": "build_review", "step_heads": {}}
+        self.assertIn("缺少 build_review 的检视入口 HEAD", rules.review_snapshot(
+            {"base_step": "build_rework"}, state).reason)
         state["step_heads"] = {
-            "tw_review": "a" * 40, "tw_change": "b" * 40}
+            "build_review": "a" * 40, "build_rework": "b" * 40}
         dirty = AgentEvidenceRules(make_ports(
             argv_output=lambda arguments: (
                 "b" * 40 if arguments[1] == "merge-base" else "commit"),
@@ -136,7 +136,7 @@ class AgentEvidenceRuleTests(unittest.TestCase):
         ))
         self.assertIn("用户检视期间源码/测试/构建文件又发生未提交变化",
                       dirty.review_snapshot(
-                          {"base_step": "tw_change"}, state).reason)
+                          {"base_step": "build_rework"}, state).reason)
 
 
 if __name__ == "__main__":

@@ -148,6 +148,7 @@ class HookStateMixin:
                 paths = data.setdefault("paths", {})
                 paths[relative] = {
                     "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "nonce": time.time_ns(),
                     "tool": "file-write",
                 }
                 compile_side_effects = data.get("compile_side_effects")
@@ -172,7 +173,6 @@ class HookStateMixin:
                 recover_corrupt=True)
         except Exception as exc:
             self.log("agent write ledger EXC: %s" % exc)
-
     def _record_compile_side_effects(self, task, tool_calls):
         """Persist accepted COMPILE changes not owned by direct Agent edits."""
         try:

@@ -19,6 +19,7 @@ class TaskCardPorts:
     review_path_fingerprint: Callable
     source_like: Callable
     test_like: Callable
+    build_like: Callable
     path_exists: Callable
     script_path: Callable
 
@@ -175,7 +176,8 @@ def _ut_command_side_effect_rejection(paths):
 
 
 def _ut_non_test_changes(changed, ports, direct_write_paths):
-    bad = [path for path in changed if not ports.test_like(path)]
+    bad = [path for path in changed
+           if not ports.test_like(path) and not ports.build_like(path)]
     direct = {
         repository_path_identity(path, case_insensitive=True)
         for path in direct_write_paths

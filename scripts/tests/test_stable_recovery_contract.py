@@ -56,6 +56,38 @@ class StableRecoveryContractTests(unittest.TestCase):
                 self.assertNotIn("import " + module, content)
                 self.assertNotIn("from ." + module, content)
 
+    def test_compatibility_prompts_are_thin_one_way_bridges(self):
+        forbidden = (
+            "CAPABILITY_PACK",
+            "UT 行为蓝图",
+            "编码计划检视",
+            "独立编译步骤",
+            "git commit",
+        )
+        for name in ("design.md", "story_ask.md", "rf_verify.md"):
+            with self.subTest(name=name):
+                with open(
+                        os.path.join(ROOT, "flow", "steps", name),
+                        encoding="utf-8") as stream:
+                    content = stream.read()
+                self.assertIn("兼容", content)
+                self.assertIn("done", content)
+                for marker in forbidden:
+                    self.assertNotIn(marker, content)
+
+    def test_retired_ut_handoff_runtime_is_absent(self):
+        self.assertFalse(os.path.exists(os.path.join(
+            ROOT, "scripts", "mae_flow_core", "quality", "ut_handoff.py")))
+        with open(os.path.join(
+                ROOT, "scripts", "mae_flow_core", "quality", "__init__.py"),
+                encoding="utf-8") as stream:
+            content = stream.read()
+        self.assertNotIn("ut_handoff", content)
+        from mae_flow_core.orchestration.work_package import WorkPackagePaths
+        from mae_flow_core.orchestration.documents import DocumentPaths
+        self.assertNotIn("ut_handoff", WorkPackagePaths.__dataclass_fields__)
+        self.assertNotIn("ut_handoff", DocumentPaths.__dataclass_fields__)
+
 
 if __name__ == "__main__":
     unittest.main()

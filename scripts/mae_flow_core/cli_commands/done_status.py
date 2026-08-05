@@ -109,6 +109,26 @@ def _done_transition_to_recheck(flow, st, sid, target, changed, note, message,
     api.print_current(flow, st)
     return True
 
+
+def _changed_file_paths(changed):
+    suffix = "(未提交)"
+    return list(dict.fromkeys(
+        item[:-len(suffix)] if item.endswith(suffix) else item
+        for item in (changed or ())
+        if item
+    ))
+
+
+def _set_quality_review_context(st, step, changed, default_origin):
+    origin = str(step.get("quality_review_origin") or default_origin)
+    st["quality_review"] = workflow_transitions.quality_review_context(
+        origin,
+        _changed_file_paths(changed),
+        api.sh("git rev-parse --verify HEAD"),
+        resume=str(step.get("quality_review_resume") or ""),
+        rework=str(step.get("quality_review_rework") or ""),
+    )
+
 def _done_source_change(flow, st, sid, step):
     source_next = step.get("source_change_next")
     if not source_next:
@@ -123,16 +143,11 @@ def _done_source_change(flow, st, sid, step):
         _done_save_die(st, "无法核对本步源码变化:" + why)
     if not changed:
         return False
-    dirty = [x for x in changed if x.endswith("(未提交)")]
-    if dirty:
-        _done_save_die(st, "本步改过源码，但仍有未提交改动: " + "、".join(dirty[:5])
-                       + "。先按单号格式精确提交，再 done；否则下一步任务卡看不到这些文件。")
-    ok, commit_why = api.ev_commit_tagged_after_entry({}, st)
-    if not ok:
-        _done_save_die(st, "源码变化尚未形成可追踪的本步提交:" + commit_why)
+    _set_quality_review_context(st, step, changed, "codecheck-source")
     return _done_transition_to_recheck(
-        flow, st, sid, source_next, changed, "本步修改源码:",
-        f"[mae-flow] {sid} 修改了源码，自动进入 {source_next} 重新编译；主会话不要自行编译。\n")
+        flow, st, sid, source_next, changed, "本步产生待检视源码:",
+        f"[mae-flow] {sid} 修改了源码，保持未提交并进入 {source_next} 验证；"
+        "验证完成后统一交给用户检视。\n")
 
 def _done_source_recheck(flow, st, sid, step):
     recheck = step.get("source_change_recheck")
@@ -153,18 +168,98 @@ def _done_source_recheck(flow, st, sid, step):
         _done_save_die(st, "UT 步骤内检测到未经 unlock source 用户裁决的被测源码变更: "
                        + "、".join(changed[:5]) + ("…" if len(changed) > 5 else "")
                        + "。这是越权修改，不能靠补跑验证洗白；先呈报变更和 UT 自查结论，由用户裁决后再处理。")
-    dirty = [x for x in changed if x.endswith("(未提交)")]
-    if dirty:
-        _done_save_die(st, "用户虽已解锁源码修复，但这些源码仍未提交: "
-                       + "、".join(dirty[:5])
-                       + "。先按单号格式精确提交，再 done；否则回流任务卡无法覆盖真实改动。")
-    ok, commit_why = api.ev_commit_tagged_after_entry({}, st)
-    if not ok:
-        _done_save_die(st, "UT 暴露的源码修复尚未形成可追踪提交:" + commit_why)
+    _set_quality_review_context(st, step, changed, "ut-source")
     return _done_transition_to_recheck(
-        flow, st, sid, recheck, changed, "UT 裁决后修改被测源码:",
+        flow, st, sid, recheck, changed, "UT 裁决后产生待检视源码:",
         f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
-        "必须重新经过编译、CodeCheck 与 UT；禁止直接推送。\n", clear_unlock=True)
+        "先编译、再统一检视提交，之后从 CodeCheck 恢复；不会重跑 Ponytail。\n",
+        clear_unlock=True)
+
+
+def _done_test_change_review(flow, st, sid, step):
+    origin = step.get("test_change_review_origin")
+    if not origin:
+        return False
+    changed = api._blocking_dirty_source_paths(st, flow)
+    test_changes = [
+        path for path in changed
+        if api._is_test_file(path, st) or api._is_build_path(path)
+    ]
+    if not test_changes:
+        return False
+    _set_quality_review_context(st, {
+        "quality_review_origin": origin,
+        "quality_review_resume": step.get("test_change_review_resume", ""),
+        "quality_review_rework": step.get("test_change_review_rework", ""),
+    }, test_changes, "ut-test")
+    return _done_transition_to_recheck(
+        flow, st, sid, "quality_review", test_changes,
+        "UT 产生待检视测试:",
+        "[mae-flow] UT 已完成并留下未提交测试改动，进入统一用户检视；"
+        "禁止在检视前提交。\n")
+
+
+def _done_quality_rework(st, sid):
+    if sid != "quality_rework":
+        return
+    context = st.get("quality_review") or {}
+    dirty = api._blocking_dirty_source_paths(st, api.FLOW)
+    business = [
+        path for path in dirty
+        if not api._is_test_file(path, st) and not api._is_build_path(path)
+    ]
+    if not dirty:
+        return
+    origin = context.get("origin", "")
+    if business and origin == "ut-test":
+        origin = "ut-source"
+        resume, rework = "verify_codecheck", "quality_recompile"
+    else:
+        resume = context.get("resume", "")
+        rework = context.get("rework", "")
+    st["quality_review"] = workflow_transitions.quality_review_context(
+        origin, dirty, api.sh("git rev-parse --verify HEAD"),
+        resume=resume, rework=rework)
+
+
+def _done_quality_review_recovery(flow, st, sid, step):
+    """Repair migrated/morning entries that lack the semantic review cursor."""
+    if step.get("next") != "quality_review":
+        return False
+    context = st.get("quality_review")
+    valid_context = isinstance(context, dict) and all(
+        context.get(key) for key in (
+            "origin", "resume", "rework", "changed_files"))
+    entry, migrate_err = api._ensure_step_entry_head(flow, st, sid)
+    if migrate_err:
+        _done_save_die(
+            st, "无法恢复质量步骤入口 HEAD:" + migrate_err
+            + "。请执行 current 查看唯一恢复动作，禁止重复运行 done。")
+    changed, why = api._source_changed_since(entry, st)
+    if why:
+        _done_save_die(
+            st, "无法核对质量步骤产生的改动:" + why
+            + "。请保留现场并交维护人修复状态，不要重跑质量 Agent。")
+    if changed:
+        st["quality_review"] = workflow_transitions.quality_review_context(
+            (context.get("origin") if valid_context else
+             str(step.get("quality_review_origin") or "ut-source")),
+            _changed_file_paths(changed),
+            api.sh("git rev-parse --verify HEAD"),
+            resume=(context.get("resume", "") if valid_context else
+                    str(step.get("quality_review_resume") or "")),
+            rework=(context.get("rework", "") if valid_context else
+                    str(step.get("quality_review_rework") or "")))
+        return False
+    resume = str(step.get("quality_review_resume") or "")
+    if not resume:
+        _done_save_die(
+            st, "质量步骤没有待检视改动，也没有声明恢复节点；"
+            "流程定义不完整，已停止一次，禁止猜测跳转。")
+    return _done_transition_to_recheck(
+        flow, st, sid, resume, [], "兼容恢复：本步没有产生质量改动",
+        "[mae-flow] 本步没有待检视 diff，已跳过空检视并恢复到 %s。\n"
+        % resume)
 
 def _done_require_evidence(step, st, args, sid):
     fails = api.check_evidence(step, st)
@@ -178,6 +273,14 @@ def _done_require_evidence(step, st, args, sid):
     api.die(workflow_completion.evidence_error(
         fails, count, api._moonlight(st), target,
         os.path.abspath(sys.argv[0])), 2)
+
+
+def _done_route_quality_changes(flow, st, sid, step):
+    if _done_source_change(flow, st, sid, step):
+        return True
+    if _done_source_recheck(flow, st, sid, step):
+        return True
+    return _done_test_change_review(flow, st, sid, step)
 
 
 def _done_resolve_moonlight_branch(flow, st, sid):
@@ -210,11 +313,13 @@ def cmd_done(flow, st, args):
     _done_validate_choice_and_ack(step, st, args, sid)
     _done_commit_inputs(step, st, args, sid, pending_config)
     _done_guard_branch(st, sid)
-    if (_done_source_change(flow, st, sid, step)
-            or _done_source_recheck(flow, st, sid, step)):
-        return
     _done_resolve_moonlight_branch(flow, st, sid)
     _done_require_evidence(step, st, args, sid)
+    if _done_route_quality_changes(flow, st, sid, step):
+        return
+    _done_quality_rework(st, sid)
+    if _done_quality_review_recovery(flow, st, sid, step):
+        return
     _done_finalize(flow, st, args, sid, step)
 
 def cmd_skip(flow, st, args):

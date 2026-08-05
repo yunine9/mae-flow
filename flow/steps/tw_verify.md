@@ -5,7 +5,8 @@
 3. 把结论写入 `.mae-flow-work/{单号}/verification.md`，包含已核对范围、证据和结论；最后必须用独立一行写 `PASS` 或 `FAIL`，存在任何 `FAIL` 时不得完成本步；
 4. 展示验证摘要后 done。
 
-发现实现问题时回到 `tw_change` 修复，之后重新走编译、CodeCheck、UT 和本检查。验证报告是本地过程件，禁止提交。
+发现实现问题时回到 `build_rework` 修复；重新编译并由用户检视新增 diff，确认后创建修复提交，
+再完整重走 CodeCheck、UT 和本检查。验证报告是本地过程件，禁止提交。
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:verify}}

@@ -6,6 +6,8 @@
 `codecheck-scope --none`。确认前禁止生成修复任务卡或 done。
 **0 告警直接 done,不派 agent**(codecheck-fix-agent 是修复工,没告警别派它空跑);有告警才执行
 `python "{MAEFLOW_PATH}" agent-task codecheck`，把唯一启动话术原样交给它。
+整个需求最多两轮 CodeCheck。Agent 修复源码后保持未提交，done 自动进入 compile-agent 和统一用户检视；
+确认提交后回到本步骤复验，轮次不重置。第二轮后仍有告警只留痕，不再循环。
 可用性只认 `codecheck fullcheck` 能否跑,裸 codecheck 报"不可用"不算数、别据此派 agent。
 REMAINING 时展示一次遗留摘要后直接 done，作为建议项进入交付报告；不逐条询问、不要求
 插件内豁免、不重启长任务。done 不再第三次现场复核。解析失败时保存完整输出到

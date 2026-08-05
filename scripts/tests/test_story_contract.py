@@ -125,6 +125,16 @@ class StoryContractTests(unittest.TestCase):
         self.assertIn("compile-agent", build)
         self.assertNotIn("role-task cp-implement", build)
 
+    def test_quality_agents_can_invoke_every_skill_required_by_their_task_card(self):
+        for name in (
+                "compile-agent.md", "codecheck-fix-agent.md",
+                "ut-generator-agent.md"):
+            frontmatter = read("agents/" + name).split("---", 2)[1]
+            tools = next(
+                line for line in frontmatter.splitlines()
+                if line.startswith("tools:"))
+            self.assertIn("Skill", tools, name)
+
     def test_only_six_approved_agents_remain(self):
         expected = {
             "grill-critic-agent.md",

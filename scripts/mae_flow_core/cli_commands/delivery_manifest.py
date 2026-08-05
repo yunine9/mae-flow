@@ -159,29 +159,38 @@ def build_delivery_manifest(
     comparable.pop("confirmed")
     old_comparable = dict(previous)
     old_confirmed = bool(old_comparable.pop("confirmed", False))
+    old_comparable.pop("confirmation", None)
     if comparable == old_comparable and old_confirmed:
         candidate["confirmed"] = True
     return candidate
 
 
-def confirm_delivery_manifest(state, message_id, command_api=api):
+def confirm_delivery_manifest(
+        state, message_id, command_api=api, moonlight_auto=False):
     manifest = (state or {}).get("delivery_manifest") or {}
     if not manifest.get("files"):
         raise ValueError("尚未生成交付清单，请先执行 manifest set")
     if manifest.get("confirmed") is True:
         return state
-    ok, answer, _receipt, error = command_api._authorization_message(
-        state, message_id)
-    if not ok:
-        raise ValueError(error)
-    if not str(answer or "").strip():
-        raise ValueError("用户确认内容为空")
-    if not command_api._is_positive_confirmation(answer):
-        raise ValueError(
-            "用户回答没有明确批准当前交付清单；"
-            "清单保持待确认，请按用户意见修改后重新展示")
+    if moonlight_auto:
+        if not bool(((state or {}).get("moonlight") or {}).get("enabled")):
+            raise ValueError("--moonlight-auto 只允许在月光宝盒运行中使用")
+        confirmation = {"mode": "moonlight-auto"}
+    else:
+        ok, answer, receipt, error = command_api._authorization_message(
+            state, message_id)
+        if not ok:
+            raise ValueError(error)
+        if not str(answer or "").strip():
+            raise ValueError("用户确认内容为空")
+        if not command_api._is_positive_confirmation(answer):
+            raise ValueError(
+                "用户回答没有明确批准当前交付清单；"
+                "清单保持待确认，请按用户意见修改后重新展示")
+        confirmation = {"mode": "user", "receipt": receipt}
     updated = copy.deepcopy(state)
     updated["delivery_manifest"]["confirmed"] = True
+    updated["delivery_manifest"]["confirmation"] = confirmation
     return updated
 
 
@@ -232,10 +241,12 @@ def cmd_delivery_manifest(state, args):
                       "manifest_confirm", {"message_id": "<消息ID>"}) + "。")
         return manifest
     try:
-        updated = confirm_delivery_manifest(state, args.message_id)
+        updated = confirm_delivery_manifest(
+            state, args.message_id or "", moonlight_auto=args.moonlight_auto)
     except ValueError as exc:
         api.die(str(exc), 2)
     if updated is not state:
         api.save_state(updated)
-    print("[mae-flow] 交付清单已由用户确认；只允许暂存并提交上述精确文件。")
+    label = "月光宝盒自动确认" if args.moonlight_auto else "用户确认"
+    print("[mae-flow] 交付清单已由%s；只允许暂存并提交上述精确文件。" % label)
     return updated.get("delivery_manifest")

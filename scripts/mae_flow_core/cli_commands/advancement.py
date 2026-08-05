@@ -7,6 +7,33 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.quality.attempts import begin_attempt
+
+
+def _bounded_next(st, sid, nxt):
+    if not nxt:
+        api.die(
+            f"步骤 {sid} 缺少可解析的下一步。语义恢复上下文未建立，"
+            "已停止本次推进；请执行 current 查看恢复指令，禁止重复运行同一命令。",
+            2)
+    if nxt != "verify_ponytail":
+        return nxt
+    attempt = begin_attempt(
+        st, "ponytail", api.sh("git rev-parse --verify HEAD"), limit=1)
+    if not attempt.exhausted:
+        return nxt
+    st["history"].append({
+        "step": sid,
+        "result": "ponytail:max-one-round",
+        "note": "Ponytail 已执行一轮，后续源码返工直接从 CodeCheck 恢复",
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    return "verify_codecheck"
+
+
+def _clear_completed_review(st, sid):
+    if sid == "quality_commit":
+        st.pop("quality_review", None)
 
 def _gitignore():
     gi = ".gitignore"
@@ -130,12 +157,14 @@ def advance(flow, st, sid, step, tag, note=""):
                 nxt = event.step
     except workflow_advancement.TransitionResolutionError as exc:
         api.die(f"月光旁路步骤 {exc.step_id} 缺少可解析的 moonlight_choice/next，拒绝卡死流程。", 2)
+    nxt = _bounded_next(st, sid, nxt)
     if api._moonlight(st) and sid == "push":
         api._moonlight_resolve_kind(st, "push")
         ml = api._moonlight_data(st)
         ml["pushed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         ml["pushed_head"] = api.sh("git rev-parse --verify HEAD")
     st["current"] = nxt
+    _clear_completed_review(st, sid)
     if nxt:
         current_head = api.sh("git rev-parse --verify HEAD")
         st.setdefault("step_heads", {})[nxt] = current_head

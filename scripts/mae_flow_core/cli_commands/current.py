@@ -84,7 +84,7 @@ def _ensure_step_entry_head(flow, st, sid):
 
 def _with_lightcheck_prompt(sid, text):
     if sid not in (
-            "build", "rf_fix", "tw_change", "verify_ponytail",
+            "build", "build_rework", "verify_ponytail",
             "verify_ut", "rf_ut", "tw_ut"):
         return text
     prompt = (
@@ -125,7 +125,11 @@ def _step_md_text(sid, st):
 
 def _review_receipt_lines(st, step):
     """展示待用户检视的完整未提交增量。"""
-    base = str(st.get("implementation_base_head", "") or "HEAD")
+    quality = st.get("quality_review") or {}
+    base = str(
+        quality.get("entered_head")
+        or st.get("implementation_base_head", "")
+        or "HEAD")
     head = api.sh("git rev-parse --verify HEAD")
     if not head:
         return ["❌ 无法读取当前 Git 状态。"]
@@ -142,9 +146,20 @@ def _review_receipt_lines(st, step):
         f"  基点: {base[:10]}  当前 HEAD: {head[:10]}",
         "  文件:",
     ]
-    lines += ["    " + item for item in files[:80]] or ["    （没有未提交差异）"]
-    if len(files) > 80:
-        lines.append(f"    …另有 {len(files) - 80} 个文件")
+    expected = set(quality.get("changed_files") or ())
+    if expected:
+        lines.append("  改动来源: " + str(quality.get("origin", "未知")))
+        lines.append("  提交后恢复: " + str(quality.get("resume", "未知")))
+    shown = files
+    unexpected = [
+        item for item in files
+        if expected and item.split(None, 1)[-1] not in expected
+    ]
+    if unexpected:
+        lines.append("  ⚠ 检视上下文外新增文件也必须一并核对，返回调整后再提交")
+    lines += ["    " + item for item in shown[:80]] or ["    （没有未提交差异）"]
+    if len(shown) > 80:
+        lines.append(f"    …另有 {len(shown) - 80} 个文件")
     if stat:
         lines.append("  统计: " + stat)
     lines.append(f"  完整差异命令: git diff {base}")
@@ -185,7 +200,7 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
-    if sid == "build_review":
+    if sid in {"build_review", "quality_review"}:
         print("\n".join(_review_receipt_lines(st, step)))
     ul = st.get("unlock") or {}
     if ul.get("step") == sid:
@@ -253,7 +268,8 @@ def print_current(flow, st):
         print("UT 若经自查后明确指向被测源码缺陷，不需要等用户：先执行")
         print(f"python \"{os.path.abspath(sys.argv[0])}\" moonlight unlock-source "
               "--reason \"<失败用例、规格依据、自查结论>\"")
-        print("再修源码并提交；done 会自动回流编译、CodeCheck 和 UT。")
+        print("再修源码并执行 done；状态机会先回流编译，再自动完成质量检视提交，"
+              "然后从 CodeCheck 继续，不重跑 Ponytail。")
     if api._moonlight(st) and sid == "push":
         print("push 若因认证、网络或冲突在有限重试后仍失败，禁止询问或谎报成功；执行：")
         print(f"python \"{os.path.abspath(sys.argv[0])}\" moonlight push-failed "

@@ -61,6 +61,8 @@ class TaskCardContractTests(unittest.TestCase):
             "source_like": lambda path: path.endswith(
                 (".py", ".cpp", ".h")),
             "test_like": lambda path: "test" in path.lower(),
+            "build_like": lambda path: path.endswith(
+                ("pom.xml", "CMakeLists.txt")),
             "path_exists": os.path.exists,
             "script_path": lambda: "/repo/scripts/mae-flow.py",
         }

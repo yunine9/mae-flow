@@ -38,6 +38,7 @@ class DomainArchiveCliTests(unittest.TestCase):
             ["domain-archive", "show"],
             ["domain-archive", "status"],
             ["domain-archive", "apply", "--message-id", "msg-1"],
+            ["domain-archive", "apply", "--moonlight-auto"],
         )
         for argv in commands:
             with self.subTest(argv=argv):
@@ -101,6 +102,34 @@ class DomainArchiveCliTests(unittest.TestCase):
                 domain_archive.cmd_domain_archive(
                     saved[-1], argparse.Namespace(
                         domain_archive_action="apply", message_id="msg-no"))
+
+    def test_moonlight_applies_prepared_archive_without_user_message(self):
+        state = {
+            "current": "domain_archive",
+            "config": {"单号": "REQ-1"},
+            "moonlight": {"enabled": True},
+        }
+        saved = []
+        fake_api = types.SimpleNamespace(
+            save_state=lambda value: saved.append(value),
+            sh=lambda _command: "",
+            die=lambda message, code=1: (_ for _ in ()).throw(
+                RuntimeError("%s:%s" % (code, message))),
+        )
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(
+                domain_archive, "api", fake_api), mock.patch.object(
+                domain_archive.os, "getcwd", return_value=root):
+            domain_archive.cmd_domain_archive(
+                state, argparse.Namespace(
+                    domain_archive_action="prepare", unchanged=True,
+                    domain=None, keyword=[]))
+            applied = domain_archive.cmd_domain_archive(
+                saved[-1], argparse.Namespace(
+                    domain_archive_action="apply", message_id=None,
+                    moonlight_auto=True))
+        self.assertEqual("applied", applied["status"])
+        self.assertEqual(
+            "moonlight-auto", applied["authorization"]["mode"])
 
     def test_untracked_legacy_process_file_is_moved_into_work_package(self):
         state = {"config": {"单号": "REQ-1"}}

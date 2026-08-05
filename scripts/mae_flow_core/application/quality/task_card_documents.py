@@ -135,7 +135,7 @@ def _append_full_codecheck(document, scan):
         "主会话不得代修；修复后按任务卡编译方式验证并复验。")
 
 
-def _append_full_ut(document, groups, targets):
+def _append_full_ut(document, groups, targets, batches=(), phase="generate"):
     document.append("UT覆盖目标（硬边界，不等于整个文件）:")
     if groups.business:
         for business_file in groups.business:
@@ -169,12 +169,30 @@ def _append_full_ut(document, groups, targets):
         document.append(
             "- 本轮无业务源码修改；只验证已变更测试/构建入口，"
             "禁止为任意存量业务函数新增覆盖")
+    if phase == "final":
+        document.append(
+            "Harness 最终收口批：禁止再生成或修改测试；只运行配置的完整 UT 命令，"
+            "确认全部批次累积结果一起通过。")
+    elif batches:
+        document.append("Harness 自适应批次（同一逻辑 UT 会话，批间禁止提交）:")
+        for index, batch in enumerate(batches, 1):
+            document.append("- 第%d批（%d个目标）: %s" % (
+                index, len(batch), "；".join(batch)))
+        document.append(
+            "执行策略:小范围在当前实例一次完成；范围较大时每次只处理一个批次，"
+            "上下文接近上限就自然语言收尾，由主会话为下一批启动新实例。"
+            "各批共享未提交测试工作区，不 commit、不询问用户；最后必须有一个收口实例"
+            "只运行配置的全量 UT 命令。")
+    route = (
+        "本任务是最终收口批，不再调用生成 Skill 或修改测试，只真实执行完整 UT。"
+        if phase == "final" else
+        "必须调用任务卡指定的 Mae-Flow 自带 AutoUT/java-autout Skill"
+        "（或明确配置的既有写法），并真实执行测试。写“随生成方式自带”时"
+        "由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。")
     document.extend([
         "职责:只对任务卡范围补/改测试；**测试对象=本次修改的函数/行为"
         "(上面硬边界所在函数)+规格条目 EARS 条目,禁止为文件中未修改的"
-        "存量函数补测**；必须调用任务卡指定的 Mae-Flow 自带"
-        " AutoUT/java-autout Skill（或明确配置的既有写法），并真实执行测试。"
-        "写“随生成方式自带”时由对应 Skill 根据项目决定实际命令，并在 EXECUTED_UT 如实报告。",
+        "存量函数补测**；" + route,
         "评审意见处理不修改规格，测试依据使用上面列出的既有需求/规格。",
     ])
 
@@ -232,7 +250,9 @@ def build_full_task_document(facts):
         _append_full_codecheck(
             document, facts["scan"])
     elif kind == "UT":
-        _append_full_ut(document, facts["groups"], facts["ut_targets"])
+        _append_full_ut(
+            document, facts["groups"], facts["ut_targets"],
+            facts.get("ut_batches", ()), facts.get("ut_phase", "generate"))
     else:
         document.append(
             "职责:严格按任务卡的编译方式执行；配置为 build-fix 时必须调用 Mae-Flow"

@@ -1,6 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.quality.ut_batches import (
+    advance_ut_session,
+    accumulated_ut_paths,
+    plan_ut_batches,
+)
 from mae_flow_core.orchestration.behavior_baseline import (
     load_relevant_domain_context,
 )
@@ -92,6 +97,17 @@ def _resolve_requirement_sources_from_runtime(st):
     ))
 
 
+def _incremental_ut_sources(st, final=False):
+    if final:
+        return []
+    ticket = str((st.get("config") or {}).get("单号", "") or "")
+    if not ticket:
+        return []
+    package = ensure_work_package(os.getcwd(), ticket)
+    return [path for path in (package.spec, package.story)
+            if os.path.isfile(path)]
+
+
 def _compile_worktree_snapshot(kind, head):
     if kind != "COMPILE":
         return {}, False
@@ -104,6 +120,70 @@ def _compile_worktree_snapshot(kind, head):
             file=sys.stderr,
         )
         return {}, False
+
+
+def _prepare_ut_session(
+        st, sid, args, groups, task_head, accumulated, prior_returned):
+    targets, error = api._changed_hunk_targets(st, groups["business"])
+    if error:
+        api.die("无法计算 UT 函数级范围：" + error, 2)
+    target_ids = []
+    for path in groups["business"]:
+        rows = targets.get(path.replace("\\", "/"), [])
+        if not rows:
+            target_ids.append(path + " | 本次删除/迁移行为")
+        target_ids.extend(
+            "%s:%s-%s | %s" % (
+                path, row.get("start", "?"), row.get("end", "?"),
+                row.get("context") or "按变更行定位函数")
+            for row in rows)
+    batches = plan_ut_batches(target_ids).batches
+    previous = st.get("ut_session") or {}
+    session = previous if previous.get("head") == task_head else {}
+    advanced = advance_ut_session(session, batches, prior_returned)
+    if advanced.complete:
+        api.die("本轮自适应批次和最终全量 UT 已完成；不要重复派发，直接 done。", 2)
+    if not args.scope:
+        args.scope = (
+            "单批完成并全量收口"
+            if len(batches) <= 1 else
+            "按任务卡自适应批次执行；上下文接近上限时自然语言收尾，"
+            "由主会话用下一批范围启动新实例")
+    st["ut_session"] = dict(advanced.record, **{
+        "step": sid,
+        "head": task_head,
+        "accumulated_test_files": list(dict.fromkeys(
+            list(previous.get("accumulated_test_files", ()))
+            + list(accumulated))),
+        "last_scope": args.scope,
+    })
+    return targets, advanced.task_batches, advanced.record["phase"]
+
+
+def _prepare_ut_dirty(st, sid, dirty_source):
+    session = st.get("ut_session") or {}
+    previous = (st.get("agent_tasks", {}) or {}).get("UT", {})
+    same_step = session.get("step") == sid and previous.get("step") == sid
+    prior_returned = False
+    if same_step:
+        prior_returned, _why = api.ev_agent_ran({"agent": "UT"}, st)
+    current_receipts = api._agent_written_receipts()
+    baseline_receipts = previous.get("agent_write_receipts") or {}
+    owned = {
+        path for path, receipt in current_receipts.items()
+        if receipt != baseline_receipts.get(path)
+    }
+    review = st.get("quality_review") or {}
+    review_authorized = (
+        review.get("origin") == "ut-test" and review.get("rework") == sid)
+    if review_authorized:
+        owned.update(review.get("changed_files") or ())
+    accumulated, blocked = accumulated_ut_paths(
+        dirty_source, same_step=same_step, prior_returned=prior_returned,
+        owned_paths=owned, review_authorized=review_authorized,
+        is_test=lambda path: api._is_test_file(path, st),
+        is_build=api._is_build_path)
+    return accumulated, blocked, prior_returned
 
 
 def _store_agent_task(flow, st, args, context):
@@ -158,6 +238,8 @@ def _store_agent_task(flow, st, args, context):
         } if lightcheck_result is not None else {}),
         ut_targets=context["ut_targets"] if kind == "UT" else {},
         unchanged_initial_dirty=context["inherited_dirty"],
+        ut_phase=context.get("ut_phase", ""),
+        agent_write_receipts=api._agent_written_receipts(),
         at=time.strftime("%Y-%m-%d %H:%M:%S"))
     if kind == "CODECHECK":
         append_codecheck_event(
@@ -184,18 +266,31 @@ def cmd_agent_task(flow, st, args):
     kind = args.kind.upper()
     sid = st["current"]
     task_diff_override = ""
-    precommit_review = kind == "COMPILE" and sid in {"build", "build_rework"}
+    current_step = (flow.get("steps", {}) or {}).get(sid, {})
+    precommit_review = kind == "COMPILE" and (
+        sid in {"build", "build_rework"}
+        or current_step.get("allow_dirty_compile") is True
+    )
     (st.get("risk_acceptances", {}) or {}).pop(kind, None)  # 新任务卡=新证据轮次，旧风险确认作废
     if not quality_task_cards.task_allowed(kind, sid):
         api.die(f"当前步骤 {sid} 不允许生成 {kind} 任务卡；先执行 current,禁止提前派发。", 2)
     dirty_source = api._blocking_dirty_source_paths(st, flow)
+    ut_accumulated = ()
+    ut_prior_returned = False
+    if kind == "UT":
+        ut_accumulated, dirty_source, ut_prior_returned = (
+            _prepare_ut_dirty(st, sid, dirty_source))
     inherited_dirty = api._unchanged_initial_dirty_source_paths(st, flow)
     if dirty_source and not precommit_review:
         api.die("生成任务卡前仍有未提交源码/测试/构建文件: " + "、".join(dirty_source[:8])
             + "。任务卡只信 Git 可追踪范围；先按单号格式精确提交，或回退不属于本单的改动。", 2)
     if precommit_review:
-        implementation_snapshot = api._worktree_snapshot_since(
-            str(st.get("implementation_base_head", "") or "HEAD"))
+        scope_head = (
+            str(st.get("implementation_base_head", "") or "HEAD")
+            if sid in {"build", "build_rework"}
+            else str((st.get("step_heads", {}) or {}).get(sid, "") or "HEAD")
+        )
+        implementation_snapshot = api._worktree_snapshot_since(scope_head)
         source_files = [
             path for path in implementation_snapshot
             if api._is_source_path(path, st, flow)
@@ -258,6 +353,9 @@ def cmd_agent_task(flow, st, args):
                 + "。禁止主会话先修再补手续；回退这些改动后重扫。", 2)
     scan = (st.get("quality", {}) or {}).get("codecheck_scan", {})
     task_files = list(scan.get("files", [])) if kind == "CODECHECK" else list(source_files)
+    if kind == "UT":
+        task_files.extend(
+            path for path in ut_accumulated if path not in task_files)
     groups = _classify_task_files_from_runtime(
         task_files, st)
     cfg = st.get("config", {})
@@ -278,11 +376,16 @@ def cmd_agent_task(flow, st, args):
         unresolved=tuple(unresolved),
     )
     notes = []
+    ut_batches = ()
+    ut_phase = ""
     if kind == "UT":
-        ut_targets, target_err = api._changed_hunk_targets(
-            st, groups["business"])
-        if target_err:
-            api.die("无法计算 UT 函数级范围：" + target_err, 2)
+        ut_targets, ut_batches, ut_phase = _prepare_ut_session(
+            st, sid, args, groups, task_head, ut_accumulated,
+            ut_prior_returned)
+        session = st.get("ut_session") or {}
+        if session.get("completed_batches") or ut_phase == "final":
+            sources = _incremental_ut_sources(
+                st, final=ut_phase == "final")
     lines = quality_task_card_documents.build_full_task_document({
         "kind": kind,
         "sid": sid,
@@ -306,6 +409,8 @@ def cmd_agent_task(flow, st, args):
         "notes": tuple(notes),
         "scan": scan,
         "ut_targets": ut_targets,
+        "ut_batches": ut_batches,
+        "ut_phase": ut_phase,
     })
     _store_agent_task(flow, st, args, {
         "kind": kind, "sid": sid, "document": lines,
@@ -314,4 +419,5 @@ def cmd_agent_task(flow, st, args):
         "task_files": task_files, "execution_files": execution_files,
         "lightcheck_result": lightcheck_result, "ut_targets": ut_targets,
         "inherited_dirty": inherited_dirty,
+        "ut_phase": ut_phase,
     })

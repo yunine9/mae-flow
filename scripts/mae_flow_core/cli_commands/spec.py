@@ -68,7 +68,7 @@ def _business_source_changed_since_step(st, sid):
     out = []
     for raw in changed or []:
         path = raw[:-len("(未提交)")] if raw.endswith("(未提交)") else raw
-        if not api._is_test_file(path, st):
+        if not api._is_test_file(path, st) and not api._is_build_path(path):
             out.append(raw)
     return list(dict.fromkeys(out)), ""
 

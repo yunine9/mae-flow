@@ -191,6 +191,18 @@ def skill_call(
     return None
 
 
+def exact_skill_call(
+        calls: Sequence[ToolCall], wanted: str) -> Optional[ToolCall]:
+    """Match one Skill identifier token without substring aliases."""
+    for call in reversed(calls or ()):
+        if call.name.lower() != "skill":
+            continue
+        raw = json.dumps(call.input, ensure_ascii=False).lower()
+        if wanted in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", raw):
+            return call
+    return None
+
+
 def _normalized_command(value):
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 

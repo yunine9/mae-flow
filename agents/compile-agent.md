@@ -1,7 +1,7 @@
 ---
 name: compile-agent
 description: 按任务卡执行一次同步编译并修复真实编译错误
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 model: inherit
 ---
 

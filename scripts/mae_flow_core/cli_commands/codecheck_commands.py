@@ -7,6 +7,31 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.quality.attempts import begin_attempt
+
+
+def _begin_codecheck_round(st, sid, head, files):
+    attempt = begin_attempt(st, "codecheck", head, limit=2)
+    if not attempt.exhausted:
+        api.save_state(st)
+        return True
+    st.setdefault("quality", {})["codecheck_scan"] = {
+        "step": sid,
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "head": head,
+        "count": None,
+        "status": "MAX_ROUNDS",
+        "files": list(files),
+        "pairs": [],
+        "commands": [],
+        "rounds": attempt.count,
+    }
+    st.setdefault("risks", []).append(
+        "CodeCheck 已达到最多两轮；剩余规范问题按诊断留痕，禁止继续循环")
+    api.save_state(st)
+    print("[mae-flow] CodeCheck 已完成最多两轮，本次不再启动第三轮。"
+          "剩余问题已写入交付风险，直接 done 进入 UT。")
+    raise SystemExit(0)
 
 def cmd_codecheck_scan(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
@@ -31,12 +56,14 @@ def cmd_codecheck_scan(flow, st, args):
     files, err = api._biz_changed_files(st)
     if err:
         api.die(err, 2)
+    head = api.sh("git rev-parse --verify HEAD")
+    _begin_codecheck_round(st, sid, head, files)
     # 兼容升级前已在途、尚未把过程目录写进 .gitignore 的项目；只改本机
     # info/exclude，避免诊断日志被后续宽范围操作意外带入提交。
     api._git_local_runtime_ignore()
     append_codecheck_event(
         os.getcwd(), st, "scan.requested", {
-            "head": api.sh("git rev-parse --verify HEAD"),
+            "head": head,
             "files": files, "file_count": len(files),
         })
     if files:
@@ -55,7 +82,6 @@ def cmd_codecheck_scan(flow, st, args):
         # CodeCheck 是辅助规范工具，不是编译器或测试器。它的版本、输出协议和
         # 可用性都不稳定；真实尝试一次后把诊断绑定当前源码即可，不让工具故障
         # 把交付流程永久封死，也不要求用户为同一工具问题反复确认。
-        head = api.sh("git rev-parse --verify HEAD")
         tool_error = quality_codecheck_state.build_tool_error_scan(
             step=sid,
             at=time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -86,7 +112,7 @@ def cmd_codecheck_scan(flow, st, args):
     completed = quality_codecheck_state.build_completed_scan(
         step=sid,
         at=time.strftime("%Y-%m-%d %H:%M:%S"),
-        head=api.sh("git rev-parse --verify HEAD"),
+        head=head,
         files=tuple(files),
         scoped=scoped,
         moonlight=api._moonlight(st),

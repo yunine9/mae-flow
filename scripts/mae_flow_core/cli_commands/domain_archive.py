@@ -222,15 +222,21 @@ def _apply(state, args, root, package):
     entries = _entries(root, record)
     require_fresh(
         record.get("input_sha256"), _fresh_digest(root, package, entries))
-    ok, answer, receipt, error = api._authorization_message(state, args.message_id)
-    if not ok:
-        raise ValueError(error)
-    if not str(answer or "").strip():
-        raise ValueError("用户确认内容为空")
-    if not api._is_positive_confirmation(answer):
-        raise ValueError(
-            "用户回答没有明确批准本次领域归档；候选已保留，"
-            "按用户意见修改后重新 prepare/show")
+    if getattr(args, "moonlight_auto", False):
+        if not bool(((state or {}).get("moonlight") or {}).get("enabled")):
+            raise ValueError("--moonlight-auto 只允许在月光宝盒运行中使用")
+        receipt = {"mode": "moonlight-auto"}
+    else:
+        ok, answer, receipt, error = api._authorization_message(
+            state, args.message_id)
+        if not ok:
+            raise ValueError(error)
+        if not str(answer or "").strip():
+            raise ValueError("用户确认内容为空")
+        if not api._is_positive_confirmation(answer):
+            raise ValueError(
+                "用户回答没有明确批准本次领域归档；候选已保留，"
+                "按用户意见修改后重新 prepare/show")
     paths = apply_candidates(root, entries)
     record.update({
         "status": "applied", "applied_paths": list(paths),

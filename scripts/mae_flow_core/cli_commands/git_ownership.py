@@ -150,6 +150,21 @@ def _agent_written_paths():
         if isinstance(path, str) and _repo_path_identity(path)
     }
 
+
+def _agent_written_receipts():
+    raw, err = safe_read_json(AGENT_WRITES_PATH)
+    if err or not isinstance(raw, dict):
+        return {}
+    entries = raw.get("paths", raw)
+    if not isinstance(entries, dict):
+        return {}
+    return {
+        _repo_path_identity(path): dict(receipt or {})
+        for path, receipt in entries.items()
+        if isinstance(path, str) and _repo_path_identity(path)
+        and isinstance(receipt, dict)
+    }
+
 def _compile_side_effect_paths():
     """Return normalized COMPILE side-effect ledger keys, if available."""
     raw, err = safe_read_json(AGENT_WRITES_PATH)

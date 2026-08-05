@@ -6,8 +6,10 @@
    再按输出执行 `codecheck-scope --include ...` 或 `codecheck-scope --none`；机器不得自行排除。
 2. 首检 0 告警 → 不派 agent，直接 done；首检后源码若变化，done 会判首检过期并要求重扫。
 3. 首检有告警 → 执行 `python "{MAEFLOW_PATH}" agent-task codecheck`，把输出的唯一启动话术原样交给 codecheck-fix-agent。禁止主会话代修；任务卡已包含范围、配置和编译方式。
+   整个需求最多两轮 CodeCheck。Agent 修复源码后保持未提交，done 自动进入 compile-agent 和统一用户检视；
+   确认提交后回到本步骤复验，轮次不重置。
 4. agent 返回 REMAINING 时展示一次遗留摘要，作为建议项进入交付报告，然后直接 done；
-   不逐项询问、不要求插件内豁免、不重启长任务。
+   第二轮后仍有告警同样只留痕，不逐项询问、不要求插件内豁免、不重启长任务。
 5. done 只核对首检/Agent 证据仍绑定当前源码，不再第三次现场重跑 CodeCheck。
 
 CodeCheck CLI 成功返回码不稳定，harness 从报告汇总表/提示文案取告警数，不再只认「共有 N 条告警」一句话。

@@ -12,7 +12,9 @@
 
 `python "{MAEFLOW_PATH}" domain-archive show`
 
-若当前是月光宝盒无人值守模式，到这里不得替用户确认或伪造消息 ID。完成 prepare/show 后执行 `python "{MAEFLOW_PATH}" moonlight blocked --reason "领域归档候选等待用户确认"` 安全停止；早晨处理后从本步骤继续。
+若当前是月光宝盒无人值守模式，主 Agent 根据最终 Spec、代码、测试和既有领域索引保守填写候选；
+不确定内容不编造，写入晨间待办。完成 prepare/show 后执行
+`python "{MAEFLOW_PATH}" domain-archive apply --moonlight-auto`，禁止 AskUserQuestion 或伪造消息 ID。
 
 只向用户确认一次。收到回答后先执行 `python "{MAEFLOW_PATH}" messages` 取得当前回答 ID，再执行：
 

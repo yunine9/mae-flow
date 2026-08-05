@@ -72,6 +72,19 @@ class FlowLivenessTests(unittest.TestCase):
         self.assertEqual(
             "build_rework", FLOW["steps"]["build_review"]["next"]["revise"])
 
+    def test_quality_review_corridor_has_no_commit_bypass(self):
+        steps = FLOW["steps"]
+        self.assertEqual(
+            "quality_review", steps["verify_post_ponytail_compile"]["next"])
+        self.assertEqual("quality_review", steps["quality_recompile"]["next"])
+        self.assertEqual(
+            "quality_commit", steps["quality_review"]["next"]["continue"])
+        self.assertEqual(
+            "quality_rework", steps["quality_review"]["next"]["revise"])
+        self.assertIn("quality_review_committed", {
+            item["type"] for item in steps["quality_commit"]["evidence"]
+        })
+
     def test_no_step_uses_agent_return_text_as_a_transition_choice(self):
         for step_id, step in FLOW["steps"].items():
             serialized = json.dumps(step, ensure_ascii=False)

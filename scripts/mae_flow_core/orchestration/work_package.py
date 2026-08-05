@@ -27,7 +27,6 @@ class WorkPackagePaths:
     story: str
     implementation: str
     decisions: str
-    ut_handoff: str
 
 
 def _ticket_text(ticket):
@@ -131,5 +130,4 @@ def ensure_work_package(project_root, ticket):
         story=os.path.join(root, "story.md"),
         implementation=os.path.join(root, "implementation.md"),
         decisions=os.path.join(root, "decisions.md"),
-        ut_handoff=os.path.join(root, "ut-handoff.md"),
     )

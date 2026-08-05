@@ -10,6 +10,7 @@ EXPECTED_STEPS = {
         "build_rework",
         "verify_recompile",
         "verify_post_ponytail_compile",
+        "quality_recompile",
     },
     "CODECHECK": {
         "verify_codecheck",
@@ -82,6 +83,8 @@ def task_record(
     unchanged_initial_dirty,
     at,
     issuance_id="",
+    ut_phase="",
+    agent_write_receipts=None,
 ):
     record = {
         "step": step,
@@ -104,5 +107,7 @@ def task_record(
         "unchanged_initial_dirty": list(
             unchanged_initial_dirty),
         "at": at,
+        "ut_phase": str(ut_phase or ""),
+        "agent_write_receipts": dict(agent_write_receipts or {}),
     }
     return record

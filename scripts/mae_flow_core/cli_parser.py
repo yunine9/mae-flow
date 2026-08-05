@@ -204,7 +204,10 @@ def parse_args(argv=None):
     archive_actions.add_parser("show")
     archive_actions.add_parser("status")
     archive_apply = archive_actions.add_parser("apply")
-    archive_apply.add_argument("--message-id", required=True)
+    archive_apply_choice = archive_apply.add_mutually_exclusive_group(
+        required=True)
+    archive_apply_choice.add_argument("--message-id")
+    archive_apply_choice.add_argument("--moonlight-auto", action="store_true")
     manifest = sub.add_parser("manifest")
     manifest_actions = manifest.add_subparsers(
         dest="manifest_action", required=True)
@@ -215,7 +218,10 @@ def parse_args(argv=None):
     manifest_set.add_argument("--adopt-dirty", action="append", default=[])
     manifest_actions.add_parser("show")
     manifest_confirm = manifest_actions.add_parser("confirm")
-    manifest_confirm.add_argument("--message-id", required=True)
+    manifest_confirm_choice = manifest_confirm.add_mutually_exclusive_group(
+        required=True)
+    manifest_confirm_choice.add_argument("--message-id")
+    manifest_confirm_choice.add_argument("--moonlight-auto", action="store_true")
     task = sub.add_parser("agent-task")
     task.add_argument("kind", choices=["compile", "codecheck", "ut"])
     task.add_argument("--scope", help="批次/单告警范围说明；写入受指纹保护的任务卡")

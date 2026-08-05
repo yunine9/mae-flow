@@ -143,6 +143,68 @@ class DeliveryEvidenceRules:
             )
         return self.commit_tagged(spec, state)
 
+    def delivery_manifest_committed(self, spec, state):
+        manifest = state.get("delivery_manifest") or {}
+        files = list(manifest.get("files") or ())
+        if not files:
+            return EvidenceResult(
+                False, "尚未生成精确交付清单；先执行 manifest set")
+        if manifest.get("confirmed") is not True:
+            return EvidenceResult(
+                False, "精确交付清单尚未确认，不能进入 push")
+        step = state.get("current", "")
+        base = (state.get("step_heads", {}) or {}).get(step, "")
+        if not base:
+            return EvidenceResult(
+                False, "缺少交付检视入口 HEAD，无法核对清单提交")
+        committed = set(self.ports.argv_output([
+            "git", "diff", "--name-only", base, "HEAD", "--",
+        ]).splitlines())
+        missing = [path for path in files if path not in committed]
+        if missing:
+            return EvidenceResult(
+                False, "交付清单仍未形成提交: " + "、".join(missing[:8]))
+        dirty = set(self.ports.dirty_paths())
+        pending = [path for path in files if path in dirty]
+        if pending:
+            return EvidenceResult(
+                False, "交付清单提交后仍有未提交/暂存差异: "
+                + "、".join(pending[:8]))
+        return self.commit_tagged_after_entry(spec, state)
+
+    def quality_review_committed(self, spec, state):
+        context = state.get("quality_review") or {}
+        files = list(context.get("changed_files") or ())
+        if not files:
+            return EvidenceResult(
+                False, "质量检视上下文没有精确修改文件，禁止空提交推进")
+        step = state.get("current", "")
+        base = (state.get("step_heads", {}) or {}).get(step, "")
+        if not base:
+            return EvidenceResult(
+                False, "缺少质量提交入口 HEAD，无法核对检视后的提交")
+        committed = set(self.ports.argv_output([
+            "git", "diff", "--name-only", base, "HEAD", "--",
+        ]).splitlines())
+        missing = [path for path in files if path not in committed]
+        if missing:
+            return EvidenceResult(
+                False, "用户检视的质量改动仍未全部提交: "
+                + "、".join(missing[:8]))
+        extra = [path for path in committed if path not in set(files)]
+        if extra:
+            return EvidenceResult(
+                False, "质量提交夹带了用户未检视的文件: "
+                + "、".join(extra[:8])
+                + "。请撤销该提交，回到完整 diff 检视后按精确清单重提")
+        dirty = set(self.ports.dirty_paths())
+        pending = [path for path in files if path in dirty]
+        if pending:
+            return EvidenceResult(
+                False, "质量提交后仍有检视文件处于未提交/暂存状态: "
+                + "、".join(pending[:8]))
+        return self.commit_tagged_after_entry(spec, state)
+
     def _push_head_result(self, state):
         current = self.ports.shell_output(
             "git branch --show-current")
@@ -311,7 +373,7 @@ class DeliveryEvidenceRules:
             if not asked.passed:
                 return EvidenceResult(
                     False,
-                    "rf_fix 把以下意见新改成了「转规格轮次(已确认)」: "
+                    "返工阶段把以下意见新改成了「转规格轮次(已确认)」: "
                     + "、".join(newly_transferred[:8])
                     + "；但本步没有真实 AskUserQuestion 用户裁决。"
                     "修复中改变既有裁决必须先向用户展示代码证据与行为影响，"

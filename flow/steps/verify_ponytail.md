@@ -8,8 +8,9 @@
 - correctness/security 类问题不归本步(ponytail-review 明确出界),**必须落盘**:逐条写进
   实现清单备注行(格式:`> 待核对(correctness): <现象+位置>`),verify 阶段规格符合性检查时
   逐条核对处理——只留在会话里=一次 /clear 就蒸发。
-精简后 → git commit -m "[单号][类型]精简代码" → done。状态机会检测本步是否真的改了源码：
-改了就自动进入独立 compile-agent 节点，没改才直接进入 CodeCheck。主会话不要自己编译。
+本需求只执行这一轮 Ponytail，不因后续 CodeCheck/UT 返工重跑。精简后保持改动未提交并执行 done：
+状态机会自动进入 compile-agent，编译通过后进行统一用户检视；确认后才精确提交并进入 CodeCheck。
+没有源码变化则直接进入 CodeCheck。主会话不要自己编译，也不要在本步提交。
 (本步排在 CodeCheck 与 UT 之前:先删掉该死的代码,再修规范、再补测,不做无用功。)
 
 ──── 本步骤内嵌方法原文（已固定版本） ────

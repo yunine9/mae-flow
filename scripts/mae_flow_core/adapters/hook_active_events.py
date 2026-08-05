@@ -38,8 +38,10 @@ from mae_flow_core.workflow.quality_executions import (
     record_quality_execution,
 )
 from mae_flow_core.quality.tool_transcript import (
-    bash_call, bash_calls, call_failed, parse_transcript, skill_call,
+    bash_call, bash_calls, call_failed, exact_skill_call, parse_transcript,
+    skill_call,
 )
+from mae_flow_core.quality.agent_contracts import required_skill
 from mae_flow_core.quality.compile_side_effects import (
     successful_direct_write_paths,
 )
@@ -51,6 +53,8 @@ _QUESTION_BLOCKED = (
     "质量步骤有限尝试后仍失败，使用 current 输出的 moonlight defer "
     "记录遗留并继续。\n"
 )
+
+
 _ACTION_EDIT_BLOCKED = (
     "[mae-flow] 独立任务状态和任务卡由 harness 维护，禁止直接编辑；"
     "普通业务代码不受此限制。\n"
@@ -319,13 +323,19 @@ class ActiveHookEventAdapter:
         return ActiveHookEventAdapter._latest_subagent_transcript(main)
 
     @staticmethod
-    def _quality_call(kind, calls, config):
+    def _quality_call(kind, calls, config, task=None):
         if kind == "COMPILE":
             build = str(config.get("编译方式", "") or "")
             if "build-fix" in build.lower():
                 return skill_call(calls, "build-fix")
             return bash_call(calls, build)
         if kind == "UT":
+            generator = str(config.get("UT生成方式", "") or "")
+            need = required_skill(generator)
+            if (str((task or {}).get("ut_phase", "")) != "final" and need):
+                generator_call = exact_skill_call(calls, need)
+                if not generator_call or call_failed(generator_call):
+                    return None
             return bash_call(calls, str(config.get("UT运行命令", "") or ""))
         if kind == "CODECHECK":
             matches = bash_calls(calls, "codecheck fullcheck")
@@ -346,7 +356,9 @@ class ActiveHookEventAdapter:
                     self._load_agent_transcript(path)).tool_calls
             except Exception as exc:
                 self.log("quality transcript EXC(fail-closed evidence): %s" % exc)
-        call = self._quality_call(kind, calls, state.get("config", {}) or {})
+        task = (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
+        call = self._quality_call(
+            kind, calls, state.get("config", {}) or {}, task)
         command = ""
         if call:
             value = call.input

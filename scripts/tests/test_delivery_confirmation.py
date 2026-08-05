@@ -37,10 +37,13 @@ class DeliveryConfirmationTests(unittest.TestCase):
         show_args = parse_args(["manifest", "show"])
         confirm_args = parse_args([
             "manifest", "confirm", "--message-id", "msg-1"])
+        auto_args = parse_args([
+            "manifest", "confirm", "--moonlight-auto"])
 
         self.assertEqual("set", set_args.manifest_action)
         self.assertEqual("show", show_args.manifest_action)
         self.assertEqual("confirm", confirm_args.manifest_action)
+        self.assertTrue(auto_args.moonlight_auto)
 
     def test_startup_dirty_requires_explicit_natural_language_adoption(self):
         with self.assertRaisesRegex(ValueError, "启动时已有修改"):
@@ -155,6 +158,20 @@ class DeliveryConfirmationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "没有明确批准"):
             confirm_delivery_manifest(state, "msg-no", api)
         self.assertFalse(state["delivery_manifest"]["confirmed"])
+
+    def test_moonlight_can_confirm_without_fabricating_a_user_message(self):
+        state = self.state()
+        state["moonlight"] = {"enabled": True}
+        state["delivery_manifest"] = build_delivery_manifest(
+            state, ["src/a.cpp"], "feat: A", "main", (),
+            candidate_paths=("src/a.cpp",))
+        updated = confirm_delivery_manifest(
+            state, "", types.SimpleNamespace(), moonlight_auto=True)
+        self.assertTrue(updated["delivery_manifest"]["confirmed"])
+        self.assertEqual(
+            "moonlight-auto",
+            updated["delivery_manifest"]["confirmation"]["mode"],
+        )
 
 
 if __name__ == "__main__":

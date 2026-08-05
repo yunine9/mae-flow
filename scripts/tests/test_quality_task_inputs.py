@@ -4,7 +4,9 @@
 import os
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -26,11 +28,21 @@ from mae_flow_core.workflow.quality_executions import (  # noqa: E402
     successful_quality_execution,
 )
 from mae_flow_core.cli_commands.agent_task import (  # noqa: E402
+    _compile_worktree_snapshot,
     _resolve_requirement_sources_from_runtime,
 )
+from mae_flow_core.cli_commands import agent_task  # noqa: E402
 
 
 class QualityTaskInputTests(unittest.TestCase):
+    def test_compile_task_snapshot_returns_a_tuple_for_real_compile_tasks(self):
+        snapshot = {"src/a.cpp": "digest"}
+        with mock.patch.object(agent_task, "api", types.SimpleNamespace(
+                _worktree_snapshot_since=lambda _head: snapshot)):
+            self.assertEqual(
+                (snapshot, True),
+                _compile_worktree_snapshot("COMPILE", "a" * 40))
+
     def test_local_spec_grill_story_precede_legacy_sources(self):
         with tempfile.TemporaryDirectory() as root:
             package = ensure_work_package(root, "REQ-123")

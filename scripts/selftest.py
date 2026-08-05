@@ -264,7 +264,7 @@ if flow:
           actual_ack_steps == {
               "config_confirm", "workflow_select", "code_reviewer_ask",
               "open", "story", "hf_open", "tw_open",
-              "build_review",
+              "build_review", "quality_review",
           }, str(sorted(actual_ack_steps)))
     check("所有工作流直接进入整体编码",
           steps.get("hf_open", {}).get("next") == "build"
@@ -295,11 +295,13 @@ if flow:
           and "domain-archive apply --message-id" in step_text("domain_archive"))
     check("review UT 只接受 PASS",
           steps.get("rf_ut", {}).get("evidence", [{}])[0].get("statuses") == ["PASS"])
-    check("review UT 改源码后回流整体返工与编译",
-          steps.get("rf_ut", {}).get("source_change_recheck") == "build_rework")
-    check("主流程 UT 改源码后回流专用编译节点",
-          steps.get("verify_ut", {}).get("source_change_recheck") == "verify_recompile"
-          and steps.get("verify_recompile", {}).get("next") == "verify_ponytail")
+    check("review UT 改源码后回流统一编译检视并恢复 CodeCheck",
+          steps.get("rf_ut", {}).get("source_change_recheck") == "quality_recompile"
+          and steps.get("rf_ut", {}).get("quality_review_resume") == "rf_codecheck")
+    check("主流程 UT 改源码后回流统一编译检视且不重跑 Ponytail",
+          steps.get("verify_ut", {}).get("source_change_recheck") == "quality_recompile"
+          and steps.get("quality_recompile", {}).get("next") == "quality_review"
+          and steps.get("verify_ut", {}).get("quality_review_resume") == "verify_codecheck")
     check("小改流程在统一实现提交后进入规范检查和 UT",
           steps.get("build_commit", {}).get("next", {}).get("tweak") == "tw_codecheck"
           and steps.get("tw_codecheck", {}).get("next") == "tw_ut"
@@ -309,11 +311,16 @@ if flow:
           and steps.get("tw_verify", {}).get("next") == "domain_archive"
           and steps.get("rf_ut", {}).get("next") == "domain_archive"
           and steps.get("domain_archive", {}).get("next") == "delivery_review"
-          and steps.get("delivery_review", {}).get("skip_in_moonlight"))
+          and not steps.get("delivery_review", {}).get("skip_in_moonlight")
+          and any(
+              item.get("type") == "delivery_manifest_committed"
+              for item in steps.get("delivery_review", {}).get("evidence", [])))
     check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
     check("精简改源码后自动进入专用编译步骤",
           steps.get("verify_ponytail", {}).get("source_change_next") == "verify_post_ponytail_compile"
-          and steps.get("verify_post_ponytail_compile", {}).get("next") == "verify_codecheck")
+          and steps.get("verify_post_ponytail_compile", {}).get("next") == "quality_review"
+          and steps.get("verify_post_ponytail_compile", {}).get(
+              "quality_review_resume") == "verify_codecheck")
     check("三条流程共用 CodeCheck 机器协议",
           all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
               for x in ("verify_codecheck", "tw_codecheck", "rf_codecheck")))
@@ -2179,21 +2186,21 @@ if flow:
                   (unlocked.get("unlock") or {}).get("moonlight") is True
                   and (unlocked.get("unlock") or {}).get("step") == "rf_ut")
 
-            # 模拟 UT 已尽力但仍有遗留。领域归档需要真实用户确认，
-            # 月光模式必须停在可恢复安全点，不能代替用户 apply 或提前 push。
+            # 模拟 UT 已尽力但仍有遗留。月光会自动处理领域归档；这里只验证
+            # 归档所需外部文件不可写时，仍可登记真实硬阻塞并安全停机。
             unlocked.pop("unlock", None)
             mf.save_state(unlocked)
             mf.cmd_moonlight(flow, unlocked, types.SimpleNamespace(
                 action="defer", ack=None,
-                reason="UT仍有1个历史环境失败，已重跑并排除本次代码逻辑问题，记录后等待领域归档确认"))
+                reason="UT仍有1个历史环境失败，已重跑并排除本次代码逻辑问题，记录后继续领域归档"))
             archive_waiting = mf.load_state()
-            check("评审月光轮停在领域归档等待用户",
+            check("评审月光轮继续到领域归档",
                   archive_waiting.get("current") == "domain_archive")
             mf.cmd_moonlight(flow, archive_waiting, types.SimpleNamespace(
                 action="blocked", ack=None,
-                reason="领域归档候选等待用户确认"))
+                reason="领域索引文件只读，无法安全写入归档结果"))
             blocked_archive = mf.load_state()
-            check("月光宝盒不会代替用户确认领域归档",
+            check("月光宝盒遇领域归档外部硬阻塞可安全停机",
                   blocked_archive.get("current") == "domain_archive"
                   and (blocked_archive.get("moonlight") or {}).get("hard_blocked")
                   and os.path.isfile(mf.MOONLIGHT_REPORT_PATH))

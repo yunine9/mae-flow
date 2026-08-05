@@ -39,6 +39,20 @@ class QualityEvidenceRules:
         changed, error = self.ports.source_changed_since(head, state)
         return not error and not changed, changed, error
 
+    def ut_session_complete(self, _spec, state):
+        files, error = self.ports.business_changed_files(state)
+        if error:
+            return EvidenceResult(False, error)
+        if not files:
+            return EvidenceResult(True, "")
+        session = state.get("ut_session") or {}
+        if (session.get("step") != state.get("current")
+                or session.get("phase") != "final"):
+            return EvidenceResult(
+                False, "UT 自适应生成批尚未全部完成；按 current 继续下一批，"
+                "最后必须签发并完成全量收口批")
+        return legacy_result(self.ports.agent_ran({"agent": "UT"}, state))
+
     def _scan_cache_result(self, state, files):
         scan = (state.get("quality", {}) or {}).get(
             "codecheck_scan", {})
@@ -256,6 +270,20 @@ class QualityEvidenceRules:
                     "CodeCheck 工具诊断后源码发生变化: "
                     + "、".join(changed[:5])
                     + "。对新代码重新尝试一次 codecheck-scan",
+                )
+            return EvidenceResult(True, "")
+        if scan.get("status") == "MAX_ROUNDS":
+            changed, error = self.ports.source_changed_since(
+                scan.get("head", ""), state)
+            if error:
+                return EvidenceResult(
+                    False, "CodeCheck 两轮上限记录失效:" + error)
+            if changed:
+                return EvidenceResult(
+                    False,
+                    "CodeCheck 达到两轮上限后源码仍发生变化: "
+                    + "、".join(changed[:5])
+                    + "。必须先完成该变化的编译和统一检视提交。",
                 )
             return EvidenceResult(True, "")
         if scan.get("count", 0) == 0:

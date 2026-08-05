@@ -50,11 +50,7 @@ class LeanDocumentPathTests(unittest.TestCase):
                 os.path.join(root, ".mae-flow-work", safe, "story.md"),
                 paths.local_story,
             )
-            self.assertEqual(
-                os.path.join(
-                    root, ".mae-flow-work", safe, "ut-handoff.md"),
-                paths.ut_handoff,
-            )
+            self.assertFalse(hasattr(paths, "ut_handoff"))
             self.assertEqual(
                 os.path.join(
                     root, ".mae-flow-work", safe, "review-notes.md"),

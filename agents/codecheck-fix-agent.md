@@ -1,7 +1,7 @@
 ---
 name: codecheck-fix-agent
 description: 只修复任务卡列出的真实 CodeCheck 告警并复验
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 model: inherit
 ---
 
@@ -14,7 +14,8 @@ model: inherit
 
 - Harness 首检为零告警时不应启动本 Agent。
 - 只处理任务卡逐条列出的告警；同文件其他旧告警也不得顺手修改。
-- 修复后按任务卡执行必要编译，并使用相同文件分批重新运行 CodeCheck。
+- 修复后按任务卡执行必要编译，并使用相同文件分批重新运行 CodeCheck。编译方式为 build-fix 时调用
+  任务卡指定的 Skill；编译方式为明确命令时原样执行，禁止互相替换或自行猜命令。
 - 编译和 CodeCheck 都使用单次同步调用及宿主允许的最大超时（目标十分钟）；命令返回就是完成信号。
   timeout/transport failure 如实报告失败；源码和构建输入未变化时不得重跑。
 - 禁止自动豁免、删除规则、压制输出、扩大需求、提交或推送。

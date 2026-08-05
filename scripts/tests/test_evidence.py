@@ -67,13 +67,16 @@ class EvidenceRegistryTests(unittest.TestCase):
         self.assertEqual(
             (
                 "glob", "branch_ok", "tasks_checked", "commit_tagged",
-                "commit_tagged_after_entry", "review_fix_committed",
+                "commit_tagged_after_entry", "delivery_manifest_committed",
+                "quality_review_committed",
+                "review_fix_committed",
                 "review_snapshot", "spec_field", "yaml_field",
                 "spec_validate", "tier_scope",
                 "pushed", "agent_ran", "content_free", "clean_paths",
                 "archive_paths_clean", "codecheck_clean", "glob_absent",
                 "review_agent_or_no_code", "agent_or_no_source",
-                "review_codecheck", "domain_archive_complete",
+                "review_codecheck", "ut_session_complete",
+                "domain_archive_complete",
                 "local_spec_valid", "verification_passed",
             ),
             registry.names,

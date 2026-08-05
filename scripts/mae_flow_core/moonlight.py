@@ -7,6 +7,7 @@ QUALITY_STEPS = {
     "build": "compile",
     "build_rework": "compile",
     "verify_post_ponytail_compile": "compile",
+    "quality_recompile": "compile",
     "verify_recompile": "compile",
     "rf_codecheck": "codecheck",
     "tw_codecheck": "codecheck",
@@ -21,8 +22,8 @@ QUALITY_STEPS = {
 REPAIR_ENTRY = {
     "review": "build_rework",
     "tweak": "build_rework",
-    "full": "verify_recompile",
-    "hotfix": "verify_recompile",
+    "full": "quality_recompile",
+    "hotfix": "quality_recompile",
 }
 
 

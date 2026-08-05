@@ -21,6 +21,9 @@ from mae_flow_core.quality.unit_test_contract import (  # noqa: E402
 from mae_flow_core.adapters.hook_runtime_contracts import (  # noqa: E402
     HookContractsMixin,
 )
+from mae_flow_core.adapters.hook_active_events import (  # noqa: E402
+    ActiveHookEventAdapter,
+)
 
 
 def tool(name, value, result="", error=False, seen=True):
@@ -35,6 +38,33 @@ def tool(name, value, result="", error=False, seen=True):
 
 
 class UnitTestContractTests(unittest.TestCase):
+    def test_active_runtime_requires_configured_generator_skill_and_test_command(self):
+        bash = tool(
+            "Bash", {"command": "python -m unittest"}, "7 passed")
+        skill = tool("Skill", {"skill": "AutoUT"}, "generated")
+        config = {
+            "UT生成方式": "AutoUT",
+            "UT运行命令": "python -m unittest",
+        }
+        self.assertIsNone(ActiveHookEventAdapter._quality_call(
+            "UT", (bash,), config))
+        self.assertIsNotNone(ActiveHookEventAdapter._quality_call(
+            "UT", (skill, bash), config))
+        descriptive = dict(config, **{
+            "UT生成方式": "Mae-Flow 自带 AutoUT / java-autout"})
+        java_skill = tool(
+            "Skill", {"skill": "java-autout"}, "generated")
+        self.assertIsNotNone(ActiveHookEventAdapter._quality_call(
+            "UT", (java_skill, bash), descriptive))
+        self.assertIsNone(ActiveHookEventAdapter._quality_call(
+            "UT", (skill, bash), descriptive))
+        failed_skill = tool(
+            "Skill", {"skill": "AutoUT"}, "failed", error=True)
+        self.assertIsNone(ActiveHookEventAdapter._quality_call(
+            "UT", (failed_skill, bash), config))
+        self.assertIsNotNone(ActiveHookEventAdapter._quality_call(
+            "UT", (bash,), config, {"ut_phase": "final"}))
+
     def context(
             self, report, calls=(), status="PASS", generator="manual",
             command="python -m unittest", changed=(), soft=False,

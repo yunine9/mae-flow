@@ -125,7 +125,6 @@ class DocumentPaths:
     local_decisions: str
     local_engineering_notes: str
     local_chain: str
-    ut_handoff: str
     local_review_notes: str
     local_codecheck_ledger: str
     local_delivery_notes: str
@@ -156,7 +155,6 @@ class DocumentPaths:
             local_engineering_notes=_path_join(
                 local_root, "engineering-notes.md"),
             local_chain=_path_join(local_root, "chain.md"),
-            ut_handoff=_path_join(local_root, "ut-handoff.md"),
             local_review_notes=_path_join(local_root, "review-notes.md"),
             local_codecheck_ledger=_path_join(
                 local_root, "codecheck-ledger.md"),

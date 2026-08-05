@@ -204,10 +204,10 @@ _review_status_count = review_status_count
 _review_statuses = review_statuses
 _review_has_confirmed_fix = review_has_confirmed_fix
 
-# Windows cmd 默认 GBK,强制 UTF-8 避免 ✅/中文 输出炸编码
+# 尊重宿主选择的控制台编码；只降级不可表示的 emoji/符号，避免整段中文乱码。
 for _s in (sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8", errors="replace")
+        _s.reconfigure(errors="replace")
     except Exception:
         pass
 

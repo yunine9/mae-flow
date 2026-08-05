@@ -159,10 +159,13 @@ def _compile_scope_rejection(changed, ports):
 
 def _codecheck_scope_rejection(task, changed):
     allowed = {
-        str(path).replace("\\", "/").lower()
+        repository_path_identity(path, case_insensitive=True)
         for path in task.get("allowed_files", [])
     }
-    bad = [path for path in changed if path.lower() not in allowed]
+    bad = [
+        path for path in changed
+        if repository_path_identity(path, case_insensitive=True) not in allowed
+    ]
     return (
         "codecheck-fix-agent 修改了首检范围外文件: "
         + "、".join(bad[:5])
@@ -183,17 +186,17 @@ def _ut_command_side_effect_rejection(paths):
 def _ut_non_test_changes(changed, ports, direct_write_paths):
     bad = [path for path in changed if not ports.test_like(path)]
     direct = {
-        repository_path_identity(path)
+        repository_path_identity(path, case_insensitive=True)
         for path in direct_write_paths
     }
     return (
         [
             path for path in bad
-            if repository_path_identity(path) in direct
+            if repository_path_identity(path, case_insensitive=True) in direct
         ],
         [
             path for path in bad
-            if repository_path_identity(path) not in direct
+            if repository_path_identity(path, case_insensitive=True) not in direct
         ],
     )
 
@@ -242,10 +245,14 @@ def _scope_rejection(kind, task, changed, ports, direct_write_paths):
         )
     if kind == "CP_IMPLEMENT":
         allowed = {
-            str(path).replace("\\", "/").lower()
+            repository_path_identity(path, case_insensitive=True)
             for path in task.get("task_files", [])
         }
-        bad = [path for path in changed if path.lower() not in allowed]
+        bad = [
+            path for path in changed
+            if repository_path_identity(
+                path, case_insensitive=True) not in allowed
+        ]
         if bad:
             return (
                 "cp-implementer-agent 修改了任务卡范围外文件: "

@@ -161,6 +161,40 @@ class TaskCardContractTests(unittest.TestCase):
         self.assertTrue(decision.accepted)
         self.assertEqual((), decision.changed_paths)
 
+    def test_writable_agent_scopes_compare_canonical_repository_paths(self):
+        cases = (
+            (
+                "CP_IMPLEMENT",
+                {"head": HEAD, "task_files": [r"SRC\allowed.py"]},
+                (),
+            ),
+            (
+                "CODECHECK",
+                {"head": HEAD, "allowed_files": [r"SRC\allowed.py"]},
+                (),
+            ),
+            (
+                "UT",
+                {"head": HEAD},
+                (r"SRC\allowed.py",),
+            ),
+        )
+        for kind, task, direct_paths in cases:
+            with self.subTest(kind=kind):
+                decision = verify_agent_scope(
+                    kind,
+                    task,
+                    self.state,
+                    self.ports(
+                        changed_paths_since=lambda _head: (
+                            "./src/allowed.py",),
+                        test_like=lambda path: path.lower().endswith(".py"),
+                        path_exists=lambda _path: True,
+                    ),
+                    direct_write_paths=direct_paths,
+                )
+                self.assertTrue(decision.accepted)
+
     def test_ut_command_side_effects_have_non_unlock_recovery(self):
         changed = ("src/main/resources/audit.properties",)
         command_effect = verify_agent_scope(

@@ -35,6 +35,24 @@ from mae_flow_core.cli_commands.source_facts import (  # noqa: E402
 
 
 class RuntimeAndStateTests(unittest.TestCase):
+    def test_cli_respects_cp936_stdout_selected_by_windows_host(self):
+        with tempfile.TemporaryDirectory() as root:
+            env = dict(os.environ)
+            env["PYTHONIOENCODING"] = "cp936"
+            result = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+                 "current"],
+                cwd=root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        output = result.stdout.decode("cp936", errors="replace")
+        self.assertIn("流程未初始化", output)
+        self.assertNotIn("娴佺▼", output)
+
     def test_branch_adoption_request_rejects_quoted_or_documentation_text(self):
         self.assertTrue(_branch_adoption_requested(
             "开启月光宝盒，继续当前分支完成开发"))

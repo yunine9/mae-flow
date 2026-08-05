@@ -13,6 +13,9 @@ from mae_flow_core.application.quality.task_cards import (
     store_task_card,
 )
 from mae_flow_core.quality.role_tasks import role_allowed
+from mae_flow_core.foundation.source_paths import (
+    existing_file_from_code_location,
+)
 from mae_flow_core.orchestration.behavior_baseline import (
     load_relevant_domain_context,
 )
@@ -140,6 +143,7 @@ def _document_paths(path):
     for pair in tokens:
         value = next((item for item in pair if item), "")
         value = value.rstrip(".,，。:：;；)")
+        value = existing_file_from_code_location(value)
         absolute = os.path.realpath(value)
         relative = os.path.relpath(absolute, root).replace("\\", "/")
         if (

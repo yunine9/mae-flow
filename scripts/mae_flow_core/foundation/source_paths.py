@@ -37,6 +37,22 @@ def normalize_path(path):
     return (path or "").replace("\\", "/")
 
 
+def existing_file_from_code_location(path):
+    """Collapse ``file:line``/``file::symbol`` references to the file."""
+    candidates = []
+    for marker in ("#L", "#l", "::"):
+        if marker in path:
+            candidates.append(path.split(marker, 1)[0])
+    line = re.match(r"^(.*?):\d+(?::\d+)?(?:[-–]\d+)?$", path)
+    if line:
+        candidates.append(line.group(1))
+    return next(
+        (item for item in candidates
+         if item and os.path.isfile(os.path.realpath(item))),
+        path,
+    )
+
+
 def repository_path_identity(path, case_insensitive=None):
     """Return one identity for repository-relative path comparisons."""
     normalized = re.sub(

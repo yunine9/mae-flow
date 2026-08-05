@@ -20,6 +20,27 @@ from mae_flow_core.quality.role_tasks import role_allowed  # noqa: E402
 
 
 class RoleTaskCliTests(unittest.TestCase):
+    def test_document_paths_normalize_code_locations_to_repository_files(self):
+        with tempfile.TemporaryDirectory() as repository:
+            os.makedirs(os.path.join(repository, "src"))
+            source = os.path.join(repository, "src", "service.cpp")
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int service();\n")
+            implementation = os.path.join(repository, "implementation.md")
+            with open(implementation, "w", encoding="utf-8") as stream:
+                stream.write(
+                    "- 注释：`src/service.cpp:484`\n"
+                    "- 函数：`src/service.cpp::getBandType`\n"
+                    "- 定位：[实现](src/service.cpp#L484)\n"
+                )
+            previous = os.getcwd()
+            try:
+                os.chdir(repository)
+                paths = role_task_cli._document_paths(implementation)
+            finally:
+                os.chdir(previous)
+        self.assertEqual(("src/service.cpp",), paths)
+
     def test_parser_accepts_all_roles_and_checkpoint(self):
         for role in (
             "test-design",

@@ -369,6 +369,29 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertFalse(os.path.exists(
             os.path.join(self.repo, ".mae-flow.json.gate-permits")))
 
+    def test_valid_compile_risk_receipt_closes_pending_commit_window(self):
+        path = "src/repair.cpp"
+        state = self.save_pending_compile()
+        write(self.repo, path, "int repaired() { return 1; }\n")
+        task = state["agent_tasks"]["COMPILE"]
+        snapshot = mf._source_snapshot_since(task["head"], state, mf.FLOW)
+        state["risk_acceptances"] = {"COMPILE": {
+            "step": "build",
+            "head": task["head"],
+            "at": "9999-12-31 23:59:59",
+            "task_sha256": task["sha256"],
+            "source_snapshot": snapshot,
+        }}
+        mf.save_state(state)
+
+        result = self.gate_bash(
+            'git add -- "%s" && git commit -m "[REQ123][fix]compile"'
+            % path)
+
+        output = result.stdout + result.stderr
+        self.assertEqual(0, result.returncode, output)
+        self.assertNotIn("先完成当前 COMPILE 任务", output)
+
     def test_multiple_head_mutations_in_one_bash_are_rejected(self):
         path = "config/runtime.properties"
         write(self.repo, path, "baseline=true\n")

@@ -661,6 +661,72 @@ class ConfirmationReceiptTests(unittest.TestCase):
         self.assertEqual(2, rebound.returncode)
         self.assertIn("任务卡", rebound.stdout + rebound.stderr)
 
+    def test_compile_repair_risk_binds_dirty_snapshot_outside_checkpoint(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        with open(os.path.join(root, ".gitignore"), "w", encoding="utf-8") as stream:
+            stream.write("pycache/\n.mae-flow*\n")
+        subprocess.run(
+            ["git", "add", ".gitignore"], cwd=root, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "ignore test runtime files"],
+            cwd=root, check=True)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+            text=True, capture_output=True).stdout.strip()
+        state = {
+            "current": "tw_compile",
+            "started": "2026-07-31 11:00:00",
+            "history": [{
+                "step": "tw_compile", "at": "2026-07-31 11:30:00",
+            }],
+            "config": {"源码路径": [r"\.cpp$"]},
+            "choices": {"workflow": "tweak"},
+            "agent_tasks": {"COMPILE": {
+                "step": "tw_compile",
+                "sha256": "compile-task",
+                "issuance_id": "compile-issue-1",
+                "head": head,
+                "worktree_snapshot_valid": True,
+                "worktree_snapshot": {},
+            }},
+        }
+        save_versioned_json(
+            os.path.join(root, ".mae-flow.json"),
+            state,
+            "flow",
+            project_root=root,
+        )
+        with open(os.path.join(root, "biz.cpp"), "w", encoding="utf-8") as stream:
+            stream.write("int answer() { return 43; }\n")
+        with open(
+                os.path.join(root, ".mae-flow.json.usermsg"),
+                "w", encoding="utf-8") as stream:
+            json.dump([{
+                "id": "compile-risk-answer",
+                "at": "2026-07-31 12:00:00",
+                "step": "tw_compile",
+                "text": "确认承担当前编译回执缺失风险",
+            }], stream, ensure_ascii=False)
+
+        accepted = run(root, [
+            sys.executable,
+            MAE,
+            "accept-risk",
+            "compile",
+            "--reason",
+            "编译已完成但宿主未记录返回",
+            "--message-id",
+            "compile-risk-answer",
+        ])
+
+        self.assertEqual(
+            0, accepted.returncode, accepted.stdout + accepted.stderr)
+        updated = read_json(os.path.join(root, ".mae-flow.json"))
+        receipt = updated["risk_acceptances"]["COMPILE"]
+        self.assertEqual("compile-issue-1", receipt["task_issuance_id"])
+        self.assertIn("biz.cpp", receipt["source_snapshot"])
+
 
 if __name__ == "__main__":
     unittest.main()

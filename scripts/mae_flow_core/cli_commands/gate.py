@@ -138,11 +138,12 @@ def _gate_compile_task_window(st):
                         st, "COMPILE", st.get("current", ""))))
         except (AttributeError, TypeError, ValueError):
             completed = False
+    risk_accepted, _risk_why = api._risk_acceptance("COMPILE", st)
     decision = decide_compile_task_commit(
         st.get("current", ""),
         task,
         (tokens if isinstance(tokens, dict) else {}).get("COMPILE"),
-        completed=completed,
+        completed=completed or risk_accepted,
     )
     if decision:
         _die_decision(decision)

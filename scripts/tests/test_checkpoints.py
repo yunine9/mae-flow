@@ -300,6 +300,51 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(
             state["development_review"]["checkpoints"][1]["status"], "coding")
 
+    def test_pace_choice_answered_before_plan_is_consumed_once(self):
+        state = self.save(self.state())
+        self.message(state, json.dumps({
+            "answer": "一次完成全部代码，最终统一检视"
+        }, ensure_ascii=False))
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_plan(state, types.SimpleNamespace(
+                item=["core behavior", "compatibility"]))
+        state = mf.load_state()
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_done(FLOW, state, types.SimpleNamespace(
+                ack=None, choice="continuous", set=[]))
+
+        state = mf.load_state()
+        self.assertEqual("tw_change", state["current"])
+        self.assertEqual("continuous", state["development_review"]["mode"])
+
+    def test_preplan_choice_is_not_reused_after_a_newer_non_choice_reply(self):
+        state = self.save(self.state())
+        choice = json.dumps({
+            "answer": "一次完成全部代码，最终统一检视"
+        }, ensure_ascii=False)
+        self.message(state, choice)
+        with contextlib.redirect_stdout(io.StringIO()):
+            mf.cmd_checkpoint_plan(state, types.SimpleNamespace(
+                item=["core behavior", "compatibility"]))
+        state = mf.load_state()
+        with open(mf.STATE_PATH + ".usermsg", "w", encoding="utf-8") as f:
+            json.dump([
+                {"text": choice, "step": state["current"],
+                 "at": "9999-12-31 23:59:59"},
+                {"text": "先等等，我还没有确认新方案",
+                 "step": state["current"],
+                 "at": "9999-12-31 23:59:59"},
+            ], f, ensure_ascii=False)
+
+        with self.assertRaises(SystemExit) as rejected:
+            with contextlib.redirect_stderr(io.StringIO()):
+                mf.cmd_done(FLOW, state, types.SimpleNamespace(
+                    ack=None, choice="continuous", set=[]))
+
+        self.assertEqual(2, rejected.exception.code)
+        self.assertEqual("tw_pace", mf.load_state()["current"])
+
     def test_new_full_process_cannot_downgrade_to_legacy_items(self):
         state = self.state(current="build_pace")
         state["choices"]["workflow"] = "full"

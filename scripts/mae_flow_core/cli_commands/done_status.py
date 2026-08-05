@@ -59,6 +59,20 @@ def _done_pending_config(step, st, args, sid):
         api.die(why, 2)
     return pending_config
 
+
+def _pace_choice_cursor(st, cursor):
+    """Expose only a latest pre-plan button answer, never the whole cursor."""
+    rows = api._current_ack_messages(st)
+    known = set(cursor or [])
+    if any(api._ack_message_signature(item) not in known for item in rows):
+        return cursor
+    if not rows:
+        return cursor
+    latest = api._ack_message_signature(rows[-1])
+    return tuple(signature for signature in (cursor or ())
+                 if signature != latest)
+
+
 def _done_validate_choice_and_ack(step, st, args, sid):
     error = workflow_completion.choice_error(step, args.choice)
     if error:
@@ -78,6 +92,10 @@ def _done_validate_choice_and_ack(step, st, args, sid):
                 (pace_state or {}).get("ack_cursor")
                 if pace_state else None
             )
+            if (
+                    ack_cursor is not None
+                    and (pace_state or {}).get("status") == "plan_pending"):
+                ack_cursor = _pace_choice_cursor(st, ack_cursor)
         ok, why = api._choice_verified(
             step, st, args.choice,
             ack_cursor)
@@ -349,8 +367,13 @@ def cmd_accept_risk(flow, st, args):
     task = (st.get("agent_tasks", {}) or {}).get(kind, {})
     precommit_compile = bool(
         kind == "COMPILE" and task.get("precommit_review"))
+    compile_task_snapshot = bool(
+        kind == "COMPILE"
+        and isinstance(task, dict)
+        and task.get("step") == sid
+        and task.get("head"))
     dirty = api._blocking_dirty_source_paths(st, flow)
-    if dirty and not precommit_compile:
+    if dirty and not compile_task_snapshot:
         api.die("风险确认必须绑定稳定代码版本，但仍有未提交源码/测试/构建文件: " + "、".join(dirty[:8])
             + "。先按本单规范提交，再向用户展示风险并重新确认。", 2)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -359,21 +382,22 @@ def cmd_accept_risk(flow, st, args):
            "task_sha256": task.get("sha256", ""), "reason": args.reason,
            "authorization": authorization_receipt,
            "unchanged_initial_dirty": inherited_dirty}
-    if precommit_compile:
+    if compile_task_snapshot:
         task_head = task.get("head", "")
         if (
                 not task_head
                 or api.argv_out([
                     "git", "cat-file", "-t", task_head]) != "commit"):
-            api.die("分段编译风险确认无法绑定任务卡源码基线，请重新签发 COMPILE 任务卡。", 2)
-        issued_snapshot = task.get("source_snapshot")
+            api.die("编译风险确认无法绑定任务卡源码基线，请重新签发 COMPILE 任务卡。", 2)
         current_snapshot = api._source_snapshot_since(
             task_head, st, flow)
-        if (
-                not isinstance(issued_snapshot, dict)
-                or current_snapshot != issued_snapshot):
-            api.die("分段编译风险确认使用的 COMPILE 任务卡已过期；"
-                    "源码快照变化后必须重新签发任务卡，再让用户确认风险。", 2)
+        if precommit_compile:
+            issued_snapshot = task.get("source_snapshot")
+            if (
+                    not isinstance(issued_snapshot, dict)
+                    or current_snapshot != issued_snapshot):
+                api.die("分段编译风险确认使用的 COMPILE 任务卡已过期；"
+                        "源码快照变化后必须重新签发任务卡，再让用户确认风险。", 2)
         rec.update({
             "task_issuance_id": task.get("issuance_id", ""),
             "checkpoint": task.get("checkpoint", ""),
@@ -392,6 +416,9 @@ def cmd_accept_risk(flow, st, args):
         print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
               "本次放行自动失效。现在执行 checkpoint ready %s。"
               % (task.get("checkpoint", "") or "<当前检查点>"))
+    elif compile_task_snapshot and dirty:
+        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
+              "本次放行自动失效。现在按本单清单精确提交当前修复，再执行 done。")
     else:
         print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
               "本次放行自动失效。现在重新执行 done。")

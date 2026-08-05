@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Confirmation receipt integration regressions."""
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -111,6 +113,165 @@ class ConfirmationReceiptTests(unittest.TestCase):
             },
         }, ensure_ascii=False) + "\n"
         return run(root, [sys.executable, HOOK, "posttooluse"], payload)
+
+    def capture_spec_answer(self, root, answer):
+        payload = json.dumps({
+            "cwd": root,
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "questions": [{
+                    "question": "本地 Spec 是否正确？",
+                    "options": [
+                        {"label": "确认Spec"},
+                        {"label": "需要修改"},
+                    ],
+                }],
+            },
+            "tool_response": {
+                "answers": {"本地 Spec 是否正确？": answer},
+            },
+        }, ensure_ascii=False) + "\n"
+        return run(root, [sys.executable, HOOK, "posttooluse"], payload)
+
+    def test_captured_spec_confirmation_button_maps_to_canonical_answer(self):
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        state = {
+            "current": "open",
+            "started": "2026-08-05 09:00:00",
+            "history": [{
+                "step": "open", "at": "2026-08-05 09:00:00",
+            }],
+            "config": {},
+            "choices": {},
+        }
+        save_versioned_json(
+            os.path.join(root, ".mae-flow.json"),
+            state,
+            "flow",
+            project_root=root,
+        )
+        captured = self.capture_spec_answer(root, "确认Spec")
+        self.assertEqual(0, captured.returncode, captured.stderr)
+
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            with open(
+                    os.path.join(ROOT, "flow", "flow.json"),
+                    encoding="utf-8") as stream:
+                step = json.load(stream)["steps"]["open"]
+            accepted, why = mf._implicit_ack_verified(step, state)
+        finally:
+            os.chdir(old_cwd)
+
+        self.assertTrue(accepted, why)
+
+    def test_spec_confirmation_rejects_generic_and_revision_buttons(self):
+        for answer in ("可以", "需要修改"):
+            with self.subTest(answer=answer):
+                temp, root = self.make_repo()
+                try:
+                    state = {
+                        "current": "open",
+                        "started": "2026-08-05 09:00:00",
+                        "history": [{
+                            "step": "open", "at": "2026-08-05 09:00:00",
+                        }],
+                        "config": {},
+                        "choices": {},
+                    }
+                    save_versioned_json(
+                        os.path.join(root, ".mae-flow.json"),
+                        state,
+                        "flow",
+                        project_root=root,
+                    )
+                    self.capture_spec_answer(root, answer)
+                    old_cwd = os.getcwd()
+                    os.chdir(root)
+                    try:
+                        with open(
+                                os.path.join(ROOT, "flow", "flow.json"),
+                                encoding="utf-8") as stream:
+                            step = json.load(stream)["steps"]["open"]
+                        accepted, why = mf._implicit_ack_verified(
+                            step, state)
+                    finally:
+                        os.chdir(old_cwd)
+                    self.assertFalse(accepted)
+                    self.assertIn(answer, why)
+                    self.assertIn("Spec 内容已确认，生成 Story", why)
+                finally:
+                    temp.cleanup()
+
+    def test_current_prints_the_exact_confirmation_button_label(self):
+        with open(
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
+            flow = json.load(stream)
+        state = {
+            "current": "open",
+            "started": "2026-08-05 09:00:00",
+            "history": [],
+            "config": {},
+            "choices": {},
+        }
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            mf.print_current(flow, state)
+
+        self.assertIn(
+            "确认按钮标签必须原样使用：「Spec 内容已确认，生成 Story」",
+            output.getvalue(),
+        )
+
+    def test_topical_button_aliases_work_for_every_fixed_confirmation_step(self):
+        with open(
+                os.path.join(ROOT, "flow", "flow.json"),
+                encoding="utf-8") as stream:
+            flow = json.load(stream)
+        cases = (
+            ("open", "确认Spec"),
+            ("story", "确认Story"),
+            ("hf_open", "确认范围"),
+            ("tw_open", "确认范围"),
+        )
+        temp, root = self.make_repo()
+        self.addCleanup(temp.cleanup)
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            for step_id, answer in cases:
+                with self.subTest(step=step_id, answer=answer):
+                    with open(
+                            os.path.join(root, ".mae-flow.json.usermsg"),
+                            "w", encoding="utf-8") as stream:
+                        json.dump([{
+                            "id": "answer-" + step_id,
+                            "at": "2026-08-05 10:00:00",
+                            "step": step_id,
+                            "text": json.dumps({
+                                "answers": {"确认": answer},
+                            }, ensure_ascii=False),
+                            "askuser": {"questions": [{
+                                "question": "是否确认？",
+                                "options": [answer, "需要修改"],
+                            }]},
+                        }], stream, ensure_ascii=False)
+                    accepted, why = mf._implicit_ack_verified(
+                        flow["steps"][step_id], {
+                            "current": step_id,
+                            "started": "2026-08-05 09:00:00",
+                            "history": [{
+                                "step": step_id,
+                                "at": "2026-08-05 09:00:00",
+                            }],
+                        })
+                    self.assertTrue(accepted, why)
+        finally:
+            os.chdir(old_cwd)
 
     def test_natural_scope_confirmation_needs_no_copied_ack(self):
         temp, root = self.make_repo()

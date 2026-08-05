@@ -497,3 +497,4 @@ compatibility 子命令或旧项目退出兼容链；删除后必须重算组件
 - **review 轮次不碰规格（红线）**——行为/规格类意见在 rf_triage 分诊转 hotfix/full。进入 rf_triage 前自动冻结 `review_base_head`；质量链拆为 rf_compile → rf_codecheck → rf_ut，只按本轮 diff。无业务代码机器自动跳过；有业务代码必须 COMPILE/OK 与 UT/PASS。旧流程的 rf_verify 作为一次性迁移桥；旧版已停在 verify_ut/rf_ut 且没有 `step_heads` 时，按进入步骤的 history 时间恢复之前最后一个 commit，只允许保守多验，禁止以当前 HEAD 补位。
 - **Bash 写检测可绕过**——定位是软提醒层（见 3.3）。
 - **返回事件丢失不自动重派**——已有 started 时由 `done/doctor` 明确展示 Hook 诊断和风险出口；禁止把宿主漏记变成 Critic/Reviewer/编译循环。
+- **普通确认按钮以标准标签为源、真实收据作兼容**——`current` 必须原样展示 `confirmation_answers`；只有当前步骤 AskUserQuestion 收据中真实展示并点选、且带明确确认主题的按钮才可映射到标准确认。泛化“可以”、修改意见、普通文本和高风险授权不得借此放宽；不匹配诊断必须同时给出实际答案与标准标签，禁止让用户重复确认或让 Agent 猜 `--choice`。

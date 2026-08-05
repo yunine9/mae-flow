@@ -258,10 +258,24 @@ def _is_positive_confirmation(value):
             r"^(?:确认|同意|可以|没问题|继续|按此|无异议)", compact, re.I))
     )
 
+def _button_confirmation_alias(item, candidate, expected):
+    """Accept a topical positive alias only when it was a displayed button."""
+    normalized = re.sub(
+        r"[\s，。；;：:、!！]+", "", str(candidate or "")).lower()
+    labels = {
+        re.sub(r"[\s，。；;：:、!！]+", "", str(label or "")).lower()
+        for question in ((item.get("askuser") or {}).get("questions") or [])
+        for label in (question.get("options") or [])
+    }
+    if normalized not in labels or not _is_positive_confirmation(candidate):
+        return False
+    subject = re.sub(r"(?:并)?继续$", "", re.sub(r"^(?:确认|同意)", "", normalized))
+    return len(subject) >= 2 and any(subject in value for value in expected)
+
 def _implicit_ack_verified(step, st):
     """Use a fresh button/plain-text answer directly; no second typed ACK."""
     expected = {
-        re.sub(r"[\s，。；;：:、!！]+", "", str(value))
+        re.sub(r"[\s，。；;：:、!！]+", "", str(value)).lower()
         for value in step.get("confirmation_answers", [])
         if str(value).strip()
     }
@@ -269,8 +283,13 @@ def _implicit_ack_verified(step, st):
     for item in reversed(rows):
         for candidate in reversed(_trusted_answer_candidates(item.get("text", ""))):
             normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
-            normalized = re.sub(r"[（(]推荐[）)]", "", normalized)
+            normalized = re.sub(
+                r"[（(]推荐[）)]", "", normalized).lower()
             if expected and normalized in expected:
+                _ack_failure(st, success=True)
+                return True, ""
+            if expected and _button_confirmation_alias(
+                    item, candidate, expected):
                 _ack_failure(st, success=True)
                 return True, ""
             if _is_positive_confirmation(candidate):
@@ -279,11 +298,15 @@ def _implicit_ack_verified(step, st):
                 _ack_failure(st, success=True)
                 return True, ""
     wanted = " / ".join(step.get("confirmation_answers", []))
+    actual = " / ".join(dict.fromkeys(value for item in rows for value in
+        _trusted_answer_values(item.get("text", ""))))
     why = (_out_of_scope_ack_reason(st) if not rows else "") or (
-        "尚未捕获到本步骤的%s选择。正常情况下直接使用 AskUserQuestion 让用户点选即可，"
-        "done 会自动读取结果，不要再要求用户补输“确认××”。"
-        "只有宿主确实没有回传按钮结果时，才让用户发送一次页面上的确认选项。"
-    ) % (("「" + wanted + "」") if wanted else "肯定")
+        ("已捕获当前步骤答案「%s」，但未匹配标准确认按钮「%s」。"
+         "不要猜 --choice 或重复询问；按 current 输出原样展示标准按钮。"
+         % (actual or "无", wanted or "肯定")) if rows else
+        ("尚未捕获到本步骤的%s选择。正常情况下直接使用 AskUserQuestion 让用户点选即可，"
+         "done 会自动读取结果；只有宿主确实没有回传按钮结果时，才让用户发送一次标准选项。"
+         % (("「" + wanted + "」") if wanted else "肯定")))
     count = _ack_failure(st, why)
     return False, why + _ack_retry_guidance(count)
 

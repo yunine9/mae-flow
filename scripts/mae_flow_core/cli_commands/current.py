@@ -331,6 +331,15 @@ def print_current(flow, st):
         print("⚠ 本步有真实用户决策:用 AskUserQuestion 呈现固定选项，用户点选后同轮直接 done。"
               "按钮结果由 harness 自动读取，不要再要求用户手动输入“确认××”；"
               "只有宿主确实不回传按钮结果时才退回一次纯文本选择。")
+        answers = [
+            str(value).strip()
+            for value in step.get("confirmation_answers", [])
+            if str(value).strip()
+        ]
+        if answers:
+            print("   确认按钮标签必须原样使用：" + " / ".join(
+                "「%s」" % value for value in answers))
+            print("   另一个按钮必须明确表达需要修改；禁止缩写或改写上述确认按钮。")
     elif step.get("user_ack") and api._moonlight(st):
         print("🌙 本步原本需要用户确认，现由月光宝盒启动授权代替；禁止调用 AskUserQuestion。"
               "按最保守且不扩大需求的选项继续，并把决定写入阶段产物。")

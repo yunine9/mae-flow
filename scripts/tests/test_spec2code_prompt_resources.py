@@ -83,6 +83,12 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("role-task code-review", review)
         self.assertIn("不代替用户人工检视", review)
 
+    def test_compile_risk_recovery_has_no_retired_cp_or_commit_first_hint(self):
+        text = read("scripts/mae_flow_core/cli_commands/done_status.py")
+        self.assertNotIn("分段编译风险确认", text)
+        self.assertNotIn("精确提交当前修复，再执行 done", text)
+        self.assertIn("重新执行 agent-task compile", text)
+
     def test_live_operator_docs_have_no_checkpoint_or_story_commit_protocol(self):
         operator_docs = "\n".join(read(path) for path in (
             "README.md", "MAINTAINERS.md", "FIELD-TEST.md",

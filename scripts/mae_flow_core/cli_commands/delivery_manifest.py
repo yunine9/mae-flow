@@ -165,6 +165,46 @@ def build_delivery_manifest(
     return candidate
 
 
+def build_unchanged_delivery_manifest(
+        state, target, current_dirty=(), preserved_initial_dirty=(),
+        repository_root=None):
+    """Build a confirmed no-op manifest after an unchanged domain archive."""
+    archive = (state or {}).get("domain_archive") or {}
+    if archive.get("status") != "applied":
+        raise ValueError("领域归档尚未应用，不能生成 unchanged 交付清单")
+    if (
+        archive.get("result") != "unchanged"
+        or bool(archive.get("applied_paths") or ())
+    ):
+        raise ValueError("领域归档不是 unchanged，必须提交真实归档增量")
+    target = str(target or "").strip()
+    if not target:
+        raise ValueError("交付清单缺少目标分支")
+
+    root = os.path.abspath(repository_root or os.getcwd())
+    dirty = DeliveryManifest.from_paths(
+        current_dirty or (), repository_root=root).files
+    preserved = DeliveryManifest.from_paths(
+        preserved_initial_dirty or (), repository_root=root).files
+    preserved_ids = {_identity(path) for path in preserved}
+    unexpected = [
+        path for path in dirty if _identity(path) not in preserved_ids
+    ]
+    if unexpected:
+        raise ValueError("仍有新增未提交文件: " + "、".join(unexpected))
+
+    return {
+        "files": [],
+        "commit_message": "",
+        "target_branch": target,
+        "adopted_dirty": {},
+        "confirmed": True,
+        "no_changes": True,
+        "unchanged_initial_dirty": sorted(preserved, key=str.casefold),
+        "confirmation": {"mode": "unchanged"},
+    }
+
+
 def confirm_delivery_manifest(
         state, message_id, command_api=api, moonlight_auto=False):
     manifest = (state or {}).get("delivery_manifest") or {}
@@ -205,8 +245,12 @@ def _print_manifest(manifest):
     print("提交说明: " + str(manifest.get("commit_message", "")))
     print("用户确认: " + ("已确认" if manifest.get("confirmed") else "待确认"))
     print("文件:")
-    for path in manifest.get("files", ()):
-        print("- " + path)
+    files = manifest.get("files", ())
+    if files:
+        for path in files:
+            print("- " + path)
+    else:
+        print("- 无（领域归档 unchanged，本步骤无需新提交）")
     adopted = manifest.get("adopted_dirty") or {}
     if adopted:
         print("启动时已有修改的采用决定:")
@@ -225,16 +269,28 @@ def cmd_delivery_manifest(state, args):
         return manifest
     if args.manifest_action == "set":
         try:
-            manifest = build_delivery_manifest(
-                state, args.file, args.message, args.target,
-                args.adopt_dirty, _current_candidates(args.file))
+            if args.unchanged:
+                dirty = tuple(api._dirty_paths())
+                preserved = tuple(
+                    path for path in dirty
+                    if api._unchanged_initial_dirty(path, state)
+                )
+                manifest = build_unchanged_delivery_manifest(
+                    state, args.target, current_dirty=dirty,
+                    preserved_initial_dirty=preserved)
+            else:
+                manifest = build_delivery_manifest(
+                    state, args.file or (), args.message, args.target,
+                    args.adopt_dirty, _current_candidates(args.file or ()))
         except ValueError as exc:
             api.die(str(exc), 2)
         updated = copy.deepcopy(state)
         updated["delivery_manifest"] = manifest
         api.save_state(updated)
         _print_manifest(manifest)
-        if not manifest["confirmed"]:
+        if manifest.get("no_changes"):
+            print("下一步: 领域归档无增量，不要提交；直接执行 done。")
+        elif not manifest["confirmed"]:
             print("下一步: 请向用户展示以上清单；收到回答后执行 "
                   + render_display("messages") + "，再执行 "
                   + render_display(

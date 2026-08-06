@@ -13,6 +13,7 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core.cli_parser import parse_args  # noqa: E402
+from mae_flow_core.cli_commands import delivery_manifest  # noqa: E402
 from mae_flow_core.cli_commands.delivery_manifest import (  # noqa: E402
     build_delivery_manifest,
     confirm_delivery_manifest,
@@ -44,6 +45,60 @@ class DeliveryConfirmationTests(unittest.TestCase):
         self.assertEqual("show", show_args.manifest_action)
         self.assertEqual("confirm", confirm_args.manifest_action)
         self.assertTrue(auto_args.moonlight_auto)
+
+    def test_parser_accepts_unchanged_delivery_without_file_or_message(self):
+        try:
+            args = parse_args([
+                "manifest", "set", "--unchanged", "--target", "main"])
+        except SystemExit as exc:
+            self.fail("合法空交付命令必须可解析，实际退出 %s" % exc.code)
+        self.assertTrue(args.unchanged)
+        self.assertIsNone(args.file)
+        self.assertIsNone(args.message)
+
+    def test_unchanged_delivery_builds_confirmed_no_op_manifest(self):
+        builder = getattr(
+            delivery_manifest, "build_unchanged_delivery_manifest", None)
+        self.assertIsNotNone(
+            builder, "缺少空交付清单构造器，unchanged 会卡死在最终检视")
+        state = self.state()
+        state["domain_archive"] = {
+            "status": "applied", "result": "unchanged",
+            "applied_paths": [],
+        }
+
+        manifest = builder(
+            state, "main", current_dirty=("docs/user-notes.md",),
+            preserved_initial_dirty=("docs/user-notes.md",))
+
+        self.assertEqual([], manifest["files"])
+        self.assertEqual("main", manifest["target_branch"])
+        self.assertTrue(manifest["confirmed"])
+        self.assertTrue(manifest["no_changes"])
+        self.assertEqual(
+            {"mode": "unchanged"}, manifest["confirmation"])
+        self.assertEqual(
+            ["docs/user-notes.md"],
+            manifest["unchanged_initial_dirty"])
+
+    def test_unchanged_delivery_rejects_nonempty_or_dirty_final_state(self):
+        builder = getattr(
+            delivery_manifest, "build_unchanged_delivery_manifest", None)
+        self.assertIsNotNone(builder)
+        cases = (
+            ({"status": "prepared", "result": "unchanged",
+              "applied_paths": []}, (), "尚未应用"),
+            ({"status": "applied", "result": "changes",
+              "applied_paths": ["docs/specs/radio.md"]}, (), "不是 unchanged"),
+            ({"status": "applied", "result": "unchanged",
+              "applied_paths": []}, ("src/leak.cpp",), "新增未提交"),
+        )
+        for archive, dirty, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                    ValueError, message):
+                state = self.state()
+                state["domain_archive"] = archive
+                builder(state, "main", current_dirty=dirty)
 
     def test_startup_dirty_requires_explicit_natural_language_adoption(self):
         with self.assertRaisesRegex(ValueError, "启动时已有修改"):

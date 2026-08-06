@@ -375,6 +375,11 @@ def cmd_accept_risk(flow, st, args):
         and task.get("head"))
     dirty = api._blocking_dirty_source_paths(st, flow)
     if dirty and not compile_task_snapshot:
+        if kind == "COMPILE":
+            api.die(
+                "编译风险确认尚未绑定当前整体源码快照；请重新执行 "
+                "agent-task compile，按新任务卡完成编译或重新确认风险。"
+                "不要在用户检视前提交代码。", 2)
         api.die("风险确认必须绑定稳定代码版本，但仍有未提交源码/测试/构建文件: " + "、".join(dirty[:8])
             + "。先按本单规范提交，再向用户展示风险并重新确认。", 2)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -397,8 +402,9 @@ def cmd_accept_risk(flow, st, args):
             if (
                     not isinstance(issued_snapshot, dict)
                     or current_snapshot != issued_snapshot):
-                api.die("分段编译风险确认使用的 COMPILE 任务卡已过期；"
-                        "源码快照变化后必须重新签发任务卡，再让用户确认风险。", 2)
+                api.die("编译风险确认使用的 COMPILE 任务卡已过期；"
+                        "代码变化后请重新执行 agent-task compile，"
+                        "完成整体编译或重新确认风险。", 2)
         rec.update({
             "task_issuance_id": task.get("issuance_id", ""),
             "source_snapshot": current_snapshot,
@@ -412,12 +418,8 @@ def cmd_accept_risk(flow, st, args):
     if inherited_dirty:
         print("审计:以下流程启动前已脏文件指纹未变，不算本单变化: "
               + "、".join(inherited_dirty[:8]))
-    if compile_task_snapshot and dirty:
-        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
-              "本次放行自动失效。现在按本单清单精确提交当前修复，再执行 done。")
-    else:
-        print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
-              "本次放行自动失效。现在重新执行 done。")
+    print("其他机器证据不会跳过；源码/测试变化、任务卡变化或进入下一步后，"
+          "本次放行自动失效。现在重新执行 done。")
 
 def _workflow_chain(flow, wf):
     """按交付方式线性展开步骤链(可选询问步取"做"分支展示完整形态)。"""

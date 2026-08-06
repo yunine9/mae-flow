@@ -59,6 +59,12 @@ class QualityFlowRedlineTests(unittest.TestCase):
         self.assertIn("delivery_manifest_committed", {
             row["type"] for row in delivery["evidence"]})
 
+    def test_unchanged_domain_archive_does_not_reuse_committed_source(self):
+        guidance = read("flow/steps/delivery_review.md")
+        self.assertIn("manifest set --unchanged", guidance)
+        self.assertIn("已经提交的源码", guidance)
+        self.assertIn("无需创建空提交", guidance)
+
     def test_ut_unlock_guidance_matches_the_parser_and_never_precommits(self):
         prompt = read("flow/steps/verify_ut.md")
         self.assertNotIn("--ack", prompt)

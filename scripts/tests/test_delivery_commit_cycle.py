@@ -65,6 +65,25 @@ class DeliveryCommitCycleTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("未确认", result.reason)
 
+    def test_unchanged_archive_needs_no_empty_commit(self):
+        state = self.state()
+        state["domain_archive"] = {
+            "status": "applied", "result": "unchanged",
+            "applied_paths": [],
+        }
+        state["delivery_manifest"] = {
+            "files": [], "confirmed": True, "no_changes": True,
+            "unchanged_initial_dirty": [],
+        }
+
+        clean = rules().delivery_manifest_committed({}, state)
+        leaked = rules(
+            dirty=("src/leak.cpp",)).delivery_manifest_committed({}, state)
+
+        self.assertTrue(clean.passed, clean.reason)
+        self.assertFalse(leaked.passed)
+        self.assertIn("新增未提交", leaked.reason)
+
     def test_quality_review_requires_every_reviewed_path_committed_and_clean(self):
         state = {
             "current": "quality_commit",

@@ -53,6 +53,52 @@ class RuntimeAndStateTests(unittest.TestCase):
         self.assertIn("流程未初始化", output)
         self.assertNotIn("娴佺▼", output)
 
+    def test_active_current_is_readable_with_windows_cp936_stdout(self):
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "mae-flow@test.invalid"],
+                cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.name", "MAE Flow Test"],
+                cwd=root, check=True)
+            source = os.path.join(root, "biz.cpp")
+            with open(source, "w", encoding="utf-8") as stream:
+                stream.write("int value = 1;\n")
+            subprocess.run(["git", "add", "biz.cpp"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "base"], cwd=root, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                text=True, capture_output=True).stdout.strip()
+            save_versioned_json(
+                os.path.join(root, ".mae-flow.json"), {
+                    "current": "build",
+                    "config": {
+                        "单号": "REQ-936", "基线分支": "master",
+                        "分支名": "master",
+                    },
+                    "choices": {"workflow": "tweak"},
+                    "history": [],
+                    "step_heads": {"build": head},
+                    "initial_dirty": [],
+                    "started": "2026-08-06 10:00:00",
+                }, "flow", project_root=root)
+            env = dict(os.environ)
+            env["PYTHONIOENCODING"] = "cp936"
+            result = subprocess.run(
+                [sys.executable, os.path.join(ROOT, "scripts", "mae-flow.py"),
+                 "current"],
+                cwd=root, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, check=False)
+
+        output = result.stdout.decode("cp936", errors="replace")
+        self.assertEqual(0, result.returncode, output)
+        self.assertIn("当前步骤", output)
+        self.assertIn("编码实现", output)
+        for mojibake in ("鈺", "褰", "姝"):
+            self.assertNotIn(mojibake, output)
+
     def test_branch_adoption_request_rejects_quoted_or_documentation_text(self):
         self.assertTrue(_branch_adoption_requested(
             "开启月光宝盒，继续当前分支完成开发"))

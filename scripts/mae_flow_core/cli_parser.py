@@ -212,8 +212,11 @@ def parse_args(argv=None):
     manifest_actions = manifest.add_subparsers(
         dest="manifest_action", required=True)
     manifest_set = manifest_actions.add_parser("set")
-    manifest_set.add_argument("--file", action="append", required=True)
-    manifest_set.add_argument("--message", required=True)
+    manifest_set_choice = manifest_set.add_mutually_exclusive_group(
+        required=True)
+    manifest_set_choice.add_argument("--file", action="append")
+    manifest_set_choice.add_argument("--unchanged", action="store_true")
+    manifest_set.add_argument("--message")
     manifest_set.add_argument("--target", required=True)
     manifest_set.add_argument("--adopt-dirty", action="append", default=[])
     manifest_actions.add_parser("show")

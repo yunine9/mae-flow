@@ -74,6 +74,35 @@ def review_has_confirmed_fix(text):
     return review_status_count(text, "修复(已确认)") > 0
 
 
+def _unchanged_manifest_result(manifest, archive, dirty_paths):
+    valid = (
+        manifest.get("no_changes") is True
+        and manifest.get("confirmed") is True
+        and archive.get("status") == "applied"
+        and archive.get("result") == "unchanged"
+        and not (archive.get("applied_paths") or ())
+    )
+    if not valid:
+        return EvidenceResult(
+            False, "尚未生成精确交付清单；先执行 manifest set")
+
+    def normalize(path):
+        return str(path).replace("\\", "/").casefold()
+
+    preserved = {
+        normalize(path) for path in
+        (manifest.get("unchanged_initial_dirty") or ())
+    }
+    leaked = [
+        path for path in dirty_paths if normalize(path) not in preserved
+    ]
+    if leaked:
+        return EvidenceResult(
+            False, "空交付清单之后仍有新增未提交文件: "
+            + "、".join(leaked[:8]))
+    return EvidenceResult(True, "领域归档 unchanged，无需创建空提交")
+
+
 class DeliveryEvidenceRules:
     def __init__(self, ports):
         self.ports = ports
@@ -147,8 +176,9 @@ class DeliveryEvidenceRules:
         manifest = state.get("delivery_manifest") or {}
         files = list(manifest.get("files") or ())
         if not files:
-            return EvidenceResult(
-                False, "尚未生成精确交付清单；先执行 manifest set")
+            return _unchanged_manifest_result(
+                manifest, state.get("domain_archive") or {},
+                self.ports.dirty_paths())
         if manifest.get("confirmed") is not True:
             return EvidenceResult(
                 False, "精确交付清单尚未确认，不能进入 push")

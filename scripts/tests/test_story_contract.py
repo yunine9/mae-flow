@@ -154,7 +154,7 @@ class StoryContractTests(unittest.TestCase):
         build = read("flow/steps/build.md")
         compile_agent = read("agents/compile-agent.md")
         self.assertIn("一次完成需求涉及的全部生产代码", build)
-        self.assertIn("不要派实现子 Agent", build)
+        self.assertIn("设计承载的代码不外包", build)
         self.assertIn("compile-agent", build)
         self.assertIn("编译方式", compile_agent)
         self.assertIn("Skill", compile_agent)

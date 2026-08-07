@@ -66,8 +66,14 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("跨块漂移", build)
         # 反回退:仍然是一步、一次编译、无实现子 Agent、无批次文档
         self.assertIn("一次完成需求涉及的全部生产代码", build)
-        self.assertIn("不要派实现子 Agent", build)
         self.assertIn("不要拆开发批次", build)
+        # 子 Agent 边界:设计不外包;只读侦察与机械扇出是仅有的两类合法用法,
+        # 且扇出产出不免检——放宽永远不得放宽到"实现整体外包"。
+        self.assertIn("设计承载的代码不外包", build)
+        self.assertIn("只读侦察", build)
+        self.assertIn("机械扇出", build)
+        self.assertIn("不免检", build)
+        self.assertIn("已亲写第一个完整样例", build)
 
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")
@@ -99,7 +105,7 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             ROOT, "agents", "implementer-agent.md")))
         build = read("flow/steps/build.md")
         self.assertIn("主 Agent", build)
-        self.assertIn("不要派实现子 Agent", build)
+        self.assertIn("设计承载的代码不外包", build)
 
     def test_ut_generator_retains_behavior_driven_execution(self):
         text = read("agents/ut-generator-agent.md")

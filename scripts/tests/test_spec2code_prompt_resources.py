@@ -335,3 +335,85 @@ class AssumptionAndDeadCodeBoundaryTests(unittest.TestCase):
         self.assertIn("本次改动弄死的旧代码是否删净", reviewer)
         self.assertIn("本次改动弄死的旧代码是否删净", standards_brief)
         self.assertIn("不是本次弄死的旧死代码不算问题", standards_brief)
+
+
+class RiskTriggeredDimensionCheckTests(unittest.TestCase):
+    """量纲检查是风险触发型,不是固定阶段。
+
+    Hz/kHz/MHz、RB、时隙、逻辑与物理索引在代码里几乎全是整型,类型系统看不见单位,
+    编译器也就看不见错——是"能编译、逻辑错"的主要产地。但绝大多数交付不碰这些,
+    所以只在改动行命中时才往卡里追加检查段:不命中一个字都不加。
+    """
+
+    def card(self, diff, axis="standards"):
+        from mae_flow_core.application.quality.role_task_documents import (
+            RoleTaskContext, build_role_task_document)
+        return "\n".join(build_role_task_document(
+            role="code-review", project_root="/r", ticket="REQ-1",
+            stage=axis, context=RoleTaskContext(diff=diff)))
+
+    def test_section_only_appears_when_changed_lines_hit(self):
+        plain = self.card("+    userName = request.getName();\n")
+        unitful = self.card("+    freqKhz = narfcn * 5;\n")
+        self.assertNotIn("量纲检查", plain)
+        self.assertIn("量纲检查", unitful)
+        self.assertIn("逻辑索引 vs 物理索引", unitful)
+        # 只有 standards 轴带这一段;spec 轴不掺工程细节
+        self.assertNotIn(
+            "量纲检查", self.card("+ freqKhz = narfcn * 5;\n", axis="spec"))
+
+    def test_trigger_reads_changed_lines_only(self):
+        from mae_flow_core.application.quality.role_task_documents import (
+            dimension_check_applies)
+        self.assertFalse(dimension_check_applies(" int freq = 100;\n"))
+        self.assertFalse(
+            dimension_check_applies("+++ b/freq.c\n--- a/freq.c\n"))
+        self.assertTrue(dimension_check_applies("+  slotIndex = 1;\n"))
+        self.assertTrue(dimension_check_applies("-  subFrameNo = 0;\n"))
+
+
+class ReviewDispositionLabelTests(unittest.TestCase):
+    """检视目标是降低风险,不是追求完美——只有 BLOCKER 挡住推进。"""
+
+    def test_three_labels_are_defined_and_only_blocker_gates(self):
+        reviewer = read("agents/craft-reviewer-agent.md")
+        step = read("flow/steps/build_agent_review.md")
+        card = read(
+            "scripts/mae_flow_core/application/quality/role_task_documents.py")
+        for text in (reviewer, step, card):
+            self.assertIn("BLOCKER", text)
+            self.assertIn("WARNING", text)
+            self.assertIn("NOTE", text)
+        self.assertIn("只有这一级需要在人工检视前修掉", reviewer)
+        self.assertIn("拿不准就往低一级标", reviewer)
+        self.assertIn("在进入人工检视前修掉", step)
+
+
+class ContextAndUncertaintyOrderTests(unittest.TestCase):
+    def test_survey_carries_the_four_facts_build_keeps_needing(self):
+        grill = read("flow/steps/grill.md")
+        for marker in ("仓内同类实现的位置", "本模块的错误处理惯例",
+                       "必须保持不变的存量行为", "已知历史坑"):
+            self.assertIn(marker, grill)
+
+    def test_riskiest_chunk_goes_first(self):
+        self.assertIn(
+            "把最不确定、风险最高的那块提前", read("flow/steps/build.md"))
+
+    def test_historical_code_needs_a_reason_before_touching(self):
+        build = read("flow/steps/build.md")
+        self.assertIn("git blame", build)
+        self.assertIn("说不出这段代码当初为什么存在", build)
+
+    def test_spec_alignment_is_a_per_item_matrix(self):
+        verify = read("flow/steps/verify_spec.md")
+        self.assertIn("逐条对齐矩阵", verify)
+        self.assertIn("验收项", verify)
+        self.assertIn("实现位置", verify)
+        # demand:指不到实现的只能记缺失,不许用"整体看起来实现了"糊过去
+        self.assertIn('结论只能写"缺失"', verify)
+
+    def test_confused_caller_lens_is_in_the_interface_contract(self):
+        template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
+        self.assertIn("困惑的调用方", template)
+        self.assertIn("参数调换了会不会照样编译通过", template)

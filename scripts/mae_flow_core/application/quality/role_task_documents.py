@@ -1,5 +1,6 @@
 """Render compact role task cards for the Story-centered workflow."""
 
+import re
 from dataclasses import dataclass
 
 from mae_flow_core.quality.task_cards import TaskCardDocument
@@ -13,6 +14,48 @@ class RoleTaskContext:
     companion_output: str = ""
     review_output: str = ""
     feedback: str = ""
+
+
+# 量纲/索引换算的触发词。这类值在电信与信号处理代码里几乎全是整型,
+# 类型系统看不见单位,编译器也就看不见错——是"能编译、逻辑错"的主要产地。
+# 只在改动行命中时才往卡里追加检查段:不命中一个字都不加,不做固定阶段。
+_DIMENSION_TRIGGERS = (
+    r"\b[kKmMgG]?[hH]z\b", r"\bfreq\w*", r"频率", r"频点",
+    r"\b[eEnN]?ARFCN\b", r"\bSCS\b", r"\bnumerolog\w*",
+    r"\bP?RB\w*", r"\bbandwidth\b", r"带宽",
+    r"\bsub_?frame\w*", r"\bslot\w*", r"子帧", r"时隙", r"帧号",
+    r"\b(ms|us|ns)\b", r"毫秒", r"微秒", r"超时", r"\btimeout\b",
+    r"\bconvert\w*", r"换算", r"\bscal(e|ing)\b", r"\bratio\b",
+    r"\boffset\w*", r"偏移", r"\bstride\b",
+    r"\b(logical|physical)_?(idx|index|id)\b", r"逻辑索引", r"物理索引",
+    r"\bcapacity\b", r"容量", r"\bthreshold\b", r"阈值",
+    r"[*/]\s*1000\b", r"[*/]\s*1024\b",
+)
+
+_DIMENSION_SECTION = (
+    "本次改动命中了单位/索引换算,追加**量纲检查**(整型不带单位,编译器发现不了):",
+    "- 同一个量在相邻代码里的单位是否一致(Hz / kHz / MHz、ms / us、帧 / 子帧 / 时隙);"
+    "跨函数传递时有没有隐式换一次算;",
+    "- 类型相同但语义单位不同的参数有没有传反(频点 vs 频率、逻辑索引 vs 物理索引、"
+    "RB 数 vs RB 起始位置);",
+    "- 换算是否漏乘漏除、是否用了整除把小数截掉、边界值(0、最大值、跨边界)是否还成立;",
+    "- 公式与需求或协议里写的那条是否逐项对得上——包括系数、下标起点(0 还是 1)与取整方向。",
+)
+
+
+def _changed_lines(diff):
+    return "\n".join(
+        line for line in (diff or "").splitlines()
+        if line[:1] in "+-" and line[:3] not in ("+++", "---"))
+
+
+def dimension_check_applies(diff):
+    """改动行是否触及单位、频率、时隙、索引或换算。"""
+    changed = _changed_lines(diff)
+    if not changed:
+        return False
+    return any(
+        re.search(pattern, changed, re.I) for pattern in _DIMENSION_TRIGGERS)
 
 
 def _append_context(document, paths):
@@ -57,12 +100,17 @@ def _append_code_review_contract(document, context, axis):
         "只检查本需求完整未提交增量与直接集成边界；禁止修改任何文件。",
     ))
     document.extend(_AXIS_BRIEFS[axis])
+    if axis == "standards" and dimension_check_applies(context.diff):
+        document.extend(_DIMENSION_SECTION)
     document.extend((
         "实际增量:",
         context.diff or "（缺失；返回 NEEDS_INPUT）",
         "工具已经在管的不报:编译告警、格式、行数与圈复杂度由 lightcheck 与 CodeCheck 守下限,"
         "重复报占名额。",
         "只报告真实问题，每轮最多五条；每条包含位置、依据、证据、实际影响和最小改法。",
+        "每条带一个处置标签:BLOCKER(功能错误/崩溃/回归/数据损坏/安全,人工检视前必须修掉)"
+        " / WARNING(可维护性、复杂度、潜在风险,呈报由用户定) / NOTE(风格偏好,不挡任何事)。"
+        "拿不准往低一级标——检视的目标是降低风险,不是把代码做到完美。",
         "没有问题时直接说明 CLEAR。返回自然语言格式不作为门禁。",
     ))
 

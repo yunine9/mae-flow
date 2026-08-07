@@ -707,18 +707,16 @@ if flow:
                   and "支持中文基站名称查询" in open(recorded, encoding="utf-8").read())
             direct_req_edit_blocked = False
             direct_req_shell_blocked = False
+            # docs/req 直写拦截已退役(误写可逆,requirement-record 仍是推荐做法);
+            # 编码正确性由 requirement-record 的回读校验保证,不再靠门禁。
+            req_edit_allowed = True
             try:
                 mf.cmd_gate(flow, config_state, types.SimpleNamespace(
                     what="edit", arg="docs/req/manual.md"))
             except SystemExit as exc:
-                direct_req_edit_blocked = exc.code == 2
-            try:
-                mf.cmd_gate(flow, config_state, types.SimpleNamespace(
-                    what="bash", arg="echo 中文需求 > docs/req/manual.md"))
-            except SystemExit as exc:
-                direct_req_shell_blocked = exc.code == 2
-            check("配置阶段需求原文只能经确定性记录命令落盘",
-                  direct_req_edit_blocked and direct_req_shell_blocked)
+                req_edit_allowed = exc.code == 0
+            check("配置阶段直写需求文档不再被门禁拦(改由证据层把关)",
+                  req_edit_allowed)
             mf._ack_verified(config_state, "错误确认")
             _, second_why = mf._ack_verified(config_state, "错误确认")
             check("确认失败只停止重复尝试而不会锁死流程",
@@ -979,14 +977,9 @@ if flow:
                     what="bash", arg="git checkout main"))
             except SystemExit as exc:
                 baseline_allowed = exc.code == 0
-            wrong_blocked = False
-            try:
-                mf.cmd_gate(flow, branch_state, types.SimpleNamespace(
-                    what="bash", arg="git checkout feature/other"))
-            except SystemExit as exc:
-                wrong_blocked = exc.code == 2
-            check("branch_create 放行基线 checkout 但仍拒绝无关分支",
-                  baseline_allowed and wrong_blocked)
+            # 分支命名约定拦截已退役(错了可改名);提交到错分支仍由
+            # bash-commit-branch 在提交那一刻拦住。
+            check("branch_create 放行基线 checkout", baseline_allowed)
 
             subprocess.run(["git", "checkout", "-qb", "main_u1_REQ1"], check=True)
             branch_ok, _ = mf.ev_branch_ok({}, branch_state)

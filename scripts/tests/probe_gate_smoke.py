@@ -84,12 +84,14 @@ def main():
     r = gate(root, "edit", "src/foo.c")
     check("build 步改源码放行", r.returncode == 0, r.stdout + r.stderr)
     r = gate(root, "edit", "docs/specs/dom.md")
-    check("build 步改真相源被拦", r.returncode != 0)
+    check("build 步改真相源放行(拦截已退役,交付清单在提交那一刻把关)",
+          r.returncode == 0, r.stdout + r.stderr)
     r = gate(root, "edit", "openspec/changes/probe-x/change.md")
     check("build 步改本单 change.md 放行", r.returncode == 0, r.stdout + r.stderr)
     root = make_repo(base, "g2", "open")
     r = gate(root, "edit", "src/foo.c")
-    check("open 步改源码被拦", r.returncode != 0)
+    check("open 步改源码放行(本步不许改源码属流程督促,已退役)",
+          r.returncode == 0, r.stdout + r.stderr)
     r = gate(root, "edit", "openspec/changes/probe-x/change.md")
     check("open 步写 change.md 放行", r.returncode == 0, r.stdout + r.stderr)
     root = make_repo(base, "g3", "domain_archive")
@@ -112,8 +114,8 @@ def main():
              "v5 同形态:提交 change.md 放行"),
             ('git add openspec/ && git commit -m "[REQ probe][fix]归档"', False,
              "整目录 OpenSpec 提交被拦"),
-            ("mkdir openspec/changes/fake", False,
-             "真手动创建 openspec 仍拦"),
+            ("mkdir openspec/changes/fake", True,
+             "手动创建 openspec 不再拦(历史包袱规则已退役)"),
             ('git commit -m "错误格式"', False,
              "错误格式在提交那一刻拦(不是 done 才发现)"),
             ('git commit --message="错误格式"', False,

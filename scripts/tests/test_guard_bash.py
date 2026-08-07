@@ -44,10 +44,10 @@ class BashGatePolicyTests(unittest.TestCase):
         internal = decide_pre_commit(self.context(
             has_internal_state_path=True))
         self.assertEqual("absolute", internal.kind)
-        branch = decide_pre_commit(self.context(
-            branch_name="wrong"))
-        self.assertEqual(("block", "bash-branch-name"),
-                         (branch.kind, branch.rule))
+        # 分支命名约定已退役(错了可改名);切分支本身不再被拦。
+        self.assertEqual(
+            "allow",
+            decide_pre_commit(self.context(branch_name="wrong")).kind)
         wide = decide_pre_commit(self.context(command="git add -A"))
         self.assertEqual("absolute", wide.kind)
 

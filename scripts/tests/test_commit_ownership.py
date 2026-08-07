@@ -1224,19 +1224,13 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertNotEqual(0, expanded.returncode, output)
         self.assertIn(extra, output)
 
-    def test_non_git_source_permit_keeps_its_existing_user_exit(self):
+    def test_non_git_source_write_needs_no_permit_after_slimming(self):
+        """本步不许改源码已退役:改源码是可逆动作，把关在 done 的证据检查。"""
         source = "src/main.py"
         write(self.repo, source, "value = 1\n")
-        state = self.state(current="config_confirm")
-        mf.save_state(state)
+        mf.save_state(self.state(current="config_confirm"))
         command = "sed -i 's/value/other/' " + source
-        ack = "我明确授权 Agent 本次用 sed 修改 " + source
 
-        self.authorize_blocked_command(
-            command,
-            "bash-source",
-            ack,
-        )
         allowed = self.gate_bash(command)
 
         self.assertEqual(
@@ -1244,6 +1238,8 @@ class CommitOwnershipTests(unittest.TestCase):
             allowed.returncode,
             allowed.stdout + allowed.stderr,
         )
+        self.assertFalse(os.path.exists(
+            os.path.join(self.repo, ".mae-flow.json.gate-strikes")))
 
     def test_user_external_current_delivery_needs_no_agent_provenance(self):
         current = "openspec/changes/current-change/change.md"

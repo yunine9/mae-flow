@@ -1,5 +1,26 @@
 # 更新记录
 
+## 2026-08-07：Hook 瘦身，只拦底线（37 → 27 条）
+
+退役 10 条流程督促规则。它们拦的都是**可逆**动作，真正的把关在 `done` 的证据检查和提交那一刻：
+
+- `edit-source` / `bash-source`：本步不许改源码。编码-编译-检视本身就是循环，逐步拦只制造摩擦；
+- `edit-specs` / `bash-specs`：写 `docs/specs/` 领域真相源。误写会在提交时被交付清单当"夹带"拦住；
+- `edit-docs-req` / `bash-docs-req`：直写需求文档。编码正确性由 `requirement-record` 的回读校验保证；
+- `bash-branch-name`：分支命名约定（错了可改名；提交到错分支仍由 `bash-commit-branch` 实时拦）；
+- `bash-worktree`、`bash-comet-init`、`bash-mkdir-openspec`：历史包袱，不影响交付正确性。
+
+同时删掉一条依赖"本步禁止改源码"的软提醒（cp/mv/tee 启发式，误报率高且同样到不了 Agent）。
+
+**保留为底线的三条**（原本列在降级名单里，评估后上调）：
+
+- `edit-tests-only` / `bash-tests-only`：UT 步禁止改产品代码。改产品代码让测试变绿属破坏信任，
+  不是可逆的流程瑕疵；出口仍是用户裁决后 `unlock source`；
+- `bash-compile-task-pending`：编译未完成不许提交。提交后回退要 `reset`/`amend`；它已修复为
+  按真实证据放行，不再死锁。
+
+`unlock source` 因此仍是有效逃生口，整条 unlock 机制无需退役——没有产生新的残留。
+
 ## 2026-08-07：非阻断提示改走 Agent 真的会读的通道
 
 - 宿主在 Hook 退 0 时只把输出显示给人看，不进模型上下文。因此门禁放行时写在 stderr 上的

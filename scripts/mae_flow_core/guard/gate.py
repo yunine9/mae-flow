@@ -88,31 +88,9 @@ def _protected_file_decision(context):
 
 
 def _repository_edit_decision(context):
-    path = context.path
-    match_path = context.match_path
-    if (
-        context.step == "config_confirm"
-        and re.search(r"(^|/)docs/req/", match_path, re.I)
-    ):
-        return _block(
-            "edit-docs-req",
-            "配置确认阶段禁止 Agent 直接写 docs/req（Windows shell/编辑工具编码"
-            "不可作为需求真相源）。用户口述先执行 current 输出中的 messages 命令，再用 "
-            "requirement-record --message-id；已有文本用 requirement-record --source。",
-        )
     if context.inside_plugin:
         return _absolute(
             "禁止修改插件自身(flow/steps/hooks/scripts):流程规则不是交付改动的对象。")
-    if (
-        re.search(context.specs_truth, match_path, re.I)
-        and not context.allow_specs_write
-    ):
-        return _block(
-            "edit-specs",
-            "docs/specs/ 领域真相源（及旧 OpenSpec 真相源）"
-            "当前步骤 %s 禁止写入(黑名单#3)。"
-            % (context.step or "未初始化"),
-        )
     return None
 
 
@@ -120,12 +98,6 @@ def _source_edit_decision(context):
     match_path = context.match_path
     if not context.is_source:
         return None
-    if not context.allow_source_edit:
-        return _block(
-            "edit-source",
-            "当前步骤 %s(%s)禁止修改源码;先执行 current 输出查看该做什么。"
-            % (context.step, context.step_title),
-        )
     if (
         context.tests_only_patterns
         and not context.source_unlocked
@@ -203,40 +175,7 @@ def _bash_absolute_decision(context):
     return None
 
 
-def _bash_repository_decision(context):
-    if (
-        context.step == "config_confirm"
-        and context.writeish
-        and context.hits_requirement
-    ):
-        return _block(
-            "bash-docs-req",
-            "配置确认阶段禁止经 Bash/PowerShell/重定向写 docs/req。"
-            "统一使用 `python \".mae-flow-work/bin/mae-flow.py\" "
-            "requirement-record` 确定性写 UTF-8 并回读校验。",
-        )
-    if (
-        context.writeish
-        and context.hits_specs_truth
-        and not context.allow_specs_write
-    ):
-        return _block(
-            "bash-specs",
-            "docs/specs/ 领域真相源（及旧 OpenSpec 真相源）"
-            "当前步骤 %s 禁止经 Bash 写入(黑名单#3)。"
-            % (context.step or "未初始化"),
-        )
-    return None
-
-
 def _bash_source_decision(context):
-    if context.offenders and not context.allow_source_edit:
-        return _block(
-            "bash-source",
-            "当前步骤 %s 禁止经 Bash 写源码文件(命中: %s);"
-            "先执行 current 输出查看该做什么。"
-            % (context.step, "、".join(context.offenders[:3])),
-        )
     if (
         context.offenders
         and context.tests_only_patterns
@@ -253,27 +192,12 @@ def _bash_source_decision(context):
                 "、".join(context.bad_test_sources[:3]),
             ),
         )
-    if (
-        not context.offenders
-        and context.weak_write
-        and context.source_tokens
-        and not context.allow_source_edit
-    ):
-        return GateDecision(
-            "advisory",
-            message=(
-                "[mae-flow] ⚠ 软提醒:命令含 cp/mv/tee/patch 且提及源码路径(%s)。"
-                "当前步骤禁止写源码;若该命令确实会修改源码请勿执行。"
-                "启发式不拦截(误报率高),真正校验在 done 证据层。"
-                % context.source_tokens[0]),
-        )
     return None
 
 
 def decide_bash_write(context):
     for evaluator in (
         _bash_absolute_decision,
-        _bash_repository_decision,
         _bash_source_decision,
     ):
         decision = evaluator(context)

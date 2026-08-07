@@ -709,9 +709,13 @@ class RuntimeAndStateTests(unittest.TestCase):
                 "action", project_root=td)
             env = dict(os.environ)
             env["PYTHONPYCACHEPREFIX"] = os.path.join(td, "pycache")
+            # 用"编辑流程状态账本"证明走的是完整流程门禁:独立任务模式只保护
+            # 独立任务自己的文件，不会拦它。(本步不许改源码那条已退役,不能再当
+            # 路由证据用。)
             payload = json.dumps({
                 "cwd": td, "tool_name": "Edit",
-                "tool_input": {"file_path": source},
+                "tool_input": {
+                    "file_path": os.path.join(td, ".mae-flow.json")},
             }) + "\n"
             hook = subprocess.run(
                 [sys.executable, os.path.join(

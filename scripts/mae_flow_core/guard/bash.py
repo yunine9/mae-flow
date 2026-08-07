@@ -40,22 +40,6 @@ def _pre_repository(context):
             "流程状态、令牌、历史账本、待重启标记和月光宝盒报告禁止经 Bash "
             "直接访问；查看请执行 current 输出中的 status/doctor/moonlight report 命令，"
             "修改只能走对应子命令。")
-    baseline_checkout = (
-        context.step == "branch_create"
-        and not context.branch_creating
-        and context.base_branch
-        and context.branch_name == context.base_branch)
-    if (
-        context.branch_name
-        and context.wanted_branch
-        and context.branch_name != context.wanted_branch
-        and not baseline_checkout
-    ):
-        return _block(
-            "bash-branch-name",
-            "分支名 %s 不符合约定 %s(内部流程建议的 feature/xx 命名一律拒绝)。"
-            % (context.branch_name, context.wanted_branch),
-        )
     return None
 
 
@@ -166,24 +150,6 @@ def _post_repository(context):
             "openspec/changes/{CHANGE_NAME}；archive 只 add spec archive "
             "输出的本次精确产物清单。",
         )
-    mkdir = re.search(
-        r"(?:^|[\s;&|(])(?:mkdir|md|new-item)\b"
-        r"((?:\s+(?:-\S+|\"[^\"]*\"|'[^']*'|[^\s;|&]+))*)",
-        command,
-        re.I,
-    )
-    if mkdir and any(
-        re.search(r"(^|/)openspec/", token, re.I)
-        for token in re.split(
-            r"""[\s;|&()<>'"]+""", mkdir.group(1) or "")
-        if token and not token.startswith("-")
-    ):
-        return _block(
-            "bash-mkdir-openspec",
-            "禁止手动创建 openspec 目录：change 必须由 current 输出的 spec new 命令创建，"
-            "它会在建目录的同时登记当前单与阶段；手搓空目录没有状态登记，"
-            "后续证据校验会失败。先执行 current，并照本步骤给出的 spec 命令处理。",
-        )
     return None
 
 
@@ -218,12 +184,6 @@ def _git_adds_worktree(git_commands):
 
 def _post_dangerous(context):
     command = context.command
-    if re.search(r"\bcomet\s+init\b", command):
-        return _absolute(
-            "bash-comet-init",
-            "禁止执行全局 comet init：它会初始化无关平台并污染项目。"
-            "Mae-Flow 已内嵌所需运行时，执行 current 给出的 capability 命令即可，"
-            "无需人工初始化。")
     if re.search(
         r"(curl|wget|iwr|invoke-webrequest)[^|&;]*\|\s*"
         r"(sudo\s+)?(sh|bash|zsh|iex|powershell)",
@@ -252,17 +212,6 @@ def _post_dangerous(context):
             "bash-recursive-delete",
             "危险命令拦截:对「%s」的递归删除。确需执行请用户手动运行。"
             % context.recursive_delete_targets[0])
-    if (
-        context.state_active
-        and _git_adds_worktree(git_commands)
-    ):
-        return _block(
-            "bash-worktree",
-            "本流程约定 branch 隔离,worktree 会使 mae-flow 状态机失联"
-            "(新目录无状态文件,gate 全拦)。若是为并行另一单开工作区:"
-            "请用户手动建 worktree 并在新目录另起会话独立 init,"
-            "本流程内不执行该命令。",
-        )
     return None
 
 

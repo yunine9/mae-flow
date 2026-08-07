@@ -42,7 +42,8 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         taste = read("runtime/standards/code-taste-v1.md")
         for marker in ("顺应优先于自包含", "按概念拆", "投机的灵活性",
                        "目标状态", "不是门禁", "改动收口", "最小改动面",
-                       "每条离开路径", "依赖方向", "编译通过 ≠ 适配完整"):
+                       "每条离开路径", "依赖方向", "编译通过 ≠ 适配完整",
+                       "复用靠调用，不靠粘贴", "副作用会随复制翻倍"):
             self.assertIn(marker, taste)
         # 完整性收口必须三处闭环:写码纪律、基准、reviewer 独立核对
         self.assertIn("改动收口", read("flow/steps/build.md"))
@@ -50,6 +51,8 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             "独立 grep", read("agents/craft-reviewer-agent.md"))
         self.assertIn(
             "非编译文件", read("agents/craft-reviewer-agent.md"))
+        self.assertIn(
+            "副作用随复制翻倍", read("agents/craft-reviewer-agent.md"))
         build = read("flow/steps/build.md")
         self.assertIn("standards/code-taste-v1.md", build)
         self.assertIn("comment-standard-v1.md", build)

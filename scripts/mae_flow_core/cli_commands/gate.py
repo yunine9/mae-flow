@@ -5,11 +5,12 @@ from .shared import (
     STATE_PATH, WRITEISH_STRONG, WRITEISH_WEAK, decide_bash_write,
     decide_commit_branch, decide_compile_task_commit, decide_edit,
     decide_ownership, decide_post_commit, decide_pre_commit, git_intent,
-    guard_intent, os, re, replace, sys,
+    guard_intent, os, re, replace, sys, time,
 )
-# 这三个事实必须静态导入。经 api.* 动态取时它们并未注册,AttributeError 被下面的
-# except 吞掉 → completed 恒为假 → 已签发 COMPILE 任务卡的步骤里任何提交都被
-# bash-compile-task-pending 永久拦死,提示还让你"先完成当前 COMPILE 任务"。
+from ..workflow.advisories import record_advisory
+# quality_input_snapshot/successful_quality_execution 必须静态导入。经 api.* 动态
+# 取时它们并未注册,AttributeError 被 _gate_compile_task_window 的 except 吞掉 →
+# completed 恒为假 → 已签发 COMPILE 任务卡的步骤里任何提交都被永久拦死。
 from ..workflow.quality_executions import (
     quality_input_snapshot,
     successful_quality_execution,
@@ -42,6 +43,42 @@ def _advisory_lightcheck_before_commit(st, snapshot):
         result["report_path"] = api._save_lightcheck_result(
             result, "提交前：异常安全降级")
     api._print_lightcheck_result(result, quiet=True)
+    _keep_advisory(st, "lightcheck", _lightcheck_advisory(result))
+
+
+def _lightcheck_advisory(result):
+    """Summarize findings for the channel the Agent reads; empty when clean."""
+    findings = result.get("findings") or []
+    if not findings:
+        return ""
+    lines = [
+        "提交前轻量编码预检发现 %d 个本轮新触发问题(建议修复，不阻断):"
+        % len(findings)
+    ]
+    for item in findings[:12]:
+        function = (" " + item["function"]) if item.get("function") else ""
+        lines.append("%s %s:%s%s — %s (%s > %s)" % (
+            item["rule"], item["file"], item["line"], function,
+            item["message"], item["actual"], item["limit"]))
+    if len(findings) > 12:
+        lines.append("…其余 %d 项见报告" % (len(findings) - 12))
+    if result.get("report_path"):
+        lines.append("人类可读报告: " + str(result["report_path"]))
+    lines.append(
+        "只修高置信且属于本次范围的项，最多两轮；仍不确定的留给正式 CodeCheck。")
+    return "\n".join(lines)
+
+
+def _keep_advisory(st, kind, message):
+    """Non-blocking Gate signals must survive the exit-0 stderr black hole."""
+    if not message:
+        return
+    try:
+        record_advisory(
+            STATE_PATH, (st or {}).get("current", ""), kind, message,
+            time.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        pass
 
 def _redirect_targets(c):
     """提取 >/>> 的真实落盘目标。fd 复制(2>&1)与空设备不算写文件。
@@ -110,7 +147,7 @@ def _compile_candidate_groups(candidate_snapshot, compile_side_effects):
     )
 
 
-def _enforce_commit_ownership(decision, jdie):
+def _enforce_commit_ownership(decision, jdie, st=None):
     if decision.block:
         if decision.block.rule in {
                 "bash-compile-side-effects",
@@ -122,6 +159,7 @@ def _enforce_commit_ownership(decision, jdie):
         jdie(decision.block.rule, decision.block.message)
     for message in decision.advisories:
         print(message, file=sys.stderr)
+        _keep_advisory(st, "commit-ownership", message)
 
 
 def _gate_compile_task_window(st):
@@ -224,7 +262,7 @@ def _gate_commit_candidates(c, st, jdie):
         unproven_paths=tuple(unproven_paths),
         artifact_hints=tuple(artifact_hints),
     ))
-    _enforce_commit_ownership(decision, jdie)
+    _enforce_commit_ownership(decision, jdie, st)
     _advisory_lightcheck_before_commit(st, candidate_snapshot)
 
 def _gate_bash_writes(flow, st, sid, step, intent, jdie):

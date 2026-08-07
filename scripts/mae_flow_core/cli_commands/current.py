@@ -1,9 +1,11 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
-    CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STEPS_DIR, json,
-    load_json, os, re, read_text, render_pack, subst, sys, time, workflow_transitions,
+    CapabilityError, DEFAULTS_PATH, HERE, MOONLIGHT_QUALITY_STEPS, STATE_PATH,
+    STEPS_DIR, json, load_json, os, re, read_text, render_pack, subst, sys,
+    time, workflow_transitions,
 )
+from ..workflow.advisories import pending_advisories, render_advisories
 from .wiring import api
 
 def perms_line(step):
@@ -200,6 +202,11 @@ def print_current(flow, st):
     print(perms_line(step))
     for _w in _sentinel_lines(sid, st):
         print(_w)
+    # 门禁放行时写的非阻断提示走不到模型(退 0 的 stderr 只给人看),在这里补送。
+    notices = render_advisories(pending_advisories(
+        STATE_PATH, sid, api._step_entered_at(st)))
+    if notices:
+        print(notices, end="")
     if sid in {"build_review", "quality_review"}:
         print("\n".join(_review_receipt_lines(st, step)))
     ul = st.get("unlock") or {}

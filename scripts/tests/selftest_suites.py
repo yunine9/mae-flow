@@ -27,6 +27,8 @@ REFACTOR_SAFETY_SUITES = (
      ("scripts/tests/test_lean_safety_kernel.py",), 90, 3000),
     ("Gate 规则总账红线(无残留/无死锁)",
      ("scripts/tests/test_gate_rule_contract.py",), 90, 3000),
+    ("Gate 非阻断提示送达通道",
+     ("scripts/tests/test_gate_advisories.py",), 90, 3000),
     ("Spec2Code 固定 Prompt 与注释规范",
      ("scripts/tests/test_spec2code_prompt_resources.py",), 180, 5000),
     ("Spec2Code 编码前流程节点",

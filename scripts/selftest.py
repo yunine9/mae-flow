@@ -2377,23 +2377,19 @@ with _TmpDir() as td:
         open(".gitignore", "w", encoding="utf-8").write(
             "# .mae-flow.json* 将由工具维护\n"
             "# .mae-flow-work/ 是过程目录\n")
-        open(".gitattributes", "w", encoding="utf-8").write(
-            "# openspec/** text eol=lf 由工具维护\n")
         mf._gitignore()
         ignore_rules = {
             line.strip() for line in open(
                 ".gitignore", encoding="utf-8").read().splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         }
-        attribute_rules = {
-            line.strip() for line in open(
-                ".gitattributes", encoding="utf-8").read().splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        }
         check("注释中的状态路径不会冒充有效 Git 忽略规则",
               ".mae-flow.json*" in ignore_rules
               and ".mae-flow-work/" in ignore_rules
-              and "openspec/** text eol=lf" in attribute_rules)
+              # 内置规格引擎的本地脚手架不该出现在用户 git status 里
+              and "openspec/config.yaml" in ignore_rules
+              # comet 状态机已换轨:不再往用户仓写 .gitattributes
+              and not os.path.exists(".gitattributes"))
     finally:
         os.chdir(old_cwd)
 

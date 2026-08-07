@@ -135,12 +135,25 @@ class _ChangedAnalyzer:
             if item is not None:
                 self.result["findings"].append(item)
 
+    def _inherited_literal(self, path, literal):
+        """字面量在改动前就存在于本文件 → 只是路过，不是本轮新写。
+
+        实测暴露的规则打架:仅仅因为在某行加了参数就被要求去改那行原有的魔鬼数字，
+        而编码基准第 7 条要求"diff 里只出现需求要求的行"。触碰不等于引入。
+        """
+        baseline = (self.baseline_sources or {}).get(path)
+        if not baseline or not literal:
+            return False
+        return str(literal) in baseline
+
     def _add_magic_findings(self, path, source, changed):
         findings = find_magic_numbers(path, source, changed)
         if findings is None:
             self._skip(path + ": 数值字面量词法分析不确定；已记录诊断，不阻断流程")
             return
         for finding in findings:
+            if self._inherited_literal(path, finding.literal):
+                continue
             self.result["findings"].append({
                 "rule": "MF-MAGIC-NUMBER",
                 "file": _normalized(path),

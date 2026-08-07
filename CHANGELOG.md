@@ -1,5 +1,32 @@
 # 更新记录
 
+## 2026-08-07：本地实战跑单暴露并修掉五处摩擦
+
+在一个多模块 fixture 仓上以 Agent 身份真跑一遍（config_confirm → build → 检视 → 提交），
+跑出五处只有真跑才能发现的问题：
+
+- **开场被问两次**：`config_confirm.md` 说用一次 AskUserQuestion 问完「配置 + 交付方式」，但
+  `config-review` 打印的指令只让问配置——Agent 会信更近的那条，交付方式在 `workflow_select`
+  又被问一遍，一卡合一在真实路径上从未生效。现在 `config-review` 一次打印两问（选项从 flow
+  定义读取，不硬编码），实测 `workflow_select` 直接消费预答、不再打断用户；
+- **`.gitattributes` 是 comet 残留**：内容 `openspec/** text eol=lf`、注释写着"comet 状态文件必须
+  LF"。comet 状态机早已换轨、流程也不再提交 OpenSpec change，这条是给不再发生的事写的，
+  还在用户仓里留未跟踪文件。不再生成；
+- **`openspec/config.yaml` 污染 git status**：它是内置规格引擎真在读的本地脚手架（不能停止生成），
+  改为纳入插件维护的 `.gitignore`；
+- **lightcheck 与编码基准第 7 条打架**：仅仅因为在某行加了参数，就报该行**原有**的魔鬼数字，
+  而基准要求"diff 里只出现需求要求的行"。现在改动前就存在于本文件的字面量不再上报；
+  实测：路过的 `100` 不报、新写的 `86400` 照报；
+- build 步"子 Agent 只用于两类工作"标题后误插一段导致列表断裂，已归位。
+
+诚实边界：本次跳过 grill/open/story 的文档写作直接置到 build；子 Agent 用真实 payload 驱动
+hook 生命周期事件模拟，因此验到的是流程机制与证据链，**验不到模型实际写码的品味**。
+
+同时实战复核了今天两处关键修复：真实三事件序列（PreToolUse 派发 → SubagentStop → PostToolUse
+兜底）后质量执行台账保持 `COMPILE/make build/成功`，未被弱证据覆盖；提交门禁对五种真实错法
+四拦一放（`git add -A`、夹带 `.pyc`、夹带插件自造文件、提交信息格式错各自拦下，精确清单放行）。
+改动收口纪律也确实把编译器看不见的 `resources/order-mapping.xml` 抓了出来。
+
 ## 2026-08-07：superpowers 的实质融入已有载体（不恢复 CP 仪式）
 
 查清事实：capability pack 定义 10 个、实际被步骤注入只有 2 个（`verify`、`ponytail-review`），

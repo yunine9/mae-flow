@@ -42,7 +42,10 @@ def _clear_completed_review(st, sid):
 def _gitignore():
     gi = ".gitignore"
     # .mae-flow.json* 含 .tmp 原子写中间件与 .last 交付备份;历史账本单列(pattern 不覆盖)
-    lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-work/"]
+    # openspec/config.yaml 是内置规格引擎读的本地脚手架(specengine_config 会读它),
+    # 流程已不再创建或提交 OpenSpec change,它不该出现在用户的 git status 里。
+    lines = [".mae-flow.json*", EXIT_PATH, HISTORY_PATH, ".mae-flow-work/",
+             "openspec/config.yaml"]
     # errors=replace:用户仓的 .gitignore 可能是 GBK 注释,严格解码会让 init 直接
     # 崩 traceback(且报错看不出和 .gitignore 有关);替换字符只影响去重判断,无害。
     txt = (read_text(gi, errors="replace")
@@ -55,29 +58,6 @@ def _gitignore():
     if add:
         body = ("\n" if txt and not txt.endswith("\n") else "") + "\n".join(add) + "\n"
         write_text(gi, body, mode="a")
-    _gitattributes()
-
-def _gitattributes():
-    """openspec/ 锁 LF:comet 的 bash 侧读 .comet.yaml 不剥 \\r,Windows autocrlf
-    检出会让 comet 读到 "pass\\r" 全线报 Invalid,而 mae-flow 侧证据解析对 \\r 免疫
-    ——症状是「done 说证据满足、comet 命令全报错」的双状态机分裂。"""
-    ga = ".gitattributes"
-    line = "openspec/** text eol=lf"
-    try:
-        txt = (read_text(ga, errors="replace")
-               if os.path.exists(ga) else "")
-        existing = {
-            item.strip() for item in txt.splitlines()
-            if item.strip() and not item.lstrip().startswith("#")
-        }
-        if line in existing:
-            return
-        body = (("\n" if txt and not txt.endswith("\n") else "") + "# mae-flow: comet 状态文件必须 LF(CRLF 检出会造成阶段状态读取分裂)\n"
-                + line + "\n")
-        write_text(ga, body, newline="\n", mode="a")
-    except OSError as exc:
-        print("[mae-flow] ⚠ 无法写 .gitattributes(%s);Windows autocrlf 环境请手动加入: %s"
-              % (exc, line), file=sys.stderr)
 
 def _friction_from_log(st):
     """从 hook 日志统计本单起始时间之后的摩擦(gate 拦截/契约打回/hook 异常)。
@@ -295,11 +275,22 @@ def cmd_config_review(flow, st, args):
     api._ack_failure(st, success=True)
 
     _print_config_review(st["config_review"], step)
-    print("\n现在只做一次最终确认。用 AskUserQuestion 原样询问：")
-    print("  上述完整配置是否正确？")
-    print("选项：")
+    print("\n现在用**一次** AskUserQuestion 同时问完这两项开场决策"
+          "（合并成一张卡，避免连着打断用户两次）：")
+    print("Q1 上述完整配置是否正确？")
     print("  - " + CONFIG_CONFIRM_ACK)
     print("  - 需要修改")
+    workflow_labels = [
+        (labels or [key])[0]
+        for key, labels in (
+            (flow["steps"].get("workflow_select", {})
+             .get("choice_answers") or {}).items())
+    ]
+    if workflow_labels:
+        print("Q2 交付方式？（推荐项排第一并给一句依据）")
+        for label in workflow_labels:
+            print("  - " + label)
+        print("Q2 的答案由随后的 workflow_select 直接消费，那一步不再重复提问。")
     print("不要把前面多个单项回答拼成 ack，也不要再次调用 config-review。")
     print("用户选择确认后执行：")
     print('python "%s" done' % os.path.abspath(sys.argv[0]))

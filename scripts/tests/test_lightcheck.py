@@ -837,5 +837,38 @@ class LightCheckTests(unittest.TestCase):
         self.assertNotIn("MF-MAGIC-NUMBER", content)
 
 
+class InheritedMagicNumberTests(unittest.TestCase):
+    """触碰 ≠ 引入:只因在某行加了参数就被要求改那行原有的魔鬼数字,
+    与编码基准第 7 条"diff 里只出现需求要求的行"直接打架。实测暴露。"""
+
+    def _findings(self, baseline, current, changed):
+        from mae_flow_core.lightcheck_analysis import _ChangedAnalyzer
+        path = "svc/a.py"
+        analyzer = _ChangedAnalyzer(
+            ".", [path], {path: set(changed)},
+            {path: baseline},
+            current_sources={path: current},
+            magic_changed_lines={path: set(changed)},
+        )
+        # 直接测被改动的那个环节:魔鬼数字上报与继承判定
+        analyzer._add_magic_findings(path, current, set(changed))
+        return [
+            item for item in analyzer.result.get("findings", ())
+            if item.get("rule") == "MF-MAGIC-NUMBER"
+        ]
+
+    def test_literal_that_predates_the_change_is_not_reported(self):
+        baseline = 'def f(a):\n    return {"amount": 100}\n'
+        current = 'def f(a, t="d"):\n    return {"t": t, "amount": 100}\n'
+        self.assertEqual([], self._findings(baseline, current, [1, 2]))
+
+    def test_newly_introduced_literal_is_still_reported(self):
+        baseline = 'def f(a):\n    return 1\n'
+        current = 'def f(a):\n    return 1\n\n\ndef ttl(a):\n    return 86400\n'
+        findings = self._findings(baseline, current, [5, 6])
+        self.assertEqual(1, len(findings), findings)
+        self.assertIn("86400", str(findings[0].get("literal")))
+
+
 if __name__ == "__main__":
     unittest.main()

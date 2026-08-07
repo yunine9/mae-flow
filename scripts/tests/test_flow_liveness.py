@@ -198,6 +198,30 @@ class FlowWiringContractTests(unittest.TestCase):
         self.assertEqual([], unguarded)
 
 
+    def test_every_step_valued_key_is_a_declared_transition(self):
+        """凡是取值为真实步骤名的键，都必须被 transition_targets 看见。
+
+        漏登记不会在运行期报错(done 直接改 current)，但图校验、活性红线和环分析
+        会全部对那条边失明——`late_source_change_next` 加进来时就漏了一轮。
+        """
+        steps = FLOW["steps"]
+        # 这些键的目标由别的步骤经 dynamic_next / next_from_state 消费，
+        # 不是本步自己的出边。
+        indirect = {
+            "quality_review_resume", "quality_review_rework",
+            "test_change_review_resume", "test_change_review_rework",
+        }
+        violations = []
+        for step_id, step in sorted(steps.items()):
+            declared = set(transition_targets(step))
+            for key, value in step.items():
+                if key in indirect or not isinstance(value, str):
+                    continue
+                if value in steps and value not in declared:
+                    violations.append(
+                        "%s.%s → %s 未登记为转移边" % (step_id, key, value))
+        self.assertEqual([], violations)
+
 
 if __name__ == "__main__":
     unittest.main()

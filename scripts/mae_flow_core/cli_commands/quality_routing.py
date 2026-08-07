@@ -3,8 +3,15 @@
 抽成独立模块只为让 done_status 保持在体量红线内;判定口径没有变化。
 """
 
+from mae_flow_core.quality.attempts import attempt_count, begin_attempt
+
 from .shared import time, workflow_transitions
 from .wiring import api
+
+
+# 检视之后的改动最多自动回流两次。无人值守时质量检视会被自动通过，回流又会重新
+# 提交并前进，HEAD 每轮都变——没有上界的话，一个反复"再修一点"的夜跑能整夜打转。
+LATE_REFLOW_LIMIT = 2
 
 
 def _done_save_die(st, message):
@@ -117,6 +124,20 @@ def _done_late_source_change(flow, st, sid, step):
     changed = api._blocking_dirty_source_paths(st, flow)
     if not changed:
         return False
+    attempt = begin_attempt(
+        st, "late-source-reflow",
+        "reflow-%d" % (attempt_count(st, "late-source-reflow") + 1),
+        limit=LATE_REFLOW_LIMIT)
+    if attempt.exhausted:
+        _done_save_die(
+            st,
+            "检视之后已经自动回流 %d 次，这一次不再自动回流:"
+            "反复在收尾阶段改代码说明前面的环节没有真正收敛。当前未提交改动: %s。"
+            "两条出路——确认这次改动不该要，用 git checkout -- <文件> 撤销后重新 done;"
+            "确实必须改，把改动和原因交给用户裁决(无人值守时用 current 输出的 "
+            "moonlight defer 登记遗留，或 moonlight blocked 留痕后停止)。"
+            % (LATE_REFLOW_LIMIT, "、".join(changed[:5])
+               + ("…" if len(changed) > 5 else "")))
     _set_quality_review_context(st, step, changed, "ut-source")
     return _done_transition_to_recheck(
         flow, st, sid, target, changed, "统一检视之后新增的待检视改动:",

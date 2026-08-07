@@ -214,6 +214,55 @@ class QualityReviewCycleTests(unittest.TestCase):
                 {}, {"current": "verify_spec"}, "verify_spec",
                 {"late_source_change_next": "quality_recompile"}))
 
+    def test_late_reflow_is_bounded_so_a_night_run_cannot_spin(self):
+        """回流必须有上界。
+
+        无人值守时质量检视自动通过，回流又会重新提交并前进，HEAD 每轮都变，
+        没有任何既有计数器会耗尽——一个反复"再修一点"的夜跑能整夜打转。
+        """
+        from unittest import mock
+        from mae_flow_core.cli_commands import quality_routing as routing
+
+        state = {"current": "verify_spec", "history": []}
+        step = {
+            "late_source_change_next": "quality_recompile",
+            "quality_review_origin": "ut-source",
+            "quality_review_resume": "verify_codecheck",
+            "quality_review_rework": "quality_recompile",
+        }
+        reflows, died = [], []
+
+        def run():
+            with mock.patch.object(
+                    routing, "_done_transition_to_recheck",
+                    side_effect=lambda *a, **k: reflows.append(a[3]) or True):
+                def die(_st, message):
+                    died.append(message)
+                    raise SystemExit(2)   # 生产里 _done_save_die 一定抛
+
+                with mock.patch.object(
+                        routing, "_done_save_die", side_effect=die):
+                    with mock.patch.dict(routing.api._values, {
+                            "_blocking_dirty_source_paths":
+                                lambda *a, **k: ["src/m.c"],
+                            "sh": lambda *a, **k: "a" * 40,
+                    }):
+                        try:
+                            routing._done_late_source_change(
+                                {}, state, "verify_spec", step)
+                        except SystemExit:
+                            pass
+
+        for _ in range(routing.LATE_REFLOW_LIMIT + 1):
+            run()
+
+        self.assertEqual(
+            routing.LATE_REFLOW_LIMIT, len(reflows), "回流次数必须封顶")
+        self.assertEqual(1, len(died), "超限后必须停下来，不能继续打转")
+        # 停下来也必须给出真实出路，否则就是把活锁换成死锁。
+        self.assertIn("git checkout --", died[0])
+        self.assertIn("moonlight defer", died[0])
+
 
 if __name__ == "__main__":
     unittest.main()

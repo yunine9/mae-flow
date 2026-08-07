@@ -52,7 +52,10 @@ def transition_targets(step):
             append(target, declared=True)
     elif nxt:
         append(nxt)
-    for key in ("source_change_next", "source_change_recheck"):
+    # 每一种"改了源码就换步"的声明都是真实转移边。漏登记的后果不是运行期出错
+    # (done 直接改 current)，而是图校验、活性红线和环分析全都看不见那条边。
+    for key in ("source_change_next", "source_change_recheck",
+                "late_source_change_next"):
         if key in step:
             append(step.get(key), declared=True)
     dynamic = step.get("dynamic_next")

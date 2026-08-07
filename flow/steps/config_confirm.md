@@ -33,6 +33,11 @@
   用户拍板；C++/CMake/mcde 仓推荐 build-fix，Java/Maven 仓推荐明确的 mvn 命令。
   build-fix 随 Mae-Flow 插件提供，不单独安装、不做项目目录迁移、不要求 reload；
   Java/Maven 仓 → mvn 命令;其他 → 用户给命令。拿不准就和用户确认一条能跑通的编译命令兜底。
+  **多模块 Java 仓不要默认整仓编译**:一次交付通常只碰本服务的 sdk / model / service 几个模块,
+  整仓 build 动辄十几分钟。推荐形如 `mvn -pl <sdk>,<model>,<service> -am compile -q`
+  (`-am` 自动带上被依赖模块)。config-review 检测到"多模块仓 + 未限定模块"时会在确认单里
+  直接列出仓内模块和可照抄的写法。这是**建议不是门禁**:用户坚持整仓编译照样接受,
+  只是慢;确定长期用某条命令后可写进 `.mae-flow-defaults.json` 的「编译方式」自动预填。
   **该配置是全流程唯一编译路由**:compile-agent、codecheck/UT agent 的编译验证全按它执行,
   任何 agent 现场另猜编译命令都是违规;
 - UT生成方式:自动推断后放进最终配置确认单(C++/mcde→插件自带 AutoUT skill;Java/Maven→插件自带

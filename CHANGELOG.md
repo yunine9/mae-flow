@@ -1,5 +1,18 @@
 # 更新记录
 
+## 2026-08-07：多模块 Java 仓不再默认整仓编译（提示，不是门禁）
+
+一次交付通常只碰本服务的 sdk / model / service 几个模块，整仓 `mvn compile` 动辄十几分钟。
+
+- `config-review` 在检测到「根 pom 声明了多个模块」且「编译命令未限定模块」时，直接在确认单的
+  「编译方式」那一行下面列出仓内模块和可照抄的写法：`mvn -pl <sdk>,<model>,<service> -am compile -q`，
+  并把 sdk / model / service 一类模块排在前面；
+- 出现的时机就是**用户拍板编译命令的那一刻**，不用等到编译慢了才发现；
+- **只是提示**：用户坚持整仓编译照样接受，不阻断、不记风险、不影响任何证据。确定长期用某条命令后
+  可写进 `.mae-flow-defaults.json` 的「编译方式」自动预填；
+- 已限定模块（`-pl` / `--projects` / `-f`）、非 Maven 编译方式（如 build-fix）、单模块仓都不提示，
+  五种情形逐个实测过。
+
 ## 2026-08-07：修正总账里两条规则的出口分类
 
 `bash-build-artifacts` 和 `bash-compile-side-effects` 在 `gate.py` 里被升级为绝对类——不签发放行令、

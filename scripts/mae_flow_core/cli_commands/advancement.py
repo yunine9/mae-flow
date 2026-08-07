@@ -8,6 +8,10 @@ from .shared import (
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
 from mae_flow_core.quality.attempts import begin_attempt
+from mae_flow_core.workflow.build_scope import (
+    build_scope_hint,
+    maven_modules,
+)
 
 
 def _bounded_next(st, sid, nxt):
@@ -242,12 +246,26 @@ def _config_review_excerpt(path):
              for line in text.splitlines() if line.strip()]
     return " / ".join(lines[:3])[:300]
 
+def _root_pom_modules():
+    """读根 pom 的子模块声明。读不到就返回空,提示自然不出现。"""
+    try:
+        return maven_modules(read_text("pom.xml", encoding="utf-8"))
+    except OSError:
+        return ()
+
+
 def _print_config_review(review, step):
     pending = review.get("config") or {}
     print("[mae-flow] 完整配置确认单（收据 %s，指纹 %s）" % (
         review.get("id", "?"), str(review.get("sha256", ""))[:12]))
     for key in step.get("require_sets", []):
         print("  %s: %s" % (key, pending.get(key, "")))
+        if key == "编译方式":
+            # 用户拍板编译命令的这一刻,是说"别整仓编译"的唯一合适时机。
+            hint = build_scope_hint(
+                pending.get(key, ""), _root_pom_modules())
+            if hint:
+                print(hint)
     print("  分支名: %s" % pending.get("分支名", ""))
     excerpt = _config_review_excerpt(pending.get("需求文档", ""))
     if excerpt:

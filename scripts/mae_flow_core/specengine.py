@@ -3,6 +3,8 @@
 from . import specengine_archive as _archive_impl
 from .specengine_base import (
     DEFAULT_SCHEMA,
+    LEGACY_SPEC_WORKSPACE,
+    SPEC_WORKSPACE_RELATIVE,
     PLUGIN_ROOT,
     VENDOR_SCHEMAS_DIR,
     SpecEngineError,

@@ -2,8 +2,8 @@
 
 from .specengine_base import (
     SpecEngineError, _DATE_RE, _LEAK_RE, _archive_dir, _main_specs_dir,
-    _norm_newlines, _posix, _read_text_utf8, _require_change_dir, _utc_today,
-    atomic_write_text, os, shutil, time,
+    _norm_newlines, _posix, _read_text_utf8, _rel_under, _require_change_dir,
+    _utc_today, atomic_write_text, os, shutil, time,
 )
 from .specengine_markdown import (
     _find_main_spec_structure_issues, _validate_main_spec_content,
@@ -103,7 +103,8 @@ def _sweep_main_specs_for_leak(root):
         except OSError:
             continue
         if _LEAK_RE.search(_norm_newlines(content)):
-            leaked.append("openspec/specs/%s/spec.md" % entry)
+            leaked.append(_posix(os.path.join(
+                _rel_under(_main_specs_dir(root), root), entry, "spec.md")))
     return leaked
 
 
@@ -222,7 +223,9 @@ def archive(root, change, date=None):
     return {
         "archived_to": _posix(archive_path),
         "archive_name": archive_name,
-        "merged": ["openspec/specs/%s/spec.md" % update["domain"]
+        "merged": [_posix(os.path.join(
+                       _rel_under(_main_specs_dir(root), root),
+                       update["domain"], "spec.md"))
                    for update, _rebuilt, _original in staged],
         "totals": totals,
         "tasks": tasks,

@@ -1,5 +1,36 @@
 # 更新记录
 
+## 2026-08-07：规格工作区目录归一——openspec/ → .mae-flow-work/spec/
+
+退役外部 OpenSpec 引擎时只退了引擎、没退目录:接替它的内置纯 Python 规格引擎沿用了
+`openspec/` 的目录布局,于是每次跑单项目根都长出一个挂着退役品牌名字的目录——
+过程件哲学被破坏(本地过程件应统一在 `.mae-flow-work/` 一个忽略根下),
+`git_ownership` 还要养一套专门规则挡它进提交,新维护者每次都要重新解释一遍
+"这不是退役了吗"。上次实战发现的 openspec/config.yaml 污染只是它的局部症状。
+
+约束与门禁瘦身同款:**无残留、无阻塞**。
+
+- **引擎双根解析**(`_openspec_dir`):旧 `openspec/` 存在就用旧根,否则用
+  `.mae-flow-work/spec/`。零副作用、无 subprocess——两种布局永远都能工作,
+  这是"不阻塞"的兜底;
+- **一次性搬迁** `migrate_legacy_spec_workspace`(接线在 init 与 current 入口):
+  只有「旧目录存在 + git 完全未跟踪 + 新目录不存在」才搬。被跟踪(老仓的
+  openspec/specs 历史领域真相、已提交在途单)原地保留——搬走会在用户的
+  git status 里制造成片删除;不在 git 仓、查询失败、搬迁抛错一律静默沿用旧根;
+- **路径记录相对化**:spec archive 的 archive_paths、merged 展示、story_diag 诊断、
+  moonlight 活跃 change、报表工件指针全部改从引擎根派生,不再写死 openspec 前缀;
+  lean 迁移的工件指针保持旧默认(它服务的就是旧状态);
+- **旧规则原样保留**:git_ownership 的 openspec 提交规则、gate 的 .openspec.yaml
+  拦截、bash 宽 add 拦截都还有活输入(老仓),不是残留;`specs_truth` 正则同理保留
+  openspec/specs——那是被跟踪老仓的真相源写保护;
+- **新根零新增规则**:`.mae-flow-work/` 本来就在 dirty 过滤、manifest 过程件前缀表
+  和 info/exclude 里,归一后这些保护自动覆盖,init 补了一次 `_git_local_runtime_ignore`;
+- domain_archive 的单包收纳对两个根都做;story-generator 的禁写清单补上新根;
+- 全新工程实测:项目根不再出现 openspec/,prepare_project 契约与 selftest 端到端
+  探针全部改到新根断言;旧布局全链由 test_legacy_layout_change_still_flows 与
+  对拍测试(显式播种旧根)继续守护;新增 `test_spec_workspace_relocation.py`
+  8 条回归(双根解析 3 + 搬迁边界 5)。
+
 ## 2026-08-07：提示词瘦身第一批——切除 verify 包、入口减 41%、立尺寸预算红线
 
 依据:context rot 实测(精度随输入变长非均匀衰减,中部规则有实质概率不被执行)

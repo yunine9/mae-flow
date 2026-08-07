@@ -94,7 +94,9 @@ def cmd_spec(flow, st, args):
         # 已归档单的 change 目录已移走,查产物必然报"不存在"——成功之后
         # 看到报错违背流畅原则,改报归档去向。
         if cn and str(data.get("phase", "")) == "archived":
-            out["note"] = "已归档: openspec/changes/archive/%s" % (
+            workspace = api.norm(os.path.relpath(
+                specengine._openspec_dir(os.getcwd()), os.getcwd()))
+            out["note"] = "已归档: " + workspace + "/changes/archive/%s" % (
                 data.get("archived_to", "?"))
         elif cn:
             try:
@@ -187,8 +189,10 @@ def cmd_spec(flow, st, args):
         data["archived_to"] = info.get("archive_name", "")
         archived_path = api.norm(os.path.relpath(
             info.get("archived_to", ""), os.getcwd()))
+        workspace = api.norm(os.path.relpath(
+            specengine._openspec_dir(os.getcwd()), os.getcwd()))
         data["archive_paths"] = list(dict.fromkeys(
-            ["openspec/changes/" + cn, archived_path] + [
+            [workspace + "/changes/" + cn, archived_path] + [
                 re.sub(r"^(?:\./)+", "", api.norm(path))
                 for path in info.get("merged", []) or []
             ]))
@@ -204,7 +208,7 @@ def cmd_spec(flow, st, args):
                  info.get("archive_name", "")))
         print("[mae-flow] 本次只需精确提交: "
               + "、".join(data["archive_paths"]))
-        print("禁止 git add openspec/；该宽路径可能卷入其他单遗留文件。")
+        print("禁止 git add %s/；该宽路径可能卷入其他单遗留文件。" % workspace)
         print("统计: " + json.dumps(info.get("totals", {}), ensure_ascii=False))
         return
     if action == "init":

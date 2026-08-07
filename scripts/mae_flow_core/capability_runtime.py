@@ -289,7 +289,7 @@ def prepare_project(project_root):
 
     # v4:规格目录由内置引擎创建,不再调 Node CLI——Node 从此不是宿主前置。
     from . import specengine
-    config = os.path.join(root, "openspec", "config.yaml")
+    config = os.path.join(specengine._openspec_dir(root), "config.yaml")
     if not os.path.isfile(config):
         try:
             specengine.ensure_config(root)

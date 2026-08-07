@@ -58,6 +58,10 @@ def _localize_legacy_process_files(root, state, package):
             os.path.join(root, "openspec", "changes", change),
             os.path.join(package.root, "legacy", "openspec-change-%s" % change),
         ))
+        mappings.append((
+            os.path.join(root, ".mae-flow-work", "spec", "changes", change),
+            os.path.join(package.root, "legacy", "spec-change-%s" % change),
+        ))
     moved = []
     for source, preferred in mappings:
         if not os.path.exists(source):

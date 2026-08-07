@@ -171,8 +171,21 @@ def _rel_under(path, base):
     return path
 
 
+# 规格工作区曾直接叫 openspec/ 蹲在项目根——那是退役外部引擎留下的名字与位置。
+# 现在统一归入 .mae-flow-work/(唯一的本地过程区,git 本地排除)。
+# 旧目录仍在时优先沿用:老团队仓里 openspec/specs 可能是已提交的历史领域真相,
+# 在途旧单的 change 目录也在里面;真正的搬迁只对"未被 git 跟踪"的旧目录做,
+# 由流程入口的 migrate_legacy_spec_workspace 一次性完成,引擎本身零副作用。
+LEGACY_SPEC_WORKSPACE = "openspec"
+SPEC_WORKSPACE_RELATIVE = os.path.join(".mae-flow-work", "spec")
+
+
 def _openspec_dir(root):
-    return os.path.join(os.path.abspath(root), "openspec")
+    base = os.path.abspath(root)
+    legacy = os.path.join(base, LEGACY_SPEC_WORKSPACE)
+    if os.path.isdir(legacy):
+        return legacy
+    return os.path.join(base, SPEC_WORKSPACE_RELATIVE)
 
 
 def _changes_dir(root):

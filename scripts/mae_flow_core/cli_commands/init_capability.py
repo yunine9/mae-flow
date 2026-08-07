@@ -8,6 +8,11 @@ from .shared import (
 from .wiring import api
 
 def cmd_init(flow, args):
+    from .lean_migration import migrate_legacy_spec_workspace
+    moved, note = migrate_legacy_spec_workspace(os.getcwd())
+    if moved:
+        print(note)
+    api._git_local_runtime_ignore()
     action = api._load_action()
     if action:
         api.die("独立任务 %s(%s) 尚未收尾。先 action finish 或 action cancel；"

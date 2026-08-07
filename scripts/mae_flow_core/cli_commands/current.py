@@ -43,15 +43,8 @@ def _spec_phase(st):
 
 def _active_change_count():
     """在建区活跃 change 计数(排除 archive/ 与已归档)。>1 = 有历史残留未归档。"""
-    n = 0
-    try:
-        for d in os.listdir(os.path.join("openspec", "changes")):
-            full = os.path.join("openspec", "changes", d)
-            if os.path.isdir(full) and d != "archive":
-                n += 1
-    except OSError:
-        pass
-    return n
+    from mae_flow_core import specengine
+    return len(specengine._list_active_changes(os.getcwd()))
 
 def _sentinel_lines(sid, st):
     """在建区残留诊断。阶段错位这一整类随 v3 消失(阶段与流程同源,不可能不一致)。"""
@@ -193,6 +186,14 @@ def _defaults():
         return None, f"⚠ {DEFAULTS_PATH} 解析失败,已忽略(修复该 JSON 或删除): {e}"
 
 def print_current(flow, st):
+    from .lean_migration import migrate_legacy_spec_workspace
+    moved, note = migrate_legacy_spec_workspace(os.getcwd())
+    if moved:
+        st.setdefault("migrations", []).append({
+            "type": "spec-workspace-relocated",
+            "at": time.strftime("%Y-%m-%d %H:%M:%S")})
+        api.save_state(st)
+        print(note)
     sid = st["current"]
     step = flow["steps"][sid]
     print(f"═══ 当前步骤: {sid} — {step['title']} ═══")

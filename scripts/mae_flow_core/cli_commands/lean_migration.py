@@ -275,3 +275,42 @@ def handle_early_state_command(args):
         raise SystemExit(2)
     _print_card(recovery, proposal)
     return True
+
+
+def migrate_legacy_spec_workspace(root="."):
+    """openspec/ → .mae-flow-work/spec 一次性搬迁。返回 (moved, note)。
+
+    这是目录归一,不是行为变更:规格引擎自 v4 起就是内置纯 Python,
+    openspec/ 只是它沿用的退役外部引擎的目录名。搬迁规则:
+
+    - 旧目录被 git 跟踪(老仓的 openspec/specs 历史领域真相、已提交的在途单)
+      → 原地保留,引擎继续用旧根——搬走会在用户的 git status 里制造成片删除;
+    - 不在 git 仓、git 查询失败、目标已存在、搬迁抛错 → 跳过并沿用旧根,
+      **绝不阻塞**:引擎的双根解析保证两种布局都能继续工作;
+    - 只有"旧目录存在 + 完全未跟踪 + 新目录不存在"才搬,搬完旧路径消失,
+      引擎自动切到新根。
+    """
+    base = os.path.abspath(root)
+    legacy = os.path.join(base, "openspec")
+    target = os.path.join(base, ".mae-flow-work", "spec")
+    if not os.path.isdir(legacy) or os.path.exists(target):
+        return False, ""
+    try:
+        probe = subprocess.run(
+            ["git", "-C", base, "ls-files", "--", "openspec"],
+            shell=False, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15)
+    except Exception:
+        return False, ""
+    if probe.returncode != 0:
+        return False, ""  # 不是 git 仓/查询失败:无法证明未跟踪,不动
+    if probe.stdout.strip():
+        return False, ""  # 被跟踪:历史真相原地保留
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        import shutil
+        shutil.move(legacy, target)
+    except OSError:
+        return False, ""  # 半途失败也不阻塞;引擎双根解析兜底
+    return True, ("[mae-flow] 规格工作区已从 openspec/ 归一到 "
+                  ".mae-flow-work/spec/(本地过程区,不进提交)。")

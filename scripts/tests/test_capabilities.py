@@ -256,7 +256,8 @@ class EmbeddedCapabilityTests(unittest.TestCase):
                 "history": [],
                 "started": time.strftime("%Y-%m-%d %H:%M:%S"),
             }, ensure_ascii=False))
-            change = os.path.join(root, "openspec", "changes", CHANGE)
+            change = os.path.join(
+                root, ".mae-flow-work", "spec", "changes", CHANGE)
 
             # --- 变更目录由内置引擎创建(v5:只有 change.md 骨架),重复创建被拒 ---
             created = self._spec_ok(root, "new", CHANGE, env=env)
@@ -357,17 +358,20 @@ class EmbeddedCapabilityTests(unittest.TestCase):
 
             # --- 定稿:delta 合并进真相源 + 目录移动(不是复制) ---
             archived = self._spec_ok(root, "archive", env=env)
-            self.assertIn("openspec/specs/runtime/spec.md", archived.stdout)
+            self.assertIn(
+                ".mae-flow-work/spec/specs/runtime/spec.md", archived.stdout)
             archived_state = self._spec_state(root)
             self.assertEqual("archived", archived_state["phase"])
             self.assertEqual([
-                "openspec/changes/" + CHANGE,
-                "openspec/changes/archive/" + archived_state["archived_to"],
-                "openspec/specs/runtime/spec.md",
+                ".mae-flow-work/spec/changes/" + CHANGE,
+                ".mae-flow-work/spec/changes/archive/"
+                + archived_state["archived_to"],
+                ".mae-flow-work/spec/specs/runtime/spec.md",
             ], archived_state["archive_paths"])
             self.assertFalse(os.path.exists(change))
             archived_dirs = glob.glob(os.path.join(
-                root, "openspec", "changes", "archive", "*-" + CHANGE))
+                root, ".mae-flow-work", "spec", "changes", "archive",
+                "*-" + CHANGE))
             self.assertEqual(1, len(archived_dirs))
             self.assertEqual(
                 os.path.basename(archived_dirs[0]),
@@ -375,7 +379,7 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             # v5 目标本身:每单入库档案 = 一个 change.md,再无其他文件
             self.assertEqual(["change.md"], sorted(os.listdir(archived_dirs[0])))
             main_spec = os.path.join(
-                root, "openspec", "specs", "runtime", "spec.md")
+                root, ".mae-flow-work", "spec", "specs", "runtime", "spec.md")
             self.assertTrue(os.path.isfile(main_spec))
             with open(main_spec, encoding="utf-8") as stream:
                 merged = stream.read()
@@ -405,7 +409,7 @@ class EmbeddedCapabilityTests(unittest.TestCase):
         specs/<域>/spec.md 合并、四件套全部随目录进档案。"""
         with tempfile.TemporaryDirectory(prefix="mae legacy ") as base:
             root = os.path.join(base, "legacy 仓库")
-            os.makedirs(root)
+            os.makedirs(os.path.join(root, "openspec"))
             subprocess.run(
                 ["git", "init", "-q", root],
                 check=True, capture_output=True, text=True)
@@ -479,15 +483,18 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertIn(" — ", prepared["bash"])
             self.assertFalse(prepared["created_project_skills"])
 
-            config = os.path.join(root, "openspec", "config.yaml")
+            # 目录归一:全新仓的规格工作区落 .mae-flow-work/spec,
+            # 项目根不再长出退役引擎名字的 openspec/
+            workspace = os.path.join(root, ".mae-flow-work", "spec")
+            config = os.path.join(workspace, "config.yaml")
             self.assertTrue(os.path.isfile(config))
+            self.assertFalse(os.path.exists(os.path.join(root, "openspec")))
             with open(config, encoding="utf-8") as stream:
                 config_text = stream.read()
             self.assertIn("schema: spec-driven", config_text)
+            self.assertTrue(os.path.isdir(os.path.join(workspace, "specs")))
             self.assertTrue(os.path.isdir(
-                os.path.join(root, "openspec", "specs")))
-            self.assertTrue(os.path.isdir(
-                os.path.join(root, "openspec", "changes", "archive")))
+                os.path.join(workspace, "changes", "archive")))
             # v4:交付阶段收归 .mae-flow.json,comet 的项目级配置不再产生
             self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
             self.assertFalse(os.path.exists(
@@ -547,8 +554,8 @@ class EmbeddedCapabilityTests(unittest.TestCase):
             self.assertIn("未安装", optional[0]["detail"])
             self.assertEqual(PREPARED_KEYS, set(prepared))
             self.assertEqual("builtin", prepared["spec_engine"])
-            self.assertTrue(os.path.isfile(
-                os.path.join(root, "openspec", "config.yaml")))
+            self.assertTrue(os.path.isfile(os.path.join(
+                root, ".mae-flow-work", "spec", "config.yaml")))
             self.assertFalse(os.path.exists(os.path.join(root, ".comet")))
             self.assertEqual(
                 [], [item for item in checks if not item["ok"]],

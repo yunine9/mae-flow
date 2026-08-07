@@ -357,7 +357,10 @@ def cmd_moonlight(flow, st, args):
         active_change_exists = False
         if current == "archive":
             change_name = (st.get("config", {}) or {}).get("CHANGE_NAME", "")
-            active_change = os.path.join("openspec", "changes", change_name) if change_name else ""
+            from mae_flow_core import specengine
+            active_change = (os.path.relpath(os.path.join(
+                specengine._changes_dir(os.getcwd()), change_name))
+                if change_name else "")
             active_change_exists = bool(
                 active_change and os.path.isdir(active_change))
         result = activate_moonlight(

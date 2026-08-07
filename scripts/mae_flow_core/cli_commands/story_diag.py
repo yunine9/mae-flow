@@ -173,14 +173,17 @@ def cmd_doctor(flow, st, args):
     # (v5=change.md,legacy=.openspec.yaml/四件套)。审计实锤:旧实现查
     # .comet.yaml,对 v3 之后的每张健康单都误报 ❌。
     if cn:
-        cdir = f"openspec/changes/{cn}"
+        from mae_flow_core import specengine
+        workspace = os.path.relpath(
+            specengine._openspec_dir(os.getcwd())).replace("\\", "/")
+        cdir = f"{workspace}/changes/{cn}"
         ph = str(api._spec_data(st).get("phase", "") or "?")
         if os.path.isfile(cdir + "/change.md"):
             print(f"✅ change: {cn}(v5 四合一),phase={ph}")
         elif os.path.isdir(cdir):
             print(f"✅ change: {cn}(旧布局在途),phase={ph}")
         elif ph == "archived" or globmod.glob(
-                f"openspec/changes/archive/*{cn}*"):
+                f"{workspace}/changes/archive/*{cn}*"):
             print(f"✅ change: {cn} 已归档,phase={ph}")
         else:
             print(f"❌ change: {cn} 目录不存在且未见归档(phase={ph})")

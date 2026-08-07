@@ -1,6 +1,7 @@
 """One-way conversion of schema-v2 flows into lean recovery cursors."""
 
 import json
+import os
 import re
 from dataclasses import dataclass
 
@@ -278,7 +279,12 @@ def _artifacts(raw, ticket, workflow):
         if kind == "spec" and not path:
             change = _string(config.get("CHANGE_NAME"))
             if change:
+                # 双根:取真实存在的那份;都不存在时保持旧指针——本迁移
+                # 服务的就是旧版在途状态,它的 change 目录只可能在旧根
                 path = "openspec/changes/%s/change.md" % change
+                relocated = ".mae-flow-work/spec/changes/%s/change.md" % change
+                if not os.path.exists(path) and os.path.exists(relocated):
+                    path = relocated
         if (kind == "story" and not path and ticket
                 and workflow == "full" and _story_was_reached(raw)):
             path = "docs/story/STORY-%s.md" % ticket

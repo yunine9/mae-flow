@@ -118,19 +118,19 @@ def main():
               state.get("spec", {}).get("phase") == "open"
               and state.get("spec", {}).get("initialized_at"),
               str(state.get("spec")))
-        skeleton = read(root, "openspec/changes/probe-hotfix/change.md")
+        skeleton = read(root, ".mae-flow-work/spec/changes/probe-hotfix/change.md")
         check("hotfix 骨架无方案节", "# 方案" not in skeleton)
         check("hotfix 骨架无 .openspec.yaml", not os.path.exists(
-            os.path.join(root, "openspec/changes/probe-hotfix/.openspec.yaml")))
-        write(root, "openspec/changes/probe-hotfix/change.md",
+            os.path.join(root, ".mae-flow-work/spec/changes/probe-hotfix/.openspec.yaml")))
+        write(root, ".mae-flow-work/spec/changes/probe-hotfix/change.md",
               CHANGE_DOC_LIGHT % "hotfix")
         r, why = drive_to_archive(root, "probe-hotfix")
         check("hotfix 无规格单全链到定稿", r is not None, why)
         if r is not None:
             check("hotfix 定稿纯移动(无合并)", "(无规格变更)" in r.stdout, r.stdout)
-            adirs = os.listdir(os.path.join(root, "openspec/changes/archive"))
+            adirs = os.listdir(os.path.join(root, ".mae-flow-work/spec/changes/archive"))
             check("hotfix 档案目录存在", len(adirs) == 1, str(adirs))
-            only = os.listdir(os.path.join(root, "openspec/changes/archive", adirs[0]))
+            only = os.listdir(os.path.join(root, ".mae-flow-work/spec/changes/archive", adirs[0]))
             check("hotfix 档案里只有 change.md", only == ["change.md"], str(only))
 
         # --- tweak 档 ---
@@ -139,7 +139,7 @@ def main():
         info = json.loads(r.stdout or "{}") if r.returncode == 0 else {}
         check("tweak new 成功且档位正确", r.returncode == 0
               and info.get("tier") == "tweak", r.stderr)
-        write(root, "openspec/changes/probe-tweak/change.md",
+        write(root, ".mae-flow-work/spec/changes/probe-tweak/change.md",
               CHANGE_DOC_LIGHT % "tweak")
         # tweak 档改走优化后的合并命令:phase verify 快进(机器代劳三跳)
         r = spec(root, "phase", "verify")
@@ -162,7 +162,7 @@ def main():
         root = make_repo(base, "full 仓", "full")
         r = spec(root, "new", "probe-full")
         check("full new 成功", r.returncode == 0, r.stderr)
-        skeleton = read(root, "openspec/changes/probe-full/change.md")
+        skeleton = read(root, ".mae-flow-work/spec/changes/probe-full/change.md")
         check("full 骨架含方案节与（待设计", "# 方案" in skeleton and "（待设计" in skeleton)
         r = spec(root, "instructions", "change")
         check("instructions change 按 full 档渲染",
@@ -173,7 +173,7 @@ def main():
         r = spec(root, "validate")
         check("full 无规格条目 validate 拒且指向 change.md",
               r.returncode != 0 and "change.md" in (r.stdout + r.stderr))
-        write(root, "openspec/changes/probe-full/change.md",
+        write(root, ".mae-flow-work/spec/changes/probe-full/change.md",
               "# 变更：probe-full\n\n# 为什么\n\n完整开发探针。\n\n"
               "# 规格条目：probe\n\n" + DELTA + "\n"
               "# 方案\n\n用内置引擎。\n\n# 实现清单\n\n- [x] 1. 实现完成\n")
@@ -182,7 +182,7 @@ def main():
         r, why = drive_to_archive(root, "probe-full")
         check("full 有规格单全链到定稿", r is not None, why)
         if r is not None:
-            merged = read(root, "openspec/specs/probe/spec.md")
+            merged = read(root, ".mae-flow-work/spec/specs/probe/spec.md")
             check("full 定稿真相源已合并", "### Requirement: Probe rule" in merged)
             check("full 定稿无 delta 泄漏", "## ADDED Requirements" not in merged)
         r = spec(root, "archive")
@@ -191,10 +191,10 @@ def main():
         # --- 布局混用与伪造通道 ---
         root = make_repo(base, "mix 仓", "full")
         spec(root, "new", "probe-full")
-        write(root, "openspec/changes/probe-full/change.md",
+        write(root, ".mae-flow-work/spec/changes/probe-full/change.md",
               "# 为什么\n\nx\n\n# 规格条目：dom\n\n" + DELTA
               + "\n# 实现清单\n\n- [x] 1. x\n")
-        write(root, "openspec/changes/probe-full/tasks.md", "- [ ] 1. old\n")
+        write(root, ".mae-flow-work/spec/changes/probe-full/tasks.md", "- [ ] 1. old\n")
         r = spec(root, "validate")
         check("布局混用 validate 拒", r.returncode != 0
               and "布局混用" in (r.stdout + r.stderr))
@@ -224,7 +224,7 @@ def main():
         # phase archive 直推拒(绕过 verify-pass 的通道关闭)
         root = make_repo(base, "pa 仓", "full", current="verify_comet")
         spec(root, "new", "probe-full")
-        write(root, "openspec/changes/probe-full/change.md",
+        write(root, ".mae-flow-work/spec/changes/probe-full/change.md",
               "# 为什么\n\nx\n\n# 规格条目：dom\n\n" + DELTA
               + "\n# 方案\n\ny\n\n# 实现清单\n\n- [x] 1. x\n")
         spec(root, "init")

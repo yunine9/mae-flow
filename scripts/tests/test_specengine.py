@@ -443,6 +443,8 @@ class DifferentialTests(unittest.TestCase):
             init = self._run_cli(cli_root, "init", ".", "--tools", "none",
                                  "--profile", "core")
             self.assertEqual(0, init.returncode, init.stdout + init.stderr)
+            # 对拍基准是 CLI 的 openspec/ 布局:先落空旧根,让引擎双根解析选它
+            os.makedirs(os.path.join(eng_root, "openspec"), exist_ok=True)
             created = ensure_config(eng_root)
             self.assertTrue(created["created"])
 
@@ -543,29 +545,31 @@ class EngineBasicsTests(unittest.TestCase):
     def test_ensure_config_creates_full_template_and_is_idempotent(self):
         first = ensure_config(self.root)
         self.assertTrue(first["created"])
-        content = read_text(self.root, "openspec/config.yaml")
+        # 全新工程:规格工作区落在 .mae-flow-work/spec(目录归一后的新根)
+        content = read_text(self.root, ".mae-flow-work/spec/config.yaml")
         self.assertTrue(content.startswith("schema: spec-driven\n"))
         self.assertIn("# Project context (optional)", content)
         self.assertIn('#       - Always include a "Non-goals" section', content)
-        self.assertTrue(os.path.isdir(
-            os.path.join(self.root, "openspec", "changes", "archive")))
-        self.assertTrue(os.path.isdir(
-            os.path.join(self.root, "openspec", "specs")))
+        self.assertTrue(os.path.isdir(os.path.join(
+            self.root, ".mae-flow-work", "spec", "changes", "archive")))
+        self.assertTrue(os.path.isdir(os.path.join(
+            self.root, ".mae-flow-work", "spec", "specs")))
         second = ensure_config(self.root)
         self.assertFalse(second["created"])
         self.assertEqual(first["path"], second["path"])
-        self.assertEqual(content, read_text(self.root, "openspec/config.yaml"))
+        self.assertEqual(content, read_text(
+            self.root, ".mae-flow-work/spec/config.yaml"))
 
     def test_new_change_products_and_duplicate_rejection(self):
         result = new_change(self.root, "first-change")
         self.assertEqual("spec-driven", result["schema"])
         metadata = read_text(
-            self.root, "openspec/changes/first-change/.openspec.yaml")
+            self.root, ".mae-flow-work/spec/changes/first-change/.openspec.yaml")
         self.assertEqual(
             "schema: spec-driven\ncreated: %s\n" % result["created"], metadata)
         # 没跑过 ensure_config 时按 CLI 同款写最小 config
         self.assertEqual("schema: spec-driven\n",
-                         read_text(self.root, "openspec/config.yaml"))
+                         read_text(self.root, ".mae-flow-work/spec/config.yaml"))
         with self.assertRaises(SpecEngineError):
             new_change(self.root, "first-change")
 
@@ -585,9 +589,10 @@ class EngineBasicsTests(unittest.TestCase):
 
     def test_new_change_keeps_existing_full_config(self):
         ensure_config(self.root)
-        full = read_text(self.root, "openspec/config.yaml")
+        full = read_text(self.root, ".mae-flow-work/spec/config.yaml")
         new_change(self.root, "second-change")
-        self.assertEqual(full, read_text(self.root, "openspec/config.yaml"))
+        self.assertEqual(
+            full, read_text(self.root, ".mae-flow-work/spec/config.yaml"))
 
     def test_change_name_validation(self):
         for bad in ("", "a b", "../evil", "a/../b", "a.b", "a/b", "a\\b",
@@ -597,7 +602,7 @@ class EngineBasicsTests(unittest.TestCase):
         # 接口契约允许（比 CLI 宽）：下划线与大写——见 specengine 模块注释差异 2
         new_change(self.root, "Hotfix_20260725")
         self.assertTrue(os.path.isdir(os.path.join(
-            self.root, "openspec", "changes", "Hotfix_20260725")))
+            specengine._changes_dir(self.root), "Hotfix_20260725")))
 
     def test_instructions_four_artifacts_from_vendored_sources(self):
         new_change(self.root, "instr-change")

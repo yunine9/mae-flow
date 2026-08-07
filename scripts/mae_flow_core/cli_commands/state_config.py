@@ -14,7 +14,7 @@ from mae_flow_core.orchestration.work_package import ensure_work_package
 
 def find_project_root(start=None):
     """从 start(默认 cwd)向上定位项目根,消除"模型 cd 进子目录后调用"的错位:
-    每层先找已有 .mae-flow.json 或退出标记，再判断 .git / openspec 项目边界；
+    每层先找已有 .mae-flow.json 或退出标记，再判断 .git / .mae-flow-work / openspec 项目边界；
     不越过最近仓库去捡父目录的陈旧状态。都没有就留在原地。
     返回 (root, 是否已有状态文件)。"""
     root = core_find_project_root(start)

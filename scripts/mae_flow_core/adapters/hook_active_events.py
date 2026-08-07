@@ -246,7 +246,8 @@ class ActiveHookEventAdapter:
         if (
                 session_start
                 and (
-                    os.path.isdir("openspec")
+                    os.path.isdir(".mae-flow-work")
+                    or os.path.isdir("openspec")
                     or os.path.isdir(".comet"))):
             script = os.path.abspath(self.maeflow_path)
             readme = os.path.abspath(

@@ -313,9 +313,13 @@ class WorkflowEvidenceRules:
         )
 
     def _spec_placeholder_result(self, spec, change):
-        document = os.path.join(
-            "openspec", "changes", change, "change.md")
-        if not self.ports.is_file(document):
+        document = None
+        for base in (os.path.join(".mae-flow-work", "spec"), "openspec"):
+            candidate = os.path.join(base, "changes", change, "change.md")
+            if self.ports.is_file(candidate):
+                document = candidate
+                break
+        if document is None:
             return None
         text = self.ports.read_text(document)
         hits = [

@@ -74,6 +74,7 @@ def find_project_root(start=None):
         if any(markers):
             return probe
         if (os.path.exists(os.path.join(probe, ".git"))
+                or os.path.isdir(os.path.join(probe, ".mae-flow-work"))
                 or os.path.isdir(os.path.join(probe, "openspec"))):
             return probe
         parent = os.path.dirname(probe)

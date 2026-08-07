@@ -1161,8 +1161,11 @@ if flow:
               prepared.get("spec_engine") == "builtin"
               and set(prepared) == {"spec_engine", "project", "python", "git",
                                     "bash", "created_project_skills"}
-              and os.path.isfile(os.path.join(td, "openspec", "config.yaml"))
-              and os.path.isdir(os.path.join(td, "openspec", "changes", "archive"))
+              and os.path.isfile(os.path.join(
+                  td, ".mae-flow-work", "spec", "config.yaml"))
+              and os.path.isdir(os.path.join(
+                  td, ".mae-flow-work", "spec", "changes", "archive"))
+              and not os.path.exists(os.path.join(td, "openspec"))
               and not os.path.exists(os.path.join(td, ".comet"))
               and not os.path.exists(os.path.join(td, ".cac"))
               and not os.path.exists(os.path.join(td, ".claude")),

@@ -34,6 +34,7 @@ from architecture_rules import (  # noqa: E402
     private_hook_import_violations,
     quality_complexity_violations,
     unmanaged_runtime_open_violations,
+    unreachable_core_modules,
     workflow_complexity_violations,
 )
 
@@ -212,6 +213,10 @@ class ArchitectureTests(unittest.TestCase):
             ],
             assert_policy_dependencies(root),
         )
+
+    def test_no_production_module_is_unreachable_from_the_entrypoints(self):
+        """插件只有两个真实入口；任何进不去的运行时模块都是排障陷阱。"""
+        self.assertEqual([], unreachable_core_modules(ROOT))
 
     def test_refactored_core_modules_stay_within_size_limit(self):
         self.assertEqual([], new_module_size_violations(ROOT))

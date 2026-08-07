@@ -84,9 +84,7 @@ class StableRecoveryContractTests(unittest.TestCase):
             content = stream.read()
         self.assertNotIn("ut_handoff", content)
         from mae_flow_core.orchestration.work_package import WorkPackagePaths
-        from mae_flow_core.orchestration.documents import DocumentPaths
         self.assertNotIn("ut_handoff", WorkPackagePaths.__dataclass_fields__)
-        self.assertNotIn("ut_handoff", DocumentPaths.__dataclass_fields__)
 
 
 if __name__ == "__main__":

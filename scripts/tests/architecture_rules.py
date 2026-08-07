@@ -580,3 +580,89 @@ def hook_complexity_violations(root, maximum=15):
                     % (relative, node.lineno, node.name, complexity, maximum)
                 )
     return violations
+
+
+def _relative_import_module(node, package):
+    """Resolve ``from . import x`` / ``from ..y import z`` to a module name."""
+    parts = package.split(".")
+    base = ".".join(parts[:len(parts) - (node.level - 1)])
+    return (base + "." + node.module) if node.module else base
+
+
+def _imported_core_modules(path, package, root_path):
+    """Collect ``mae_flow_core`` modules a single file statically imports."""
+    imported = set()
+    for node in ast.walk(_parse(path)):
+        if isinstance(node, ast.Import):
+            imported.update(
+                alias.name for alias in node.names
+                if alias.name.startswith("mae_flow_core"))
+            continue
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = (
+            _relative_import_module(node, package)
+            if node.level else (node.module or ""))
+        if not module.startswith("mae_flow_core"):
+            continue
+        imported.add(module)
+        # ``from pkg.mod import name`` may import a submodule, not an object.
+        imported.update(module + "." + alias.name for alias in node.names)
+    return {
+        module for module in imported
+        if _module_file(module, root_path) is not None
+    }
+
+
+def _module_file(module, root_path):
+    base = root_path / "scripts" / Path(*module.split("."))
+    if (base / "__init__.py").is_file():
+        return base / "__init__.py"
+    candidate = base.with_suffix(".py")
+    return candidate if candidate.is_file() else None
+
+
+def unreachable_core_modules(root):
+    """Return production modules no runtime entrypoint can ever import.
+
+    Dead runtime code is a live hazard here rather than mere clutter: a
+    maintainer chasing a Hook defect can spend a session "fixing" an adapter
+    the dispatcher never loads, with the whole suite staying green.
+    """
+    root_path = Path(root)
+    queue = []
+    for relative in RUNTIME_ENTRYPOINTS:
+        path = root_path / relative
+        if path.is_file():
+            queue.extend(
+                _imported_core_modules(
+                    os.fspath(path), "mae_flow_core", root_path))
+    reached = set()
+    while queue:
+        module = queue.pop()
+        if module in reached:
+            continue
+        path = _module_file(module, root_path)
+        if path is None:
+            continue
+        reached.add(module)
+        package = (
+            module if path.name == "__init__.py"
+            else module.rsplit(".", 1)[0])
+        queue.extend(
+            _imported_core_modules(os.fspath(path), package, root_path))
+    # Importing a submodule executes every ancestor ``__init__.py``, so those
+    # packages are reached even without a statement naming them.
+    for module in tuple(reached):
+        parts = module.split(".")
+        for depth in range(1, len(parts)):
+            reached.add(".".join(parts[:depth]))
+    package_root = root_path / "scripts" / "mae_flow_core"
+    everything = set()
+    for path in sorted(package_root.rglob("*.py")):
+        relative = path.relative_to(root_path / "scripts").as_posix()
+        module = relative[:-len(".py")].replace("/", ".")
+        everything.add(
+            module[:-len(".__init__")] if module.endswith(".__init__")
+            else module)
+    return sorted(everything - reached)

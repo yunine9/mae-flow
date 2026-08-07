@@ -614,7 +614,8 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertIn(command_only, unproven_paths)
         self.assertFalse(artifact_hints)
 
-    def test_unrelated_ambiguous_artifact_remains_warning_only(self):
+    def test_unwritten_output_artifact_is_blocked_with_a_permit_route(self):
+        """别的编译任务的台账不该给它归属，但它仍是 Agent 没写过的产物。"""
         artifact = "dist/app.js"
         write(self.repo, artifact, "console.log('release');\n")
         self.write_sidecar({"internal/generated/build.properties": {
@@ -624,9 +625,12 @@ class CommitOwnershipTests(unittest.TestCase):
 
         compile_side_effects, decision = self.decide_pending_files(self.state())
 
-        self.assertEqual([], compile_side_effects)
-        self.assertIsNone(decision.block)
-        self.assertTrue(decision.advisories)
+        self.assertEqual(
+            [], compile_side_effects, "不能张冠李戴地归属到别的编译任务")
+        self.assertEqual(
+            "bash-build-output-artifacts", decision.block.rule)
+        self.assertEqual(
+            "block", decision.block.kind, "裁决类:用户可一次性放行")
 
     def test_tracked_deletion_without_compile_ledger_remains_committable(self):
         path = "config/runtime.properties"

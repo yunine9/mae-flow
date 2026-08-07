@@ -137,6 +137,38 @@ def _strong_artifact_block(facts):
     return None
 
 
+def _ambiguous_artifact_paths(facts):
+    """输出目录/产物后缀，且 Agent 从没直接写过的候选。
+
+    只提示不拦曾让编译产物静默上车:提示走的是门禁放行时的 stderr，宿主不会把它
+    送进模型上下文,Agent 眼里那次提交完全静默。但不能一刀切按路径拦——`bin/`
+    `out/` 这些目录在有些项目里放的是正经源码。Agent 用 Write/Edit 亲手写过的
+    文件是有意产出，仍然只提示;它没写过却出现在产物位置的，才是编译产出。
+    """
+    unproven = {path for path in facts.unproven_paths}
+    return tuple(
+        path for path in facts.artifact_hints if path in unproven)
+
+
+def _ambiguous_artifact_block(facts):
+    paths = _ambiguous_artifact_paths(facts)
+    if not paths:
+        return None
+    return GateDecision(
+        "block",
+        "bash-build-output-artifacts",
+        "提交前检测到位于常见输出目录或具有编译产物特征、且 Agent 从未直接改写过"
+        "的候选: "
+        + "、".join(paths[:8])
+        + ("…" if len(paths) > 8 else "")
+        + "。这类文件几乎都是编译产出，不应进入交付分支。若已暂存，执行 "
+        "git restore --staged -- <上述路径>（只移出暂存区，不删除本地文件），"
+        "并把对应规则加入项目 .gitignore；若命令是 git add && git commit，"
+        "从 git add 清单中移除这些路径。"
+        "确实需要交付预编译产物时，把文件和理由展示给用户，按下方拦截编号放行。",
+    )
+
+
 def _ownership_blocks(facts):
     # Integrity and irreversible side-effect boundaries are not user permits.
     # They must win before inherited/foreign ownership choices that do have an
@@ -147,6 +179,7 @@ def _ownership_blocks(facts):
             if facts.compile_side_effects else None
         ),
         _strong_artifact_block(facts),
+        _ambiguous_artifact_block(facts),
         _inherited_block(facts),
         _foreign_block(facts),
     ) if block)
@@ -178,12 +211,15 @@ def _advisories(facts):
             "也可能是必要的移动/删除，因此本次不阻断。请逐个确认: "
             + "、".join(facts.unproven_paths[:8])
             + ("…" if len(facts.unproven_paths) > 8 else ""))
-    if facts.artifact_hints:
+    authored_hints = tuple(
+        path for path in facts.artifact_hints
+        if path not in set(_ambiguous_artifact_paths(facts)))
+    if authored_hints:
         messages.append(
             "[mae-flow] ⚠ 产物提示:以下候选位于常见输出目录或具有编译产物特征；"
             "即使 Agent 直接写过，也不代表必须提交，请结合 git diff 确认: "
-            + "、".join(facts.artifact_hints[:8])
-            + ("…" if len(facts.artifact_hints) > 8 else ""))
+            + "、".join(authored_hints[:8])
+            + ("…" if len(authored_hints) > 8 else ""))
     return tuple(messages)
 
 

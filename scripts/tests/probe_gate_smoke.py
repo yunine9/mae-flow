@@ -168,9 +168,10 @@ def main():
     subprocess.run(
         ["git", "add", "dist/app.js"], cwd=root, check=True, capture_output=True)
     r = gate_bash(root, 'git commit -m "[REQ probe][fix]发布产物"')
-    check("提交产物:dist 等歧义项只提示不阻断",
-          r.returncode == 0 and "不阻断" in (r.stdout + r.stderr),
-          (r.stdout + r.stderr)[-300:])
+    out = r.stdout + r.stderr
+    check("提交产物:Agent 没写过的输出目录候选被拦且给出放行编号",
+          r.returncode != 0 and "从未直接改写过" in out and "拦截编号" in out,
+          out[-300:])
 
     root = make_repo(base, "artifact-source", "build")
     write(root, "src/Foo.cpp", "int foo() { return 1; }\n")

@@ -187,6 +187,12 @@
       "tier": "A",
       "escape": "permit",
       "why": "编译未完成就提交，回退要 reset/amend;已修复为真实证据放行，不再死锁"
+    },
+    "bash-build-output-artifacts": {
+      "kind": "permit",
+      "tier": "A",
+      "escape": "permit",
+      "why": "输出目录/产物后缀且 Agent 从未直接改写过的候选几乎必然是编译产出;真要交付预编译产物走一次性放行令"
     }
   }
 }

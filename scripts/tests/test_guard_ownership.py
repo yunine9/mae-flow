@@ -121,6 +121,40 @@ class OwnershipPolicyTests(unittest.TestCase):
         self.assertIn("提交提示", result.advisories[0])
         self.assertIn("产物提示", result.advisories[1])
 
+    def test_build_output_never_written_by_the_agent_is_blocked(self):
+        """只提示不拦曾让编译产物静默上车:提示走门禁放行时的 stderr，到不了模型。"""
+        result = decide_ownership(self.facts(
+            unproven_paths=("build/libfoo.so",),
+            artifact_hints=("build/libfoo.so",),
+        ))
+        self.assertIsNotNone(result.block)
+        self.assertEqual("bash-build-output-artifacts", result.block.rule)
+        self.assertEqual("block", result.block.kind, "必须是裁决类:带一次性放行令")
+        self.assertIn("git restore --staged --", result.block.message)
+        # 同一条信息不能既拦又提示。
+        self.assertEqual((), result.advisories)
+
+    def test_agent_authored_files_in_output_dirs_stay_advisory(self):
+        """`bin/` `out/` 在有些项目里放正经源码;Agent 亲手写的仍只提示。"""
+        result = decide_ownership(self.facts(
+            unproven_paths=(),
+            artifact_hints=("bin/deploy.sh",),
+        ))
+        self.assertIsNone(result.block)
+        self.assertEqual(1, len(result.advisories))
+        self.assertIn("bin/deploy.sh", result.advisories[0])
+
+    def test_integrity_blocks_still_win_over_the_output_block(self):
+        result = decide_ownership(self.facts(
+            compile_side_effects=("build/libfoo.so",),
+            staged_compile_side_effects=("build/libfoo.so",),
+            unproven_paths=("build/libfoo.so",),
+            artifact_hints=("build/libfoo.so",),
+        ))
+        self.assertEqual(
+            "bash-compile-side-effects", result.block.rule,
+            "归属明确的编译副作用是完整性边界，必须先裁决")
+
 
 if __name__ == "__main__":
     unittest.main()

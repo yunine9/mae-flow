@@ -125,6 +125,79 @@ class FlowLivenessTests(unittest.TestCase):
             self.assertNotIn(step_id, reachable())
             self.assertEqual("domain_archive", FLOW["steps"][step_id]["next"])
 
+def _quality_evidence(step):
+    return any(
+        item.get("agent") in ("COMPILE", "CODECHECK", "UT")
+        or item.get("type") == "review_codecheck"
+        for item in step.get("evidence", ()))
+
+
+def _source_guards(step):
+    """本步对"源码变了"这件事有没有任何一种机器保护。"""
+    guards = []
+    if any(item.get("agent") == "COMPILE"
+           for item in step.get("evidence", ())):
+        guards.append("recompile")
+    if any(item.get("type") == "review_snapshot"
+           for item in step.get("evidence", ())):
+        guards.append("review_snapshot")
+    for key in ("late_source_change_next", "source_change_next",
+                "source_change_recheck"):
+        if step.get(key):
+            guards.append(key)
+    return guards
+
+
+class FlowWiringContractTests(unittest.TestCase):
+    """新增流程节点必须接全。
+
+    现有红线管的是"删了没清干净";这两条管"加了没接全"——同样会出真故障，
+    而且只在夜跑或异常恢复时才暴露。
+    """
+
+    def test_every_quality_step_is_registered_for_moonlight_defer(self):
+        """有质量证据的步骤必须能被月光宝盒登记遗留，否则夜里撞上就没有出口。"""
+        from mae_flow_core.moonlight import QUALITY_STEPS
+
+        missing = sorted(
+            step_id for step_id in reachable()
+            if _quality_evidence(FLOW["steps"][step_id])
+            and step_id not in QUALITY_STEPS)
+        self.assertEqual([], missing)
+
+    def test_no_step_lets_changed_source_reach_push_unverified(self):
+        """改了源码之后，不存在一条能绕过全部机器检查直达 push 的路径。
+
+        瘦身删掉"本步不许改源码"之后，这条是替代保障:每个可达步骤要么自己重新
+        编译、要么拒绝脏源码、要么声明回流，否则改动会静默丢弃或未经编译上车。
+        """
+        steps = FLOW["steps"]
+
+        def slides_to_push(start):
+            seen, pending = set(), [start]
+            while pending:
+                current = pending.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                if current == "push":
+                    return True
+                pending.extend(
+                    target for target in transition_targets(
+                        steps.get(current, {}))
+                    if target in steps
+                    and not _source_guards(steps[target])
+                    and target not in seen)
+            return False
+
+        unguarded = sorted(
+            step_id for step_id in reachable()
+            if step_id != "push"
+            and not _source_guards(steps[step_id])
+            and slides_to_push(step_id))
+        self.assertEqual([], unguarded)
+
+
 
 if __name__ == "__main__":
     unittest.main()

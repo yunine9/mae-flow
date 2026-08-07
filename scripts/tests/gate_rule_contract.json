@@ -94,16 +94,18 @@
       "why": "宽提交把无关文件卷进交付分支"
     },
     "bash-build-artifacts": {
-      "kind": "permit",
+      "kind": "absolute",
       "tier": "A",
-      "escape": "permit",
-      "why": "构建产物不该进交付提交"
+      "escape": "comply",
+      "why": "高置信临时产物是完整性边界,不签放行令;文案直接给本地恢复做法",
+      "evidence": "git restore --staged"
     },
     "bash-compile-side-effects": {
-      "kind": "permit",
+      "kind": "absolute",
       "tier": "A",
-      "escape": "permit",
-      "why": "编译副作用冒充源码改动"
+      "escape": "comply",
+      "why": "编译副作用冒充源码改动是完整性边界,不签放行令;文案直接给移除做法",
+      "evidence": "移除这些路径"
     },
     "bash-foreign-openspec": {
       "kind": "permit",

@@ -697,12 +697,16 @@ def _gate_rule_paths(root):
             yield target
 
 
+_GATE_KIND_WORDS = {"absolute", "block", "advisory", "allow"}
+
+
 def _call_literals(node, skip=""):
     return "".join(
         child.value for child in ast.walk(node)
         if isinstance(child, ast.Constant)
         and isinstance(child.value, str)
         and child.value != skip
+        and child.value not in _GATE_KIND_WORDS
     )
 
 
@@ -728,6 +732,33 @@ def _gate_rule_from_call(node):
     return _GATE_DECISION_KINDS.get(first), rule
 
 
+def _absolute_escalated_rules(root):
+    """gate.py 把部分 block 类规则升级为绝对类:不签放行令、只给本地恢复做法。
+
+    不认这个升级，总账就会声称它们有放行令出口，而无死锁红线也就在验一个不存在
+    的出口——这两条恰好是提交产物那一类最常撞上的规则。
+    """
+    path = Path(root) / "scripts" / "mae_flow_core" / "cli_commands" / "gate.py"
+    if not path.is_file():
+        return frozenset()
+    rules = set()
+    for node in ast.walk(_parse(os.fspath(path))):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name == "_enforce_commit_ownership"):
+            continue
+        for inner in ast.walk(node):
+            if not (isinstance(inner, ast.Compare)
+                    and any(isinstance(op, ast.In) for op in inner.ops)):
+                continue
+            for comparator in inner.comparators:
+                if isinstance(comparator, (ast.Set, ast.List, ast.Tuple)):
+                    rules.update(
+                        item.value for item in comparator.elts
+                        if isinstance(item, ast.Constant)
+                        and isinstance(item.value, str))
+    return frozenset(rules)
+
+
 def gate_rule_inventory(root):
     """Return {rule: {"kind", "message"}} for every production Gate rule.
 
@@ -737,7 +768,17 @@ def gate_rule_inventory(root):
     """
     inventory = {}
     for path in _gate_rule_paths(root):
-        for node in ast.walk(_parse(os.fspath(path))):
+        tree = _parse(os.fspath(path))
+        # 文案常在局部变量里拼好再传进去,调用节点自身看不到。字面量过薄时回退到
+        # 所属函数的字面量,否则"绝对类必须自带出路"这条会对着空字符串做断言。
+        enclosing = {}
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(function):
+                if isinstance(inner, ast.Call):
+                    enclosing.setdefault(id(inner), function)
+        for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             kind, rule = _gate_rule_from_call(node)
@@ -746,11 +787,16 @@ def gate_rule_inventory(root):
             if not _GATE_RULE_SHAPE.match(rule):
                 continue
             message = _call_literals(node, skip=rule)
+            if len(message) < 20 and id(node) in enclosing:
+                message = _call_literals(enclosing[id(node)], skip=rule)
             previous = inventory.get(rule)
             if previous is None or len(message) > len(previous["message"]):
                 inventory[rule] = {"kind": kind, "message": message}
             elif previous["kind"] != kind:
                 previous["kind"] = "absolute"
+    for rule in _absolute_escalated_rules(root):
+        if rule in inventory:
+            inventory[rule]["kind"] = "absolute"
     return inventory
 
 

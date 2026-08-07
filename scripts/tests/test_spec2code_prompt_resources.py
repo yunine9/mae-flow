@@ -13,6 +13,20 @@ def read(path):
         return stream.read()
 
 
+def _read_reserved_packs():
+    """runtime/guidance/capability-preservation.json 里显式登记的保留待用包。"""
+    import json
+    path = os.path.join(
+        ROOT, "runtime", "guidance", "capability-preservation.json")
+    with open(path, encoding="utf-8") as stream:
+        data = json.load(stream)
+    # 如实登记:这些包的来源子系统已退役,或其实质已手工融入其他载体。
+    # 每个都必须写明理由——空理由等于没交代。
+    dormant = data.get("dormant_capability_packs") or {}
+    assert all(str(reason).strip() for reason in dormant.values()), dormant
+    return set(dormant)
+
+
 class Spec2CodePromptResourceTests(unittest.TestCase):
     def test_checkpoint_runtime_and_cp_agent_are_removed(self):
         removed = (
@@ -87,6 +101,63 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         # 工单携带上下文而不是指向上下文——子 Agent 重建上下文正是 CP 被退掉的主因
         self.assertIn("自包含", build)
         self.assertIn("不要读 spec/story/领域文档", build)
+
+    def test_superpowers_plan_substance_lives_in_implementation_appendix(self):
+        """writing-plans 的真东西进实施附录:文件结构、任务边界、接口契约、定稿自查。
+
+        整段注入 pack 会把 CP 时代的 TDD 微步与逐任务提交一起带回来——那正是被退掉的。
+        """
+        template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
+        for marker in ("文件结构与任务边界", "独立否决其中一个任务而批准它的邻居",
+                       "接口契约两栏", "消费", "产出",
+                       "定稿自查", "占位符扫描", "类型与命名一致"):
+            self.assertIn(marker, template)
+
+    def test_build_stops_instead_of_guessing_when_blocked(self):
+        build = read("flow/steps/build.md")
+        self.assertIn("卡住就停，不要猜", build)
+        self.assertIn("不做试探性修改", build)
+
+    def test_both_rework_steps_carry_review_reception_discipline(self):
+        """用户提意见后的返工此前没有"先核实、可反驳"环节,是真空白。"""
+        for name in ("build_rework.md", "quality_rework.md"):
+            with self.subTest(name=name):
+                text = read("flow/steps/%s" % name)
+                self.assertIn("receiving-code-review", text)
+                self.assertIn("有不懂的条目就先全部停下", text)
+                self.assertIn("带依据反驳", text)
+                self.assertIn("一次一项", text)
+                self.assertIn("表演式回应", text)
+
+    def test_every_capability_pack_is_injected_by_some_step(self):
+        """有资产无人读:pack 定义完整、vendor 完整,但没有步骤 {{...}} 它。
+
+        comment-standard 与 8 个 pack 都栽在这上面。定义即须消费，或显式登记待用。
+        """
+        import re
+        import sys as _sys
+        scripts = os.path.join(ROOT, "scripts")
+        if scripts not in _sys.path:
+            _sys.path.insert(0, scripts)
+        from mae_flow_core.capability_shared import CAPABILITY_PACKS
+
+        steps_dir = os.path.join(ROOT, "flow", "steps")
+        injected = set()
+        for name in os.listdir(steps_dir):
+            if not name.endswith(".md"):
+                continue
+            with open(os.path.join(steps_dir, name), encoding="utf-8") as fh:
+                injected.update(
+                    re.findall(r"CAPABILITY_PACK:([a-z0-9-]+)", fh.read()))
+        reserved = _read_reserved_packs()
+        orphans = sorted(set(CAPABILITY_PACKS) - injected - reserved)
+        self.assertEqual(
+            [], orphans,
+            "这些能力包没有任何步骤注入,也没在 capability-preservation.json 的 "
+            "dormant_capability_packs 里登记理由——等于白带 vendor")
+        self.assertEqual(
+            [], sorted(injected - set(CAPABILITY_PACKS)),
+            "步骤注入了不存在的能力包")
 
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")

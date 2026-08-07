@@ -398,5 +398,15 @@
         "flow/phases/story.md"
       ]
     }
+  },
+  "dormant_capability_packs": {
+    "archive": "comet 归档阶段规则;归档已换轨为 domain_archive 领域真相事务,注入会请回退役状态机",
+    "build": "comet/openspec 阶段规则已退役;writing-plans、executing-plans、systematic-debugging 的实质已手工融入 IMPLEMENTATION 模板、build 停机纪律与编码基准第 15 条;ponytail 纪律由 verify_ponytail 步自己注入",
+    "design": "design 步已是兼容入口;方案讨论由 Interactive Grill 承担",
+    "hotfix-open": "comet hotfix 与 OpenSpec 变更创建均已退役;hf_open 用本地 Spec",
+    "open": "同上;open 步用 local_spec 校验,不再创建 OpenSpec change",
+    "review-fix": "receiving-code-review 实质已进 rf_triage 与两个返工步;systematic-debugging 进编码基准",
+    "tweak-build": "systematic-debugging 进编码基准;ponytail 纪律由其本步注入",
+    "tweak-open": "comet 小改规则与 OpenSpec 变更创建均已退役;tw_open 用本地 Spec"
   }
 }

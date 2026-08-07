@@ -161,6 +161,36 @@ class QualityTaskInputTests(unittest.TestCase):
             self.assertIsNone(successful_quality_execution(
                 state_path, "COMPILE", "build", changed))
 
+    def test_evidence_free_second_event_cannot_erase_a_proven_success(self):
+        """SubagentStop 与 PostToolUse 报同一次调用时，弱证据不得覆盖强证据。"""
+        with tempfile.TemporaryDirectory() as root:
+            state_path = os.path.join(root, ".mae-flow.json")
+            snapshot = {"kind": "COMPILE", "step": "build"}
+            record_quality_execution(
+                state_path, "COMPILE", "build", "toolu-1", "make all",
+                True, snapshot, "2026-08-07 10:00:00")
+            # 第二个事件解析不到子 Agent transcript：command 为空、succeeded 为假。
+            record_quality_execution(
+                state_path, "COMPILE", "build", "toolu-1", "",
+                False, snapshot, "2026-08-07 10:00:01")
+            proven = successful_quality_execution(
+                state_path, "COMPILE", "build", snapshot)
+            self.assertIsNotNone(proven)
+            self.assertEqual("make all", proven["command"])
+
+    def test_observed_failure_still_replaces_an_earlier_success(self):
+        with tempfile.TemporaryDirectory() as root:
+            state_path = os.path.join(root, ".mae-flow.json")
+            snapshot = {"kind": "COMPILE", "step": "build"}
+            record_quality_execution(
+                state_path, "COMPILE", "build", "toolu-1", "make all",
+                True, snapshot, "2026-08-07 10:00:00")
+            record_quality_execution(
+                state_path, "COMPILE", "build", "toolu-1", "make all",
+                False, snapshot, "2026-08-07 10:00:01")
+            self.assertIsNone(successful_quality_execution(
+                state_path, "COMPILE", "build", snapshot))
+
     def test_timeout_is_recorded_as_failure(self):
         with tempfile.TemporaryDirectory() as root:
             state_path = os.path.join(root, ".mae-flow.json")

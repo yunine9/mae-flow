@@ -3,6 +3,7 @@
 import os
 import sys
 import types
+from .adapters.project_launcher import install_launcher_when_active
 from .cli_commands import shared
 from .cli_commands.shared import *  # noqa: F401,F403
 from .cli_commands.wiring import api
@@ -163,6 +164,9 @@ def main():
     except (OSError, RuntimeError) as exc:
         print("[mae-flow] %s" % exc, file=sys.stderr)
         raise SystemExit(2)
+    # init 之后同一条命令里就要能给出 .mae-flow-work/bin/mae-flow.py;
+    # 不能等到下一次 Hook 事件才物化(损坏恢复提示直接引用该路径)。
+    install_launcher_when_active(root)
     if handle_early_state_command(args):
         return None
     retire_legacy_batch_state()

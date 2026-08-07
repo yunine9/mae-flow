@@ -193,7 +193,6 @@ class QualityTaskCardUseCaseTests(unittest.TestCase):
         record = standalone_task_record(
             step="standalone_ut",
             path="/repo/task.md",
-            digest="abc",
             head="deadbeef",
             scope="only a",
             allowed_files=files,

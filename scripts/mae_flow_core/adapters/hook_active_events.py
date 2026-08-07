@@ -405,7 +405,7 @@ class ActiveHookEventAdapter:
             return HookResponse()
         template_name, label = target
         resolved_template = template_path(
-            self.plugin_root, template_name)
+            self.repository_root, template_name, self.plugin_root)
         if not os.path.exists(resolved_template):
             self.log(label + " 模板缺失: " + resolved_template)
             return HookResponse()
@@ -430,14 +430,15 @@ class ActiveHookEventAdapter:
         tool_input = payload.get("tool_input") or {}
         if tool in ("Task", "Agent"):
             return self.agent_lifecycle.posttool(payload)
-        if tool in ("Write", "Edit", "MultiEdit"):
-            path = (
-                tool_input.get("file_path", "")
-                or tool_input.get("path", "")
-                or ""
-            )
-            if path:
-                self.runtime._record_agent_write(path)
+        # 宿主可能用 file_path 也可能用 path;两者必须走同一条解析,否则写入台账
+        # 记下了而模板结构校验被静默跳过。
+        written_path = (
+            tool_input.get("file_path", "")
+            or tool_input.get("path", "")
+            or ""
+        )
+        if tool in ("Write", "Edit", "MultiEdit") and written_path:
+            self.runtime._record_agent_write(written_path)
         if tool == "AskUserQuestion":
             answer = self.runtime._text_of(payload.get("tool_response"))
             self.runtime._capture_usermsg(
@@ -449,9 +450,7 @@ class ActiveHookEventAdapter:
                 tool_input.get("command", "") or "")
             self.runtime._maybe_utrun(payload)
             return HookResponse()
-        path = (
-            tool_input.get("file_path", "") or "").replace("\\", "/")
-        return self._template_response(path)
+        return self._template_response(written_path.replace("\\", "/"))
 
     def stop(self, payload):
         try:

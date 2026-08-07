@@ -67,7 +67,6 @@ def task_record(
     *,
     step,
     path,
-    digest,
     head,
     scope,
     precommit_review,
@@ -82,7 +81,6 @@ def task_record(
     ut_targets,
     unchanged_initial_dirty,
     at,
-    issuance_id="",
     ut_phase="",
     agent_write_receipts=None,
 ):

@@ -3,6 +3,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 
@@ -13,6 +14,9 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 from mae_flow_core import RuntimeMode  # noqa: E402
+from mae_flow_core.adapters.hook_active_events import (  # noqa: E402
+    ActiveHookEventAdapter,
+)
 from mae_flow_core.application.hooks.event_policies import (  # noqa: E402
     active_pretool_decision,
     agent_kind,
@@ -252,6 +256,68 @@ class HookEventTests(unittest.TestCase):
                 "/repo", "STORY-TEMPLATE.md",
                 exists=lambda path: path == source),
         )
+
+    def test_template_path_keeps_project_and_plugin_roots_separate(self):
+        """物化模板在用户项目里，源码兜底在插件里；两者不能共用一个根。"""
+        local = os.path.join(
+            "/repo", ".mae-flow-work", "plugin-resources",
+            "assets", "STORY-TEMPLATE.md")
+        plugin = os.path.join(
+            "/plugin", "skills", "mae-flow", "assets", "STORY-TEMPLATE.md")
+        self.assertEqual(
+            local,
+            template_path(
+                "/repo", "STORY-TEMPLATE.md", "/plugin",
+                exists=lambda path: path in {local, plugin}),
+        )
+        self.assertEqual(
+            plugin,
+            template_path(
+                "/repo", "STORY-TEMPLATE.md", "/plugin",
+                exists=lambda path: path == plugin),
+        )
+
+    def test_hook_validates_the_template_handed_to_the_agent(self):
+        """Agent 拿到的是项目物化模板，Hook 必须按同一份校验。
+
+        插件在途升级后内置模板会新增章节；若 Hook 仍按插件那份校验，
+        Agent 按物化模板写出的正确文档会被 PostToolUse 反复打回。
+        """
+        with tempfile.TemporaryDirectory() as project:
+            with tempfile.TemporaryDirectory() as plugin:
+                materialized = os.path.join(
+                    project, ".mae-flow-work", "plugin-resources", "assets")
+                built_in = os.path.join(
+                    plugin, "skills", "mae-flow", "assets")
+                for assets, heading in (
+                        (materialized, "# 物化章节"),
+                        (built_in, "# 插件升级后的新章节")):
+                    os.makedirs(assets)
+                    with open(
+                            os.path.join(assets, "STORY-TEMPLATE.md"),
+                            "w", encoding="utf-8") as stream:
+                        stream.write(heading + "\n")
+                document = os.path.join(project, "docs", "story",
+                                        "STORY-REQ1.md")
+                os.makedirs(os.path.dirname(document))
+                with open(document, "w", encoding="utf-8") as stream:
+                    stream.write("# 物化章节\n\n内容\n")
+                adapter = ActiveHookEventAdapter(
+                    state=os.path.join(project, ".mae-flow.json"),
+                    maeflow_path=os.path.join(
+                        plugin, "scripts", "mae-flow.py"),
+                    repository_root=project,
+                    maeflow=lambda *args: 0,
+                    runtime_adapter=SimpleNamespace(
+                        _record_agent_write=lambda path: None),
+                    task_card_ports=lambda: None,
+                    log=lambda message: None,
+                )
+                response = adapter.posttool({
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": document},
+                })
+        self.assertEqual(0, response.exit_code, response.stderr)
 
 
 if __name__ == "__main__":

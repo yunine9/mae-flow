@@ -27,6 +27,7 @@ from mae_flow_core import (
     resolve_runtime,
 )
 from mae_flow_core.file_io import write_text
+from mae_flow_core.adapters import hook_budget
 from mae_flow_core.application.hooks.events import handle_hook_event as _handle_hook_event
 from mae_flow_core.adapters.hook_active_events import ActiveHookEventAdapter
 from mae_flow_core.adapters.hook_events import HookEventAdapter
@@ -80,6 +81,9 @@ def _arm_watchdog():
     t = threading.Timer(WATCHDOG_SECS, _kill)
     t.daemon = True
     t.start()
+    # 同一预算交给所有子进程调用共享:单次上限 8s 但一个事件可能连发数次
+    # (posttool 的 git 权证落定就会),各自计时会被看门狗在中途打死。
+    hook_budget.arm(WATCHDOG_SECS)
 
 
 def maeflow(*args):
@@ -91,12 +95,15 @@ def maeflow(*args):
     if not os.path.isfile(MAEFLOW):
         _log("maeflow missing at %s — fail-open" % MAEFLOW)
         return 0
+    if hook_budget.exhausted():
+        _log("maeflow %s 预算耗尽,未启动子进程 — fail-open" % (args[:2],))
+        return 0
     try:
         r = subprocess.run([sys.executable, MAEFLOW, *args],
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
                            env=_DIAGNOSTICS.subprocess_environment(),
-                           timeout=SUBPROC_SECS)
+                           timeout=hook_budget.timeout_for(SUBPROC_SECS))
     except subprocess.TimeoutExpired:
         _log("maeflow %s TIMEOUT" % (args,))
         return 0

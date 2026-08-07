@@ -22,6 +22,23 @@ def quality_input_snapshot(state, kind, step):
     }
 
 
+def _supersedes(existing, incoming):
+    """Whether a later lifecycle event may replace an earlier execution fact.
+
+    SubagentStop and the PostToolUse fallback both report the same Agent
+    invocation, and only one of them may be able to resolve the subagent
+    transcript. A second event that observed no quality call at all
+    (``command`` empty) carries strictly less evidence than a proven success:
+    letting it overwrite the record would erase real machine evidence and
+    leave ``done`` demanding a rerun that can never be recorded either.
+    Genuine new evidence (a command that actually failed) still wins.
+    """
+    if not (existing.get("succeeded") is True
+            and str(existing.get("lifecycle", "")) == "returned"):
+        return True
+    return bool(incoming.get("succeeded")) or bool(incoming.get("command"))
+
+
 def record_quality_execution(
         state_path, kind, step, invocation_id, command, succeeded,
         input_snapshot, at, lifecycle="returned"):
@@ -32,13 +49,21 @@ def record_quality_execution(
         "at": str(at), "lifecycle": str(lifecycle),
     }
 
+    def same_invocation(item):
+        return (
+            isinstance(item, dict)
+            and item.get("invocation_id") == record["invocation_id"]
+            and item.get("kind") == record["kind"]
+        )
+
     def mutate(data):
         records = data.setdefault("executions", [])
+        if any(
+                same_invocation(item) and not _supersedes(item, record)
+                for item in records):
+            return data
         records[:] = [
-            item for item in records
-            if not (item.get("invocation_id") == record["invocation_id"]
-                    and item.get("kind") == record["kind"])
-        ]
+            item for item in records if not same_invocation(item)]
         records.append(record)
         if len(records) > 500:
             del records[:-500]

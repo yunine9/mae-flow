@@ -76,9 +76,9 @@ class CommitOwnershipTests(unittest.TestCase):
         task = {"step": "build", "task_files": ["src/a.cpp"]}
 
         pending = decide_compile_task_commit(
-            "build", task, token=None, completed=False)
+            "build", task, completed=False)
         complete = decide_compile_task_commit(
-            "build", task, token=None, completed=True)
+            "build", task, completed=True)
 
         self.assertEqual("bash-compile-task-pending", pending.rule)
         self.assertIsNone(complete)
@@ -128,14 +128,6 @@ class CommitOwnershipTests(unittest.TestCase):
             "sha256": "current-compile-task",
         }}
         mf.save_state(state)
-        write(self.repo, ".mae-flow.json.tokens", json.dumps({
-            "COMPILE": {
-                "at": "9999-12-31 23:59:59",
-                "step": state["current"],
-                "status": "OK",
-                "task_sha256": "stale-compile-task",
-            },
-        }))
         return state
 
     def push_to_new_remote(self):
@@ -170,6 +162,28 @@ class CommitOwnershipTests(unittest.TestCase):
             )
         return output, permit_id
 
+    def mark_compile_completed(self, state, invocation="toolu-compile"):
+        """按生产形态坐实"编译已完成":真实返回 + 当前输入上的真实成功执行。
+
+        这里刻意不再手写 `.mae-flow.json.tokens`——COMPILE Hook 令牌早已没有
+        写入方，用它坐实完成度会让测试通过在生产上永不成立的路径。
+        """
+        from mae_flow_core.workflow.agent_observations import (
+            record_agent_finished, record_agent_started,
+        )
+        from mae_flow_core.workflow.quality_executions import (
+            quality_input_snapshot, record_quality_execution,
+        )
+        state_path = os.path.join(self.repo, ".mae-flow.json")
+        step = state.get("current", "")
+        at = "2026-07-28 11:00:00"
+        record_agent_started(state_path, "COMPILE", step, invocation, at)
+        record_agent_finished(state_path, invocation, "returned", at)
+        record_quality_execution(
+            state_path, "COMPILE", step, invocation,
+            state.get("config", {}).get("编译方式", "") or "make all",
+            True, quality_input_snapshot(state, "COMPILE", step), at)
+
     def assert_compile_commit_lifecycle(self, path, tracked):
         if tracked:
             write(self.repo, path, "compiled=false\n")
@@ -184,14 +198,6 @@ class CommitOwnershipTests(unittest.TestCase):
             "sha256": "current-compile-task",
         }}
         mf.save_state(state)
-        write(self.repo, ".mae-flow.json.tokens", json.dumps({
-            "COMPILE": {
-                "at": "9999-12-31 23:59:59",
-                "step": "build",
-                "status": "OK",
-                "task_sha256": "stale-compile-task",
-            },
-        }))
         command = (
             'git add -- "%s" && git commit -m "[REQ123][fix]compile"'
             % path
@@ -211,14 +217,7 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertFalse(os.path.exists(
             os.path.join(self.repo, ".mae-flow.json.gate-permits")))
 
-        write(self.repo, ".mae-flow.json.tokens", json.dumps({
-            "COMPILE": {
-                "at": "9999-12-31 23:59:59",
-                "step": "build",
-                "status": "OK",
-                "task_sha256": "current-compile-task",
-            },
-        }))
+        self.mark_compile_completed(state)
         self.write_sidecar({
             path: {"task_sha256": "current-compile-task"},
         })
@@ -764,14 +763,7 @@ class CommitOwnershipTests(unittest.TestCase):
             "先完成当前 COMPILE 任务",
             pending.stdout + pending.stderr,
         )
-        write(self.repo, ".mae-flow.json.tokens", json.dumps({
-            "COMPILE": {
-                "at": "9999-12-31 23:59:59",
-                "step": state["current"],
-                "status": "OK",
-                "task_sha256": "current-compile-task",
-            },
-        }))
+        self.mark_compile_completed(state)
 
         completed = self.gate_bash(command)
 

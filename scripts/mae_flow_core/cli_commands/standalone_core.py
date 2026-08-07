@@ -336,7 +336,6 @@ def _action_task_card(action, kind, stage=""):
         quality_task_card_use_cases.standalone_task_record(
             step=sid,
             path=path,
-            digest=digest,
             head=head,
             scope=action.get("request", ""),
             allowed_files=(

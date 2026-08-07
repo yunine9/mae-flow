@@ -24,24 +24,19 @@ class OwnershipDecision:
     advisories: tuple = ()
 
 
-def decide_compile_task_commit(step, task, token, completed=False):
-    """Close the issued-COMPILE/pre-completion commit window."""
+def decide_compile_task_commit(step, task, completed=False):
+    """Close the issued-COMPILE/pre-completion commit window.
+
+    Only the real lifecycle-plus-execution fact (or an explicit user risk
+    acceptance) may open it. The former Hook token path is gone: nothing has
+    issued a COMPILE token since agent returns stopped being parsed, so
+    keeping it as an alternative gate only hid which fact actually decided.
+    """
     if completed:
         return None
     if (
             not isinstance(task, dict)
             or task.get("step") != step):
-        return None
-    digest = str(task.get("sha256", "") or "")
-    issuance_id = str(task.get("issuance_id", "") or "")
-    if (
-            digest
-            and isinstance(token, dict)
-            and token.get("step") == step
-            and token.get("task_sha256") == digest
-            and (
-                not issuance_id
-                or token.get("task_issuance_id") == issuance_id)):
         return None
     return GateDecision(
         "block",

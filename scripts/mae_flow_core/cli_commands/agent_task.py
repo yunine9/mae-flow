@@ -213,7 +213,7 @@ def _store_agent_task(flow, st, args, context):
     worktree_snapshot, worktree_snapshot_valid = (
         _compile_worktree_snapshot(kind, context["task_head"]))
     st.setdefault("agent_tasks", {})[kind] = quality_task_cards.task_record(
-        step=sid, path=path, digest=digest, head=context["task_head"],
+        step=sid, path=path, head=context["task_head"],
         scope=args.scope or "",
         precommit_review=context["precommit_review"],
         initial_compile_net=(

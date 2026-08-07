@@ -2,10 +2,17 @@
 
 from .shared import (
     BashGateContext, BashWriteContext, EditGateContext, HERE, OwnershipFacts,
-    WRITEISH_STRONG, WRITEISH_WEAK, decide_bash_write, decide_commit_branch,
-    decide_compile_task_commit, decide_edit, decide_ownership,
-    decide_post_commit, decide_pre_commit, git_intent, guard_intent, os, re,
-    replace, sys,
+    STATE_PATH, WRITEISH_STRONG, WRITEISH_WEAK, decide_bash_write,
+    decide_commit_branch, decide_compile_task_commit, decide_edit,
+    decide_ownership, decide_post_commit, decide_pre_commit, git_intent,
+    guard_intent, os, re, replace, sys,
+)
+# 这三个事实必须静态导入。经 api.* 动态取时它们并未注册,AttributeError 被下面的
+# except 吞掉 → completed 恒为假 → 已签发 COMPILE 任务卡的步骤里任何提交都被
+# bash-compile-task-pending 永久拦死,提示还让你"先完成当前 COMPILE 任务"。
+from ..workflow.quality_executions import (
+    quality_input_snapshot,
+    successful_quality_execution,
 )
 from .wiring import api
 
@@ -118,26 +125,29 @@ def _enforce_commit_ownership(decision, jdie):
 
 
 def _gate_compile_task_window(st):
-    tokens = api._agent_token_data()
+    """Close the commit window while an issued COMPILE task is unproven.
+
+    "Proven" is the Agent's real lifecycle return plus a real successful
+    execution on the current inputs. The retired COMPILE Hook token has no
+    writer left, so it must not take part in the decision.
+    """
     task = (st.get("agent_tasks", {}) or {}).get("COMPILE")
     completed = False
-    if isinstance(task, dict) and not task.get("sha256"):
+    if isinstance(task, dict):
+        step = st.get("current", "")
         try:
             completed = bool(
                 api._finished_agent_observation(
-                    "COMPILE", st.get("current", ""),
-                    api._step_entered_at(st))
-                and api.successful_quality_execution(
-                    api.STATE_PATH, "COMPILE", st.get("current", ""),
-                    api.quality_input_snapshot(
-                        st, "COMPILE", st.get("current", ""))))
-        except (AttributeError, TypeError, ValueError):
+                    "COMPILE", step, api._step_entered_at(st))
+                and successful_quality_execution(
+                    STATE_PATH, "COMPILE", step,
+                    quality_input_snapshot(st, "COMPILE", step)))
+        except (TypeError, ValueError):
             completed = False
     risk_accepted, _risk_why = api._risk_acceptance("COMPILE", st)
     decision = decide_compile_task_commit(
         st.get("current", ""),
         task,
-        (tokens if isinstance(tokens, dict) else {}).get("COMPILE"),
         completed=completed or risk_accepted,
     )
     if decision:

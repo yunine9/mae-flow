@@ -24,7 +24,6 @@ def make_ports(**overrides):
         "risk_acceptance": lambda _kind, _state: (False, ""),
         "source_changed_since": lambda _head, _state: ([], ""),
         "agent_ran": lambda _spec, _state: (True, ""),
-        "tokens": lambda: {},
         "append_event": lambda _state, event, payload: events.append(
             (event, payload)),
         "git_head": lambda: "a" * 40,

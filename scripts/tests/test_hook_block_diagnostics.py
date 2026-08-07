@@ -103,6 +103,25 @@ class HookBlockDiagnosticsTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn(" decision event=pretooluse ", log_text)
 
+    def test_rule_marker_is_stripped_even_after_earlier_stderr_output(self):
+        """建议/advisory 先写过 stderr 时，标记不在缓冲区开头也必须剥离。"""
+        from mae_flow_core.adapters.hook_diagnostics import (
+            HookBlockDiagnostics,
+        )
+        diagnostics = HookBlockDiagnostics()
+        diagnostics.subprocess_environment()
+        stderr = (
+            "[mae-flow] ⚠ 轻量编码预检发现 1 个问题\n"
+            "  NESTING src/a.c:12 — 太深 (5 > 4)\n"
+            "[mae-flow] [mae-flow-rule=bash-artifact]\n"
+            "构建产物禁止提交。\n"
+        )
+        sanitized = diagnostics.sanitize_stderr(stderr)
+        self.assertNotIn("mae-flow-rule=", sanitized)
+        self.assertIn("轻量编码预检发现 1 个问题", sanitized)
+        self.assertIn("[mae-flow] 构建产物禁止提交。", sanitized)
+        self.assertEqual("bash-artifact", diagnostics.gate_rule)
+
     def test_direct_hook_block_uses_stable_fallback_rule(self):
         command = "python nested/dispatch.py # private-fragment"
         with tempfile.TemporaryDirectory() as project:

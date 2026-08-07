@@ -51,9 +51,10 @@ def _matching_receipt(context, build_config):
     task = context.task
     if (
             receipt.get("step") != task.get("step")
-            or receipt.get("task_sha256") != task.get("sha256")
-            or receipt.get("task_issuance_id", "")
-            != task.get("issuance_id", "")
+            or str(receipt.get("task_sha256") or "")
+            != str(task.get("sha256") or "")
+            or str(receipt.get("task_issuance_id") or "")
+            != str(task.get("issuance_id") or "")
             or receipt.get("status") != context.status
             or not same_config(receipt.get("build", ""), build_config)):
         return None

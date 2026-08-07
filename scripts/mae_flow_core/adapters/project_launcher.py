@@ -2,6 +2,23 @@
 
 import os
 
+from ..runtime import ACTION_FILE, EXIT_FILE, FLOW_FILE
+
+
+def project_has_runtime_state(project_root=None):
+    """Whether this project ever enabled Mae-Flow.
+
+    A global plugin install only offers capability; it must not leave files in
+    repositories that never started a delivery. Without this check the bridge
+    reappears in ``git status`` of every project on the first message, and
+    comes back immediately after the user deletes it.
+    """
+    root = os.path.abspath(project_root or os.getcwd())
+    return any(
+        os.path.isfile(os.path.join(root, marker))
+        for marker in (FLOW_FILE, EXIT_FILE, ACTION_FILE)
+    )
+
 
 def install_project_launcher(project_root=None, plugin_root=None):
     project_root = os.path.abspath(project_root or os.getcwd())
@@ -38,10 +55,17 @@ def install_project_launcher(project_root=None, plugin_root=None):
         return ""
 
 
+def install_launcher_when_active(project_root=None, plugin_root=None):
+    """Materialize the bridge only for projects that already use Mae-Flow."""
+    if not project_has_runtime_state(project_root):
+        return ""
+    return install_project_launcher(project_root, plugin_root)
+
+
 def install_launcher_for_event(event):
     normalized = "".join(
         character for character in str(event).casefold()
         if character.isalnum())
     if normalized in {"sessionstart", "userprompt", "userpromptsubmit"}:
-        return install_project_launcher()
+        return install_launcher_when_active()
     return ""

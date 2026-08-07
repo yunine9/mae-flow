@@ -127,15 +127,23 @@ def template_target(path):
     )
 
 
-def template_path(repository_root, template_name, exists=os.path.exists):
-    """Resolve the materialized consumer template before source-tree fallback."""
+def template_path(
+        repository_root, template_name, plugin_root=None,
+        exists=os.path.exists):
+    """Resolve the materialized consumer template before source-tree fallback.
+
+    The materialized copy lives in the *user project* and is the exact document
+    handed to the writing Agent; the source tree fallback lives in the
+    *plugin*. Validating against the plugin copy while the Agent was given the
+    project copy makes a mid-flow plugin upgrade reject correct documents.
+    """
     candidates = (
         os.path.join(
             repository_root, ".mae-flow-work", "plugin-resources",
             "assets", template_name),
         os.path.join(
-            repository_root, "skills", "mae-flow", "assets",
-            template_name),
+            plugin_root if plugin_root else repository_root,
+            "skills", "mae-flow", "assets", template_name),
     )
     return next((path for path in candidates if exists(path)), candidates[0])
 

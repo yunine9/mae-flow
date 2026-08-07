@@ -121,10 +121,19 @@ def plan_compile_run_receipt(
 
 
 def _same_task(receipt, task):
+    """Whether a receipt belongs to this task card.
+
+    Task cards carry no digest, so the receipt stores ``""``. Comparing a
+    stored ``""`` against a missing key (``None``) made every freshly issued
+    receipt look like it belonged to a different card, which silently killed
+    all receipt reuse and forced a full recompile/recheck on every re-report.
+    Freshness itself is enforced by ``_fresh`` from real source changes.
+    """
     return bool(
         receipt
         and receipt.get("step") == task.get("step")
-        and receipt.get("task_sha256") == task.get("sha256")
+        and str(receipt.get("task_sha256") or "")
+        == str(task.get("sha256") or "")
     )
 
 

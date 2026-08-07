@@ -21,6 +21,7 @@ from mae_flow_core import (
     update_json,
     update_versioned_json,
 )
+from mae_flow_core.adapters import hook_budget
 from mae_flow_core.application.hooks.receipts import (
     ReceiptContext as _ReceiptContext,
     askuser_receipt as _askuser_receipt,

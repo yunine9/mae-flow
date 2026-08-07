@@ -13,7 +13,6 @@ class QualityEvidencePorts:
     risk_acceptance: object
     source_changed_since: object
     agent_ran: object
-    tokens: object
     append_event: object
     git_head: object
     exists: object
@@ -309,29 +308,10 @@ class QualityEvidenceRules:
             "agent": "CODECHECK",
             "statuses": ["CLEAN", "REMAINING", "FAIL"],
         }, state))
-        if not result.passed:
-            return result
-        token = self.ports.tokens().get("CODECHECK", {})
-        if isinstance(token, dict) and token.get("status") == "FAIL":
-            task = (
-                (state.get("agent_tasks", {}) or {}).get(
-                    "CODECHECK", {}))
-            changed, error = self.ports.source_changed_since(
-                task.get("head", ""), state)
-            if error:
-                return EvidenceResult(
-                    False,
-                    "CodeCheck FAIL 后无法核对源码状态:" + error,
-                )
-            if changed:
-                return EvidenceResult(
-                    False,
-                    "CodeCheck Agent 以 FAIL 收尾但留下了源码变化: "
-                    + "、".join(changed[:5])
-                    + "。先回退未验证改动，或完成编译并以 "
-                    "REMAINING/CLEAN 收尾。",
-                )
-        return EvidenceResult(True, "")
+        # 曾经这里还会按 CODECHECK Hook 令牌的 status=="FAIL" 追查遗留源码变化。
+        # 令牌早已没有写入方(不再解析 Agent 自报状态),该分支恒不可达;真实的
+        # 源码新鲜度由 review_codecheck 的机器复核负责。
+        return result if not result.passed else EvidenceResult(True, "")
 
     def review_codecheck(self, _spec, state):
         scan = (state.get("quality", {}) or {}).get(

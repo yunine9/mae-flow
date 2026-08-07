@@ -182,7 +182,6 @@ _QUALITY_EVIDENCE = QualityEvidenceRules(QualityEvidencePorts(
     source_changed_since=lambda head, state: api._source_changed_since(
         head, state),
     agent_ran=lambda spec, state: _AGENT_EVIDENCE.agent_ran(spec, state),
-    tokens=lambda: api._agent_token_data(),
     append_event=lambda state, event, payload: append_codecheck_event(
         os.getcwd(), state, event, payload),
     git_head=lambda: api.sh("git rev-parse --verify HEAD"),

@@ -14,7 +14,7 @@ class HookGitAuthorizationMixin:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=5,
+                timeout=hook_budget.timeout_for(5),
             )
             return (
                 result.stdout.strip()
@@ -32,7 +32,7 @@ class HookGitAuthorizationMixin:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=8,
+                timeout=hook_budget.timeout_for(8),
             )
         except Exception:
             return "", False
@@ -107,6 +107,11 @@ class HookGitAuthorizationMixin:
     def _finalize_git_authorization(self, command):
         """Bind a consumed exact permit to its resulting commit."""
         if not command or "git" not in command.lower():
+            return
+        if hook_budget.exhausted():
+            # 落定要连发数个 git 调用。预算不够就别开工:半途被看门狗打死会留下
+            # "已消费但未落定"的权证,后续流程反而卡在缺收据上。
+            self.log("git authorization finalize 跳过: Hook 时间预算不足")
             return
         raw, err = safe_read_json(self.STATE)
         if err or not raw:

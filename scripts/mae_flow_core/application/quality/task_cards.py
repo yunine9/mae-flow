@@ -247,7 +247,6 @@ def standalone_task_record(
         *,
         step,
         path,
-        digest,
         head,
         scope,
         allowed_files,

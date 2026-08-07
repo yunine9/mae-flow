@@ -853,7 +853,10 @@ if flow:
                         },
                     }, ensure_ascii=False),
                     "step": "code_reviewer_ask",
-                    "at": decision_at,
+                    # 必须是"进入本步之后"捕获的时间戳。复用上一步的 decision_at
+                    # 会在跨整秒时早于 _step_entered_at,被判旧轮失效 —— 那是
+                    # fixture 的时间竞态,不是流程缺陷。
+                    "at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 }], f, ensure_ascii=False)
             mf.cmd_done(
                 flow, reviewer_choice_state,

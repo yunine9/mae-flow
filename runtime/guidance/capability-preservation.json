@@ -407,6 +407,7 @@
     "open": "同上;open 步用 local_spec 校验,不再创建 OpenSpec change",
     "review-fix": "receiving-code-review 实质已进 rf_triage 与两个返工步;systematic-debugging 进编码基准",
     "tweak-build": "systematic-debugging 进编码基准;ponytail 纪律由其本步注入",
-    "tweak-open": "comet 小改规则与 OpenSpec 变更创建均已退役;tw_open 用本地 Spec"
+    "tweak-open": "comet 小改规则与 OpenSpec 变更创建均已退役;tw_open 用本地 Spec",
+    "verify": "comet 验证状态机已退役(要求写 .comet.yaml,与 Edit Gate 绝对拦截直接冲突);requesting-code-review 指挥 verify 阶段再派审查子代理,违反预检只跑一轮;openspec-verify-change 的规格符合实质已换成 verify_spec 的逐条对齐矩阵;verification-before-completion 的证据铁律已压缩进 verify_spec/tw_verify 正文与 guidance/quality.md"
   }
 }

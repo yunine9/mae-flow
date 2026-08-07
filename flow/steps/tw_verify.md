@@ -8,5 +8,6 @@
 发现实现问题时回到 `build_rework` 修复；重新编译并由用户检视新增 diff，确认后创建修复提交，
 再完整重走 CodeCheck、UT 和本检查。验证报告是本地过程件，禁止提交。
 
-──── 本步骤内嵌方法原文（已固定版本） ────
-{{CAPABILITY_PACK:verify}}
+**证据铁律**：每条结论必须指向本流程真实产生过的证据，没有新鲜证据不得写"满足"；
+本步只引用前序证据，不重复执行，也不派任何审查子 Agent。
+验证纪律的完整口径见 `.mae-flow-work/plugin-resources/guidance/quality.md`。

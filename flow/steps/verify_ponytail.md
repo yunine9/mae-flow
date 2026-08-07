@@ -15,3 +15,5 @@
 
 ──── 本步骤内嵌方法原文（已固定版本） ────
 {{CAPABILITY_PACK:ponytail-review}}
+
+本步的取舍依据（精简与质量链的判断口径），见 `.mae-flow-work/plugin-resources/guidance/quality.md`。

@@ -159,6 +159,33 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             [], sorted(injected - set(CAPABILITY_PACKS)),
             "步骤注入了不存在的能力包")
 
+    def test_every_guidance_file_is_pointed_at_by_some_step(self):
+        """有资产无人读第四例:五份 guidance 全物化到项目里,却没有任何步骤指向它们。
+
+        capability pack 栽过同一个坑。渐进披露只在指针存在时才成立——没有指针的
+        参考文件既不省上下文也不被读到,纯粹白带。
+        """
+        import re
+
+        guidance_dir = os.path.join(ROOT, "runtime", "guidance")
+        have = {
+            name[: -len(".md")]
+            for name in os.listdir(guidance_dir) if name.endswith(".md")
+        }
+        steps_dir = os.path.join(ROOT, "flow", "steps")
+        pointed = set()
+        for name in os.listdir(steps_dir):
+            if not name.endswith(".md"):
+                continue
+            with open(os.path.join(steps_dir, name), encoding="utf-8") as fh:
+                pointed.update(
+                    re.findall(r"guidance/([a-z-]+)\.md", fh.read()))
+        self.assertEqual(
+            set(), have - pointed,
+            "这些 guidance 没有任何步骤指向,渐进披露不成立")
+        self.assertEqual(
+            set(), pointed - have, "步骤指向了不存在的 guidance")
+
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")
         self.assertIn("新增业务注释统一使用简体中文", text)

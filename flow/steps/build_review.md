@@ -7,3 +7,5 @@
 
 用户点选后同轮执行 `done --choice continue|revise`。Agent 预检只是可选辅助，不代替本次人工检视。
 该规则同样适用于后续质量阶段产生的源码、测试或构建改动；质量阶段通过统一检视节点执行，不在各 Agent 内提交。
+
+本步的取舍依据（检视关注点与返工边界），见 `.mae-flow-work/plugin-resources/guidance/review.md`。

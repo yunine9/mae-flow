@@ -46,6 +46,7 @@ _RESOURCE_FILES = (
     ("runtime/guidance/quality.md", "guidance/quality.md"),
     ("runtime/guidance/review.md", "guidance/review.md"),
     ("runtime/guidance/story-design.md", "guidance/story-design.md"),
+    ("runtime/guidance/cross-repo.md", "guidance/cross-repo.md"),
     ("runtime/standards/code-taste-v1.md", "standards/code-taste-v1.md"),
     ("runtime/standards/comment-standard-v1.md",
      "standards/comment-standard-v1.md"),

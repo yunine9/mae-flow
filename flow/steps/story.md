@@ -7,3 +7,5 @@ Story 保持既有业务模板；Mae-Flow 的实施信息单独写入本地实�
 5. 展示 Story 章节摘要、实施附录和全部未决项。用户修改后更新对应文件，最终只确认一次进入编码实现。
 
 Story 与实施附录都不入库。禁止生成额外的编码前计划过程件。
+
+本步的取舍依据（设计取舍与接口深度），见 `.mae-flow-work/plugin-resources/guidance/story-design.md`。

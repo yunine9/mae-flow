@@ -174,6 +174,9 @@ def _gate_confirmed_manifest_candidates(st, candidate_snapshot):
         _die_rule(
             "bash-delivery-manifest-files",
             "待提交文件必须精确等于用户确认的交付清单。缺少: %s；夹带: %s。"
+            "用 manifest show 核对清单，再用 git add / git restore --staged "
+            "把暂存内容调整到与清单一致；确实需要改清单本身时，重新 "
+            "manifest show 并取得用户确认。"
             % ("、".join(sorted(expected - actual)) or "无",
                "、".join(sorted(actual - expected)) or "无"))
 
@@ -197,7 +200,9 @@ def _gate_confirmed_manifest_add(st, add_paths):
         _die_rule(
             "bash-delivery-manifest-stage",
             "git add 只能包含用户确认清单中的精确文件: "
-            + "、".join(outside))
+            + "、".join(outside)
+            + "。执行 manifest show 核对清单后只暂存其中的文件；"
+            "这些文件确实属于本次交付时，重新 manifest show 取得用户确认。")
 
 
 def _gate_commit_candidates(c, st, jdie):

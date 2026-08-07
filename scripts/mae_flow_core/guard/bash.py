@@ -134,12 +134,15 @@ def _post_early(context):
             for operation, arguments in executed_git_invocations(command)):
         return _absolute(
             "bash-force-push",
-            "禁止 force push(含 +refspec 形式)。")
+            "禁止 force push(含 +refspec 形式):它会覆盖远端历史，不可逆。"
+            "改用普通 push;远端确实需要被覆盖时，把命令和风险交给用户，"
+            "由用户在自己的终端执行。")
     if re.search(r"dispatch\.py", command):
         return _absolute(
             "bash-manual-dispatch",
             "hook 分发器(dispatch.py)由 harness 自动调用,禁止手动执行——"
-            "这是伪造 agent 收尾令牌的通道。")
+            "这是伪造 agent 收尾令牌的通道。本来也不需要手动调用:"
+            "看流程现场执行 current 输出中的 status/doctor 命令即可。")
     if re.search(
             r"mae-flow\.py[^;&|]*\bexit\b[^;&|]*--interactive\b",
             command, re.I):
@@ -234,7 +237,9 @@ def _post_dangerous(context):
     if _git_clean_ignored(git_commands):
         return _absolute(
             "bash-git-clean-ignored",
-            "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)。")
+            "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)，"
+            "不可逆。改用精确路径删除真正要清的文件;确需整树清理，"
+            "把命令和风险交给用户手动运行。")
     if context.state_active and _git_wipes_worktree(git_commands):
         return _block(
             "bash-wipe-worktree",

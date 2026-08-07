@@ -2,6 +2,7 @@
 
 import ast
 import os
+import re
 from pathlib import Path
 
 
@@ -666,3 +667,145 @@ def unreachable_core_modules(root):
             module[:-len(".__init__")] if module.endswith(".__init__")
             else module)
     return sorted(everything - reached)
+
+
+_GATE_RULE_SHAPE = re.compile(r"^(?:bash|edit|absolute)-[a-z0-9-]{3,}$")
+_GATE_RULE_FILES = (
+    "scripts/mae_flow_core/guard",
+    "scripts/mae_flow_core/cli_commands/gate.py",
+)
+# 产出一次 Gate 裁决的每种写法。绝对类不会被追加放行令出口，裁决类会。
+_GATE_PRODUCERS = {
+    "_absolute": "absolute",
+    "_die_rule": "absolute",
+    "_block": "permit",
+    "jdie": "permit",
+    "_advisory": "advisory",
+}
+_GATE_DECISION_KINDS = {
+    "absolute": "absolute", "block": "permit", "advisory": "advisory"}
+
+
+def _gate_rule_paths(root):
+    root_path = Path(root)
+    for relative in _GATE_RULE_FILES:
+        target = root_path / relative
+        if target.is_dir():
+            for path in sorted(target.rglob("*.py")):
+                yield path
+        elif target.is_file():
+            yield target
+
+
+def _call_literals(node, skip=""):
+    return "".join(
+        child.value for child in ast.walk(node)
+        if isinstance(child, ast.Constant)
+        and isinstance(child.value, str)
+        and child.value != skip
+    )
+
+
+def _gate_rule_from_call(node):
+    name = getattr(node.func, "id", "") or getattr(node.func, "attr", "")
+    if name in _GATE_PRODUCERS:
+        rule = (
+            node.args[0].value
+            if node.args and isinstance(node.args[0], ast.Constant)
+            else None)
+        return _GATE_PRODUCERS[name], rule
+    if name != "GateDecision":
+        return None, None
+    keywords = {item.arg: item.value for item in node.keywords}
+    first = (
+        node.args[0].value
+        if node.args and isinstance(node.args[0], ast.Constant) else None)
+    rule = None
+    if isinstance(keywords.get("rule"), ast.Constant):
+        rule = keywords["rule"].value
+    elif len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+        rule = node.args[1].value
+    return _GATE_DECISION_KINDS.get(first), rule
+
+
+def gate_rule_inventory(root):
+    """Return {rule: {"kind", "message"}} for every production Gate rule.
+
+    The inventory is the anchor for both redlines the slimming needs: nothing
+    may be deleted while a reference survives (no residue), and every rule that
+    blocks must offer a way forward (no deadlock).
+    """
+    inventory = {}
+    for path in _gate_rule_paths(root):
+        for node in ast.walk(_parse(os.fspath(path))):
+            if not isinstance(node, ast.Call):
+                continue
+            kind, rule = _gate_rule_from_call(node)
+            if not kind or not isinstance(rule, str):
+                continue
+            if not _GATE_RULE_SHAPE.match(rule):
+                continue
+            message = _call_literals(node, skip=rule)
+            previous = inventory.get(rule)
+            if previous is None or len(message) > len(previous["message"]):
+                inventory[rule] = {"kind": kind, "message": message}
+            elif previous["kind"] != kind:
+                previous["kind"] = "absolute"
+    return inventory
+
+
+_TOKEN_WRITER = "_record_agent_token"
+_TOKEN_LITERAL_READER = re.compile(
+    r"(?:_agent_token_data\(\)|tokens\(\)|askuser_tokens\(\))\s*"
+    r"\.get\(\s*\"([A-Z][A-Z_]*)\"")
+_PRODUCTION_TREES = ("scripts/mae_flow_core", "hooks")
+
+
+def _production_files(root):
+    root_path = Path(root)
+    for relative in _PRODUCTION_TREES:
+        base = root_path / relative
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            yield path
+
+
+def hook_token_writers(root):
+    """The token kinds production actually issues."""
+    written = set()
+    for path in _production_files(root):
+        tree = _parse(os.fspath(path))
+        for node in ast.walk(tree):
+            if (
+                    isinstance(node, ast.Call)
+                    and (getattr(node.func, "id", "")
+                         or getattr(node.func, "attr", "")) == _TOKEN_WRITER
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                written.add(node.args[0].value)
+    return sorted(written)
+
+
+def hook_token_evidence_violations(root):
+    """Token kinds still read by name while nothing issues them any more.
+
+    This is the exact shape of the defects this project keeps hitting: a
+    retired evidence source loses its writer while a gate keeps reading it, so
+    a condition that can never become true blocks the flow forever.
+    """
+    root_path = Path(root)
+    written = set(hook_token_writers(root))
+    read = {}
+    for path in _production_files(root):
+        relative = path.relative_to(root_path).as_posix()
+        with open(path, encoding="utf-8") as stream:
+            source = stream.read()
+        for match in _TOKEN_LITERAL_READER.finditer(source):
+            read.setdefault(match.group(1), relative)
+    return sorted(
+        "%s: 读取了没有任何写入方的令牌 %s" % (location, kind)
+        for kind, location in read.items()
+        if kind not in written
+    )

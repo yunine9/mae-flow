@@ -2,12 +2,13 @@
   "start": "config_confirm",
   "state_file": ".mae-flow.json",
   "compatibility_entries": [
-    "rf_verify",
-    "grill_ask",
-    "design",
-    "story_ask",
-    "archive_confirm",
     "archive",
+    "archive_confirm",
+    "design",
+    "grill_ask",
+    "rf_verify",
+    "story_ask",
+    "verify_comet",
     "verify_recompile"
   ],
   "source_patterns": [
@@ -522,7 +523,7 @@
         "verify_codecheck",
         "tw_codecheck",
         "rf_codecheck",
-        "verify_comet",
+        "verify_spec",
         "tw_verify",
         "domain_archive"
       ],
@@ -605,7 +606,7 @@
       "quality_review_resume": "verify_codecheck",
       "quality_review_rework": "quality_recompile",
       "test_change_review_origin": "ut-test",
-      "test_change_review_resume": "verify_comet",
+      "test_change_review_resume": "verify_spec",
       "test_change_review_rework": "verify_ut",
       "evidence": [
         {
@@ -619,16 +620,20 @@
           "type": "ut_session_complete"
         }
       ],
-      "next": "verify_comet"
+      "next": "verify_spec"
     },
-    "verify_comet": {
+    "verify_spec": {
       "title": "验证 4/4 — 规格符合性",
       "evidence": [
         {
           "type": "verification_passed"
         }
       ],
-      "next": "domain_archive"
+      "next": "domain_archive",
+      "late_source_change_next": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
     },
     "domain_archive": {
       "title": "领域知识归档",
@@ -638,7 +643,11 @@
           "type": "domain_archive_complete"
         }
       ],
-      "next": "delivery_review"
+      "next": "delivery_review",
+      "late_source_change_next": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
     },
     "delivery_review": {
       "title": "最终代码增量检视",
@@ -647,7 +656,11 @@
           "type": "delivery_manifest_committed"
         }
       ],
-      "next": "push"
+      "next": "push",
+      "late_source_change_next": "quality_recompile",
+      "quality_review_origin": "ut-source",
+      "quality_review_resume": "verify_codecheck",
+      "quality_review_rework": "quality_recompile"
     },
     "archive_confirm": {
       "title": "旧规格定稿确认恢复",
@@ -676,6 +689,10 @@
     "end": {
       "title": "交付完成",
       "terminal": true
+    },
+    "verify_comet": {
+      "title": "验证 4/4 — 规格符合性(旧节点名，仅作恢复入口)",
+      "next": "verify_spec"
     }
   }
 }

@@ -290,7 +290,7 @@ if flow:
           and "local-spec validate" in step_text("open")
           and "唯一一次确认" in step_text("open")
           and "候选题为 0" in step_text("grill")
-          and "只向用户裁决一次" in step_text("verify_comet")
+          and "只向用户裁决一次" in step_text("verify_spec")
           and "只向用户确认一次" in step_text("domain_archive")
           and "domain-archive apply --message-id" in step_text("domain_archive"))
     check("review UT 只接受 PASS",
@@ -307,7 +307,7 @@ if flow:
           and steps.get("tw_codecheck", {}).get("next") == "tw_ut"
           and steps.get("tw_ut", {}).get("next") == "tw_verify")
     check("三条质量链均在最终推送前生成精确交付清单",
-          steps.get("verify_comet", {}).get("next") == "domain_archive"
+          steps.get("verify_spec", {}).get("next") == "domain_archive"
           and steps.get("tw_verify", {}).get("next") == "domain_archive"
           and steps.get("rf_ut", {}).get("next") == "domain_archive"
           and steps.get("domain_archive", {}).get("next") == "delivery_review"
@@ -325,7 +325,7 @@ if flow:
           and steps.get("verify_codecheck", {}).get("source_change_defer_review") is True
           and steps.get("verify_codecheck_compile", {}).get("next") == "verify_ut")
     check("质量链末尾只保留一次统一人工检视",
-          steps.get("verify_ut", {}).get("test_change_review_resume") == "verify_comet"
+          steps.get("verify_ut", {}).get("test_change_review_resume") == "verify_spec"
           and steps.get("quality_review", {}).get("next", {}).get("continue") == "quality_commit")
     check("三条流程共用 CodeCheck 机器协议",
           all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
@@ -2261,12 +2261,12 @@ if flow:
 
             # full/tweak/hotfix 同样不能在夜间越过需要用户确认的领域归档。
             full_state = {
-                "current": "verify_comet", "config": {"单号": "REQMOON2", "CHANGE_NAME": "moon"},
+                "current": "verify_spec", "config": {"单号": "REQMOON2", "CHANGE_NAME": "moon"},
                 "choices": {"workflow": "full"}, "history": [], "started": now,
                 "moonlight": {"enabled": True, "activated_at": now, "cycle": 1, "issues": []},
             }
             mf.save_state(full_state)
-            mf.advance(flow, full_state, "verify_comet", flow["steps"]["verify_comet"], "done")
+            mf.advance(flow, full_state, "verify_spec", flow["steps"]["verify_spec"], "done")
             full_archive = mf.load_state()
             check("完整开发月光轮停在领域归档",
                   full_archive.get("current") == "domain_archive")

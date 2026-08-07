@@ -59,7 +59,7 @@ class ProcessArtifactBoundaryTests(unittest.TestCase):
             "hf_open": "local_spec_valid",
             "tw_open": "local_spec_valid",
             "tw_verify": "verification_passed",
-            "verify_comet": "verification_passed",
+            "verify_spec": "verification_passed",
         }
         for step_id, evidence_type in expected.items():
             declared = tuple(

@@ -253,7 +253,8 @@ def _resume_direct_mode(ack="", message_id=""):
                 "delivery_review", "archive_confirm", "archive", "push", "end"):
             target = "build_rework"
         elif old_step in ("verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
-                          "verify_codecheck", "verify_ut", "verify_comet",
+                          "verify_codecheck", "verify_codecheck_compile",
+                          "verify_ut", "verify_spec", "verify_comet",
                           "delivery_review", "archive_confirm", "archive", "push", "end"):
             if api._spec_phase(st) == "archive":
                 ok, why = _reopen_spec_archive(st)

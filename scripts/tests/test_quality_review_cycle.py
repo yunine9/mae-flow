@@ -43,7 +43,7 @@ class QualityReviewCycleTests(unittest.TestCase):
         factory = getattr(transitions, "quality_review_context", None)
         self.assertTrue(callable(factory))
         context = factory("ut-test", ["tests/a_test.cpp"], "b" * 40)
-        self.assertEqual("verify_comet", context["resume"])
+        self.assertEqual("verify_spec", context["resume"])
         self.assertEqual("verify_ut", context["rework"])
 
     def test_focused_paths_may_supply_their_real_resume_nodes(self):
@@ -109,25 +109,25 @@ class QualityReviewCycleTests(unittest.TestCase):
     def test_engine_skips_the_cursor_for_deferred_source_changes(self):
         """真调 done 的路由:延后检视的步骤不得写出检视游标。"""
         from unittest import mock
-        from mae_flow_core.cli_commands import done_status
+        from mae_flow_core.cli_commands import quality_routing as routing
 
         def route(step):
             state = {"current": "x", "step_heads": {"x": "a" * 40}}
             calls = []
             with mock.patch.object(
-                    done_status, "_set_quality_review_context",
+                    routing, "_set_quality_review_context",
                     side_effect=lambda *a, **k: calls.append(a)):
                 with mock.patch.object(
-                        done_status, "_done_transition_to_recheck",
+                        routing, "_done_transition_to_recheck",
                         return_value=True):
                     # api 的属性在 _values 里late-bind,只能替换该字典。
-                    with mock.patch.dict(done_status.api._values, {
+                    with mock.patch.dict(routing.api._values, {
                             "_ensure_step_entry_head":
                                 lambda *a, **k: ("a" * 40, ""),
                             "_source_changed_since":
                                 lambda *a, **k: (["src/a.cpp"], ""),
                     }):
-                        handled = done_status._done_source_change(
+                        handled = routing._done_source_change(
                             {}, state, "x", step)
             return handled, calls
 
@@ -155,7 +155,64 @@ class QualityReviewCycleTests(unittest.TestCase):
         self.assertEqual("verify_codecheck", ut["quality_review_resume"])
         self.assertEqual("quality_review", steps["quality_recompile"]["next"])
         # 而测试改动只做一次统一检视，通过后直接继续。
-        self.assertEqual("verify_comet", ut["test_change_review_resume"])
+        self.assertEqual("verify_spec", ut["test_change_review_resume"])
+
+    def test_post_review_steps_cannot_silently_drop_late_code_changes(self):
+        """检视之后的三步都必须声明回流，否则那里的改动会被静默丢弃。
+
+        它们既进不了交付提交(清单必须精确等于用户确认的文件)，也没有任何证据在查
+        —— Agent 以为修好了，实际上那修改永远不会进提交，谁都不知道。
+        """
+        root = os.path.abspath(os.path.join(SCRIPTS, ".."))
+        with open(os.path.join(root, "flow", "flow.json"),
+                  encoding="utf-8") as stream:
+            steps = json.load(stream)["steps"]
+        for step_id in ("verify_spec", "domain_archive", "delivery_review"):
+            with self.subTest(step=step_id):
+                step = steps[step_id]
+                self.assertEqual(
+                    "quality_recompile", step["late_source_change_next"])
+                # 回流后必须重跑 CodeCheck:这部分代码从没经过质量链。
+                self.assertEqual(
+                    "verify_codecheck", step["quality_review_resume"])
+                self.assertEqual(
+                    "quality_recompile", step["quality_review_rework"])
+
+    def test_engine_reflows_late_code_changes(self):
+        from unittest import mock
+        from mae_flow_core.cli_commands import quality_routing as routing
+
+        calls = []
+        state = {"current": "verify_spec", "history": []}
+        with mock.patch.object(
+                routing, "_done_transition_to_recheck",
+                side_effect=lambda *a, **k: calls.append(a[3]) or True):
+            with mock.patch.dict(routing.api._values, {
+                    "_blocking_dirty_source_paths":
+                        lambda *a, **k: ["src/m.c"],
+                    "sh": lambda *a, **k: "a" * 40,
+            }):
+                handled = routing._done_late_source_change(
+                    {}, state, "verify_spec", {
+                        "late_source_change_next": "quality_recompile",
+                        "quality_review_origin": "ut-source",
+                        "quality_review_resume": "verify_codecheck",
+                        "quality_review_rework": "quality_recompile",
+                    })
+        self.assertTrue(handled)
+        self.assertEqual(["quality_recompile"], calls)
+        self.assertEqual(
+            "verify_codecheck", state["quality_review"]["resume"])
+
+    def test_clean_worktree_after_review_just_moves_on(self):
+        from unittest import mock
+        from mae_flow_core.cli_commands import quality_routing as routing
+
+        with mock.patch.dict(routing.api._values, {
+                "_blocking_dirty_source_paths": lambda *a, **k: []}):
+            self.assertFalse(routing._done_late_source_change(
+                {}, {"current": "verify_spec"}, "verify_spec",
+                {"late_source_change_next": "quality_recompile"}))
 
 
 if __name__ == "__main__":

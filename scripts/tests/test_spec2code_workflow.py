@@ -56,7 +56,7 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
         self.assertEqual(
             {
                 "verify_codecheck", "tw_codecheck", "rf_codecheck",
-                "verify_comet", "tw_verify", "domain_archive",
+                "verify_spec", "tw_verify", "domain_archive",
             },
             set(steps["quality_commit"]["dynamic_next"]),
         )

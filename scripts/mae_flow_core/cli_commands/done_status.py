@@ -4,6 +4,12 @@ from .shared import (
     WORKFLOW_LABELS, json, os, sys, time, workflow_completion,
     workflow_transitions,
 )
+from .quality_routing import (
+    _changed_file_paths,
+    _done_route_quality_changes,
+    _done_save_die,
+    _done_transition_to_recheck,
+)
 from .wiring import api
 
 def _done_pending_config(step, st, args, sid):
@@ -87,128 +93,6 @@ def _done_guard_branch(st, sid):
             _done_save_die(
                 st, f"当前分支 {cur or '未知'} != 本单约定分支 {want}。先切回正确分支，禁止在别的分支推进。")
 
-def _done_save_die(st, message):
-    api.save_state(st)
-    api.die(message, 2)
-
-def _done_transition_to_recheck(flow, st, sid, target, changed, note, message,
-                                clear_unlock=False):
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    st["history"].append({"step": sid, "result": "source-recheck:" + target,
-                          "note": note + "、".join(changed[:10]), "at": now})
-    st["current"] = target
-    st.setdefault("step_heads", {})[target] = api.sh("git rev-parse --verify HEAD")
-    if clear_unlock:
-        st.pop("unlock", None)
-    for kind in ("COMPILE", "CODECHECK", "UT"):
-        (st.get("agent_tasks", {}) or {}).pop(kind, None)
-    (st.get("quality", {}) or {}).pop("codecheck_scan", None)
-    (st.get("quality", {}) or {}).pop("codecheck_verify", None)
-    api.save_state(st)
-    print(message)
-    api.print_current(flow, st)
-    return True
-
-
-def _changed_file_paths(changed):
-    suffix = "(未提交)"
-    return list(dict.fromkeys(
-        item[:-len(suffix)] if item.endswith(suffix) else item
-        for item in (changed or ())
-        if item
-    ))
-
-
-def _set_quality_review_context(st, step, changed, default_origin):
-    origin = str(step.get("quality_review_origin") or default_origin)
-    st["quality_review"] = workflow_transitions.quality_review_context(
-        origin,
-        _changed_file_paths(changed),
-        api.sh("git rev-parse --verify HEAD"),
-        resume=str(step.get("quality_review_resume") or ""),
-        rework=str(step.get("quality_review_rework") or ""),
-    )
-
-def _done_source_change(flow, st, sid, step):
-    source_next = step.get("source_change_next")
-    if not source_next:
-        return False
-    _, migrate_err = api._ensure_step_entry_head(flow, st, sid)
-    if migrate_err:
-        _done_save_die(
-            st, "无法恢复步骤入口 HEAD:" + migrate_err + "。拒绝猜测源码是否变化。")
-    changed, why = api._source_changed_since(
-        (st.get("step_heads", {}) or {}).get(sid, ""), st)
-    if why:
-        _done_save_die(st, "无法核对本步源码变化:" + why)
-    if not changed:
-        return False
-    if step.get("source_change_defer_review"):
-        # 质量链内的改动全部保持未提交，因此可以一路做完再统一检视一次。
-        # 逐步各拉一轮人工检视，最坏要把用户叫四次，而且会让 CodeCheck 反复重跑。
-        return _done_transition_to_recheck(
-            flow, st, sid, source_next, changed, "本步产生待编译源码:",
-            f"[mae-flow] {sid} 修改了源码，保持未提交并进入 {source_next} "
-            "重新编译；本轮质量链的全部改动会在 UT 之后一次性交给用户检视。\n")
-    _set_quality_review_context(st, step, changed, "codecheck-source")
-    return _done_transition_to_recheck(
-        flow, st, sid, source_next, changed, "本步产生待检视源码:",
-        f"[mae-flow] {sid} 修改了源码，保持未提交并进入 {source_next} 验证；"
-        "验证完成后统一交给用户检视。\n")
-
-def _done_source_recheck(flow, st, sid, step):
-    recheck = step.get("source_change_recheck")
-    if not recheck:
-        return False
-    _, migrate_err = api._ensure_step_entry_head(flow, st, sid)
-    if migrate_err:
-        _done_save_die(st, "无法恢复 UT 步骤入口 HEAD:" + migrate_err
-                       + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人核对历史。")
-    changed, why = api._business_source_changed_since_step(st, sid)
-    if why:
-        _done_save_die(st, "无法核对 UT 步骤内是否修改过被测源码:" + why
-                       + "。为避免漏掉编译/CodeCheck，拒绝向后推进；请交维护人恢复步骤入口基点。")
-    if not changed:
-        return False
-    ul = st.get("unlock") or {}
-    if ul.get("scope") != "source" or ul.get("step") != sid:
-        _done_save_die(st, "UT 步骤内检测到未经 unlock source 用户裁决的被测源码变更: "
-                       + "、".join(changed[:5]) + ("…" if len(changed) > 5 else "")
-                       + "。这是越权修改，不能靠补跑验证洗白；先呈报变更和 UT 自查结论，由用户裁决后再处理。")
-    _set_quality_review_context(st, step, changed, "ut-source")
-    return _done_transition_to_recheck(
-        flow, st, sid, recheck, changed, "UT 裁决后产生待检视源码:",
-        f"[mae-flow] UT 阶段经用户裁决修改了被测源码，自动回流到 {recheck}。"
-        "先编译、再统一检视提交，之后从 CodeCheck 恢复；不会重跑 Ponytail。\n",
-        clear_unlock=True)
-
-
-def _done_test_change_review(flow, st, sid, step):
-    """质量链末尾的唯一一次人工检视。
-
-    Ponytail 的删码、CodeCheck 的修复和 UT 的测试改动全都保持未提交，所以到这里
-    工作区里就是本轮质量链的完整增量——一次看完整 diff 既省人工轮次，也比分三次
-    看增量更容易判断。UT 步自己经 unlock 改的被测源码不走这条:那部分代码没过
-    CodeCheck，由 _done_source_recheck 单独回流并重跑 CodeCheck。
-    """
-    origin = step.get("test_change_review_origin")
-    if not origin:
-        return False
-    changed = api._blocking_dirty_source_paths(st, flow)
-    if not changed:
-        return False
-    _set_quality_review_context(st, {
-        "quality_review_origin": origin,
-        "quality_review_resume": step.get("test_change_review_resume", ""),
-        "quality_review_rework": step.get("test_change_review_rework", ""),
-    }, changed, "ut-test")
-    return _done_transition_to_recheck(
-        flow, st, sid, "quality_review", changed,
-        "本轮质量链产生待检视改动:",
-        "[mae-flow] 质量链已完成并留下未提交改动，进入本轮唯一一次统一用户检视；"
-        "禁止在检视前提交。\n")
-
-
 def _done_quality_rework(st, sid):
     if sid != "quality_rework":
         return
@@ -283,14 +167,6 @@ def _done_require_evidence(step, st, args, sid):
     api.die(workflow_completion.evidence_error(
         fails, count, api._moonlight(st), target,
         os.path.abspath(sys.argv[0])), 2)
-
-
-def _done_route_quality_changes(flow, st, sid, step):
-    if _done_source_change(flow, st, sid, step):
-        return True
-    if _done_source_recheck(flow, st, sid, step):
-        return True
-    return _done_test_change_review(flow, st, sid, step)
 
 
 def _done_resolve_moonlight_branch(flow, st, sid):

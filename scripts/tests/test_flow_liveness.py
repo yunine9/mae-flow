@@ -106,7 +106,7 @@ class FlowLivenessTests(unittest.TestCase):
                 self.assertNotIn(forbidden, serialized, step_id)
 
     def test_every_delivery_path_archives_domain_truth_exactly_once(self):
-        self.assertEqual("domain_archive", FLOW["steps"]["verify_comet"]["next"])
+        self.assertEqual("domain_archive", FLOW["steps"]["verify_spec"]["next"])
         self.assertEqual("domain_archive", FLOW["steps"]["tw_verify"]["next"])
         self.assertEqual("domain_archive", FLOW["steps"]["rf_ut"]["next"])
         self.assertEqual("delivery_review", FLOW["steps"]["domain_archive"]["next"])
@@ -116,7 +116,7 @@ class FlowLivenessTests(unittest.TestCase):
                 self.assertNotEqual(
                     "domain_archive",
                     FLOW["steps"][step_id].get("next")
-                    if step_id not in {"verify_comet", "tw_verify", "rf_ut"}
+                    if step_id not in {"verify_spec", "tw_verify", "rf_ut"}
                     else "allowed",
                     step_id)
 

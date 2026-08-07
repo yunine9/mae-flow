@@ -5,7 +5,7 @@ _QUALITY_REVIEW_ROUTES = {
     "ponytail-source": ("verify_codecheck", "quality_recompile"),
     "codecheck-source": ("verify_codecheck", "quality_recompile"),
     "ut-source": ("verify_codecheck", "quality_recompile"),
-    "ut-test": ("verify_comet", "verify_ut"),
+    "ut-test": ("verify_spec", "verify_ut"),
 }
 
 

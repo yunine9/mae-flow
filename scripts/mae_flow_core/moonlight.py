@@ -7,6 +7,7 @@ QUALITY_STEPS = {
     "build": "compile",
     "build_rework": "compile",
     "verify_post_ponytail_compile": "compile",
+    "verify_codecheck_compile": "compile",
     "quality_recompile": "compile",
     "verify_recompile": "compile",
     "rf_codecheck": "codecheck",
@@ -15,7 +16,8 @@ QUALITY_STEPS = {
     "rf_ut": "ut",
     "tw_ut": "ut",
     "verify_ut": "ut",
-    "verify_comet": "comet",
+    "verify_spec": "comet",
+    "verify_comet": "comet",   # 旧节点名,在途状态兼容
     "tw_verify": "comet",
 }
 

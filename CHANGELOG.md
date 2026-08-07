@@ -1,5 +1,22 @@
 # 更新记录
 
+## 2026-08-07：修复检视之后的代码改动被静默丢弃，并给 comet 旧名字改名
+
+- **检视之后的代码改动不再无声消失**：规格符合性、领域归档、交付检视三步既没有
+  `allow_source_edit` 也没有任何证据在查脏源码。瘦身删掉 `edit-source` 之后，这三步里
+  出现的代码改动既进不了交付提交（清单必须精确等于用户确认的文件），也没人告诉任何人
+  它被丢了——Agent 以为修好了，实际那修改永远不会进提交。现在统一回流到重新编译 +
+  重新检视，并从 CodeCheck 重跑（这部分代码从未经过质量链）；
+- **`verify_comet` 改名 `verify_spec`**：这一步做的是本地规格符合性检查（对照本地
+  `spec.md`、Grill 决策、Story 和最终代码，产出本地 `verification.md`），文档里明确写着
+  「不创建或修改 OpenSpec 文件」，早已与 comet 无关。旧名字会让人以为它还在驱动外部
+  状态机。旧节点保留为单向恢复桥并登记进 `compatibility_entries`，在途单平滑过渡；
+- 质量改动路由抽成 `cli_commands/quality_routing.py`，让 `done_status.py` 回到体量红线内；
+  判定口径没有变化。
+
+`capability comet-*` 五个子命令**保留**：它们不是残留，而是 selftest 明确记录的
+「`capability ...` 透传逃生口」，且项目级 comet 兼容层 `comet_compat.py` 仍在使用。
+
 ## 2026-08-07：质量链只做一次人工检视
 
 原来 Ponytail、CodeCheck、UT 每一步只要改了源码，就各自拉一轮「重新编译 + 人工检视」，

@@ -48,6 +48,8 @@ _STEP_PHASES = {
     "verify_ponytail": Phase.QUALITY,
     "verify_codecheck": Phase.QUALITY,
     "verify_ut": Phase.QUALITY,
+    "verify_spec": Phase.QUALITY,
+    "verify_codecheck_compile": Phase.QUALITY,
     "verify_comet": Phase.QUALITY,
     "verify_recompile": Phase.QUALITY,
     "tw_compile": Phase.QUALITY,

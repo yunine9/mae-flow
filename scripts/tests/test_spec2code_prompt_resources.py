@@ -225,6 +225,11 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
                 self.assertNotIn(retired, operator_docs)
 
         command = read("commands/mae-flow.md")
+        # 第一动作必须是启动流程:只说"不要自由发挥"留下了开局空档,
+        # 实战里模型据此自行派只读侦察、先出方案,与流程意图完全相反。
+        self.assertIn("第一个动作固定是启动流程本身", command)
+        self.assertIn("禁止先做架构调研", command)
+        self.assertIn("只读/计划模式", command)
         self.assertNotIn("docs/story/STORY-", command)
         self.assertNotIn("用户选择入库", command)
         self.assertNotIn("由你决定是否入库", read("README.md"))

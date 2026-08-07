@@ -273,3 +273,34 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodeReviewTwoAxisTests(unittest.TestCase):
+    """CODE 预检拆成两个互不参考的视角,三处必须同时说得住。
+
+    一个 Agent 同时拿着 Spec、Story 和代码规范时,注意力会全部流向业务正确性,
+    命名、重复实现、资源收口这类工程问题就漏了;反过来只盯规范的也发现不了需求做错。
+    卡模板、步骤提示、Agent 定义三处必须一致,否则又变成"卡里拆了、提示没拆"。
+    """
+
+    def test_step_prompt_dispatches_both_axes_once_each(self):
+        step = read("flow/steps/build_agent_review.md")
+        self.assertIn("两张", step)
+        self.assertIn("需求符合性", step)
+        self.assertIn("工程质量", step)
+        self.assertIn("分别派两个 craft-reviewer-agent", step)
+        # 汇总不合并、不重排;仍然只跑一轮
+        self.assertIn("不合并、不互相重排优先级", step)
+        self.assertIn("只跑这一轮", step)
+
+    def test_reviewer_agent_executes_exactly_one_axis(self):
+        reviewer = read("agents/craft-reviewer-agent.md")
+        self.assertIn("你只执行自己卡上写明的那一个", reviewer)
+        self.assertIn("故意不给", reviewer)
+        self.assertIn("两个视角互不参考", reviewer)
+
+    def test_card_template_refuses_a_default_axis(self):
+        template = read(
+            "scripts/mae_flow_core/application/quality/role_task_documents.py")
+        self.assertIn("必须指定视角", template)
+        self.assertIn('CODE_REVIEW_AXES = ("standards", "spec")', template)

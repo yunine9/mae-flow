@@ -70,15 +70,26 @@ class RoleTaskCliTests(unittest.TestCase):
                         {}, state, parse_args(["role-task", "code-review"]))
             finally:
                 os.chdir(previous)
-            with open(
-                    state["agent_tasks"]["REVIEWER"]["path"],
-                    encoding="utf-8") as stream:
-                body = stream.read()
-            self.assertIn("-VALUE = 1", body)
-            self.assertIn("+VALUE = 2", body)
-            self.assertIn("### 未跟踪文件: new.py", body)
-            self.assertIn(os.path.abspath(package.spec), body)
-            self.assertIn(os.path.abspath(package.story), body)
+            cards = state["agent_tasks"]["REVIEWER"]["axis_cards"]
+            self.assertEqual({"standards", "spec"}, set(cards))
+            bodies = {}
+            for axis, path in cards.items():
+                with open(path, encoding="utf-8") as stream:
+                    bodies[axis] = stream.read()
+            # 完整未提交增量(含未跟踪文件)进两张卡:两个视角看同一份代码
+            for axis, body in bodies.items():
+                with self.subTest(axis=axis):
+                    self.assertIn("-VALUE = 1", body)
+                    self.assertIn("+VALUE = 2", body)
+                    self.assertIn("### 未跟踪文件: new.py", body)
+            # 权威输入刻意不同:需求符合性轴拿 Spec/Story,工程质量轴一份都不给
+            self.assertIn(os.path.abspath(package.spec), bodies["spec"])
+            self.assertIn(os.path.abspath(package.story), bodies["spec"])
+            self.assertNotIn(os.path.abspath(package.spec), bodies["standards"])
+            self.assertNotIn(os.path.abspath(package.story), bodies["standards"])
+            # REVIEWER 指向哪张卡必须确定,不能取决于迭代顺序
+            self.assertEqual(
+                cards["standards"], state["agent_tasks"]["REVIEWER"]["path"])
 
 
 if __name__ == "__main__":

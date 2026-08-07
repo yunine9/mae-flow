@@ -5,6 +5,7 @@ import os
 import time
 
 from mae_flow_core.application.quality.role_task_documents import (
+    CODE_REVIEW_AXES,
     RoleTaskContext,
     build_role_task_document,
 )
@@ -33,14 +34,17 @@ def _existing(paths):
     return tuple(result)
 
 
-def _story_context(state, role, document=""):
+def _story_context(state, role, document="", axis=""):
     config = state.get("config") or {}
     ticket = str(config.get("单号", "") or "")
     package = ensure_work_package(os.getcwd(), ticket)
     if role == "code-review":
-        # Implementation has exactly two authoritative process inputs.  Source
-        # exploration starts from Story and remains local to the implementation.
-        return package, _existing((package.spec, package.story))
+        # 两轴的权威输入刻意不同:需求符合性轴拿 Spec/Story/实施附录,
+        # 工程质量轴一份都不给——同时拿着需求和规范的 Agent 会把注意力全给业务。
+        if axis == "spec":
+            return package, _existing(
+                (package.spec, package.story, package.implementation))
+        return package, ()
 
     survey = os.path.join(package.root, "survey.md")
     terms = []
@@ -101,6 +105,73 @@ def _whole_change_diff(state):
     return body
 
 
+def _emit_code_review_cards(state, step, ticket):
+    """一次生成两张 CODE 预检卡:需求符合性 + 工程质量。
+
+    两张卡由两个独立子 Agent 各执行一张,上下文互不污染。一个 Agent 同时拿着
+    Spec、Story 和代码规范时,注意力会全部流向业务正确性,低级工程问题就漏了;
+    反过来只盯风格的也发现不了需求做错。汇总由主 Agent 完成,不额外问用户。
+
+    预检仍然只跑一轮:两张卡各派一次,不因结论是 ISSUE 就自动重来。
+    """
+    diff = _whole_change_diff(state)
+    head = api.sh("git rev-parse --verify HEAD")
+    launches = []
+    records = {}
+    for axis in CODE_REVIEW_AXES:
+        package, context_paths = _story_context(
+            state, "code-review", axis=axis)
+        card = build_role_task_document(
+            role="code-review",
+            project_root=os.path.abspath(os.getcwd()),
+            ticket=ticket,
+            stage=axis,
+            context=RoleTaskContext(context_paths=context_paths, diff=diff),
+        )
+        artifact = store_task_card(
+            card,
+            os.path.join(".mae-flow-work", "role-tasks"),
+            "%s-code-review-%s.md" % (step, axis),
+            TaskCardStorePorts(
+                absolute=os.path.abspath,
+                make_directory=lambda path: os.makedirs(path, exist_ok=True),
+                write_text=lambda path, body: write_text(
+                    path, body, encoding="utf-8"),
+            ),
+        )
+        record = {
+            "step": step,
+            "path": artifact.path,
+            "sha256": artifact.digest,
+            "stage": axis,
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        state.setdefault("role_tasks", {})["code-review-" + axis] = record
+        records[axis] = record
+        launches.append((axis, artifact.path))
+    # REVIEWER 记录是步骤级的:它是"预检之后源码有没有再变"的比对基线,也是风险确认
+    # 绑定的任务卡。两张卡同一个 HEAD,这里固定取 standards 那张(而不是循环里最后
+    # 写入的那张——那会让指向哪张卡取决于迭代顺序),另一张一并记在 axis_cards 里。
+    # 证据仍是一次 REVIEWER 返回:拆两轴不把可选顾问步变成两条硬证据。
+    state.setdefault("agent_tasks", {})["REVIEWER"] = {
+        **records["standards"],
+        "head": head,
+        "precommit_review": True,
+        "axis_cards": {
+            axis: record["path"] for axis, record in records.items()},
+        "source_snapshot": (
+            api._source_snapshot_since(head, state, api.FLOW)
+            if head else {}),
+    }
+    api.save_state(state)
+    print("[mae-flow] CODE 预检任务卡已生成(两个独立视角，各派一次):")
+    for axis, path in launches:
+        print("- %s: %s" % (axis, path))
+    for axis, path in launches:
+        print('启动 craft-reviewer-agent(%s 视角)时只传：读取并严格执行任务卡 "%s"；'
+              '返回可使用自然语言。' % (axis, path))
+
+
 def cmd_role_task(_flow, state, args):
     role = str(args.role or "")
     step = str(state.get("current", "") or "")
@@ -112,6 +183,9 @@ def cmd_role_task(_flow, state, args):
         api.die("grill-critic 必须同时指定 --stage prep|final 和 --document。", 2)
 
     ticket = str((state.get("config") or {}).get("单号", "") or "")
+    if role == "code-review":
+        _emit_code_review_cards(state, step, ticket)
+        return
     package, context_paths = _story_context(state, role, document_path)
     card = build_role_task_document(
         role=role,

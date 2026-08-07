@@ -39,7 +39,8 @@ class RoleTaskDocumentTests(unittest.TestCase):
                 "code-review", "story-generate", "story-review",
                 "grill-critic"):
             with self.subTest(role=role):
-                body = build(role, stage="prep")
+                stage = "standards" if role == "code-review" else "prep"
+                body = build(role, stage=stage)
                 self.assertIn("任意自然语言格式", body)
                 self.assertNotIn("_RESULT:", body)
                 self.assertNotIn("TASK_CARD_SHA256", body)
@@ -51,15 +52,37 @@ class RoleTaskDocumentTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "未知角色"):
                     build(retired)
 
-    def test_code_reviewer_gets_exact_inputs_and_is_read_only(self):
-        body = build("code-review")
-        self.assertIn("spec.md", body)
-        self.assertIn("story.md", body)
-        self.assertIn("diff --git", body)
-        self.assertIn("用户人工检视前", body)
-        self.assertIn("只读", body)
-        self.assertIn("最多五条", body)
-        self.assertIn("CLEAR", body)
+    def test_code_review_needs_an_explicit_axis(self):
+        """CODE 预检拆成两个互不参考的视角,卡上必须写明是哪一个。
+
+        缺省视角的卡等于又回到"一个 Agent 同时看需求和规范"——注意力会全部
+        流向业务正确性,工程问题就漏了。所以这里宁可报错也不给默认值。
+        """
+        with self.assertRaisesRegex(ValueError, "必须指定视角"):
+            build("code-review")
+
+    def test_both_axes_are_read_only_and_carry_the_diff(self):
+        for axis in ("spec", "standards"):
+            with self.subTest(axis=axis):
+                body = build("code-review", stage=axis)
+                self.assertIn("diff --git", body)
+                self.assertIn("用户人工检视前", body)
+                self.assertIn("只读", body)
+                self.assertIn("最多五条", body)
+                self.assertIn("CLEAR", body)
+                self.assertIn("工具已经在管的不报", body)
+
+    def test_the_two_axes_do_not_share_a_brief(self):
+        spec = build("code-review", stage="spec")
+        standards = build("code-review", stage="standards")
+        self.assertIn("需求符合性", spec)
+        self.assertIn("引用 Spec 或 Story 里的原句", spec)
+        self.assertNotIn("命名是否继承邻居", spec)
+        self.assertIn("工程质量", standards)
+        self.assertIn("命名是否继承邻居", standards)
+        self.assertIn("code-taste-v1.md", standards)
+        self.assertIn("故意不提供 Spec 与 Story", standards)
+        self.assertNotIn("擅自扩大范围", standards)
 
     def test_story_roles_use_local_outputs_once(self):
         generated = build("story-generate")

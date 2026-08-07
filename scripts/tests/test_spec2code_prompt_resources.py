@@ -41,8 +41,15 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         """标准文件必须有生产消费者——comment-standard 曾无人引用地躺了一个月。"""
         taste = read("runtime/standards/code-taste-v1.md")
         for marker in ("顺应优先于自包含", "按概念拆", "投机的灵活性",
-                       "目标状态", "不是门禁"):
+                       "目标状态", "不是门禁", "改动收口", "最小改动面",
+                       "每条离开路径", "依赖方向", "编译通过 ≠ 适配完整"):
             self.assertIn(marker, taste)
+        # 完整性收口必须三处闭环:写码纪律、基准、reviewer 独立核对
+        self.assertIn("改动收口", read("flow/steps/build.md"))
+        self.assertIn(
+            "独立 grep", read("agents/craft-reviewer-agent.md"))
+        self.assertIn(
+            "非编译文件", read("agents/craft-reviewer-agent.md"))
         build = read("flow/steps/build.md")
         self.assertIn("standards/code-taste-v1.md", build)
         self.assertIn("comment-standard-v1.md", build)
@@ -74,6 +81,9 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("机械扇出", build)
         self.assertIn("不免检", build)
         self.assertIn("已亲写第一个完整样例", build)
+        # 工单携带上下文而不是指向上下文——子 Agent 重建上下文正是 CP 被退掉的主因
+        self.assertIn("自包含", build)
+        self.assertIn("不要读 spec/story/领域文档", build)
 
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")

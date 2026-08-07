@@ -304,3 +304,34 @@ class CodeReviewTwoAxisTests(unittest.TestCase):
             "scripts/mae_flow_core/application/quality/role_task_documents.py")
         self.assertIn("必须指定视角", template)
         self.assertIn('CODE_REVIEW_AXES = ("standards", "spec")', template)
+
+
+class AssumptionAndDeadCodeBoundaryTests(unittest.TestCase):
+    """两条 Karpathy 原则落地后,四处口径必须一致,否则互相打脸。
+
+    「路过的旧死代码不要动」如果只写进 build 而不改 reviewer,reviewer 会照着
+    「失效旧代码是否删净」去报 builder 被要求不许动的东西——提示词自己打自己。
+    """
+
+    def test_small_ambiguity_is_surfaced_not_silently_resolved(self):
+        build = read("flow/steps/build.md")
+        self.assertIn("小歧义：选一个，并把假设写出来", build)
+        self.assertIn("默默挑一个", build)
+        # 与"卡住就停"并列存在:根本缺口停下,小歧义带假设继续
+        self.assertIn("卡住就停，不要猜", build)
+
+    def test_pre_existing_dead_code_is_reported_not_deleted(self):
+        build = read("flow/steps/build.md")
+        taste = read("runtime/standards/code-taste-v1.md")
+        ponytail = read("flow/steps/verify_ponytail.md")
+        reviewer = read("agents/craft-reviewer-agent.md")
+        standards_brief = read(
+            "scripts/mae_flow_core/application/quality/role_task_documents.py")
+        self.assertIn("路过的旧代码：指出来，不要动", build)
+        self.assertIn("只删自己弄死的", taste)
+        self.assertIn("delete 只作用于本次的代码", ponytail)
+        # reviewer 两处口径都要跟上,否则它会去报 builder 被禁止动的东西
+        self.assertIn("不是本次弄死的**旧死代码不算问题", reviewer)
+        self.assertIn("本次改动弄死的旧代码是否删净", reviewer)
+        self.assertIn("本次改动弄死的旧代码是否删净", standards_brief)
+        self.assertIn("不是本次弄死的旧死代码不算问题", standards_brief)

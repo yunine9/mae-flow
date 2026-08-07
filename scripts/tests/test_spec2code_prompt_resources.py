@@ -57,7 +57,8 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         for marker in ("顺应优先于自包含", "按概念拆", "投机的灵活性",
                        "目标状态", "不是门禁", "改动收口", "最小改动面",
                        "每条离开路径", "依赖方向", "编译通过 ≠ 适配完整",
-                       "复用靠调用，不靠粘贴", "副作用会随复制翻倍"):
+                       "复用靠调用，不靠粘贴", "副作用会随复制翻倍",
+                       "散弹式修改", "不顺手重构"):
             self.assertIn(marker, taste)
         # 完整性收口必须三处闭环:写码纪律、基准、reviewer 独立核对
         self.assertIn("改动收口", read("flow/steps/build.md"))
@@ -74,6 +75,10 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         reviewer = read("agents/craft-reviewer-agent.md")
         self.assertIn("code-taste-v1.md", reviewer)
         self.assertIn("品味问题与正确性问题同级", reviewer)
+        # 报告纪律:工具能管的不占名额;硬违规按事实陈述,判断题接受仓内既有做法反驳
+        self.assertIn("工具已经在管的不写进来", reviewer)
+        self.assertIn("区分硬违规与判断题", reviewer)
+        self.assertIn("仓内既有形态胜过基准", reviewer)
         construction = read("runtime/guidance/construction.md")
         self.assertIn("code-taste-v1.md", construction)
         # 物化清单里必须有,否则项目本地路径是死链接
@@ -110,7 +115,10 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
         for marker in ("文件结构与任务边界", "独立否决其中一个任务而批准它的邻居",
                        "接口契约两栏", "消费", "产出",
-                       "定稿自查", "占位符扫描", "类型与命名一致"):
+                       "定稿自查", "占位符扫描", "类型与命名一致",
+                       # codebase-design:深模块三判据落在设计时,而非写码时
+                       "删除测试", "一个实现是假接缝，两个实现才是真接缝",
+                       "接口就是测试面"):
             self.assertIn(marker, template)
 
     def test_build_stops_instead_of_guessing_when_blocked(self):

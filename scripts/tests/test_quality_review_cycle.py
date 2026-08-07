@@ -78,6 +78,85 @@ class QualityReviewCycleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown quality review origin"):
             factory("mystery", ["src/a.cpp"], "c" * 40)
 
+    def test_deferred_steps_do_not_open_their_own_review_round(self):
+        """精简与规范修复只重新编译;检视留到质量链末尾一次做完。
+
+        逐步各拉一轮人工检视，最坏要把用户叫四次，还会让 CodeCheck 反复重跑。
+        """
+        root = os.path.abspath(os.path.join(SCRIPTS, ".."))
+        with open(os.path.join(root, "flow", "flow.json"),
+                  encoding="utf-8") as stream:
+            flow = json.load(stream)
+        steps = flow["steps"]
+        for step_id, compile_step, resume in (
+                ("verify_ponytail", "verify_post_ponytail_compile",
+                 "verify_codecheck"),
+                ("verify_codecheck", "verify_codecheck_compile",
+                 "verify_ut")):
+            with self.subTest(step=step_id):
+                step = steps[step_id]
+                self.assertTrue(step["source_change_defer_review"])
+                self.assertEqual(compile_step, step["source_change_next"])
+                # 延后检视的步骤不得再声明自己的检视游标，否则会写出一个
+                # 没人消费的游标，后续恢复逻辑会照它跳转。
+                for key in ("quality_review_origin", "quality_review_resume",
+                            "quality_review_rework"):
+                    self.assertNotIn(key, step)
+                self.assertEqual(resume, steps[compile_step]["next"])
+                self.assertNotEqual(
+                    "quality_review", steps[compile_step]["next"])
+
+    def test_engine_skips_the_cursor_for_deferred_source_changes(self):
+        """真调 done 的路由:延后检视的步骤不得写出检视游标。"""
+        from unittest import mock
+        from mae_flow_core.cli_commands import done_status
+
+        def route(step):
+            state = {"current": "x", "step_heads": {"x": "a" * 40}}
+            calls = []
+            with mock.patch.object(
+                    done_status, "_set_quality_review_context",
+                    side_effect=lambda *a, **k: calls.append(a)):
+                with mock.patch.object(
+                        done_status, "_done_transition_to_recheck",
+                        return_value=True):
+                    # api 的属性在 _values 里late-bind,只能替换该字典。
+                    with mock.patch.dict(done_status.api._values, {
+                            "_ensure_step_entry_head":
+                                lambda *a, **k: ("a" * 40, ""),
+                            "_source_changed_since":
+                                lambda *a, **k: (["src/a.cpp"], ""),
+                    }):
+                        handled = done_status._done_source_change(
+                            {}, state, "x", step)
+            return handled, calls
+
+        deferred, deferred_calls = route({
+            "source_change_next": "verify_codecheck_compile",
+            "source_change_defer_review": True,
+        })
+        self.assertTrue(deferred)
+        self.assertEqual([], deferred_calls, "延后检视不应写游标")
+
+        immediate, immediate_calls = route({
+            "source_change_next": "quality_recompile",
+        })
+        self.assertTrue(immediate)
+        self.assertEqual(1, len(immediate_calls), "未声明延后的仍立即建立游标")
+
+    def test_ut_unlock_source_still_reruns_codecheck(self):
+        """UT 经用户裁决改的被测源码没过 CodeCheck，必须单独回流重跑。"""
+        root = os.path.abspath(os.path.join(SCRIPTS, ".."))
+        with open(os.path.join(root, "flow", "flow.json"),
+                  encoding="utf-8") as stream:
+            steps = json.load(stream)["steps"]
+        ut = steps["verify_ut"]
+        self.assertEqual("quality_recompile", ut["source_change_recheck"])
+        self.assertEqual("verify_codecheck", ut["quality_review_resume"])
+        self.assertEqual("quality_review", steps["quality_recompile"]["next"])
+        # 而测试改动只做一次统一检视，通过后直接继续。
+        self.assertEqual("verify_comet", ut["test_change_review_resume"])
+
 
 if __name__ == "__main__":
     unittest.main()

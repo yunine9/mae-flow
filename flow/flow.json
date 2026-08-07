@@ -533,10 +533,8 @@
       "clear_hint": true,
       "allow_source_edit": true,
       "source_change_next": "verify_post_ponytail_compile",
-      "quality_review_origin": "ponytail-source",
-      "quality_review_resume": "verify_codecheck",
-      "quality_review_rework": "quality_recompile",
-      "next": "verify_codecheck"
+      "next": "verify_codecheck",
+      "source_change_defer_review": true
     },
     "verify_post_ponytail_compile": {
       "title": "验证 — 精简后重新编译",
@@ -551,10 +549,7 @@
           ]
         }
       ],
-      "next": "quality_review",
-      "quality_review_origin": "ponytail-source",
-      "quality_review_resume": "verify_codecheck",
-      "quality_review_rework": "quality_recompile"
+      "next": "verify_codecheck"
     },
     "verify_recompile": {
       "title": "验证回流 — 重新编译",
@@ -577,13 +572,26 @@
     "verify_codecheck": {
       "title": "验证 2/4 — 规范检查(代码定稿)",
       "allow_source_edit": true,
-      "source_change_next": "quality_recompile",
-      "quality_review_origin": "codecheck-source",
-      "quality_review_resume": "verify_codecheck",
-      "quality_review_rework": "quality_recompile",
+      "source_change_next": "verify_codecheck_compile",
       "evidence": [
         {
           "type": "review_codecheck"
+        }
+      ],
+      "next": "verify_ut",
+      "source_change_defer_review": true
+    },
+    "verify_codecheck_compile": {
+      "title": "验证 — 规范修复后重新编译",
+      "allow_source_edit": true,
+      "allow_dirty_compile": true,
+      "evidence": [
+        {
+          "type": "agent_or_no_source",
+          "agent": "COMPILE",
+          "statuses": [
+            "OK"
+          ]
         }
       ],
       "next": "verify_ut"

@@ -143,6 +143,13 @@ def _done_source_change(flow, st, sid, step):
         _done_save_die(st, "无法核对本步源码变化:" + why)
     if not changed:
         return False
+    if step.get("source_change_defer_review"):
+        # 质量链内的改动全部保持未提交，因此可以一路做完再统一检视一次。
+        # 逐步各拉一轮人工检视，最坏要把用户叫四次，而且会让 CodeCheck 反复重跑。
+        return _done_transition_to_recheck(
+            flow, st, sid, source_next, changed, "本步产生待编译源码:",
+            f"[mae-flow] {sid} 修改了源码，保持未提交并进入 {source_next} "
+            "重新编译；本轮质量链的全部改动会在 UT 之后一次性交给用户检视。\n")
     _set_quality_review_context(st, step, changed, "codecheck-source")
     return _done_transition_to_recheck(
         flow, st, sid, source_next, changed, "本步产生待检视源码:",
@@ -177,25 +184,28 @@ def _done_source_recheck(flow, st, sid, step):
 
 
 def _done_test_change_review(flow, st, sid, step):
+    """质量链末尾的唯一一次人工检视。
+
+    Ponytail 的删码、CodeCheck 的修复和 UT 的测试改动全都保持未提交，所以到这里
+    工作区里就是本轮质量链的完整增量——一次看完整 diff 既省人工轮次，也比分三次
+    看增量更容易判断。UT 步自己经 unlock 改的被测源码不走这条:那部分代码没过
+    CodeCheck，由 _done_source_recheck 单独回流并重跑 CodeCheck。
+    """
     origin = step.get("test_change_review_origin")
     if not origin:
         return False
     changed = api._blocking_dirty_source_paths(st, flow)
-    test_changes = [
-        path for path in changed
-        if api._is_test_file(path, st) or api._is_build_path(path)
-    ]
-    if not test_changes:
+    if not changed:
         return False
     _set_quality_review_context(st, {
         "quality_review_origin": origin,
         "quality_review_resume": step.get("test_change_review_resume", ""),
         "quality_review_rework": step.get("test_change_review_rework", ""),
-    }, test_changes, "ut-test")
+    }, changed, "ut-test")
     return _done_transition_to_recheck(
-        flow, st, sid, "quality_review", test_changes,
-        "UT 产生待检视测试:",
-        "[mae-flow] UT 已完成并留下未提交测试改动，进入统一用户检视；"
+        flow, st, sid, "quality_review", changed,
+        "本轮质量链产生待检视改动:",
+        "[mae-flow] 质量链已完成并留下未提交改动，进入本轮唯一一次统一用户检视；"
         "禁止在检视前提交。\n")
 
 

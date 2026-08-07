@@ -74,9 +74,21 @@ class FlowLivenessTests(unittest.TestCase):
 
     def test_quality_review_corridor_has_no_commit_bypass(self):
         steps = FLOW["steps"]
+        # 链内的两个编译节点回到质量链本身:精简与规范修复不再各拉一轮人工检视，
+        # 全部改动保持未提交，到 UT 之后统一检视一次。
         self.assertEqual(
-            "quality_review", steps["verify_post_ponytail_compile"]["next"])
+            "verify_codecheck", steps["verify_post_ponytail_compile"]["next"])
+        self.assertEqual(
+            "verify_ut", steps["verify_codecheck_compile"]["next"])
+        for deferred in ("verify_ponytail", "verify_codecheck"):
+            with self.subTest(step=deferred):
+                self.assertTrue(
+                    steps[deferred]["source_change_defer_review"])
+        # UT 经用户裁决改了被测源码仍单独回流,并重跑 CodeCheck。
+        self.assertEqual(
+            "quality_recompile", steps["verify_ut"]["source_change_recheck"])
         self.assertEqual("quality_review", steps["quality_recompile"]["next"])
+        # 唯一的提交走廊仍然只有"检视通过"这一条。
         self.assertEqual(
             "quality_commit", steps["quality_review"]["next"]["continue"])
         self.assertEqual(

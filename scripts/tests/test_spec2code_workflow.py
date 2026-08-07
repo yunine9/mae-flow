@@ -41,8 +41,12 @@ class Spec2CodeWorkflowTests(unittest.TestCase):
 
     def test_quality_changes_share_one_review_and_commit_corridor(self):
         steps = self.flow["steps"]
+        # 精简与规范修复各自的编译节点回到质量链，不再各拉一轮人工检视;
+        # UT 之后统一检视一次。
         self.assertEqual(
-            "quality_review", steps["verify_post_ponytail_compile"]["next"])
+            "verify_codecheck", steps["verify_post_ponytail_compile"]["next"])
+        self.assertEqual(
+            "verify_ut", steps["verify_codecheck_compile"]["next"])
         self.assertEqual(
             "quality_review", steps["quality_recompile"]["next"])
         self.assertEqual(

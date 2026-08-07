@@ -316,11 +316,17 @@ if flow:
               item.get("type") == "delivery_manifest_committed"
               for item in steps.get("delivery_review", {}).get("evidence", [])))
     check("小改规范检查不可直接跳过", not steps.get("tw_codecheck", {}).get("skippable"))
-    check("精简改源码后自动进入专用编译步骤",
+    check("精简改源码后重新编译并直接继续质量链(检视延后到 UT 之后)",
           steps.get("verify_ponytail", {}).get("source_change_next") == "verify_post_ponytail_compile"
-          and steps.get("verify_post_ponytail_compile", {}).get("next") == "quality_review"
-          and steps.get("verify_post_ponytail_compile", {}).get(
-              "quality_review_resume") == "verify_codecheck")
+          and steps.get("verify_ponytail", {}).get("source_change_defer_review") is True
+          and steps.get("verify_post_ponytail_compile", {}).get("next") == "verify_codecheck")
+    check("规范修复改源码后重新编译并继续 UT(检视同样延后)",
+          steps.get("verify_codecheck", {}).get("source_change_next") == "verify_codecheck_compile"
+          and steps.get("verify_codecheck", {}).get("source_change_defer_review") is True
+          and steps.get("verify_codecheck_compile", {}).get("next") == "verify_ut")
+    check("质量链末尾只保留一次统一人工检视",
+          steps.get("verify_ut", {}).get("test_change_review_resume") == "verify_comet"
+          and steps.get("quality_review", {}).get("next", {}).get("continue") == "quality_commit")
     check("三条流程共用 CodeCheck 机器协议",
           all(steps.get(x, {}).get("evidence", [{}])[0].get("type") == "review_codecheck"
               for x in ("verify_codecheck", "tw_codecheck", "rf_codecheck")))

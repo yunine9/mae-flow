@@ -1,5 +1,15 @@
-主 Agent 直接读取本单 `spec.md` 与 `story.md`，一次完成需求涉及的全部生产代码。不要派实现子 Agent，
+主 Agent 直接读取本单 `spec.md` 与 `story.md`，在本步骤内一次完成需求涉及的全部生产代码。不要派实现子 Agent，
 不要拆开发批次，不要创建额外的编码前计划或实现任务文档。
+
+**分块纪律（同一上下文内执行，不产生任何流程动作）**：按 `implementation.md` 已有的任务顺序逐块实现；
+每块写完先对照四项自查再写下一块——命名与邻居文件一致？有没有和本次已写或仓内已有重复的 helper？
+错误路径处理与本模块惯例一致？暴露给后续块的接口签名此刻定稿？全部块完成后通读一遍完整改动，
+处理跨块漂移（同一概念两套写法、前紧后松的错误处理），然后才进入编译。
+块与块之间不编译、不 done、不询问用户。
+
+写码前先读 `.mae-flow-work/plugin-resources/standards/code-taste-v1.md`（编码基准）与
+`standards/comment-standard-v1.md`（注释标准）；动笔前先找仓内同类实现，能复用的抽象不重造，
+新文件的命名与结构顺应同目录邻居。基准是目标不是门禁，但 Craft Reviewer 与人工检视会按它挑刺。
 
 实现完成后执行 `python "{MAEFLOW_PATH}" agent-task compile --scope "本需求完整代码增量"`，按任务卡启动
 compile-agent。编译成功后执行 `done`。此时保持代码未提交，供用户统一检视。

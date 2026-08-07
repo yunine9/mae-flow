@@ -37,6 +37,38 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             if os.path.exists(os.path.join(ROOT, path))
         ])
 
+    def test_code_taste_baseline_exists_and_has_consumers(self):
+        """标准文件必须有生产消费者——comment-standard 曾无人引用地躺了一个月。"""
+        taste = read("runtime/standards/code-taste-v1.md")
+        for marker in ("顺应优先于自包含", "按概念拆", "投机的灵活性",
+                       "目标状态", "不是门禁"):
+            self.assertIn(marker, taste)
+        build = read("flow/steps/build.md")
+        self.assertIn("standards/code-taste-v1.md", build)
+        self.assertIn("comment-standard-v1.md", build)
+        self.assertIn("四项自查", build)
+        reviewer = read("agents/craft-reviewer-agent.md")
+        self.assertIn("code-taste-v1.md", reviewer)
+        self.assertIn("品味问题与正确性问题同级", reviewer)
+        construction = read("runtime/guidance/construction.md")
+        self.assertIn("code-taste-v1.md", construction)
+        # 物化清单里必须有,否则项目本地路径是死链接
+        runtime_source = read("scripts/mae_flow_core/cli_runtime.py")
+        self.assertIn("standards/code-taste-v1.md", runtime_source)
+        self.assertIn("standards/comment-standard-v1.md", runtime_source)
+
+    def test_build_chunk_discipline_is_in_context_only(self):
+        """分块是同一上下文内的纪律,不得回退成流程批次(那是 CP 被退掉的原因)。"""
+        build = read("flow/steps/build.md")
+        self.assertIn("分块纪律", build)
+        self.assertIn("implementation.md", build)
+        self.assertIn("不编译、不 done、不询问用户", build)
+        self.assertIn("跨块漂移", build)
+        # 反回退:仍然是一步、一次编译、无实现子 Agent、无批次文档
+        self.assertIn("一次完成需求涉及的全部生产代码", build)
+        self.assertIn("不要派实现子 Agent", build)
+        self.assertIn("不要拆开发批次", build)
+
     def test_comment_standard_is_single_versioned_source(self):
         text = read("runtime/standards/comment-standard-v1.md")
         self.assertIn("新增业务注释统一使用简体中文", text)

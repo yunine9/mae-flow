@@ -1,6 +1,8 @@
 # Construction Guidance
 
-The main Agent implements the complete approved change from local `spec.md` and `story.md`; no implementation subagent or batch plan is used.
+The main Agent implements the complete approved change from local `spec.md` and `story.md`; no implementation subagent or batch plan is used. Within that single pass, write chunk by chunk following the task order in `implementation.md`: after each chunk, self-check the four items (neighbor-consistent naming, no duplicated helpers, error handling matching the module's convention, downstream interface signatures finalized) before the next chunk, and re-read the whole diff once at the end for cross-chunk drift. Chunks are an in-context discipline only — no compiles, no done, no user contact between them.
+
+Before writing, read the materialized `standards/code-taste-v1.md` and `standards/comment-standard-v1.md`, and study neighboring code first: conformance to the repository's existing abstractions, naming and error-handling conventions outranks self-contained novelty. The taste baseline is a target, not a gate; the craft reviewer and the human review judge against it.
 
 For a localized change with concise confirmed scope, proceed directly. Upgrade to full workflow when semantic risk appears: unclear behavior, cross-module impact, compatibility, security, data, public interface, shared state, or concurrency. The decision follows semantic risk, not file or line count.
 

@@ -1,5 +1,51 @@
 # 更新记录
 
+## 2026-08-07：清掉三处"说了不做数"
+
+### 门禁配置空转：两个 flag、11 个字段、一行反着说的提示
+
+`current` 每步打印的那行权限提示里，「禁止: 修改源码」由 `allow_source_edit` 决定，
+而 **guard 里没有任何判据读这个字段**——29 个步骤每步都在打印一条谁都不执行的禁令。
+更糟的是 `rf_ut` / `tw_ut` / `verify_ut` 三步同时 `allow_source_edit: true` 和 `tests_only: true`，
+那行于是打印「允许: 修改源码」，而 Edit Gate 实际只放测试路径——**说反了**。
+另外每步都提醒「禁止编辑 .comet.yaml」，那是退役机制留下的沉积。
+
+- `perms_line` 改为「写入范围」，只陈述真实成立的事：`tests_only` 是门禁真会拦的，
+  照实说并给出逃生口（`unlock source`）；`allow_*` 是步骤意图，因此不再写成「禁止 X」；
+- `guard/gate.py` 两个 context 里 **11 个无人读的字段全部删除**（`allow_source_edit`、
+  `allow_specs_write`、`step_title`、`specs_truth`、`strong_write`、`weak_write`、
+  `hits_requirement`、`hits_specs_truth`、`source_tokens`），连带清掉构造点的传参；
+- 新增红线 `dead_gate_context_fields`：门禁 context 不许有无人读的字段。这是
+  `hook_token_evidence_violations`（有读者无写入方）的镜像——**有写入方无读者**，
+  同样是在骗人：一个谁都不判的字段，要么是退役规则的残留，要么是不作数的承诺。
+  反向验证过：注入一个死字段就报 `EditGateContext.allow_source_edit`；
+- 原来靠传这些字段断言"退役督促仍不拦"的测试改为断言更强的结构事实——字段已删，
+  这些信号连表达都表达不出来。
+
+### 交付清单不认更早的提交
+
+`delivery_manifest_committed` 只比对 `本步入口 HEAD..HEAD`。可交付清单是**整单**的产物清单，
+其中一部分文件常在更早的步骤就进了 commit（质量检视后的提交、build 之后的提交）。
+那些文件不在窗口内，于是报「交付清单仍未形成提交: X」——而 X 早就在 HEAD 里了，
+Agent 拿着这句话无从下手。
+
+- 新增 `_branch_committed_paths`：以 `git merge-base <基线分支> HEAD` 为界，把本分支上
+  已经提交过的路径一并算作已提交。放宽的只是"在哪一段提交的"，没放宽"必须已提交"——
+  diff 两端都是 commit，工作区脏改动进不来，后面的 dirty 检查照旧，
+  「本步必须真的产生过提交」仍由 `commit_tagged_after_entry` 单独把关；
+- 拿不到基线分支时退回原来的窗口，不静默放行。
+
+### 文档流程链路
+
+- `docs/share/mae-flow-workflow-overview.md` §5 还在描述已退役的检查点批处理
+  （"按任务列表分批修改，每一批只处理一个相对独立的问题…每完成一批都会留下记录"）。
+  改成实际形态：一次写完全部生产代码，分块是同一次思考里的纪律而不是流程切段，
+  并说明切段的代价是每段重新理解上下文；补上独立 Reviewer 预检、批量重验证、领域归档；
+- `README.md` §6 补一段说明重新验证是**批量**的（攒到一起统一重编译一次、统一检视一次，
+  最多回流两次）。README 其余部分经核对是准确的——我上一轮说它过时，是错的；
+- `docs/share/mae-flow-workflow-overview-v3-4k.png` 里的图仍是旧链路，我无法重新生成，
+  需要人工出图。
+
 ## 2026-08-07：落入 codebase-design 与 code-review 两份 skill 的可用条目
 
 上一批只落了 `writing-for-agents`（改文档怎么写）。这批落另两份里对我们真有增量的部分——

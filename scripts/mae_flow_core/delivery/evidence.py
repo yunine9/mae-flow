@@ -172,6 +172,29 @@ class DeliveryEvidenceRules:
             )
         return self.commit_tagged(spec, state)
 
+    def _branch_committed_paths(self, state):
+        """本分支上已经提交过的路径——不只是本步入口之后那一段。
+
+        交付清单是整单的产物清单,其中一部分文件常在更早的步骤就进了 commit
+        (质量检视后的提交、build 之后的提交)。只比对本步入口 HEAD..HEAD 时,
+        这些文件"没有形成提交",清单永远核不过——而它们其实早就提交了,
+        Agent 拿着"仍未形成提交: X"也无从下手(X 已经在 HEAD 里了)。
+
+        放宽的只是"在哪一段提交的",没放宽"必须已提交":diff 的两端都是 commit,
+        工作区脏改动进不来;后面的 dirty 检查照旧;本步必须真的产生过提交由
+        commit_tagged_after_entry 单独把关。
+        """
+        baseline = ((state.get("config") or {}).get("基线分支") or "").strip()
+        if not baseline:
+            return set()
+        merge_base = self.ports.argv_output(
+            ["git", "merge-base", baseline, "HEAD"]).strip()
+        if not merge_base:
+            return set()
+        return set(self.ports.argv_output([
+            "git", "diff", "--name-only", merge_base, "HEAD", "--",
+        ]).splitlines())
+
     def delivery_manifest_committed(self, spec, state):
         manifest = state.get("delivery_manifest") or {}
         files = list(manifest.get("files") or ())
@@ -190,6 +213,7 @@ class DeliveryEvidenceRules:
         committed = set(self.ports.argv_output([
             "git", "diff", "--name-only", base, "HEAD", "--",
         ]).splitlines())
+        committed |= self._branch_committed_paths(state)
         missing = [path for path in files if path not in committed]
         if missing:
             return EvidenceResult(

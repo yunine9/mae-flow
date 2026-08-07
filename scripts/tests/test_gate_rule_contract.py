@@ -23,6 +23,7 @@ for path in (TESTS, SCRIPTS):
         sys.path.insert(0, path)
 
 from architecture_rules import (  # noqa: E402
+    dead_gate_context_fields,
     gate_rule_inventory,
     hook_token_evidence_violations,
     hook_token_writers,
@@ -145,3 +146,14 @@ class GateRuleContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeadGateContextFieldTests(unittest.TestCase):
+    def test_no_gate_context_field_is_carried_without_a_reader(self):
+        """门禁 context 里不许有无人读的字段——那是"说了不做数"的来源。
+
+        `allow_source_edit` 曾这样空转:perms_line 据它对 29 个步骤打印
+        「禁止: 修改源码」,而 guard 里没有任何判据读它;对 tests_only 的三步
+        它还让那行打印「允许: 修改源码」,与门禁实际行为相反。
+        """
+        self.assertEqual([], dead_gate_context_fields(ROOT))

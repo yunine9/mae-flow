@@ -9,11 +9,26 @@ from ..workflow.advisories import pending_advisories, render_advisories
 from .wiring import api
 
 def perms_line(step):
-    allow, forbid = [], []
-    (allow if step.get("allow_source_edit") else forbid).append("修改源码")
-    (allow if step.get("allow_specs_write") else forbid).append(
-        "写 docs/specs/ 领域真相源")
-    return "允许: " + ("、".join(allow) or "仅本步指令内动作") + ";禁止: " + "、".join(forbid + ["编辑 .comet.yaml"])
+    """本步的写入范围提示——只陈述真实成立的事。
+
+    历史上这行说了两处不作数的话:①「禁止: 修改源码」——allow_source_edit 在 guard 里
+    没有任何判据读它,29 个步骤每步都打印一条谁都不执行的禁令;②对 rf_ut/tw_ut/verify_ut
+    三步打印「允许: 修改源码」,而这三步 tests_only=True,Edit Gate 实际只放测试路径——
+    说反了。另外每步都提醒「禁止编辑 .comet.yaml」,那是退役机制留下的沉积。
+
+    现在的口径:tests_only 是门禁真会拦的,照实说并给出逃生口;allow_* 是步骤意图,
+    因此这行叫「写入范围」而不是「禁止 X」。
+    """
+    if step.get("tests_only"):
+        scope = ("只写测试路径(门禁拦源码;UT 暴露的源码缺陷经用户裁决后 "
+                 "unlock source 再改)")
+    elif step.get("allow_source_edit"):
+        scope = "源码与测试"
+    else:
+        scope = "仅本步指令内的产物"
+    if step.get("allow_specs_write"):
+        scope += " + docs/specs/ 领域真相源"
+    return "写入范围: " + scope
 
 def _spec_data(st):
     """本单的交付登记(阶段与产物指针)。

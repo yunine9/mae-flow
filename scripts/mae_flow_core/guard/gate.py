@@ -19,12 +19,8 @@ class EditGateContext:
     path: str
     match_path: str
     step: str
-    step_title: str
     inside_plugin: bool
-    specs_truth: str
-    allow_specs_write: bool
     is_source: bool
-    allow_source_edit: bool
     tests_only_patterns: tuple
     source_unlocked: bool
 
@@ -34,16 +30,9 @@ class BashWriteContext:
     command: str
     tokens: tuple
     writeish: bool
-    strong_write: bool
-    weak_write: bool
-    hits_requirement: bool
     hits_internal_state: bool
-    hits_specs_truth: bool
     step: str
-    allow_specs_write: bool
     offenders: tuple
-    source_tokens: tuple
-    allow_source_edit: bool
     tests_only_patterns: tuple
     source_unlocked: bool
     bad_test_sources: tuple

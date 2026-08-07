@@ -855,3 +855,41 @@ def hook_token_evidence_violations(root):
         for kind, location in read.items()
         if kind not in written
     )
+
+
+_GATE_CONTEXT_MODULE = "scripts/mae_flow_core/guard/gate.py"
+
+
+def dead_gate_context_fields(root):
+    """Gate context fields carried into a decision that no decision reads.
+
+    The inverse of ``hook_token_evidence_violations``: not a reader without a
+    writer, but a *writer without a reader*. ``perms_line`` printed
+    "禁止: 修改源码" on 29 steps off ``allow_source_edit`` while no gate rule
+    ever read it — a prohibition that never held, and on the three tests_only
+    steps the same field made the line claim the opposite of what the gate did.
+    A field the caller computes and passes for nobody is either a retired rule's
+    residue or an unenforced promise; both are lies about what the gate does.
+    """
+    root_path = Path(root)
+    module = root_path / _GATE_CONTEXT_MODULE
+    if not module.exists():
+        return []
+    declared = {}
+    for node in _parse(os.fspath(module)).body:
+        if not isinstance(node, ast.ClassDef) or node.name == "GateDecision":
+            continue
+        for item in node.body:
+            if isinstance(item, ast.AnnAssign) and isinstance(
+                    item.target, ast.Name):
+                declared.setdefault(item.target.id, node.name)
+    if not declared:
+        return []
+    read = set()
+    for path in _production_files(root):
+        for node in ast.walk(_parse(os.fspath(path))):
+            if isinstance(node, ast.Attribute):
+                read.add(node.attr)
+    return sorted(
+        "%s.%s" % (declared[field], field)
+        for field in declared if field not in read)

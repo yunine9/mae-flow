@@ -114,3 +114,68 @@ class DeliveryCommitCycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManifestSeesEarlierBranchCommitsTests(unittest.TestCase):
+    """更早的步骤已经提交过的清单文件,不该被判成"仍未形成提交"。
+
+    交付清单覆盖整单产物,而质量检视后的提交、build 后的提交都早于交付检视步。
+    只比对本步入口 HEAD..HEAD 时那些文件不在窗口内,清单永远核不过,
+    而 Agent 拿到"仍未形成提交: X"也无从下手——X 已经在 HEAD 里了。
+    """
+
+    def rules(self, step_window=(), branch_window=()):
+        def argv(arguments):
+            if arguments[:3] == ["git", "cat-file", "-t"]:
+                return "commit"
+            if arguments[:3] == ["git", "log", "--format=%H"]:
+                return "new-head"
+            if arguments[:2] == ["git", "merge-base"]:
+                return "branch-base"
+            if arguments[:3] == ["git", "diff", "--name-only"]:
+                base = arguments[3]
+                return "\n".join(
+                    branch_window if base == "branch-base" else step_window)
+            return ""
+
+        return DeliveryEvidenceRules(types.SimpleNamespace(
+            argv_output=argv,
+            shell_output=lambda command: (
+                "[REQ-1][feat]x" if "pretty=%s" in command else ""),
+            dirty_paths=lambda: [],
+        ))
+
+    def state(self):
+        return {
+            "current": "delivery_review",
+            "config": {"单号": "REQ-1", "基线分支": "master"},
+            "step_heads": {"delivery_review": "base-head"},
+            "delivery_manifest": {
+                "files": ["src/a.py", "docs/specs/radio.md"],
+                "confirmed": True,
+            },
+        }
+
+    def test_file_committed_before_this_step_still_counts(self):
+        result = self.rules(
+            step_window=("docs/specs/radio.md",),
+            branch_window=("src/a.py", "docs/specs/radio.md"),
+        ).delivery_manifest_committed({}, self.state())
+        self.assertTrue(result.passed, result.reason)
+
+    def test_file_committed_nowhere_still_blocks(self):
+        result = self.rules(
+            step_window=("docs/specs/radio.md",),
+            branch_window=("docs/specs/radio.md",),
+        ).delivery_manifest_committed({}, self.state())
+        self.assertFalse(result.passed)
+        self.assertIn("src/a.py", result.reason)
+
+    def test_missing_baseline_config_falls_back_to_step_window(self):
+        state = self.state()
+        state["config"].pop("基线分支")
+        result = self.rules(
+            step_window=("docs/specs/radio.md",),
+            branch_window=("src/a.py", "docs/specs/radio.md"),
+        ).delivery_manifest_committed({}, state)
+        self.assertFalse(result.passed)

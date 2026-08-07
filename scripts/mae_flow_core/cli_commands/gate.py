@@ -107,13 +107,9 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
         path=p,
         match_path=pm,
         step=sid or "",
-        step_title=step.get("title", ""),
         inside_plugin=api.norm(os.path.abspath(p)).lower().startswith(
             plugin_root + "/"),
-        specs_truth=flow["specs_truth"],
-        allow_specs_write=bool(step.get("allow_specs_write")),
         is_source=api._is_source_path(p, st, flow),
-        allow_source_edit=bool(step.get("allow_source_edit")),
         tests_only_patterns=patterns,
         source_unlocked=(
             unlock.get("scope") == "source"
@@ -293,21 +289,12 @@ def _gate_bash_writes(flow, st, sid, step, intent, jdie):
         command=c,
         tokens=tuple(toks),
         writeish=writeish,
-        strong_write=strong_write,
-        weak_write=weak_write,
-        hits_requirement=guard_intent.hits_path(
-            intent, r"(^|/)docs/req/"),
         hits_internal_state=guard_intent.hits_path(
             intent,
             r"\.mae-flow(\.json|-history\.jsonl|-need-reload|-defaults\.json)"
             r"|\.mae-flow-work/moonlight-report\.md"),
-        hits_specs_truth=guard_intent.hits_path(
-            intent, flow["specs_truth"]),
         step=sid or "",
-        allow_specs_write=bool(step.get("allow_specs_write")),
         offenders=tuple(offenders),
-        source_tokens=tuple(source_toks),
-        allow_source_edit=bool(step.get("allow_source_edit")),
         tests_only_patterns=patterns,
         source_unlocked=source_unlocked,
         bad_test_sources=tuple(bad),

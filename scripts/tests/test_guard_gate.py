@@ -25,12 +25,8 @@ class EditGateTests(unittest.TestCase):
             "path": "README.md",
             "match_path": "README.md",
             "step": "build",
-            "step_title": "实现",
             "inside_plugin": False,
-            "specs_truth": r"(^|/)openspec/specs/",
-            "allow_specs_write": False,
             "is_source": False,
-            "allow_source_edit": True,
             "tests_only_patterns": (),
             "source_unlocked": False,
         }
@@ -67,7 +63,7 @@ class EditGateTests(unittest.TestCase):
                     match_path="openspec/specs/api/spec.md")),
                 ("source", self.context(
                     path="src/main.py", match_path="src/main.py",
-                    is_source=True, allow_source_edit=False)),
+                    is_source=True)),
                 ("docs-req", self.context(
                     path="docs/req/REQ1.md", match_path="docs/req/REQ1.md",
                     step="config_confirm")),
@@ -88,16 +84,9 @@ class BashWriteGateTests(unittest.TestCase):
             "command": "echo ok",
             "tokens": (),
             "writeish": False,
-            "strong_write": False,
-            "weak_write": False,
-            "hits_requirement": False,
             "hits_internal_state": False,
-            "hits_specs_truth": False,
             "step": "build",
-            "allow_specs_write": False,
             "offenders": (),
-            "source_tokens": (),
-            "allow_source_edit": True,
             "tests_only_patterns": (),
             "source_unlocked": False,
             "bad_test_sources": (),
@@ -116,26 +105,24 @@ class BashWriteGateTests(unittest.TestCase):
         self.assertIn("流程状态", internal.message)
 
     def test_process_nudges_no_longer_block_bash_writes(self):
-        """经 Bash 写需求/规格/源码的流程督促已退役。"""
-        for label, context in (
-                ("docs-req", self.context(
-                    step="config_confirm", writeish=True,
-                    hits_requirement=True)),
-                ("specs", self.context(
-                    writeish=True, hits_specs_truth=True)),
-                ("source", self.context(
-                    offenders=("src/main.py",), allow_source_edit=False)),
-                ("weak-source", self.context(
-                    weak_write=True, source_tokens=("src/main.py",),
-                    allow_source_edit=False)),
-        ):
-            with self.subTest(rule=label):
-                self.assertEqual("allow", decide_bash_write(context).kind)
+        """经 Bash 写需求/规格/源码的流程督促已退役——且门禁已看不见这些信号。
+
+        这些督促曾经靠 hits_requirement / hits_specs_truth / source_tokens /
+        allow_source_edit 判定。退役后字段还挂在 context 上空转了一段时间,
+        现已删除:退役从"传进去也不拦"升级为"根本无法表达"。
+        """
+        retired = {"hits_requirement", "hits_specs_truth", "source_tokens",
+                   "allow_source_edit", "allow_specs_write",
+                   "strong_write", "weak_write"}
+        self.assertEqual(
+            set(), retired & set(BashWriteContext.__dataclass_fields__))
+        # 仍可表达的那一例:只有源码 offenders、没有 tests_only 时不拦
+        self.assertEqual("allow", decide_bash_write(self.context(
+            offenders=("src/main.py",))).kind)
 
     def test_ut_step_still_blocks_bash_writes_to_product_code(self):
         result = decide_bash_write(self.context(
             offenders=("src/main.py",),
-            allow_source_edit=True,
             tests_only_patterns=(r"(^|/)tests/",),
             bad_test_sources=("src/main.py",),
         ))

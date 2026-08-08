@@ -60,6 +60,7 @@ def _dispatch_global_command(flow, state, runtime, args):
         return _dispatch_moonlight_start(
             flow, state, runtime, args)
     document_handler = {
+        "panel": api.cmd_panel,          # 只读展示层:不写状态、不拦任何东西
         "lightcheck": api.cmd_lightcheck,
         "local-spec": api.cmd_local_spec,
         "domain-docs": api.cmd_domain_docs,

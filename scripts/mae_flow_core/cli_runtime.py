@@ -6,6 +6,7 @@ import types
 from .adapters.project_launcher import install_launcher_when_active
 from .cli_commands import shared
 from .cli_commands import symbol_refs as _symbol_refs
+from .cli_commands import panel as _panel
 from .cli_commands import codespec_engine as _codespec_engine
 from .cli_commands.shared import *  # noqa: F401,F403
 from .cli_commands.wiring import api
@@ -126,6 +127,7 @@ _COMMAND_MODULES = (
     _lifecycle,
     _lean_migration,
     _symbol_refs,
+    _panel,
     _codespec_engine,
     _local_spec,
     _domain_docs,

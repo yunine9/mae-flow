@@ -415,6 +415,45 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 `adapters/hook_active_events.py` 装配平台证据与路由；`hooks/dispatch.py` 只保留协议入口，
 禁止把识别正则和验签状态机加回入口。
 
+### 3.7 面板与通知（展示层，2026-08-08 落地）
+
+**分层定位**：展示层是编排层/执行层之外的第三层，随模型变强而**变重**——模型越强，
+人越少盯过程，但裁决点仍在人手里，那几次出现的信息质量决定整套东西的价值。
+
+`scripts/mae_flow_core/panel/`（只读，不写任何状态）：
+
+| 模块 | 职责 |
+| --- | --- |
+| `snapshot.py` | **唯一结构化出口**。`panel --json` 打印它；任何展示层（含公司可视化壳）都从这个口取数，不许爬中文文本 |
+| `markdown.py` | md 子集 → HTML（只覆盖我们自己模板的语法面，故不引第三方 JS） |
+| `plantuml.py` / `plantuml_sequence.py` / `plantuml_flow.py` | PlantUML 子集 → 内联 SVG（时序/活动/组件类图），识别不了就交回源码 |
+| `diffview.py` | 统一 diff → 左右双排对照，超 700 行**报数**截断 |
+| `page.py` / `assets.py` | 自包含单文件 HTML；内网零依赖、零服务 |
+| `notify.py` | 阶段推进与"需要你裁决"的主动通知 |
+
+**四条铁律**（各有测试钉死，改前先读 `panel/__init__.py`）：
+
+1. **只读**——`test_panel_snapshot` 断言调用前后 `.mae-flow.json` 字节与 mtime 不变；
+2. **可缺席**——没有面板流程一模一样跑完，任何"只有面板上能确认"的环节都是设计错误；
+3. **软失败**——取不到的东西进 `warnings`，永不抛栈、永不非零退出；
+4. **不触发重活**——只读文件与 git（带 timeout），禁止调 CodeCheck/npm/编译。
+
+**版面优先级是契约不是审美**：待你裁决 → 产物 → 变更 → 证据 → 建议 → 进度（最后，
+且**不给百分比**：flow 有分支与回退，算出来必然是编的）。页面**不提供任何推进按钮**——
+那是绕过证据的官方通道，比模型偷懒危险得多。`test_panel_page` 锁住这两条。
+
+**降级第三态**：`degraded=true`（CodeCheck TOOL_ERROR 等）必须渲染成区别于通过的颜色。
+"工具没跑起来"和"跑了且干净"混成一个绿灯，是这套系统最不能容忍的谎。
+
+**通知**：`advance()` 落地后调用 `notify.announce()`，只在两种时刻响——到了需要用户
+裁决的步骤、跨入新阶段；同阶段内推进保持安静（噪声化的通知等于没有通知）。
+桌面弹窗默认关闭，在 `.mae-flow-defaults.json` 写 `"桌面通知": true` 才启用；
+`MAE_FLOW_NO_NOTIFY=1` 可强制关闭。阶段表在 `notify.PHASES`，是 step→阶段的唯一来源，
+`test_panel_notify` 用覆盖断言拦住 flow.json 增删步骤造成的漂移。
+
+**为什么不是 `status --json`**：`status` 已经在打印原始状态 JSON，再加 `--json` 会撞语义。
+`panel` 是全新只读命令，既有路径一行没动。
+
 ## 四、comet 思想源合同（v3 后 comet 不再是运行组件，方法约定内化到这些落点）
 
 v3 摘除第二状态机后，`.comet/config.yaml`、`.comet.yaml`、`capability comet-build-defaults`

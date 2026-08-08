@@ -7,6 +7,7 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core.panel import notify
 from mae_flow_core.quality.attempts import begin_attempt
 from mae_flow_core.workflow.build_scope import (
     build_scope_hint,
@@ -158,6 +159,9 @@ def advance(flow, st, sid, step, tag, note=""):
     if api._moonlight(st) and nxt == "moonlight_review":
         api._write_moonlight_report(flow, st)
     print(f"[mae-flow] {sid} {tag} → 进入 {nxt}\n")
+    # 只在"需要你裁决"与"进入新阶段"两种时刻响;失败即静默,绝不影响推进。
+    notify.announce(flow, sid, nxt, os.getcwd(),
+                    st.get("config", {}).get("单号", ""))
     api.print_current(flow, st)
 
 def _validated_pending_config(step, st, set_values):

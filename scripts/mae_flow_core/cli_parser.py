@@ -20,7 +20,7 @@ class MFParser(argparse.ArgumentParser):
             '  python "%s" current\n'
             '  python "%s" done [--choice 值] [--set 键=值]\n'
             '  python "%s" init\n'
-            "其余子命令: status|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
+            "其余子命令: status|panel|doctor|report|envcheck|skip|goto|unlock|allow|spec|template|"
             "agent-task|lightcheck|accept-risk|moonlight|action|messages|config-review|requirement-record|"
             "story-localize|local-spec|domain-docs|domain-archive|manifest|codecheck-scan|"
             "codecheck-scope|codecheck-record|approve-exemption|"
@@ -173,6 +173,14 @@ def parse_args(argv=None):
         "symbol-refs",
         help="全仓符号引用清单(含 XML/YAML/SQL 等编译器看不见的文件),改动收口用")
     symbol_refs.add_argument("symbols", nargs="+", help="要核对的符号,可多个")
+    panel = sub.add_parser(
+        "panel",
+        help="交付现场只读面板(文档/变更/证据/建议);--json 输出结构化快照")
+    panel.add_argument(
+        "--json", action="store_true",
+        help="只打印结构化快照,不生成 HTML;任何展示层都从这个出口取数")
+    panel.add_argument(
+        "--out", help="面板输出路径,默认 .mae-flow-work/panel.html")
     report = sub.add_parser("report")
     report.add_argument("--all", action="store_true")
     template = sub.add_parser("template")

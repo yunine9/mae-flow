@@ -159,6 +159,11 @@ details.note summary:hover{color:var(--accent)}details.note ul{margin:6px 0 0;pa
 details.note li{margin:2px 0}.paths{list-style:none;margin:5px 0 0;padding:0}
 .paths li{font:9px var(--mono);padding:2px 0}.paths a{color:var(--dim);text-decoration:none}
 .paths a:hover{color:var(--accent)}
+/* 待裁决卡片里"点开就地阅读"的文档按钮:链接样式,不能长成系统灰按钮 */
+.paths button{background:none;border:0;padding:0;cursor:pointer;font:inherit;
+  font-family:var(--mono);font-size:12px;color:var(--accent);
+  border-bottom:1px solid var(--accent)}
+.paths button:hover{opacity:.75}
 footer{display:flex;justify-content:space-between;padding:8px 11px;border-top:1px solid var(--line);
   background:var(--code-bg);color:var(--faint);font-size:9px}footer code{font-family:var(--mono)}
 

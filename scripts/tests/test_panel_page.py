@@ -163,11 +163,13 @@ class PanelPageTests(unittest.TestCase):
             for name in ("grill.md", "spec.md", "story.md",
                          "implementation.md"):
                 self.assertIn(name, html)
-            self.assertIn('<span class="asset-kind">业务规格</span>', html)
-            self.assertIn('<span class="asset-kind">实现说明</span>', html)
-            self.assertIn("Grill / 决策", html)
+            self.assertIn('<span class="asset-kind">规格条目</span>', html)
+            self.assertIn('<span class="asset-kind">实现记录</span>', html)
+            # 显示名单一来源(snapshot DOC_KINDS);Grill 等上游术语不进用户视野
+            self.assertIn("需求澄清 / 决策", html)
+            self.assertNotIn("Grill / 决策", html)
             self.assertIn("Story", html)
-            self.assertIn("实现说明 / 代码", html)
+            self.assertIn("实现记录 / 代码", html)
         finally:
             shutil.rmtree(os.path.join(TESTS, ".mae-flow-work"), True)
 
@@ -189,6 +191,24 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn('class="history-result">已完成</span>', html)
         self.assertNotIn('class="history-result">done</span>', html)
         self.assertIn("质量事实", html)
+
+    def test_summary_deduplicates_files_across_change_groups(self):
+        """同一文件常同时在"已提交"与"未提交"两组:首屏文件数必须去重。
+        实测踩过:两组直加显示 11 个文件,真实去重是 8——首屏第一个数字撒谎。"""
+        overlapping = [
+            {"title": "已提交", "note": "", "files": [
+                {"path": "a.py", "added": 10, "removed": 1, "patch": ""}]},
+            {"title": "未提交", "note": "", "files": [
+                {"path": "a.py", "added": 5, "removed": 0, "patch": ""}]},
+        ]
+        html = build(changes=overlapping)
+        self.assertIn("1 个文件 · +15 / −1", html)
+
+    def test_history_count_excludes_the_now_row(self):
+        """"现在"行不是执行记录,不计入"最近 N 条"。"""
+        html = build()
+        self.assertIn("最近 2 条", html)     # STATE 里恰有两条 history
+        self.assertIn(">现在<", html.replace("<time>现在</time>", ">现在<"))
 
 
 if __name__ == "__main__":

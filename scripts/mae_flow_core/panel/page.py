@@ -11,16 +11,6 @@ import os
 from . import assets, diffview, markdown, notify, plantuml
 from .markdown import escape
 
-DOC_DISPLAY_LABELS = {
-    "survey": "调研",
-    "grill-prep": "Grill 准备",
-    "grill": "需求澄清",
-    "decisions": "决策记录",
-    "spec": "业务规格",
-    "story": "Story",
-    "implementation": "实现说明",
-}
-
 def _fence_hook(language, body):
     """md 里的 plantuml 块就地出图;出不了就显示源码并说清为什么。"""
     if language != "plantuml":
@@ -42,7 +32,9 @@ def _document_panes(documents):
     rows, tabs, panes = [], [], []
     for doc in documents:
         key = "doc-" + doc["kind"]
-        display_label = DOC_DISPLAY_LABELS.get(doc["kind"], doc["label"])
+        # 显示名只有一个来源(snapshot 的 DOC_KINDS):第二张标签表必漂移,
+        # 而且上游术语(Grill/openspec)不进用户视野——封装原则。
+        display_label = doc["label"]
         try:
             with io.open(doc["path"], encoding="utf-8", errors="replace") as fh:
                 body = markdown.render(fh.read(), _fence_hook)
@@ -199,7 +191,7 @@ def _history_section(progress):
     return ('<section class="panel-section history"><div class="section-head">'
             '<h2>执行记录</h2><span>最近 %d 条</span></div>'
             '<div class="history-table">%s</div></section>'
-            % (len(rows), "".join(rows)))
+            % (len(rows) - 1, "".join(rows)))   # "现在"行不是记录,不计入条数
 
 
 def _summary(snapshot, changes):
@@ -207,12 +199,15 @@ def _summary(snapshot, changes):
     files = [item for group in changes for item in group.get("files", [])]
     added = sum(item.get("added", 0) for item in files)
     removed = sum(item.get("removed", 0) for item in files)
+    # 同一文件常同时出现在"已提交"与"未提交"两组——文件数必须去重,
+    # 否则首屏第一个数字就在撒谎(实测 11 vs 真实 8)。
+    distinct = len({item.get("path", "") for item in files})
     progress = snapshot["progress"]
     current = progress.get("step_title") or progress.get("step") or "—"
     cells = (
         ("当前分支", snapshot["repo"].get("branch") or "—", "mono"),
         ("代码增量", "%d 个文件 · +%d / −%d" %
-         (len(files), added, removed), ""),
+         (distinct, added, removed), ""),
         ("当前步骤", current, ""),
         ("提交位置", snapshot["repo"].get("head") or "—", "mono"),
         ("状态修订", "rev %s" % (snapshot.get("state_revision") or 0), "mono"),
@@ -226,9 +221,11 @@ def _summary(snapshot, changes):
 def _asset_chain(documents):
     """说明过程产物的消费关系;存在性仍以实际资产卡片为准。"""
     empty = "" if documents else '<span class="chain-empty">本单尚无过程产物</span>'
-    return ('<div class="asset-chain"><b>Grill / 决策</b><i>→</i>'
-            '<b>业务规格</b><i>→</i><b>Story</b><i>→</i>'
-            '<b>实现说明 / 代码</b>%s</div>' % empty)
+    # 链条节点名与资产卡片的显示名一字不差(都来自 snapshot 的 DOC_KINDS);
+    # 上游术语(Grill)不进用户视野——用户话术封装原则。
+    return ('<div class="asset-chain"><b>需求澄清 / 决策</b><i>→</i>'
+            '<b>规格条目</b><i>→</i><b>Story</b><i>→</i>'
+            '<b>实现记录 / 代码</b>%s</div>' % empty)
 
 
 def _evidence_rows(evidence, steps_done):

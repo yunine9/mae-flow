@@ -269,13 +269,13 @@ class LightCheckTests(unittest.TestCase):
 
     def test_cross_language_changed_logic_reports_every_numeric_literal(self):
         fixtures = (
-            ("logic.cpp", "int apply(int value) {\n  return value * 0;\n}\n", 2, "0"),
+            ("logic.cpp", "int apply(int value) {\n  return value * 7;\n}\n", 2, "7"),
             ("Logic.java", (
                 "class Logic {\n  int apply(int value) {\n"
-                "    return value + 1;\n  }\n}\n"), 3, "1"),
+                "    return value + 30;\n  }\n}\n"), 3, "30"),
             ("Logic.cs", (
                 "class Logic {\n  int Apply(int value) {\n"
-                "    return value - 2;\n  }\n}\n"), 3, "2"),
+                "    return value - 42;\n  }\n}\n"), 3, "42"),
             ("logic.js", (
                 "function apply(value) {\n  return value * 10;\n}\n"), 2, "10"),
             ("logic.ts", (
@@ -291,6 +291,21 @@ class LightCheckTests(unittest.TestCase):
                 self.assertEqual(len(magic), 1, result)
                 self.assertEqual(magic[0]["line"], line, result)
                 self.assertEqual(magic[0]["literal"], literal, result)
+
+    def test_unremarkable_values_zero_one_two_are_never_magic(self):
+        """checkstyle 同款白名单:0/1/2 是初始化/自增/二分的通用值,报它只有噪声。
+
+        实弹校准:五毒夹具 58 条发现 54 条魔法数字,大半是 `total = 0`、`i + 1`——
+        淹没结构发现并吃光 advisory 的 12 条名额。"""
+        source = (
+            "def apply(value):\n"
+            "    total = 0\n"
+            "    total += 1\n"
+            "    half = value / 2\n"
+            "    return total + half + 9527\n")
+        result = self.analyze("noise.py", source, changed={2, 3, 4, 5})
+        magic = self.magic_findings(result)
+        self.assertEqual(["9527"], [item["literal"] for item in magic], result)
 
     def test_named_constants_are_extraction_not_magic_number_usage(self):
         fixtures = (

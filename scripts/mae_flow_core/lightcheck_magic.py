@@ -393,6 +393,22 @@ def _has_explanation(comment):
     return len(_COMMENT_WORD.findall(comment)) >= 3
 
 
+def _is_unremarkable_number(literal):
+    """checkstyle 同款默认白名单:0/1/2 是初始化、自增与二分的通用值。
+
+    实弹校准(2026-08-08):一个五毒俱全的夹具函数打出 58 条发现,54 条是魔法数字,
+    其中大半是 `total = 0`、`i + 1` 这类——噪声淹没结构发现,还会吃光 advisory
+    的 12 条展示名额。报 0/1/2 不改变任何人的行为,只消耗信任。"""
+    try:
+        value = int(literal, 0)
+    except ValueError:
+        try:
+            value = float(literal)
+        except ValueError:
+            return False
+    return value in (0, 1, 2)
+
+
 def find_magic_numbers(path, source, changed_lines):
     """Return changed-line findings, or None when tokenization is uncertain."""
     if _is_test_data_path(path):
@@ -419,6 +435,8 @@ def find_magic_numbers(path, source, changed_lines):
             continue
         for match in _NUMBER.finditer(facts.code):
             literal = match.group(0)
+            if _is_unremarkable_number(literal):
+                continue
             python_masked = _python_number_is_masked(
                 python_tokens, python_indices, line, literal)
             if _is_enum_member_number(enum_spans, line, match):

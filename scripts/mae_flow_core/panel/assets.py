@@ -182,11 +182,14 @@ footer{display:flex;justify-content:space-between;padding:8px 11px;border-top:1p
 #viewer.on{display:block}
 .vbox{max-width:920px;margin:0 auto;background:var(--card);
   border:1px solid var(--line);border-radius:12px;
-  box-shadow:0 16px 48px rgba(0,0,0,.25)}
-.vbar{position:sticky;top:0;background:var(--card);
+  box-shadow:0 16px 48px rgba(0,0,0,.25);
+  display:flex;flex-direction:column;max-height:calc(100vh - 48px)}
+/* 标题栏与标签行固定,滚动只发生在内容区内部——sticky 会让正文从
+   弹层顶部内边距那条缝里穿到标题栏上方(实测截图确认过)。 */
+.vbar{flex:none;background:var(--card);
   border-bottom:1px solid var(--line);border-radius:12px 12px 0 0;
   padding:11px 18px;display:flex;flex-wrap:wrap;align-items:center;
-  gap:8px 12px;z-index:2}
+  gap:8px 12px}
 .vbar .vt{font-weight:600;font-size:14px}
 .vbar .vp{font-family:var(--mono);font-size:11px;color:var(--faint);
   word-break:break-all}
@@ -195,13 +198,13 @@ footer{display:flex;justify-content:space-between;padding:8px 11px;border-top:1p
   background:var(--bg);border:1px solid var(--line);border-radius:7px;
   padding:4px 11px;text-decoration:none;cursor:pointer;white-space:nowrap}
 .vbar a:hover,.vbar button:hover{color:var(--accent);border-color:var(--accent)}
-.vtabs{display:flex;flex-wrap:wrap;gap:5px;padding:10px 18px 0}
+.vtabs{flex:none;display:flex;flex-wrap:wrap;gap:5px;padding:10px 18px}
 .vtabs button{font:inherit;font-size:11.5px;background:var(--bg);
   color:var(--dim);border:1px solid var(--line);border-radius:20px;
   padding:2px 11px;cursor:pointer}
 .vtabs button.on{color:var(--accent);border-color:var(--accent);font-weight:600}
 .pane{display:none}
-.pane.on{display:block}
+.pane.on{display:block;flex:1 1 auto;min-height:0;overflow-y:auto}
 
 /* ── 文档正文 ── */
 .md{padding:8px 28px 32px;font-size:14.5px;line-height:1.74}
@@ -310,6 +313,7 @@ function show(key){
   document.getElementById('vpath').textContent = pane.dataset.rel;
   V.classList.add('on');
   V.scrollTop = 0;
+  pane.scrollTop = 0;          // 滚动在内容区内部,切换文件回到顶部
 }
 function hide(){ V.classList.remove('on'); }
 function dx(el){

@@ -210,6 +210,17 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("最近 2 条", html)     # STATE 里恰有两条 history
         self.assertIn(">现在<", html.replace("<time>现在</time>", ">现在<"))
 
+    def test_viewer_scrolls_inside_the_pane_not_under_a_sticky_bar(self):
+        """弹层标题栏固定、滚动只发生在内容区内部。
+
+        sticky 方案实测有 bug:滚动容器带内边距时,正文会从标题栏上方的
+        缝里穿出去,标题栏悬在内容中间(截图确认过)。回归锁:面板 CSS
+        不再使用 sticky,内容区自己滚。"""
+        from mae_flow_core.panel import assets
+        self.assertNotIn("position:sticky", assets.CSS)
+        self.assertIn("overflow-y:auto", assets.CSS)
+        self.assertIn("pane.scrollTop = 0", assets.JS)
+
 
 if __name__ == "__main__":
     unittest.main()

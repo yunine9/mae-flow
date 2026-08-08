@@ -164,3 +164,20 @@ class StoryContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoryDiagramLanguageTests(unittest.TestCase):
+    """实战发现:4+1 视图必须 PlantUML——公司评审工具只渲染它,别的等于没画。
+
+    三处口径一致:模板(单一真相源)、生成 agent、Story 设计检视。
+    """
+
+    def test_plantuml_is_pinned_in_template_generator_and_reviewer(self):
+        for path in ("skills/mae-flow/assets/STORY-TEMPLATE.md",
+                     "agents/story-generator-agent.md",
+                     "agents/craft-reviewer-agent.md"):
+            with self.subTest(path=path):
+                self.assertIn("plantuml", read(path))
+        template = read("skills/mae-flow/assets/STORY-TEMPLATE.md")
+        self.assertIn("```plantuml 代码块", template)
+        self.assertIn("评审工具只渲染", template)

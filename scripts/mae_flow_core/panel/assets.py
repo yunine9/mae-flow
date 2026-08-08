@@ -263,6 +263,9 @@ footer code{font-family:var(--mono)}
 .dr.hk .c{color:var(--run)}
 .dr.cut{background:var(--warn-bg)}
 .dr.cut .c{color:var(--warn)}
+.dr.exp{background:var(--run-bg);cursor:pointer}
+.dr.exp .c{color:var(--run);text-align:center}
+.dr.exp:hover .c{text-decoration:underline}
 @media (max-width:760px){
   .dhead{display:none}
   .dr{grid-template-columns:38px minmax(0,1fr)}
@@ -295,6 +298,11 @@ function show(key){
   V.scrollTop = 0;
 }
 function hide(){ V.classList.remove('on'); }
+function dx(el){
+  var gap = el.nextElementSibling;
+  if (gap) { gap.hidden = false; }
+  el.parentNode.removeChild(el);
+}
 V.addEventListener('click', function(e){ if (e.target === V) hide(); });
 document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') hide();

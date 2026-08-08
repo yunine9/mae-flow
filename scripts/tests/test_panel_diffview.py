@@ -100,6 +100,37 @@ class DiffViewTests(unittest.TestCase):
     def test_empty_patch_is_not_an_error(self):
         self.assertIn("变更前", diffview.render(""))
 
+    def test_long_unchanged_run_collapses_into_an_expander(self):
+        """全量上下文的 patch:未改动长段折叠,内容埋在 hidden 容器里可点开。"""
+        ctx = "\n".join(" line %d" % index for index in range(1, 41))
+        html = diffview.render("@@ -1,41 +1,41 @@\n" + ctx + "\n-old\n+new")
+        # 文件头 40 行:头部不留可见行(前面没有改动),尾部留 3 行 → 折 37
+        self.assertIn("展开 37 行未改动", html)
+        self.assertIn("<div hidden>", html)
+        self.assertIn('onclick="dx(this)"', html)
+        # 折叠区间是 1..37(在 hidden 容器里),尾部可见 3 行(38..40)在其后
+        hidden_start = html.index("<div hidden>")
+        self.assertNotIn("line 1<", html[:hidden_start])
+        self.assertGreater(html.index("line 37"), hidden_start)
+        self.assertGreater(html.index("line 38"), hidden_start)
+        for visible in ("line 38", "line 39", "line 40"):
+            # 双排:同一行内容左右各一格,恰好出现两次(且只有一行)
+            self.assertEqual(2, html.count(visible))
+
+    def test_short_unchanged_run_is_not_worth_a_button(self):
+        ctx = "\n".join(" line %d" % index for index in range(1, 6))
+        html = diffview.render("@@ -1,6 +1,6 @@\n" + ctx + "\n+new")
+        self.assertNotIn("展开", html)
+        self.assertNotIn("hidden", html)
+
+    def test_oversized_gap_is_announced_not_embedded(self):
+        """超过内嵌上限的段不塞进页面——大文件会把面板撑爆,但必须说出来。"""
+        ctx = "\n".join(" x%d" % index for index in range(1, 402))
+        html = diffview.render("@@ -1,402 +1,402 @@\n" + ctx + "\n+new")
+        self.assertIn("行未改动（过长未内嵌，完整内容看源文件）", html)
+        self.assertNotIn("展开", html)
+        self.assertNotIn("<div hidden>", html)
+
 
 if __name__ == "__main__":
     unittest.main()

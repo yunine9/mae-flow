@@ -133,11 +133,15 @@ def changes(root, base):
     """两组变更:本单已提交范围、当前未提交。patch 不进快照,只进 HTML。"""
     from . import diffview
     groups = []
-    plans = [("未提交", "工作区待检视增量", ["diff", "--numstat"], ["diff"])]
+    # -U999999:整个文件都进 patch,页面把未改动长段折叠成"展开"——
+    # file:// 页面没有运行时读文件的能力,全文必须生成时就埋进去。
+    plans = [("未提交", "工作区待检视增量",
+              ["diff", "--numstat"], ["diff", "-U999999"])]
     if base:
         span = "%s..HEAD" % base
         plans.insert(0, ("已提交", "本单范围 %s..HEAD" % base,
-                         ["diff", "--numstat", span], ["diff", span]))
+                         ["diff", "--numstat", span],
+                         ["diff", "-U999999", span]))
     for title, note, stat_args, patch_args in plans:
         stats = diffview.numstat(_git(root, *stat_args))
         patches = diffview.split_patch(_git(root, *patch_args))

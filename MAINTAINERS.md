@@ -59,6 +59,21 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
   (IMPLEMENTATION 模板同款判据)。第二个模型真到位时,升级动作 =
    替换 guidance/方法层 + 删薄步骤正文,flow.json 与证据层零改动。
 
+### 执行者替换手册(三种插槽,全都不碰 flow.json 与证据层)
+
+判据:流程只认证据、不认谁干的 = 插槽;定义产物格式与真相源的 = 主板,不可插拔。
+
+| 插槽 | 现有 adapter | 换更强 skill 的动作 |
+|------|--------------|---------------------|
+| 编译(config 的「编译方式」) | build-fix / mvn / 任意命令 | 改 .mae-flow-defaults.json 预设,证据仍是 successful_quality_execution |
+| UT 生成(config 的「UT生成方式」) | AutoUT / java-autout / 仓内写法 | 同上;证据仍是"真实生成并运行 + PASS" |
+| 方法包(ponytail 等) | pack 注入 | 换 runtime/vendor 下的 SKILL.md + capability_shared 注册表一行;verify 包的拔除即先例 |
+| 蒸馏方法(guidance/standards) | 本仓自有文件 | 直接重写,test_native_guidance 语义红线守住不退化 |
+| 质量 agent(reviewer/fixer/generator) | agents/*.md | 换 agent 定义;流程只认任务卡 + 生命周期观察 |
+
+**主板(换它=改合同,不是换插件)**:流程图、证据链、spec 引擎与真相源格式、
+门禁、任务卡结构。OpenSpec 已内化为主板;Superpowers 已蒸馏,可换的是蒸馏物。
+
 ### 设计原则（改任何代码前先读）
 
 1. **不信口头汇报，只信磁盘**。推进流程的唯一凭据是文件系统与 git 的真实状态（`done` 的证据校验）。任何新功能如果依赖"模型说它做了"，就是错的。

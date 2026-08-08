@@ -353,7 +353,9 @@ def build(root=".", state=None, flow=None):
                 for key, sub in (("lightcheck", "lightcheck/latest.md"),
                                  ("codecheck", "codecheck-logs"),
                                  ("agent_tasks", "agent-tasks"),
-                                 ("role_tasks", "role-tasks"))
+                                 ("role_tasks", "role-tasks"),
+                                 # 月光报告:无人值守一整夜,它是用户唯一的现场
+                                 ("moonlight_report", "moonlight-report.md"))
                 if os.path.exists(_abs(root, WORK_DIR, sub))
             },
         },

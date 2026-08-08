@@ -426,6 +426,13 @@ class UserVisibilityDisciplineTests(unittest.TestCase):
     修法 = 转述义务写进权威处(config-review 输出)+ 通用纪律进 SKILL。
     """
 
+    def test_moonlight_report_demands_restating_leftovers(self):
+        """无人值守是转述断链的最坏场景:用户一整夜不在场,报告是唯一现场。
+        只报"夜间已完成"不列遗留,等于替用户签收风险(横向排查补钉)。"""
+        source = read("scripts/mae_flow_core/cli_commands/moonlight_commands.py")
+        self.assertIn("逐条复制进你的回复正文", source)
+        self.assertIn("等于替用户签收了风险", source)
+
     def test_config_review_output_demands_restating_in_reply(self):
         source = read("scripts/mae_flow_core/cli_commands/advancement.py")
         self.assertIn("逐项复制进你的回复正文", source)

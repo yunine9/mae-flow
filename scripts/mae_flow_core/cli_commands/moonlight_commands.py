@@ -384,6 +384,11 @@ def cmd_moonlight(flow, st, args):
         text = _write_moonlight_report(flow, st)
         print(text, end="")
         print(f"\n[mae-flow] 报告已写入: {os.path.abspath(MOONLIGHT_REPORT_PATH)}")
+        # 无人值守是转述断链的最坏场景:用户一整夜不在场,报告是他唯一的现场。
+        # 与配置确认单同款纪律——内容进回复正文,不靠模型自觉摘要。
+        print("⚠ 用户看不见工具输出:把报告中的「遗留问题」与「人工裁决」项"
+              "**逐条复制进你的回复正文**,并附上面这个报告路径;"
+              "只报'夜间已完成'而不列遗留,等于替用户签收了风险。")
         return
     if action == "off":
         enabled = api._moonlight(st)

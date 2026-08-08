@@ -197,6 +197,17 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn("# story.md", body)
         self.assertLess(len(body.encode("utf-8")), 64 * 1024)
 
+    def test_moonlight_report_surfaces_in_panel_logs(self):
+        """月光报告进面板日志区:结构性感知,不只靠模型转述一条路。"""
+        work = os.path.join(self.root, ".mae-flow-work")
+        os.makedirs(work, exist_ok=True)
+        with open(os.path.join(work, "moonlight-report.md"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("# 夜间报告\n")
+        logs = snapshot.build(self.root, STATE, FLOW)["artifacts"]["logs"]
+        self.assertIn("moonlight_report", logs)
+        self.assertTrue(logs["moonlight_report"].endswith("moonlight-report.md"))
+
     def test_advisories_are_scoped_to_the_current_step(self):
         with open(os.path.join(self.root, ".mae-flow.json.advisories"), "w",
                   encoding="utf-8") as stream:

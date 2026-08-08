@@ -29,8 +29,11 @@ from mae_flow_core.capability_packs import render_pack  # noqa: E402
 STEP_BUDGET = 7500
 # 会话入口命令文件。压缩后 8.8K;曾胖到 15K。
 COMMAND_BUDGET = 9500
-# 单个子 Agent 定义。当前最大: craft-reviewer-agent 5.1K。
+# 单个子 Agent 定义。当前最大: craft-reviewer-agent 5.3K。
 AGENT_BUDGET = 5500
+# 会话开场"通读并全程遵守"的宪法。曾胖到 14.3K,三大节复读命令文件与运行时输出;
+# 压缩后 ~8K。复读的危害不只是 token:两处口径必然漂移("四问卡"事故同款)。
+SKILL_BUDGET = 9000
 
 
 def rendered_step(path):
@@ -65,6 +68,16 @@ class PromptSizeBudgetTests(unittest.TestCase):
             size, COMMAND_BUDGET,
             "会话入口文件超预算(%d > %d):它占据整个会话的头部,"
             "分支正文能压给 CLI 输出的就压给 CLI。" % (size, COMMAND_BUDGET))
+
+    def test_skill_constitution_fits_its_budget(self):
+        with open(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"),
+                  encoding="utf-8") as stream:
+            size = len(stream.read())
+        self.assertLessEqual(
+            size, SKILL_BUDGET,
+            "SKILL.md 超预算(%d > %d):它是会话开场整篇加载的宪法,"
+            "月光/退出/独立任务的细节属于命令文件与运行时输出,别在这里复读。"
+            % (size, SKILL_BUDGET))
 
     def test_every_agent_definition_fits_its_budget(self):
         agents_dir = os.path.join(ROOT, "agents")

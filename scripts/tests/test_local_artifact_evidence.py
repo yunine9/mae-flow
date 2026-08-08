@@ -68,9 +68,27 @@ class LocalArtifactEvidenceTests(unittest.TestCase):
                 os.chdir(root)
                 self._write(report, "已核对全部范围。\n")
                 self.assertFalse(_verification_passed(state)[0])
+                # 只有 PASS、没有矩阵 → 报告退化成散文,不算数
                 self._write(report, "已核对全部范围。\nPASS\n")
+                passed, why = _verification_passed(state)
+                self.assertFalse(passed)
+                self.assertIn("对齐矩阵", why)
+                # 只有模板占位行也不算填写
+                self._write(report,
+                            "| AC-1 | 位置 | UT | 满足 / 部分 / 缺失 |\nPASS\n")
+                self.assertFalse(_verification_passed(state)[0])
+                matrix = ("| 验收项 | 实现位置 | 验证方式 | 结论 |\n"
+                          "|---|---|---|---|\n"
+                          "| AC-1 短信可发 | SmsHandler.handle | UT smsSends | 满足 |\n")
+                self._write(report, matrix + "PASS\n")
                 self.assertEqual((True, ""), _verification_passed(state))
-                self._write(report, "PASS\n发现回归：FAIL\n")
+                # 有「缺失」行却写 PASS → 自相矛盾,拦下
+                self._write(report, matrix
+                            + "| AC-2 重试 | - | - | 缺失 |\nPASS\n")
+                passed, why = _verification_passed(state)
+                self.assertFalse(passed)
+                self.assertIn("缺失", why)
+                self._write(report, matrix + "PASS\n发现回归：FAIL\n")
                 self.assertFalse(_verification_passed(state)[0])
             finally:
                 os.chdir(before)

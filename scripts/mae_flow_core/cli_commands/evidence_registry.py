@@ -88,6 +88,29 @@ def _verification_passed(state):
         return False, (
             "本地验证报告缺少独立一行的 PASS 结论；"
             "在 .mae-flow-work/<单号>/verification.md 补充真实结论")
+    # 对齐矩阵是本报告的核心要求:每条验收项一行、指到实现位置。
+    # 只查 PASS 不查矩阵,报告就能退化成一句话散文——提示词的要求必须有机器兜底。
+    rows = [
+        line for line in content.splitlines()
+        if line.strip().startswith("|")
+        and re.search(r"满足|部分|缺失", line)
+        and "---" not in line
+    ]
+    filled = [row for row in rows if not re.search(r"满足\s*/\s*部分", row)]
+    if not filled:
+        return False, (
+            "验证报告缺少逐条对齐矩阵(验收项|实现位置|验证方式|结论)。"
+            "把 Spec 与 Grill 决策拆成验收项,每条一行、结论写 满足/部分/缺失；"
+            "只有模板占位行不算填写")
+    missing = [
+        row for row in filled
+        if re.search(r"\|\s*缺失\s*\|?\s*$", row)
+    ]
+    if missing:
+        return False, (
+            "对齐矩阵存在结论为「缺失」的验收项,却写了 PASS——两者矛盾。"
+            "缺失项要么补实现重走质量链,要么按用户裁决修订 Spec: "
+            + missing[0].strip()[:120])
     return True, ""
 
 

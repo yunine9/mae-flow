@@ -41,10 +41,15 @@ def _dispatch_moonlight_start(flow, state, runtime, args):
 def _dispatch_global_command(flow, state, runtime, args):
     if args.cmd == "envcheck":
         return api.cmd_envcheck(flow, args)
+    # 只吃 args 的无状态命令(symbol-refs 是递工具不是门禁:只读、任何模式可用)
+    args_only_handler = {
+        "symbol-refs": api.cmd_symbol_refs,
+        "capability": api.cmd_capability,
+    }.get(args.cmd)
+    if args_only_handler is not None:
+        return args_only_handler(args)
     if args.cmd == "steps":
         return api.cmd_steps(flow, state, args)
-    if args.cmd == "capability":
-        return api.cmd_capability(args)
     if args.cmd == "template":
         return api.cmd_template(flow, args)
     if args.cmd == "story-localize":

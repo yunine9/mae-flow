@@ -169,6 +169,10 @@ def parse_args(argv=None):
     cap_codecheck.add_argument(
         "--install", action="store_true",
         help="缺失时从公司内网仓库尽力安装")
+    symbol_refs = sub.add_parser(
+        "symbol-refs",
+        help="全仓符号引用清单(含 XML/YAML/SQL 等编译器看不见的文件),改动收口用")
+    symbol_refs.add_argument("symbols", nargs="+", help="要核对的符号,可多个")
     report = sub.add_parser("report")
     report.add_argument("--all", action="store_true")
     template = sub.add_parser("template")

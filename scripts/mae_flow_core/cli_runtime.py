@@ -5,6 +5,7 @@ import sys
 import types
 from .adapters.project_launcher import install_launcher_when_active
 from .cli_commands import shared
+from .cli_commands import symbol_refs as _symbol_refs
 from .cli_commands.shared import *  # noqa: F401,F403
 from .cli_commands.wiring import api
 from .cli_commands import git_authorization as _git_authorization
@@ -123,6 +124,7 @@ _COMMAND_MODULES = (
     _moonlight_commands,
     _lifecycle,
     _lean_migration,
+    _symbol_refs,
     _local_spec,
     _domain_docs,
     _domain_archive,

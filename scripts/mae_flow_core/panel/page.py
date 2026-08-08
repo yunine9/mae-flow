@@ -80,7 +80,7 @@ def _change_sections(groups, root):
         added = sum(item["added"] for item in group["files"])
         removed = sum(item["removed"] for item in group["files"])
         blocks.append('<div class="gtitle"><b>%s</b><span>%s · %d 个文件 · '
-                      '+%d / −%d</span></div><div class="chg">'
+                      '+%d / −%d</span></div><div class="chg list">'
                       % (escape(group["title"]), escape(group["note"]),
                          len(group["files"]), added, removed))
         for item in group["files"]:
@@ -173,16 +173,19 @@ def _evidence_rows(evidence):
 
 
 def _progress_section(progress):
-    steps = "".join('<span>%s</span>' % escape(name)
-                    for name in progress["steps_done"])
-    steps += '<span class="now">%s</span>' % escape(progress["step"])
+    """一行字,不是一面墙——那串步骤药丸是全页最大的杂乱源,退役。"""
     total = progress["steps_total_estimate"]
-    return ('<section class="prog"><h2>进度</h2><div class="card">'
-            '<div class="steps">%s</div><div class="line">'
-            '<span>第 <b>%d</b> 步%s</span><span>起始 <b>%s</b></span>'
-            '<span>回退 <b>%d</b> 次</span></div></div></section>'
-            % (steps, len(progress["steps_done"]) + 1,
+    current = escape(progress["step"])
+    if progress["step_title"]:
+        current += " · " + escape(progress["step_title"])
+    return ('<section class="prog"><h2>进度</h2><div class="line">'
+            '<span>第 <b>%d</b> 步%s</span>'
+            '<span>当前 <span class="cur">%s</span></span>'
+            '<span>起始 <b>%s</b></span>'
+            '<span>回退 <b>%d</b> 次</span></div></section>'
+            % (len(progress["steps_done"]) + 1,
                (" / 约 <b>%d</b> 步" % total) if total else "",
+               current,
                escape(progress["started_at"]),
                progress["revisits"]["goto"]))
 
@@ -240,25 +243,25 @@ TEMPLATE = """<!doctype html>
 <title>Mae-Flow 交付现场 · %(ticket)s</title>
 <style>%(css)s</style></head><body><div class="wrap">
 <header><h1>交付现场 · <span class="tick">%(ticket)s</span></h1>
-<div class="meta"><span>分支 <b>%(branch)s</b></span>
-<span>基线 <b>%(baseline)s</b></span><span>HEAD <b>%(head)s</b></span></div>
-<div class="stamp">快照 %(stamp)s · rev %(revision)s</div></header>
+<div class="hd-meta"><span>%(branch)s</span><span>基线 %(baseline)s</span>
+<span>HEAD %(head)s</span>
+<span class="stamp">快照 %(stamp)s · rev %(revision)s</span></div></header>
 %(pending)s
-<section><h2>产物 <span class="n">· 点文档名就地渲染</span></h2>
-<div class="card"><div class="docs">%(docs)s</div>
-<div class="sub"><h3>提交</h3>%(commits)s</div>
-<div class="sub"><h3>代码变更 <span class="n">· 点文件看双排 diff</span></h3>
-%(changes)s</div>
-<div class="sub"><h3>日志与任务卡</h3><ul class="paths">%(logs)s</ul></div>
-</div></section>
-<section><h2>证据</h2><div class="card"><div class="ev">%(evidence)s</div>
-%(degraded)s</div></section>
+<section><h2>文档 <span class="n">· 点名字就地阅读</span></h2>
+<div class="list">%(docs)s</div></section>
+<section><h2>代码变更 <span class="n">· 点文件看双排 diff</span></h2>
+<div class="list">%(commits)s</div>
+%(changes)s</section>
+<section><h2>证据</h2><div class="list">%(evidence)s</div>
+%(degraded)s</section>
 <section><h2>本轮建议 <span class="n">· 非阻断</span></h2>
-<div class="card"><ul class="adv">%(advisories)s</ul></div></section>
+<ul class="adv">%(advisories)s</ul></section>
 %(progress)s
-<div class="warn-box"><b>出口自述</b>（快照自己的降级说明）：
+<details class="note"><summary>日志与任务卡</summary>
+<ul class="paths">%(logs)s</ul></details>
+<details class="note"><summary>出口自述（快照自己的降级说明）</summary>
 <ul>%(warnings)s<li>百分比故意留空：flow 有分支和回退，算出来必然是编的。</li>
-<li>图形为内置轻渲染，与公司评审工具的 PlantUML 输出可能有差异。</li></ul></div>
+<li>图形为内置轻渲染，与公司评审工具的 PlantUML 输出可能有差异。</li></ul></details>
 <footer>只读快照 · 由 <code>mae-flow.py panel</code> 生成 ·
 数据源 <code>panel --json</code>；本页不含任何写入入口。</footer>
 </div>

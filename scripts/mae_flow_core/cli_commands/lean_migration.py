@@ -296,6 +296,14 @@ def migrate_legacy_spec_workspace(root="."):
     if not os.path.isdir(legacy) or os.path.exists(target):
         return False, ""
     try:
+        with open(os.path.join(base, ".mae-flow-defaults.json"),
+                  encoding="utf-8-sig") as stream:
+            engine = str(json.load(stream).get("规格引擎", "") or "")
+    except Exception:
+        engine = ""
+    if engine.strip().lower() == "codespec":
+        return False, ""  # codespec 管的工作区就是根目录 openspec/,不搬
+    try:
         probe = subprocess.run(
             ["git", "-C", base, "ls-files", "--", "openspec"],
             shell=False, capture_output=True, text=True,

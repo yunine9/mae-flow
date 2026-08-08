@@ -74,7 +74,7 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 **主板(换它=改合同,不是换插件)**:流程图、证据链、spec 引擎与真相源格式、
 门禁、任务卡结构。OpenSpec 已内化为主板;Superpowers 已蒸馏,可换的是蒸馏物。
 
-### codespec 接入预案(2026-08-08,公司推行,等实物后按此执行)
+### codespec 接入(2026-08-08 已实现;codespec = openspec 同源换名)
 
 判断:codespec 疑似 openspec 魔改(产物/流程/定位一致)。接入形态 =
 **规格引擎的第二个 adapter**(格式契约是主板,引擎是插槽):
@@ -89,8 +89,14 @@ mae-flow(本插件)   —— 管"路径":公司交付流程的状态机 + 实物
 - 现成资产:run_openspec 适配器(有意保留的逃生口)、内置引擎 vs 外部 CLI 的
   差分对拍测试(指向 codespec 即可量出魔改幅度)、双根解析(根目录 openspec/
   布局零改动共存)。
-- 摸底顺序:运行时形态 → 差分对拍量漂移 → 状态文件有无 → validate 退出码与
-  输出格式 → archive 语义 → 工作区位置要求 → Windows 表现。
+- **启用方式(团队一次性)**:仓库 .mae-flow-defaults.json 写
+  `"规格引擎": "codespec"`(可选 `"规格引擎命令"` 指定可执行,支持字符串或数组);
+  项目根先跑一次 codespec init。未预设的仓一切照旧(builtin);
+- 实现落点:cli_commands/codespec_engine.py(adapter)+ spec.py 三处路由
+  (new/validate/archive)+ 迁移跳过 + prepare 前置检查;
+  契约由 test_codespec_engine.py 用桩二进制钉死(6 条);
+- 上线前用真 codespec 跑一遍 fieldtest-java(把 defaults 加上预设即可);
+  若真实 CLI 的子命令/参数与 openspec 有出入,只改 codespec_engine.py 一个文件。
 
 ### 设计原则（改任何代码前先读）
 

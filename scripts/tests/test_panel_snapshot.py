@@ -32,7 +32,9 @@ FLOW = {
                             "choice_key": "workflow",
                             "choice_answers": {"full": ["完整开发"],
                                                "hotfix": ["已定位问题修复"]},
-                            "next": "build"},
+                            "next": "story"},
+        "story": {"title": "Story 与实施附录生成及一次设计检视",
+                  "user_ack": True, "next": "build"},
         "build": {"title": "编码", "next": "verify"},
         "verify": {"title": "验证", "terminal": True},
     },
@@ -128,6 +130,18 @@ class SnapshotTests(unittest.TestCase):
 
         # 纯机器证据步骤不该出现在"待你裁决"里
         self.assertEqual([], snapshot.build(self.root, STATE, FLOW)["pending"])
+
+    def test_story_confirmation_lists_the_story_not_the_config(self):
+        """卡片说"确认 Story",内容就必须真是 Story——倒整张项目配置进去,
+        是视觉在提醒、信息在撒谎(实战反馈)。"""
+        self._docs()
+        data = snapshot.build(self.root, dict(STATE, current="story"), FLOW)
+        item = data["pending"][0]
+        self.assertEqual("doc_review", item["kind"])
+        self.assertEqual([], item["items"])          # 不再倒配置
+        names = sorted(os.path.basename(path) for path in item["paths"])
+        self.assertEqual(["story.md"], names)        # implementation.md 不存在则不列
+        self.assertTrue(all(os.path.isabs(path) for path in item["paths"]))
 
     def test_degraded_tool_is_distinguishable_from_passing(self):
         """"工具没跑起来"和"跑了且干净"混成一个绿灯,是这套系统最不能容忍的谎。"""

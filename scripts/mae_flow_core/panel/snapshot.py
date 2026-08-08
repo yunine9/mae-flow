@@ -198,7 +198,9 @@ def _evidence(state):
     }
     ponytail = attempts.get("ponytail")
     if isinstance(ponytail, dict):
-        out["ponytail"] = {"name": "代码精简", "rounds": ponytail.get("count", 0)}
+        # 有尝试记录≠检查通过;通过与否由步骤是否走完判定(展示层据 step 判)
+        out["ponytail"] = {"name": "代码精简", "rounds": ponytail.get("count", 0),
+                           "step": "verify_ponytail"}
     if ut_session:
         batches = ut_session.get("batches") or []
         out["ut"] = {
@@ -226,8 +228,17 @@ def _advisories(root, state):
             if isinstance(item, dict) and item.get("step") == current]
 
 
-def _pending(state, flow):
-    """待你裁决:只列真正需要人拍板的事,不把机器证据混进来。"""
+# 确认步骤 → 要检视的文档种类。卡片说"确认 Story",内容就必须真是 Story——
+# 把整张项目配置倒进去,是视觉在提醒、信息在撒谎。
+ACK_REVIEW_DOCS = {
+    "open": ("spec",), "hf_open": ("spec",), "tw_open": ("spec",),
+    "story": ("story", "implementation"),
+    "archive_confirm": ("spec",),
+}
+
+
+def _pending(state, flow, documents):
+    """待你裁决:只列真正需要人拍板的事,且卡片内容必须与步骤对得上。"""
     current = (state or {}).get("current", "")
     step = ((flow or {}).get("steps", {}) or {}).get(current)
     if not isinstance(step, dict):
@@ -242,17 +253,24 @@ def _pending(state, flow):
                       for key, value in sorted(answers.items())],
             "paths": [],
         }]
-    if step.get("user_ack"):
-        keys = step.get("require_sets") or sorted(config)
+    if not step.get("user_ack"):
+        return []
+    if step.get("require_sets"):        # 配置确认:确认的就是这几项配置
         return [{
-            "kind": "config_review" if step.get("require_sets") else "ack",
-            "step": current, "title": step.get("title", ""),
-            "needs": "user_ack",
+            "kind": "config_review", "step": current,
+            "title": step.get("title", ""), "needs": "user_ack",
             "items": [{"label": key, "value": str(config.get(key, ""))}
-                      for key in keys],
+                      for key in step["require_sets"]],
             "paths": [],
         }]
-    return []
+    kinds = ACK_REVIEW_DOCS.get(current, ())
+    paths = [doc["path"] for doc in documents if doc["kind"] in kinds]
+    return [{
+        "kind": "doc_review" if paths else "ack", "step": current,
+        "title": step.get("title", ""), "needs": "user_ack",
+        "items": [],                    # 不倒配置:与本步无关的信息就是噪声
+        "paths": paths,
+    }]
 
 
 def _remaining(flow, current):
@@ -303,15 +321,16 @@ def build(root=".", state=None, flow=None):
     if state is None:
         warnings.append("没有 .mae-flow.json:本仓当前没有在途交付,仅给出仓库信息")
     base = (state or {}).get("implementation_base_head", "")
+    documents = _documents(root, state)
     return {
         "schema": SCHEMA,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "state_revision": (state or {}).get("revision"),
         "repo": _repo(root, state, warnings),
         "delivery": _delivery(state),
-        "pending": _pending(state, flow),
+        "pending": _pending(state, flow, documents),
         "artifacts": {
-            "documents": _documents(root, state),
+            "documents": documents,
             "spec": _spec(root, state),
             "commits": _commits(root, base),
             "logs": {

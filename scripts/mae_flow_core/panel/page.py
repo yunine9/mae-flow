@@ -108,24 +108,41 @@ def _change_sections(groups, root):
     return "".join(blocks), tabs, panes
 
 
-def _pending_section(pending):
+def _pending_section(pending, doc_key_by_path):
+    """卡片内容必须与步骤对得上:确认 Story 的卡里就是 Story,点开即读。"""
     if not pending:
         return ('<section class="decide"><h2>待你裁决</h2><div class="card">'
                 '<div class="quiet"><span class="dot"></span>'
                 '当前没有需要你拍板的事项。</div></div></section>')
     cards = []
     for item in pending:
-        rows = "".join("<dt>%s</dt><dd>%s</dd>"
-                       % (escape(entry["label"]), escape(entry["value"]))
-                       for entry in item["items"])
+        body = ""
+        if item["items"]:
+            body += '<dl class="kv">%s</dl>' % "".join(
+                "<dt>%s</dt><dd>%s</dd>"
+                % (escape(entry["label"]), escape(entry["value"]))
+                for entry in item["items"])
+        if item["paths"]:
+            links = []
+            for path in item["paths"]:
+                key = doc_key_by_path.get(path)
+                name = escape(os.path.basename(path))
+                if key:      # 面板里有渲染版,点开就地读
+                    links.append('<li><button class="open" '
+                                 'onclick="show(\'%s\')">%s</button></li>'
+                                 % (key, name))
+                else:
+                    links.append('<li><a href="file://%s">%s</a></li>'
+                                 % (escape(path), name))
+            body += ('<div class="ask-sub">要检视的文件（点开就地阅读）：'
+                     '</div><ul class="paths">%s</ul>' % "".join(links))
         cards.append(
             '<div class="ask-title">%s</div>'
-            '<div class="ask-sub">%s · 需要你逐项过目后确认</div>'
-            '<dl class="kv">%s</dl>'
+            '<div class="ask-sub">%s · 需要你逐项过目后确认</div>%s'
             '<div class="hint">python .mae-flow-work/bin/mae-flow.py done ...'
             '\n<em># 给人复制到终端用 —— 面板不提供执行按钮</em></div>'
             % (escape(item["title"] or item["step"]), escape(item["step"]),
-               rows))
+               body))
     return ('<section class="decide has"><h2>待你裁决</h2>'
             '<div class="card">%s</div></section>' % "".join(cards))
 
@@ -149,18 +166,25 @@ def _evidence_rows(evidence, steps_done):
                     '<span class="why">%s</span></div>'
                     % (escape(name), cls, escape(tag), escape(why)))
 
+    # 唯一的绿灯判据:该检查所属的步骤已经走完(工具门禁放行过)。
+    # 有任务卡/尝试记录只说明"派发过",不说明"通过"——误绿比不显示更坏。
+    def gate(item, name, running_why):
+        if item.get("step", "") in steps_done:
+            fine.append(name)
+        else:
+            row(name, "进行中", "t-run", running_why)
+
     compile_ev = evidence.get("compile")
     if compile_ev:
-        if compile_ev.get("step", "") in steps_done:
-            fine.append("编译")
-        else:
-            row("编译", "进行中", "t-run",
-                "%s 派发 · 覆盖 %d 个文件" % (_hm(compile_ev["at"]),
-                                              compile_ev["files"]))
-    if evidence.get("reviewer"):
-        fine.append("Agent 预检")
-    if evidence.get("ponytail"):
-        fine.append("代码精简")
+        gate(compile_ev, "编译",
+             "%s 派发 · 覆盖 %d 个文件" % (_hm(compile_ev["at"]),
+                                           compile_ev["files"]))
+    reviewer = evidence.get("reviewer")
+    if reviewer:
+        gate(reviewer, "Agent 预检", "检视中 · 派发于 " + _hm(reviewer["at"]))
+    ponytail = evidence.get("ponytail")
+    if ponytail:
+        gate(ponytail, "代码精简", "第 %s 轮进行中" % ponytail["rounds"])
     check = evidence.get("codecheck")
     if check:
         degraded = check["degraded"]
@@ -171,8 +195,12 @@ def _evidence_rows(evidence, steps_done):
         elif isinstance(check["count"], int) and check["count"] > 0:
             row("CodeCheck", "%d 项待修" % check["count"], "t-bad",
                 "扫了 %d 个文件 · %s" % (check["files"], _hm(check["at"])))
-        else:
+        elif check["status"] == "CLEAN":     # 明确成功只有这一种
             fine.append("CodeCheck")
+        else:
+            row("CodeCheck", "没确认过", "t-deg",
+                "记录状态 %s、告警数 %s——不当作通过 · %s"
+                % (check["status"] or "空", check["count"], _hm(check["at"])))
     unit = evidence.get("ut")
     if unit:
         if unit["complete"]:
@@ -236,6 +264,8 @@ def render(snapshot, changes=(), root="."):
     evidence_rows, degraded_note = _evidence_rows(
         snapshot["evidence"], set(snapshot["progress"]["steps_done"]))
     advisories = snapshot["advisories"]
+    doc_key_by_path = {doc["path"]: "doc-" + doc["kind"]
+                       for doc in snapshot["artifacts"]["documents"]}
     context = {
         "css": assets.CSS + plantuml.SVG_CSS,
         "js": assets.JS,
@@ -246,7 +276,7 @@ def render(snapshot, changes=(), root="."):
         "head": escape(snapshot["repo"]["head"]),
         "stamp": escape(snapshot["generated_at"]),
         "revision": snapshot["state_revision"] or 0,
-        "pending": _pending_section(snapshot["pending"]),
+        "pending": _pending_section(snapshot["pending"], doc_key_by_path),
         "docs": "".join(doc_rows) or
                 '<div class="doc"><span class="k">—</span>'
                 '<span>本单尚无文档</span><span></span><span></span></div>',

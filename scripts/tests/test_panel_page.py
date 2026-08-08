@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 """面板页面契约:自包含、无写入入口、版面优先级不许倒过来。"""
 
+import json
 import os
 import re
+import shutil
 import sys
 import unittest
 
@@ -76,6 +78,57 @@ class PanelPageTests(unittest.TestCase):
         html = page.render(snapshot.build(TESTS, None, FLOW), [], TESTS)
         self.assertIn("（无在途单）", html)
         self.assertIn("没有 .mae-flow.json", html)
+
+    def test_dispatched_but_unfinished_checks_never_show_green(self):
+        """有任务卡/尝试记录≠通过:Reviewer 在检视中、精简在跑、CodeCheck
+        状态含糊时,一律不得进"已过关"——误绿比不显示更坏(实战反馈)。"""
+        state = dict(STATE)
+        state["agent_tasks"] = dict(STATE["agent_tasks"])
+        state["agent_tasks"]["REVIEWER"] = {
+            "at": "2026-08-08 16:36:29", "step": "build_agent_review",
+            "task_files": [], "path": "/tmp/review.md"}
+        # steps_done 只有 config_confirm/workflow_select:四项检查全没走完
+        html = build(state)
+        fineline = re.search(r'已过关：[^<]*', html)
+        joined = fineline.group(0) if fineline else ""
+        for name in ("Agent 预检", "代码精简", "编译", "CodeCheck"):
+            self.assertNotIn(name, joined,
+                             "%s 未走完却进了已过关——误绿" % name)
+        self.assertGreaterEqual(html.count(">进行中<"), 3)
+
+    def test_ambiguous_codecheck_status_is_not_clean(self):
+        """REMAINING/空状态且无告警数:记录含糊就明说"没确认过",不当作通过。"""
+        state = json.loads(json.dumps(STATE))
+        state["quality"]["codecheck_scan"].update(
+            {"status": "REMAINING", "count": None, "error": ""})
+        html = build(state)
+        self.assertIn("没确认过", html)
+        self.assertIn("不当作通过", html)
+
+    def test_explicit_clean_codecheck_is_green(self):
+        state = json.loads(json.dumps(STATE))
+        state["quality"]["codecheck_scan"].update(
+            {"status": "CLEAN", "count": 0, "error": ""})
+        html = build(state)
+        self.assertNotIn("没确认过", html)
+        self.assertIn("CodeCheck", re.search(r'已过关：[^<]*', html).group(0))
+
+    def test_story_confirmation_card_shows_the_story_door(self):
+        """确认 Story 的卡片里是可点开的 story.md,而不是项目配置。"""
+        folder = os.path.join(TESTS, ".mae-flow-work", "REQ2026080901")
+        os.makedirs(folder, exist_ok=True)
+        try:
+            with open(os.path.join(folder, "story.md"), "w",
+                      encoding="utf-8") as stream:
+                stream.write("# STORY\n")
+            html = build(dict(STATE, current="story"))
+            card = html[html.index("待你裁决"):html.index(">文档 <")]
+            self.assertIn("story.md", card)
+            self.assertIn("要检视的文件", card)
+            self.assertIn("show('doc-story')", card)   # 点开就地阅读
+            self.assertNotIn("工号", card)             # 不倒配置
+        finally:
+            shutil.rmtree(os.path.join(TESTS, ".mae-flow-work"), True)
 
 
 if __name__ == "__main__":

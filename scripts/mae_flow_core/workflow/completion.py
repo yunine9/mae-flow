@@ -65,24 +65,72 @@ def natural_binary_choice(step, value, is_positive):
     return ""
 
 
+def _receipt_norm(value):
+    out = re.sub(r"[\s，。；;：:、!！]+", "", str(value or ""))
+    return re.sub(r"[（(]推荐[）)]", "", out).lower()
+
+
+def _label_affinity(label, choices, answer_aliases):
+    """展示标签 → choice key,只认文本亲和,与展示顺序无关。
+
+    实测事故:模型把推荐项排到第一位并改写了标签,按位置映射直接把用户的
+    选择判反(需要预检 → disabled),机器反过来指控模型"替用户改选"。
+    位置从来不是证据,文字才是。
+    """
+    normalized = _receipt_norm(label)
+    if not normalized:
+        return ""
+    hits = {
+        key for key, alias in answer_aliases
+        if normalized == alias
+        or (not re.fullmatch(r"[a-z0-9_-]+", alias)
+            and (normalized.startswith(alias) or alias.startswith(normalized)))
+    }
+    if len(hits) == 1:
+        return next(iter(hits))
+    if len(choices) == 2 and not hits:
+        # 二选一的否定锚:一侧以"不/否/跳过"开头,另一侧不带否定——
+        # "需要,先预检"与"不需要,我直接检视"即使全改写也能可靠区分。
+        negated = {key for key, alias in answer_aliases
+                   if re.match(r"(不|否|跳过|无需)", alias)}
+        if len(negated) == 1:
+            negative_key = next(iter(negated))
+            positive_key = next(k for k in choices if k != negative_key)
+            return (negative_key
+                    if re.match(r"(不|否|跳过|无需)", normalized)
+                    else positive_key)
+    return ""
+
+
 def receipt_choice(step, item, value):
-    """Resolve a structured AskUserQuestion selection by displayed position."""
+    """Resolve a structured AskUserQuestion selection by label affinity."""
     choices = list(step.get("choices") or [])
     if not choices:
         return ""
-    normalized_value = re.sub(
-        r"[\s，。；;：:、!！]+", "", value or "").lower()
+    answer_aliases = []
+    for key, values in (step.get("choice_answers") or {}).items():
+        for alias in [key] + list(values or []):
+            normalized = _receipt_norm(alias)
+            if normalized:
+                answer_aliases.append((key, normalized))
+    normalized_value = _receipt_norm(value)
     selected = set()
     for question in (
             ((item.get("askuser") or {}).get("questions") or [])):
         options = question.get("options") or []
         if len(options) != len(choices):
             continue
-        for index, label in enumerate(options):
-            normalized_label = re.sub(
-                r"[\s，。；;：:、!！]+", "", str(label or "")).lower()
-            if normalized_label and normalized_value == normalized_label:
-                selected.add(choices[index])
+        # 全部展示选项必须构成到 choice key 的双射,任何一个映射不出来
+        # 就放弃整题——宁可打回重问,不做无声的猜测。
+        mapping = {}
+        for label in options:
+            key = _label_affinity(label, choices, answer_aliases)
+            if not key or key in mapping.values():
+                mapping = {}
+                break
+            mapping[_receipt_norm(label)] = key
+        if len(mapping) == len(choices) and normalized_value in mapping:
+            selected.add(mapping[normalized_value])
     return next(iter(selected)) if len(selected) == 1 else ""
 
 

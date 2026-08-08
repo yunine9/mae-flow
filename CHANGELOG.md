@@ -1,5 +1,17 @@
 # 更新记录
 
+## 2026-08-08：删除 docs/ 整目录(约 9MB 历史分享与过程材料)
+
+docs/ 下全部是插件自身开发期的分享与过程材料,不是流程资产:share/(演讲 PPT、
+7MB 旧流程图 PNG、解说文案)、superpowers/(重构期 findings 与 plans)、
+mae-flow/requirements/(改版需求存档)、field-tests/、两份重构笔记,
+以及一个空的领域索引。用户确认不再需要,整目录移除。
+
+- `design-provenance:lean-story-review` 的出处原指向已删除的改版 spec 文档,
+  改指仍然存在的契约本体(flow/phases/story.md 与 flow/steps/story.md);
+- 生产代码对 docs/superpowers/、docs/specs/ 的引用都是**交付目标仓**里的路径
+  前缀或临时夹具,与插件仓自己的 docs/ 无关,零改动。
+
 ## 2026-08-08：矩阵检查降级——机器只拦谎言,不拦格式
 
 用户原则重申(照此执行,写进本条防再犯):**机器硬拦的问题是频繁打回,体验极差**。

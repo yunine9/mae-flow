@@ -392,10 +392,10 @@
   ],
   "design_provenance": {
     "lean-story-review": {
-      "description": "Design Reviewer is introduced by the approved lean redesign and its Story phase contract; it is not an existing agent prompt.",
+      "description": "Design Reviewer is introduced by the approved lean redesign; its Story phase contract now lives in flow/phases/story.md and flow/steps/story.md (the original redesign spec under docs/ was a historical process artifact, removed 2026-08-08).",
       "sources": [
-        "docs/mae-flow/requirements/2026-08-01-workflow-redesign/spec.md",
-        "flow/phases/story.md"
+        "flow/phases/story.md",
+        "flow/steps/story.md"
       ]
     }
   },

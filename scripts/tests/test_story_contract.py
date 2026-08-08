@@ -76,16 +76,38 @@ class StoryContractTests(unittest.TestCase):
         ], [line for line in template.splitlines() if line.startswith("## ")])
 
     def test_implementation_template_owns_process_additions(self):
+        """附录只承载 Story 装不下的两件事;其余各归各位,但都不许流回 Story。
+
+        2026-08-08 契约变更:原六节里有五节是 decisions.md 与 Story 的重复,
+        「关键函数详述」还诱导模型把实现提前写一遍(实测 26KB 文档里 265 行是
+        Python 代码,且与真代码已漂移——检视者对着副本打勾)。现在只剩
+        拆分决策与接口契约,并明令不出现函数体。
+        """
         template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
-        sections = (
-            "Grill 决策与实现影响",
-            "关键函数与方法修改详述",
-            "整体实现与验证说明",
-            "风险、回滚与领域归档影响",
-        )
+        sections = ("文件结构与任务边界", "接口契约两栏", "定稿自查")
         positions = [template.index(section) for section in sections]
         self.assertEqual(sorted(positions), positions)
         self.assertIn("docs/specs/<domain>.md", template)
+        # 被移走的内容必须写明去处,不能悄悄消失
+        for moved in ("Grill 决策看 `decisions.md`", "对外接口写 Story 2.2.2",
+                      "风险与回滚看 `decisions.md`"):
+            self.assertIn(moved, template)
+        # 流程内容仍然不许流回公司 Story 模板(本测试的原始意图)
+        story = read("skills/mae-flow/assets/STORY-TEMPLATE.md")
+        for leaked in ("任务边界", "接口契约两栏", "删除测试"):
+            self.assertNotIn(leaked, story)
+
+    def test_implementation_template_forbids_pre_written_code(self):
+        """提前写的代码是会漂移的副本,而检视者会对着副本打勾——这是真事故的成因。"""
+        template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
+        self.assertIn("全文不出现函数体", template)
+        self.assertIn("代码是控制流最权威的表达", template)
+        for consumer in ("agents/story-generator-agent.md",
+                         "agents/craft-reviewer-agent.md"):
+            text = read(consumer)
+            self.assertTrue(
+                "代码块" in text or "函数体" in text,
+                "%s 没有承接「附录不写代码」这条约束" % consumer)
 
     def test_story_generator_requires_exact_local_inputs(self):
         generator = read("agents/story-generator-agent.md")

@@ -233,7 +233,9 @@ Manifest 拒绝整个 `openspec/`、所有过程文档路径，以及任何未�
 **子 agent 任务卡**（`.mae-flow-work/agent-tasks/`）：compile/codecheck/UT 派发前必须执行
 `python ".mae-flow-work/bin/mae-flow.py" agent-task <kind>`。脚本把单号、本轮 diff、编译方式、UT 生成/运行方式和规格来源一次写齐；
 PreToolUse 在派发前校验任务卡属于当前步骤，返回自然语言不要求回传指纹、令牌或固定状态行。
-主 Agent 不使用实现任务卡、不派实现子 Agent，也不拆开发批次；compile 任务卡覆盖本轮完整未提交实现。
+主 Agent 不使用实现任务卡，也不拆流程批次；实现子 Agent 的边界（设计承载的代码亲写、只读侦察随时可派、
+机械扇出满足三条才派）单一权威在 `flow/steps/build.md`「子 Agent 边界」节，SKILL.md 只留指针不复述。
+compile 任务卡覆盖本轮完整未提交实现——派发不改变门禁与证据：编译仍一次、检视仍一次。
 编译后只进入一次人工检视，检视期间保留 diff，用户通过后才提交；修改意见会回到同一实现/编译闭环，
 不会重新生成 Story 或重复确认设计。
 独立 Grill 的 prep/final 任务卡由 `action critic` 同样签名；PreToolUse 在 Task 派发时通过统一

@@ -138,6 +138,54 @@ class NotifyTests(unittest.TestCase):
         self.assertIn("现场面板(浏览器打开一次", source)
         self.assertIn("与现场面板路径", source)
 
+    def test_review_doc_write_regenerates_the_panel(self):
+        """用户原话即契约:凡请用户检视的东西,面板必须能直接看。
+
+        open/story 在进了步之后才生成文档,进步瞬间的面板拍不到它们——
+        实战反馈:请用户确认 spec 时,面板上没有 spec.md。"""
+        import subprocess
+        from mae_flow_core.panel import sync
+        root = tempfile.mkdtemp(prefix="panel-sync-")
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True)
+        state_path = os.path.join(root, ".mae-flow.json")
+        with open(state_path, "w", encoding="utf-8") as stream:
+            json.dump({"current": "open", "revision": 1,
+                       "config": {"单号": "REQ-1"}, "choices": {},
+                       "history": [], "started": "2026-08-09 08:00:00"},
+                      stream, ensure_ascii=False)
+        doc = os.path.join(root, ".mae-flow-work", "REQ-1", "spec.md")
+        os.makedirs(os.path.dirname(doc), exist_ok=True)
+        with open(doc, "w", encoding="utf-8") as stream:
+            stream.write("# 规格\n- 条目一\n")
+        before = os.getcwd()
+        os.chdir(root)
+        try:
+            # 检视文档落盘 → 面板重生成,且内容里真有这份文档
+            self.assertTrue(sync.refresh_on_doc_write(state_path, doc))
+            panel_page = os.path.join(root, ".mae-flow-work", "panel.html")
+            with open(panel_page, encoding="utf-8") as stream:
+                html = stream.read()
+            self.assertIn("spec.md", html)
+            self.assertIn("条目一", html)      # 待裁决卡可点开就地读的就是它
+            # 非检视文档一行判断直接跳过
+            self.assertFalse(sync.refresh_on_doc_write(
+                state_path, os.path.join(root, "src", "a.py")))
+            # 状态文件损坏也只能静默,hook 绝不因面板受伤
+            with open(state_path, "w", encoding="utf-8") as stream:
+                stream.write("{broken")
+            self.assertFalse(sync.refresh_on_doc_write(state_path, doc))
+        finally:
+            os.chdir(before)
+
+    def test_doc_write_hook_stays_wired(self):
+        """接线锁:posttool 的 Write 台账点必须同时触发面板重生成。"""
+        path = os.path.join(SCRIPTS, "mae_flow_core", "adapters",
+                            "hook_active_events.py")
+        with open(path, encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("refresh_on_doc_write", source)
+
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""
         from mae_flow_core.cli_commands import panel as panel_command

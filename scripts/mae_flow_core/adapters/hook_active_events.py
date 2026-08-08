@@ -28,6 +28,7 @@ from mae_flow_core.file_io import (
     write_text,
 )
 from mae_flow_core.adapters.hook_agent_lifecycle import HookAgentLifecycle
+from mae_flow_core.panel import sync as panel_sync
 from mae_flow_core.adapters.hook_transcript_paths import (
     explicit_agent_transcript_path,
 )
@@ -440,6 +441,10 @@ class ActiveHookEventAdapter:
         )
         if tool in ("Write", "Edit", "MultiEdit") and written_path:
             self.runtime._record_agent_write(written_path)
+            # 凡请用户检视的东西,面板必须能直接看(用户原话即契约)。
+            # open/story 在进步之后才生成文档,进步瞬间的面板拍不到它们——
+            # 检视文档落盘即重生成;非检视文档一行判断直接跳过,软失败。
+            panel_sync.refresh_on_doc_write(self.state, written_path)
         if tool == "AskUserQuestion":
             answer = self.runtime._text_of(payload.get("tool_response"))
             self.runtime._capture_usermsg(

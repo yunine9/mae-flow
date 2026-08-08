@@ -159,10 +159,25 @@ def advance(flow, st, sid, step, tag, note=""):
     if api._moonlight(st) and nxt == "moonlight_review":
         api._write_moonlight_report(flow, st)
     print(f"[mae-flow] {sid} {tag} → 进入 {nxt}\n")
-    # 只在"需要你裁决"与"进入新阶段"两种时刻响;失败即静默,绝不影响推进。
-    notify.announce(flow, sid, nxt, os.getcwd(),
-                    st.get("config", {}).get("单号", ""))
+    _announce_and_sync_panel(flow, st, sid, nxt)
     api.print_current(flow, st)
+
+
+def _announce_and_sync_panel(flow, st, sid, nxt):
+    """通知响 = 面板刷新 = 告知路径,三件事同一个瞬间。
+
+    只在"需要你裁决"与"进入新阶段"两种时刻响;人被叫来时看到的必须是
+    最新现场,其余时刻没人看、不刷。任何失败都静默,绝不影响推进。
+    """
+    rang = notify.announce(flow, sid, nxt, os.getcwd(),
+                           st.get("config", {}).get("单号", ""))
+    if not rang:
+        return
+    from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
+    panel_path = _panel_refresh(flow, st)
+    if panel_path:
+        print("[mae-flow] 现场面板已同步(浏览器打开或刷新即可): %s"
+              % panel_path)
 
 def _validated_pending_config(step, st, set_values):
     """Build and fully validate a candidate without touching confirmed config."""

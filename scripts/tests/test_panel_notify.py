@@ -113,6 +113,34 @@ class NotifyTests(unittest.TestCase):
         with open(path, encoding="utf-8") as stream:
             source = stream.read()
         self.assertIn("notify.announce(", source)
+        # 感知时机契约:通知响 = 面板刷新 = 告知路径,同一个瞬间;
+        # 面板只在响的时刻刷新(rang 守卫),其余时刻没人看,不刷。
+        self.assertIn("_announce_and_sync_panel(flow, st, sid, nxt)", source)
+        self.assertIn("_panel_refresh", source)
+        self.assertIn("if not rang:", source)
+
+    def test_init_is_the_first_perception_moment(self):
+        """开启流程就生成面板并要求转述路径——没人知道存在的面板等于不存在。"""
+        path = os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                            "init_capability.py")
+        with open(path, encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("_panel_refresh", source)
+        self.assertIn("原样告诉用户", source)
+
+    def test_panel_refresh_is_soft_fail(self):
+        """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""
+        from mae_flow_core.cli_commands import panel as panel_command
+        original = panel_command._write_page
+
+        def explode(*_args, **_kwargs):
+            raise OSError("disk full")
+
+        panel_command._write_page = explode
+        try:
+            self.assertIsNone(panel_command.refresh({}, {"current": "build"}))
+        finally:
+            panel_command._write_page = original
 
     def test_real_flow_transitions_produce_sensible_announcements(self):
         """拿真 flow.json 走几步真实转移,确认不是只有构造的假数据能过。"""

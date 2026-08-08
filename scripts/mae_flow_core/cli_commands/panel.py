@@ -35,6 +35,23 @@ def _write_page(data, changes, target):
     return len(html.encode("utf-8"))
 
 
+def refresh(flow, st):
+    """通知响的时刻自动同步面板——人被叫来时,看到的必须是最新现场。
+
+    只在这两种时刻刷新(需要裁决/跨阶段):其余时刻没人看,刷了也是白刷;
+    失败即放弃返回 None,面板永远不能反过来影响推进。
+    """
+    try:
+        root = os.getcwd()
+        data = snapshot.build(root, st, flow or {})
+        changes = snapshot.changes(
+            root, (st or {}).get("implementation_base_head", ""))
+        _write_page(data, changes, PANEL_PATH)
+        return os.path.abspath(PANEL_PATH)
+    except Exception:                      # noqa: BLE001
+        return None
+
+
 def cmd_panel(st, args):
     """生成只读面板;--json 只打印结构化快照,不落地文件。"""
     root = os.getcwd()

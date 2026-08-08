@@ -114,6 +114,13 @@ def cmd_init(flow, args):
         print("[mae-flow] 已按用户明确授权开启另一流程；旧退出现场继续保留在 %s。"
               % api.norm(new_exit_snapshot))
     print("[mae-flow] 流程已初始化；内置规格引擎已就绪，未创建项目级 Skill。")
+    # 开启流程就是面板的第一个感知时刻:此后每到需要用户裁决/跨阶段时自动同步。
+    from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
+    panel_path = _panel_refresh(flow, st)
+    if panel_path:
+        print("[mae-flow] 现场面板已生成(浏览器打开,之后每到确认点自动同步): %s"
+              % panel_path)
+        print("  ⚠ 把上面这个面板路径原样告诉用户——工具输出用户看不见。")
     api.print_current(flow, st)
 
 def _capability_arguments(args):

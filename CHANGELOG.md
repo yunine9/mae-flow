@@ -1,29 +1,19 @@
 # 更新记录
 
-## 2026-08-08：codespec 作为规格引擎的第二个 adapter(公司推行,openspec 同源换名)
+## 2026-08-08：codespec adapter 预埋(未接线,等用户拍板)
 
-规格引擎插槽从此有两个 adapter——接缝由假变真,这也是切换机制此刻才建的原因
-(单实现是假接缝)。领导要的"流程里真用它"落在三处真实执行:
+公司推行 codespec(openspec 同源换名),领导要求作为流程组件。按用户决定:
+**能力先预埋,生产路径不动**——埋好的管,拉线只要半小时。
 
-- 仓库预设 `"规格引擎": "codespec"` 启用(`"规格引擎命令"` 可自定义,支持数组;
-  默认 PATH 上的 codespec);未预设的仓零行为变化;
-- `spec new / validate / archive` 改走 codespec CLI 真实执行,每次调用的命令、
-  退出码、时间记进 state 的 engine_runs 与 history——审计要什么有什么;
-- **单一裁决源不动摇**:阶段真相仍只在 .mae-flow.json,codespec 只管产物;
-  它的 .openspec.yaml 元数据本来就被 gate 拦手工编辑。双状态机的学费不交第二次;
-- archive 用树差推导档案名与 merged 真相源清单(不解析 CLI 文案,换版本不脆);
-  CLI 失败抛 SpecEngineError 由 spec 命令层统一接住给出路,不新增拦截点;
-- 工作区就是 codespec 自己的根目录 openspec/ 布局——上周的双根解析在这里闭环:
-  codespec 仓自动走旧根,目录归一搬迁对这类仓跳过;
-- 读操作(instructions/status/tasks_source)保持内置引擎——对四件套旧布局
-  本就兼容,codespec 建的单走完整个流程不需要它再出场;
-- prepare 前置检查:预设了 codespec 但工作区未初始化 → 给确切命令
-  (codespec init),不代跑外部工具;
-- 契约由 test_codespec_engine.py 用桩二进制钉死 6 条(启用开关/新建与留痕/
-  校验过败/树差归档/命令缺失的可解释报错/迁移跳过),不依赖真 codespec。
-
-上线动作:拿到真 codespec 后在 fieldtest-java 加预设跑一单;
-子命令若与 openspec 有出入,只改 codespec_engine.py 一个文件。
+- 预埋物:cli_commands/codespec_engine.py(完整 adapter:new/validate/archive 走
+  CLI 真实执行并留 engine_runs 审计痕、archive 树差推导、失败给出路)+
+  test_codespec_engine.py 桩二进制契约 6 条;
+- **休眠锁**:test_capability_is_dormant_not_wired 断言 spec.py 不含 codespec——
+  接线那天它会红,提醒按 MAINTAINERS 手册换成正向断言;
+- 接线 diff 已留档:提交 ab0dbbf 含全部三处路由(spec.py/lean_migration/
+  capability_runtime),本提交将其还原,拍板后照抄即可;
+- 设计不变:仓库预设启用、单一裁决源不动摇(阶段真相只在 .mae-flow.json)、
+  未预设的仓零行为变化。
 
 ## 2026-08-08：symbol-refs——最贵失效类的递工具(不是门禁)
 

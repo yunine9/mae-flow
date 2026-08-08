@@ -1,7 +1,5 @@
 """Host runtime discovery and project preparation for bundled capabilities."""
 
-import json
-
 from .capability_shared import COMET_SCRIPT_ROOT, OPENSPEC_ENTRY, PLUGIN_ROOT, os, shutil, subprocess, sys
 from .capability_packs import CapabilityError
 
@@ -290,24 +288,7 @@ def prepare_project(project_root):
             % (root, actual_root))
 
     # v4:规格目录由内置引擎创建,不再调 Node CLI——Node 从此不是宿主前置。
-    # 例外:仓库预设「规格引擎: codespec」时,工作区由 codespec 管(根目录 openspec/),
-    # 缺工作区给确切命令,不代跑外部工具(prepare 阶段失败要可解释、可重试)。
     from . import specengine
-    engine_preset = ""
-    try:
-        with open(os.path.join(root, ".mae-flow-defaults.json"),
-                  encoding="utf-8-sig") as stream:
-            engine_preset = str(
-                json.loads(stream.read()).get("规格引擎", "") or "")
-    except Exception:
-        engine_preset = ""
-    if engine_preset.strip().lower() == "codespec":
-        codespec_config = os.path.join(root, "openspec", "config.yaml")
-        if not os.path.isfile(codespec_config):
-            raise CapabilityError(
-                "本仓预设规格引擎=codespec,但 openspec/config.yaml 不存在。"
-                "先在项目根执行一次 codespec init(或核对 codespec 已安装)再重试。")
-        return _prepared_payload(root, runtime, engine="codespec")
     config = os.path.join(specengine._openspec_dir(root), "config.yaml")
     if not os.path.isfile(config):
         try:
@@ -317,12 +298,8 @@ def prepare_project(project_root):
         if not os.path.isfile(config):
             raise CapabilityError("规格配置创建后仍不存在: " + config)
 
-    return _prepared_payload(root, runtime)
-
-
-def _prepared_payload(root, runtime, engine="builtin"):
     return {
-        "spec_engine": engine,
+        "spec_engine": "builtin",
         "project": root,
         "python": runtime["python"]["detail"],
         "git": runtime["git"]["detail"],

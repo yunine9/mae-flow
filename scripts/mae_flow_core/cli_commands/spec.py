@@ -113,12 +113,8 @@ def cmd_spec(flow, st, args):
         if not name:
             api.die("需要变更目录名:spec new <英文短名>。", 2)
         try:
-            if api.spec_engine_enabled():
-                # codespec adapter:CLI 真实执行并留执行记录;阶段真相仍在本状态
-                info = api.codespec_new(st, name, tier)
-            else:
-                specengine.ensure_config(os.getcwd())
-                info = specengine.new_change(os.getcwd(), name, tier=tier)
+            specengine.ensure_config(os.getcwd())
+            info = specengine.new_change(os.getcwd(), name, tier=tier)
         except specengine.SpecEngineError as exc:
             api.die("创建变更目录失败: " + str(exc), 2)
         # dogfood 实测:spec init 要求 CHANGE_NAME 已记录,而记录动作(done --set)
@@ -170,11 +166,7 @@ def cmd_spec(flow, st, args):
         if not cn:
             api.die("先记录 CHANGE_NAME。", 2)
         try:
-            if api.spec_engine_enabled():
-                ok, messages = api.codespec_validate(st, cn)
-                api.save_state(st)   # 落执行记录;本动作后不再使用 data 引用
-            else:
-                ok, messages = specengine.validate(os.getcwd(), cn)
+            ok, messages = specengine.validate(os.getcwd(), cn)
         except specengine.SpecEngineError as exc:
             api.die("规格校验无法执行: " + str(exc), 2)
         for line in messages:
@@ -190,10 +182,7 @@ def cmd_spec(flow, st, args):
             api.die("规格定稿只能在定稿阶段执行(当前阶段 %s):先完成验证并通过 spec verify-pass。"
                 % (api._spec_phase(st) or "未初始化"), 2)
         try:
-            if api.spec_engine_enabled():
-                info = api.codespec_archive(st, cn)
-            else:
-                info = specengine.archive(os.getcwd(), cn)
+            info = specengine.archive(os.getcwd(), cn)
         except specengine.SpecEngineError as exc:
             api.die("规格定稿失败(现场保持原样,可修正后直接重跑): " + str(exc), 2)
         data["phase"] = "archived"

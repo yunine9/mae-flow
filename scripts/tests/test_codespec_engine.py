@@ -13,7 +13,6 @@
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -25,10 +24,6 @@ if SCRIPTS not in sys.path:
 
 from mae_flow_core import specengine  # noqa: E402
 from mae_flow_core.cli_commands import codespec_engine  # noqa: E402
-from mae_flow_core.cli_commands.lean_migration import (  # noqa: E402
-    migrate_legacy_spec_workspace,
-)
-
 STUB = r'''
 import os, shutil, sys
 args = sys.argv[1:]
@@ -126,12 +121,17 @@ class CodespecEngineTests(unittest.TestCase):
             codespec_engine.codespec_new(self.state, "req-x", "full")
         self.assertIn("规格引擎命令", str(ctx.exception))
 
-    def test_workspace_relocation_skipped_for_codespec_repos(self):
-        subprocess.run(["git", "-C", self.root, "init", "-q"], check=True)
-        codespec_engine.codespec_new(self.state, "req-x", "full")
-        moved, _note = migrate_legacy_spec_workspace(self.root)
-        self.assertFalse(moved)
-        self.assertTrue(os.path.isdir("openspec/changes/req-x"))
+    def test_capability_is_dormant_not_wired(self):
+        """预埋契约:能力在、接线不在——用户拍板前生产路径零改动。
+
+        接线时应恢复的三处路由见 MAINTAINERS「codespec 接入」节
+        (参照提交 ab0dbbf 的 spec.py/lean_migration/capability_runtime diff)。
+        本断言在接线那天会红——届时删掉它,换成路由生效的正向断言。
+        """
+        spec_source = os.path.join(
+            SCRIPTS, "mae_flow_core", "cli_commands", "spec.py")
+        with open(spec_source, encoding="utf-8") as stream:
+            self.assertNotIn("codespec", stream.read())
 
 
 if __name__ == "__main__":

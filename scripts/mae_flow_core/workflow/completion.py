@@ -70,6 +70,31 @@ def _receipt_norm(value):
     return re.sub(r"[（(]推荐[）)]", "", out).lower()
 
 
+_NEGATION_RE = re.compile(r"(不|否|跳过|无需)")
+
+
+def _alias_hits(normalized, answer_aliases):
+    return {
+        key for key, alias in answer_aliases
+        if normalized == alias
+        or (not re.fullmatch(r"[a-z0-9_-]+", alias)
+            and (normalized.startswith(alias) or alias.startswith(normalized)))
+    }
+
+
+def _binary_negation_key(choices, answer_aliases, normalized):
+    """二选一的否定锚:一侧标准文本以"不/否/跳过"开头,另一侧不带否定——
+    "需要,先预检"与"不需要,我直接检视"即使全改写也能可靠区分。"""
+    negated = {key for key, alias in answer_aliases
+               if _NEGATION_RE.match(alias)}
+    if len(negated) != 1:
+        return ""
+    negative_key = next(iter(negated))
+    positive_key = next(key for key in choices if key != negative_key)
+    return (negative_key if _NEGATION_RE.match(normalized)
+            else positive_key)
+
+
 def _label_affinity(label, choices, answer_aliases):
     """展示标签 → choice key,只认文本亲和,与展示顺序无关。
 
@@ -80,26 +105,24 @@ def _label_affinity(label, choices, answer_aliases):
     normalized = _receipt_norm(label)
     if not normalized:
         return ""
-    hits = {
-        key for key, alias in answer_aliases
-        if normalized == alias
-        or (not re.fullmatch(r"[a-z0-9_-]+", alias)
-            and (normalized.startswith(alias) or alias.startswith(normalized)))
-    }
+    hits = _alias_hits(normalized, answer_aliases)
     if len(hits) == 1:
         return next(iter(hits))
-    if len(choices) == 2 and not hits:
-        # 二选一的否定锚:一侧以"不/否/跳过"开头,另一侧不带否定——
-        # "需要,先预检"与"不需要,我直接检视"即使全改写也能可靠区分。
-        negated = {key for key, alias in answer_aliases
-                   if re.match(r"(不|否|跳过|无需)", alias)}
-        if len(negated) == 1:
-            negative_key = next(iter(negated))
-            positive_key = next(k for k in choices if k != negative_key)
-            return (negative_key
-                    if re.match(r"(不|否|跳过|无需)", normalized)
-                    else positive_key)
-    return ""
+    if hits or len(choices) != 2:
+        return ""
+    return _binary_negation_key(choices, answer_aliases, normalized)
+
+
+def _option_mapping(options, choices, answer_aliases):
+    """全部展示选项必须构成到 choice key 的双射,任何一个映射不出来
+    就放弃整题——宁可打回重问,不做无声的猜测。"""
+    mapping = {}
+    for label in options:
+        key = _label_affinity(label, choices, answer_aliases)
+        if not key or key in mapping.values():
+            return {}
+        mapping[_receipt_norm(label)] = key
+    return mapping if len(mapping) == len(choices) else {}
 
 
 def receipt_choice(step, item, value):
@@ -120,16 +143,8 @@ def receipt_choice(step, item, value):
         options = question.get("options") or []
         if len(options) != len(choices):
             continue
-        # 全部展示选项必须构成到 choice key 的双射,任何一个映射不出来
-        # 就放弃整题——宁可打回重问,不做无声的猜测。
-        mapping = {}
-        for label in options:
-            key = _label_affinity(label, choices, answer_aliases)
-            if not key or key in mapping.values():
-                mapping = {}
-                break
-            mapping[_receipt_norm(label)] = key
-        if len(mapping) == len(choices) and normalized_value in mapping:
+        mapping = _option_mapping(options, choices, answer_aliases)
+        if normalized_value in mapping:
             selected.add(mapping[normalized_value])
     return next(iter(selected)) if len(selected) == 1 else ""
 

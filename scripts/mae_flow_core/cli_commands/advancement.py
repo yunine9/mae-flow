@@ -294,9 +294,15 @@ def cmd_config_review(flow, st, args):
     api._ack_failure(st, success=True)
 
     _print_config_review(st["config_review"], step)
+    # 面板路径并进确认单,搭"逐项复制进回复正文"的转述义务便车——
+    # 实战验证过:单独一行"告诉用户"的指令会被模型跳过,进了卡就跳不过。
+    panel_page = os.path.abspath(os.path.join(".mae-flow-work", "panel.html"))
+    if os.path.exists(panel_page):
+        print("🖥 现场面板(浏览器打开一次,之后每到确认点自动刷新): %s"
+              % panel_page)
     print("\n⚠ 用户看不见工具输出:先把上面的确认单**逐项复制进你的回复正文**"
-          "(含分支名与需求摘录),再提问——只发一张没有配置内容的确认卡,"
-          "用户无从确认。")
+          "(含分支名、需求摘录与现场面板路径),再提问——只发一张没有配置内容"
+          "的确认卡,用户无从确认。")
     print("然后用**一次** AskUserQuestion 同时问完这两项开场决策"
           "（合并成一张卡，避免连着打断用户两次）：")
     print("Q1 上述完整配置是否正确？")

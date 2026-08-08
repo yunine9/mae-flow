@@ -128,6 +128,16 @@ class NotifyTests(unittest.TestCase):
         self.assertIn("_panel_refresh", source)
         self.assertIn("原样告诉用户", source)
 
+    def test_panel_path_rides_the_config_card_relay_contract(self):
+        """实战验证:单独一行"告诉用户"的指令会被模型跳过——面板路径必须
+        并进配置确认单,搭"逐项复制进回复正文"转述义务的便车。"""
+        path = os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                            "advancement.py")
+        with open(path, encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("现场面板(浏览器打开一次", source)
+        self.assertIn("与现场面板路径", source)
+
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""
         from mae_flow_core.cli_commands import panel as panel_command

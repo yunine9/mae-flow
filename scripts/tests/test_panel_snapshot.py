@@ -115,6 +115,37 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(4, progress["steps_total_estimate"])
         self.assertEqual("编码", progress["step_title"])
 
+    def test_progress_projects_history_for_the_read_only_timeline(self):
+        """页面执行记录只消费快照，不回头读取或猜测状态历史。"""
+        state = json.loads(json.dumps(STATE))
+        state["history"] = [
+            {"step": "config_confirm", "result": "done",
+             "at": "2026-08-08 14:10:00"},
+            {"step": "workflow_select", "result": "choice:full",
+             "at": "2026-08-08 14:15:00"},
+            "broken-row",
+        ]
+        history = snapshot.build(self.root, state, FLOW)["progress"]["history"]
+        self.assertEqual([
+            {"step": "config_confirm", "title": "配置确认",
+             "result": "done", "at": "2026-08-08 14:10:00"},
+            {"step": "workflow_select", "title": "交付方式选择",
+             "result": "choice:full", "at": "2026-08-08 14:15:00"},
+        ], history)
+
+    def test_progress_history_projection_is_bounded(self):
+        """长需求不能让 panel --json 随历史无限膨胀。"""
+        state = json.loads(json.dumps(STATE))
+        state["history"] = [
+            {"step": "config_confirm", "result": "done-%d" % index,
+             "at": "2026-08-08 14:%02d:00" % (index % 60)}
+            for index in range(75)
+        ]
+        history = snapshot.build(self.root, state, FLOW)["progress"]["history"]
+        self.assertEqual(50, len(history))
+        self.assertEqual("done-25", history[0]["result"])
+        self.assertEqual("done-74", history[-1]["result"])
+
     def test_pending_lists_confirmations_and_choices_only(self):
         ack = dict(STATE, current="config_confirm")
         item = snapshot.build(self.root, ack, FLOW)["pending"][0]

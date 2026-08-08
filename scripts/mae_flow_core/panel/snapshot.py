@@ -24,6 +24,7 @@ DOC_KINDS = (
     ("implementation", "实现记录"),
 )
 COMMIT_CAP = 50
+HISTORY_CAP = 50
 
 
 def _git(root, *args):
@@ -296,11 +297,24 @@ def _remaining(flow, current):
 
 def _progress(state, flow):
     current = (state or {}).get("current", "")
-    history = [item.get("step") for item in (state or {}).get("history", [])
-               if isinstance(item, dict)]
-    done = list(dict.fromkeys(name for name in history if name))
+    steps = ((flow or {}).get("steps", {}) or {})
+    history, timeline = [], []
+    for item in (state or {}).get("history", []):
+        if not isinstance(item, dict):
+            continue
+        name = item.get("step")
+        if not name:
+            continue
+        history.append(name)
+        timeline.append({
+            "step": str(name),
+            "title": str((steps.get(name) or {}).get("title", "") or ""),
+            "result": str(item.get("result", "") or ""),
+            "at": str(item.get("at", "") or ""),
+        })
+    done = list(dict.fromkeys(history))
     remaining = _remaining(flow, current)
-    step = ((flow or {}).get("steps", {}) or {}).get(current) or {}
+    step = steps.get(current) or {}
     gotos = sum(1 for item in (state or {}).get("history", [])
                 if isinstance(item, dict) and "goto" in str(item.get("result")))
     return {
@@ -312,6 +326,7 @@ def _progress(state, flow):
         "percent": None,        # 有分支与回退,算出来必然是编的
         "started_at": (state or {}).get("started", ""),
         "revisits": {"goto": gotos},
+        "history": timeline[-HISTORY_CAP:],
     }
 
 

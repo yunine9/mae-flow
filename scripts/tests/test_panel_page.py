@@ -48,14 +48,15 @@ class PanelPageTests(unittest.TestCase):
                 "done ...", ""), "页面不应提供可执行的推进入口: " + word)
 
     def test_pending_section_precedes_progress_section(self):
-        """版面优先级是契约:待裁决在前,进度在最后。"""
+        """当前动作优先，流程细节在侧栏，不抢用户注意力。"""
         html = build(dict(STATE, current="config_confirm"))
-        self.assertLess(html.index("待你裁决"), html.index(">进度<"))
+        self.assertLess(html.index("现在需要你看什么"),
+                        html.index(">流程细节<"))
         self.assertIn("REQ2026080901", html)
 
     def test_quiet_when_nothing_needs_the_user(self):
         html = build()
-        self.assertIn("当前没有需要你拍板的事项", html)
+        self.assertIn("当前不需要你处理", html)
 
     def test_degraded_tool_gets_its_own_banner(self):
         html = build()
@@ -68,6 +69,16 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("变更后", html)
         self.assertIn('class="dr"', html)
         self.assertIn("+3", html)
+
+    def test_change_generator_feeds_both_summary_and_diff(self):
+        """渲染层不应因先消费迭代器而让首屏统计变成 0。"""
+        data = snapshot.build(TESTS, STATE, FLOW)
+        html = page.render(data, (item for item in CHANGES), TESTS)
+        summary = html[html.index('<div class="summary-grid">'):
+                       html.index("现在需要你看什么")]
+        self.assertIn("1 个文件 · +3 / −1", summary)
+        self.assertIn("src/", html)
+        self.assertIn("a.py", html)
 
     def test_progress_never_prints_a_percentage(self):
         html = build()
@@ -122,13 +133,62 @@ class PanelPageTests(unittest.TestCase):
                       encoding="utf-8") as stream:
                 stream.write("# STORY\n")
             html = build(dict(STATE, current="story"))
-            card = html[html.index("待你裁决"):html.index(">文档 <")]
+            card = html[html.index("现在需要你看什么"):
+                        html.index("需求与设计资产")]
             self.assertIn("story.md", card)
             self.assertIn("要检视的文件", card)
             self.assertIn("show('doc-story')", card)   # 点开就地阅读
             self.assertNotIn("工号", card)             # 不倒配置
         finally:
             shutil.rmtree(os.path.join(TESTS, ".mae-flow-work"), True)
+
+    def test_artifacts_are_a_first_class_section_before_execution_details(self):
+        """Grill/Spec/Story/实现说明是实现依据，不是缩在侧栏的普通附件。"""
+        folder = os.path.join(TESTS, ".mae-flow-work", "REQ2026080901")
+        os.makedirs(folder, exist_ok=True)
+        try:
+            for name in ("grill.md", "spec.md", "story.md",
+                         "implementation.md"):
+                with open(os.path.join(folder, name), "w",
+                          encoding="utf-8") as stream:
+                    stream.write("# %s\n" % name)
+            html = build()
+            action = html.index("现在需要你看什么")
+            assets = html.index("需求与设计资产")
+            history = html.index("执行记录")
+            changes = html.index("代码变更")
+            self.assertLess(action, assets)
+            self.assertLess(assets, history)
+            self.assertLess(assets, changes)
+            for name in ("grill.md", "spec.md", "story.md",
+                         "implementation.md"):
+                self.assertIn(name, html)
+            self.assertIn('<span class="asset-kind">业务规格</span>', html)
+            self.assertIn('<span class="asset-kind">实现说明</span>', html)
+            self.assertIn("Grill / 决策", html)
+            self.assertIn("Story", html)
+            self.assertIn("实现说明 / 代码", html)
+        finally:
+            shutil.rmtree(os.path.join(TESTS, ".mae-flow-work"), True)
+
+    def test_phase_rail_is_a_connected_horizontal_node_track(self):
+        """当前阶段不准再被挤成逐字竖排的胶囊。"""
+        html = build()
+        self.assertIn('class="phase-node past"', html)
+        self.assertIn('class="phase-node current"', html)
+        self.assertIn("grid-template-columns:repeat(7,1fr)", html)
+        self.assertIn(".phase-node:not(:last-child):after", html)
+        self.assertIn("@media (max-width:860px)", html)
+        self.assertNotIn("writing-mode", html)
+
+    def test_execution_history_is_visible_without_replacing_quality_facts(self):
+        html = build()
+        self.assertIn("执行记录", html)
+        self.assertIn("配置确认", html)
+        self.assertIn("交付方式选择", html)
+        self.assertIn('class="history-result">已完成</span>', html)
+        self.assertNotIn('class="history-result">done</span>', html)
+        self.assertIn("质量事实", html)
 
 
 if __name__ == "__main__":

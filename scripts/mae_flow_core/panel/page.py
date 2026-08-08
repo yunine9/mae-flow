@@ -11,6 +11,16 @@ import os
 from . import assets, diffview, markdown, notify, plantuml
 from .markdown import escape
 
+DOC_DISPLAY_LABELS = {
+    "survey": "调研",
+    "grill-prep": "Grill 准备",
+    "grill": "需求澄清",
+    "decisions": "决策记录",
+    "spec": "业务规格",
+    "story": "Story",
+    "implementation": "实现说明",
+}
+
 def _fence_hook(language, body):
     """md 里的 plantuml 块就地出图;出不了就显示源码并说清为什么。"""
     if language != "plantuml":
@@ -32,28 +42,30 @@ def _document_panes(documents):
     rows, tabs, panes = [], [], []
     for doc in documents:
         key = "doc-" + doc["kind"]
+        display_label = DOC_DISPLAY_LABELS.get(doc["kind"], doc["label"])
         try:
             with io.open(doc["path"], encoding="utf-8", errors="replace") as fh:
                 body = markdown.render(fh.read(), _fence_hook)
         except OSError as exc:
             body = '<p>读取失败：%s</p>' % escape(str(exc))
         rows.append(
-            '<div class="doc"><span class="k">%s</span>'
-            '<button class="open" onclick="show(\'%s\')" title="%s">%s'
-            '</button><span class="s">%s · %s</span>'
-            '<a class="raw" href="file://%s">↗</a></div>'
-            % (escape(doc["label"]), key, escape(doc["relative"]),
+            '<div class="asset"><span class="asset-kind">%s</span>'
+            '<button class="asset-open" onclick="show(\'%s\')" title="%s">'
+            '<b>%s</b><span>%s · %s</span></button>'
+            '<a class="asset-raw" href="file://%s" title="打开源文件">↗</a>'
+            '</div>'
+            % (escape(display_label), key, escape(doc["relative"]),
                escape(doc["relative"].rpartition("/")[2]),
                _size(doc["bytes"]), escape(doc["updated_at"]),
                escape(doc["path"])))
         tabs.append('<button data-group="doc" data-key="%s" '
                     'onclick="show(\'%s\')">%s</button>'
-                    % (key, key, escape(doc["label"])))
+                    % (key, key, escape(display_label)))
         panes.append(
             '<div class="pane" data-group="doc" data-key="%s" '
             'data-title="%s" data-raw="file://%s" data-rel="%s">'
             '<div class="md">%s</div></div>'
-            % (key, escape(doc["label"]), escape(doc["path"]),
+            % (key, escape(display_label), escape(doc["path"]),
                escape(doc["relative"]), body))
     return rows, tabs, panes
 
@@ -111,9 +123,11 @@ def _change_sections(groups, root):
 def _pending_section(pending, doc_key_by_path):
     """卡片内容必须与步骤对得上:确认 Story 的卡里就是 Story,点开即读。"""
     if not pending:
-        return ('<section class="decide"><h2>待你裁决</h2><div class="card">'
+        return ('<section class="current-action"><h2>现在需要你看什么</h2>'
+                '<div class="action-card">'
                 '<div class="quiet"><span class="dot"></span>'
-                '当前没有需要你拍板的事项。</div></div></section>')
+                '当前不需要你处理，流程正在按已有决定继续。</div>'
+                '</div></section>')
     cards = []
     for item in pending:
         body = ""
@@ -143,13 +157,78 @@ def _pending_section(pending, doc_key_by_path):
             '\n<em># 给人复制到终端用 —— 面板不提供执行按钮</em></div>'
             % (escape(item["title"] or item["step"]), escape(item["step"]),
                body))
-    return ('<section class="decide has"><h2>待你裁决</h2>'
-            '<div class="card">%s</div></section>' % "".join(cards))
+    return ('<section class="current-action has"><h2>现在需要你看什么</h2>'
+            '<div class="action-card">%s</div></section>' % "".join(cards))
 
 
 def _hm(stamp):
     """"2026-08-08 16:35:28" → "16:35"。整页都是今天前后的事,日期是噪声。"""
     return stamp[11:16] if len(stamp) >= 16 else stamp
+
+
+def _history_result(result):
+    """状态内部码只用于恢复;面板用短中文说明人能观察到的含义。"""
+    value = str(result or "")
+    if value == "done":
+        return "已完成"
+    for prefix, label in (
+            ("choice:", "已选择"), ("goto:", "已回退"),
+            ("accept-risk:", "风险已确认"), ("resumed:", "已恢复"),
+            ("source-recheck:", "已重新检查"), ("unlock:", "已解锁")):
+        if value.startswith(prefix):
+            return label
+    return "已记录"
+
+
+def _history_section(progress):
+    """最近执行记录:只展示快照投影,不从页面反读状态。"""
+    rows = []
+    for item in progress.get("history", [])[-7:]:
+        title = item.get("title") or item.get("step") or "未知步骤"
+        result = _history_result(item.get("result"))
+        rows.append(
+            '<div class="history-row"><time>%s</time><span class="history-step">'
+            '%s</span><span class="history-result">%s</span></div>'
+            % (escape(_hm(item.get("at", "")) or "—"), escape(title),
+               escape(result)))
+    current = progress.get("step_title") or progress.get("step") or "未知步骤"
+    rows.append(
+        '<div class="history-row current"><time>现在</time>'
+        '<span class="history-step">%s</span>'
+        '<span class="history-result">当前步骤</span></div>' % escape(current))
+    return ('<section class="panel-section history"><div class="section-head">'
+            '<h2>执行记录</h2><span>最近 %d 条</span></div>'
+            '<div class="history-table">%s</div></section>'
+            % (len(rows), "".join(rows)))
+
+
+def _summary(snapshot, changes):
+    """首屏现场摘要:只计算传入快照和精确变更组里的事实。"""
+    files = [item for group in changes for item in group.get("files", [])]
+    added = sum(item.get("added", 0) for item in files)
+    removed = sum(item.get("removed", 0) for item in files)
+    progress = snapshot["progress"]
+    current = progress.get("step_title") or progress.get("step") or "—"
+    cells = (
+        ("当前分支", snapshot["repo"].get("branch") or "—", "mono"),
+        ("代码增量", "%d 个文件 · +%d / −%d" %
+         (len(files), added, removed), ""),
+        ("当前步骤", current, ""),
+        ("提交位置", snapshot["repo"].get("head") or "—", "mono"),
+        ("状态修订", "rev %s" % (snapshot.get("state_revision") or 0), "mono"),
+    )
+    return '<div class="summary-grid">%s</div>' % "".join(
+        '<div class="summary-item"><span>%s</span><b class="%s">%s</b></div>'
+        % (escape(label), cls, escape(str(value)))
+        for label, value, cls in cells)
+
+
+def _asset_chain(documents):
+    """说明过程产物的消费关系;存在性仍以实际资产卡片为准。"""
+    empty = "" if documents else '<span class="chain-empty">本单尚无过程产物</span>'
+    return ('<div class="asset-chain"><b>Grill / 决策</b><i>→</i>'
+            '<b>业务规格</b><i>→</i><b>Story</b><i>→</i>'
+            '<b>实现说明 / 代码</b>%s</div>' % empty)
 
 
 def _evidence_rows(evidence, steps_done):
@@ -233,9 +312,11 @@ def _phase_rail(step):
     index = order.index(current)
     cells = []
     for slot, name in enumerate(order):
-        cls = "past" if slot < index else ("cur" if slot == index else "todo")
-        cells.append('<span class="ph %s">%s</span>' % (cls, escape(name)))
-    return '<div class="rail">%s</div>' % "".join(cells)
+        cls = "past" if slot < index else (
+            "current" if slot == index else "future")
+        cells.append('<span class="phase-node %s">%s</span>'
+                     % (cls, escape(name)))
+    return '<div class="phase-track">%s</div>' % "".join(cells)
 
 
 def _progress_section(progress):
@@ -244,7 +325,8 @@ def _progress_section(progress):
     current = escape(progress["step"])
     if progress["step_title"]:
         current += " · " + escape(progress["step_title"])
-    return ('<section class="prog"><h2>进度</h2><div class="line">'
+    return ('<section class="panel-section prog"><div class="section-head">'
+            '<h2>流程细节</h2><span>只陈述事实</span></div><div class="line">'
             '<span>第 <b>%d</b> 步%s</span>'
             '<span>当前 <span class="cur">%s</span></span>'
             '<span>起始 <b>%s</b></span>'
@@ -258,6 +340,7 @@ def _progress_section(progress):
 
 def render(snapshot, changes=(), root="."):
     """快照(+变更组) → 完整 HTML 文本。"""
+    changes = tuple(changes)  # 既给摘要统计,也给 diff 渲染;生成器不能只消费一次
     doc_rows, doc_tabs, doc_panes = _document_panes(
         snapshot["artifacts"]["documents"])
     change_html, change_tabs, change_panes = _change_sections(changes, root)
@@ -276,10 +359,12 @@ def render(snapshot, changes=(), root="."):
         "head": escape(snapshot["repo"]["head"]),
         "stamp": escape(snapshot["generated_at"]),
         "revision": snapshot["state_revision"] or 0,
+        "summary": _summary(snapshot, changes),
         "pending": _pending_section(snapshot["pending"], doc_key_by_path),
+        "asset_chain": _asset_chain(snapshot["artifacts"]["documents"]),
         "docs": "".join(doc_rows) or
-                '<div class="doc"><span class="k">—</span>'
-                '<span>本单尚无文档</span><span></span><span></span></div>',
+                '<div class="asset empty"><span class="asset-kind">—</span>'
+                '<span>本单尚无过程产物</span></div>',
         "commits": "".join(
             '<div class="commit"><code>%s</code><span>%s</span>'
             '<span class="t">%s</span></div>'
@@ -299,6 +384,7 @@ def render(snapshot, changes=(), root="."):
             for item in advisories) or
             '<li class="quiet"><span class="dot"></span>本轮无待处理建议。</li>',
         "progress": _progress_section(snapshot["progress"]),
+        "history": _history_section(snapshot["progress"]),
         "warnings": "".join("<li>%s</li>" % escape(text)
                             for text in snapshot["warnings"]),
         "tabs": "".join(doc_tabs + change_tabs),
@@ -310,36 +396,36 @@ def render(snapshot, changes=(), root="."):
 TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mae-Flow 交付现场 · %(ticket)s</title>
-<style>%(css)s</style></head><body><div class="wrap">
-<header><h1>交付现场 · <span class="tick">%(ticket)s</span></h1>
-<div class="hd-meta"><span>%(branch)s</span><span>基线 %(baseline)s</span>
-<span>HEAD %(head)s</span>
-<span class="stamp">快照 %(stamp)s · rev %(revision)s</span></div>
-%(rail)s</header>
+<title>Mae-Flow 交付工作台 · %(ticket)s</title>
+<style>%(css)s</style></head><body><div class="workbench">
+<header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
+<h1>交付工作台</h1></div><div class="header-state">%(stamp)s · rev %(revision)s</div>
+</div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>
+<span>HEAD %(head)s</span></div>%(rail)s</header>
+%(summary)s
 %(pending)s
-<div class="cols">
-<div class="col-main">
-<section><h2>文档 <span class="n">· 点名字就地阅读</span></h2>
-<div class="list">%(docs)s</div></section>
-<section><h2>代码变更 <span class="n">· 点文件看双排 diff</span></h2>
-<div class="list">%(commits)s</div>
-%(changes)s</section>
-</div>
-<div class="col-side">
-<section><h2>质量检查 <span class="n">· 只列需要注意的</span></h2>
-<div class="list">%(evidence)s</div>
-%(degraded)s</section>
-<section><h2>本轮建议 <span class="n">· 非阻断</span></h2>
+<section class="asset-section"><div class="section-head asset-head">
+<h2>需求与设计资产</h2><span>本次实现的依据 · 点开就地阅读</span></div>
+<div class="asset-grid">%(docs)s</div>%(asset_chain)s</section>
+<div class="workspace"><main>
+%(history)s
+<section class="panel-section changes"><div class="section-head">
+<h2>代码变更</h2><span>点文件查看完整双排 diff</span></div>
+<div class="commit-list">%(commits)s</div>%(changes)s</section>
+</main><aside>
+<section class="panel-section"><div class="section-head">
+<h2>质量事实</h2><span>未知不算通过</span></div>
+<div class="list">%(evidence)s</div>%(degraded)s</section>
+<section class="panel-section"><div class="section-head">
+<h2>本轮建议</h2><span>非阻断</span></div>
 <ul class="adv">%(advisories)s</ul></section>
 %(progress)s
-</div>
-</div>
-<details class="note"><summary>日志与任务卡</summary>
+</aside></div>
+<div class="low-frequency"><details class="note"><summary>日志与任务卡</summary>
 <ul class="paths">%(logs)s</ul></details>
 <details class="note"><summary>出口自述（快照自己的降级说明）</summary>
 <ul>%(warnings)s<li>百分比故意留空：flow 有分支和回退，算出来必然是编的。</li>
-<li>图形为内置轻渲染，与公司评审工具的 PlantUML 输出可能有差异。</li></ul></details>
+<li>图形为内置轻渲染，与公司评审工具的 PlantUML 输出可能有差异。</li></ul></details></div>
 <footer>只读快照 · 由 <code>mae-flow.py panel</code> 生成 ·
 数据源 <code>panel --json</code>；本页不含任何写入入口。</footer>
 </div>

@@ -176,7 +176,7 @@ def _announce_and_sync_panel(flow, st, sid, nxt):
     from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
     panel_path = _panel_refresh(flow, st)
     if panel_path:
-        print("[mae-flow] 现场面板已同步(浏览器打开或刷新即可): %s"
+        print("[mae-flow] 现场面板已同步(切回浏览器标签页即自动刷新): %s"
               % panel_path)
 
 def _validated_pending_config(step, st, set_values):

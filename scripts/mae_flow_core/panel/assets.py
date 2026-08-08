@@ -325,4 +325,9 @@ V.addEventListener('click', function(e){ if (e.target === V) hide(); });
 document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') hide();
 });
+// 自动刷新:file:// 没有服务端推送,退而求其次——切回本标签页时重载,
+// 你回来看的那一刻正好是它该最新的那一刻;阅读层开着时不打扰。
+document.addEventListener('visibilitychange', function(){
+  if (!document.hidden && !V.classList.contains('on')) { location.reload(); }
+});
 """

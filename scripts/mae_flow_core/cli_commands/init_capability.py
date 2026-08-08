@@ -118,7 +118,7 @@ def cmd_init(flow, args):
     from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
     panel_path = _panel_refresh(flow, st)
     if panel_path:
-        print("[mae-flow] 现场面板已生成(浏览器打开,之后每到确认点自动同步): %s"
+        print("[mae-flow] 现场面板已生成(浏览器打开即可,确认点自动同步,切回标签页自动刷新): %s"
               % panel_path)
         print("  ⚠ 把上面这个面板路径原样告诉用户——工具输出用户看不见。")
     api.print_current(flow, st)

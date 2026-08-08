@@ -221,6 +221,12 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("overflow-y:auto", assets.CSS)
         self.assertIn("pane.scrollTop = 0", assets.JS)
 
+    def test_tab_return_triggers_reload_unless_reading(self):
+        """file:// 无推送,自动刷新=切回标签页时重载;阅读层开着不打扰。"""
+        from mae_flow_core.panel import assets
+        self.assertIn("visibilitychange", assets.JS)
+        self.assertIn("!V.classList.contains('on')", assets.JS)
+
 
 if __name__ == "__main__":
     unittest.main()

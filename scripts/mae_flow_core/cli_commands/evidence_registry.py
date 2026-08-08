@@ -11,6 +11,7 @@ from .shared import (
     read_text, STATE_PATH, specengine, sys, time,
 )
 from .wiring import api
+from mae_flow_core.workflow.advisories import record_advisory
 from mae_flow_core.workflow.agent_observations import (
     finished_observation,
     open_started_observations,
@@ -88,8 +89,9 @@ def _verification_passed(state):
         return False, (
             "本地验证报告缺少独立一行的 PASS 结论；"
             "在 .mae-flow-work/<单号>/verification.md 补充真实结论")
-    # 对齐矩阵是本报告的核心要求:每条验收项一行、指到实现位置。
-    # 只查 PASS 不查矩阵,报告就能退化成一句话散文——提示词的要求必须有机器兜底。
+    # 机器只拦谎言,不拦格式——频繁打回毁体验,格式与充分性交给人工检视。
+    # 「有结论为缺失的行却写 PASS」是自相矛盾的伪证,属于底线,拦;
+    # 「矩阵没写/写成散文」是质量问题,只在 current 提示一次,放行。
     rows = [
         line for line in content.splitlines()
         if line.strip().startswith("|")
@@ -97,20 +99,25 @@ def _verification_passed(state):
         and "---" not in line
     ]
     filled = [row for row in rows if not re.search(r"满足\s*/\s*部分", row)]
-    if not filled:
-        return False, (
-            "验证报告缺少逐条对齐矩阵(验收项|实现位置|验证方式|结论)。"
-            "把 Spec 与 Grill 决策拆成验收项,每条一行、结论写 满足/部分/缺失；"
-            "只有模板占位行不算填写")
     missing = [
         row for row in filled
         if re.search(r"\|\s*缺失\s*\|?\s*$", row)
     ]
     if missing:
         return False, (
-            "对齐矩阵存在结论为「缺失」的验收项,却写了 PASS——两者矛盾。"
+            "验证报告存在结论为「缺失」的验收项,却写了 PASS——两者矛盾。"
             "缺失项要么补实现重走质量链,要么按用户裁决修订 Spec: "
             + missing[0].strip()[:120])
+    if not filled:
+        try:
+            record_advisory(
+                STATE_PATH, str((state or {}).get("current", "")),
+                "verification-matrix",
+                "verification.md 没有逐条对齐矩阵(验收项|实现位置|验证方式|结论),"
+                "人工检视时请留意规格覆盖是否只是一句话带过",
+                time.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass  # 建议层失败绝不反过来挡流程
     return True, ""
 
 

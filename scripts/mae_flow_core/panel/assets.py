@@ -28,7 +28,7 @@ CSS = r"""
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-.wrap{max-width:860px;margin:0 auto;padding:30px 20px 64px}
+.wrap{max-width:1120px;margin:0 auto;padding:30px 22px 64px}
 
 /* ── 页眉 ── */
 header{margin-bottom:30px}
@@ -37,6 +37,22 @@ h1 .tick{font-family:var(--mono);color:var(--accent)}
 .hd-meta{color:var(--dim);font-size:12px;font-family:var(--mono);
   display:flex;flex-wrap:wrap;gap:4px 14px}
 .hd-meta .stamp{margin-left:auto;color:var(--faint)}
+
+/* ── 阶段轨道:离散事实,不是百分比 ── */
+.rail{display:flex;gap:5px;margin-top:16px}
+.ph{flex:1;text-align:center;font-size:11px;padding:4px 0;
+  border-radius:20px;border:1px solid var(--line);color:var(--faint);
+  letter-spacing:.12em;white-space:nowrap}
+.ph.past{background:var(--line);color:var(--dim);border-color:transparent}
+.ph.cur{background:var(--accent);border-color:var(--accent);color:#fff;
+  font-weight:650}
+
+/* ── 双栏:左=要检视的东西,右=状态;窄屏塌回单栏 ── */
+.cols{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);
+  gap:4px 46px;align-items:start}
+@media (max-width:900px){
+  .cols{grid-template-columns:minmax(0,1fr)}
+}
 
 /* ── 区块:标题小而轻,内容拍平成行 ── */
 section{margin:30px 0}

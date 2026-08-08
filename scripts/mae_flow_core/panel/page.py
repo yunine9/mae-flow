@@ -8,7 +8,7 @@
 import io
 import os
 
-from . import assets, diffview, markdown, plantuml
+from . import assets, diffview, markdown, notify, plantuml
 from .markdown import escape
 
 STATUS_LABEL = {"PASS": "t-ok", "CLEAN": "t-ok", "OK": "t-ok",
@@ -44,10 +44,11 @@ def _document_panes(documents):
             body = '<p>读取失败：%s</p>' % escape(str(exc))
         rows.append(
             '<div class="doc"><span class="k">%s</span>'
-            '<button class="open" onclick="show(\'%s\')">%s</button>'
-            '<span class="s">%s · %s</span>'
-            '<a class="raw" href="file://%s">源文件 ↗</a></div>'
+            '<button class="open" onclick="show(\'%s\')" title="%s">%s'
+            '</button><span class="s">%s · %s</span>'
+            '<a class="raw" href="file://%s">↗</a></div>'
             % (escape(doc["label"]), key, escape(doc["relative"]),
+               escape(doc["relative"].rpartition("/")[2]),
                _size(doc["bytes"]), escape(doc["updated_at"]),
                escape(doc["path"])))
         tabs.append('<button data-group="doc" data-key="%s" '
@@ -172,6 +173,30 @@ def _evidence_rows(evidence):
     return "".join(rows), note
 
 
+_PHASE_SHORT = {"需求澄清": "澄清"}
+
+
+def _phase_rail(step):
+    """页眉的阶段轨道:离散事实,不是百分比。
+
+    阶段来自 notify.PHASES(step→阶段的唯一来源)。过去的段灰、当前段高亮、
+    未来段虚——它回答"你在哪",不宣称"完成了多少"。百分比条被契约禁止:
+    有分支有回退的图上,百分比必然是编的。
+    """
+    order = list(notify.PHASES)
+    current = notify.phase_of(step)
+    if current not in order:
+        return ""
+    index = order.index(current)
+    cells = []
+    for slot, name in enumerate(order):
+        cls = "past" if slot < index else ("cur" if slot == index else "todo")
+        cells.append('<span class="ph %s" title="%s">%s</span>'
+                     % (cls, escape(name),
+                        escape(_PHASE_SHORT.get(name, name))))
+    return '<div class="rail">%s</div>' % "".join(cells)
+
+
 def _progress_section(progress):
     """一行字,不是一面墙——那串步骤药丸是全页最大的杂乱源,退役。"""
     total = progress["steps_total_estimate"]
@@ -200,6 +225,7 @@ def render(snapshot, changes=(), root="."):
     context = {
         "css": assets.CSS + plantuml.SVG_CSS,
         "js": assets.JS,
+        "rail": _phase_rail(snapshot["progress"]["step"]),
         "ticket": escape(snapshot["delivery"]["ticket"] or "（无在途单）"),
         "branch": escape(snapshot["repo"]["branch"]),
         "baseline": escape(snapshot["repo"]["baseline"]),
@@ -245,18 +271,25 @@ TEMPLATE = """<!doctype html>
 <header><h1>交付现场 · <span class="tick">%(ticket)s</span></h1>
 <div class="hd-meta"><span>%(branch)s</span><span>基线 %(baseline)s</span>
 <span>HEAD %(head)s</span>
-<span class="stamp">快照 %(stamp)s · rev %(revision)s</span></div></header>
+<span class="stamp">快照 %(stamp)s · rev %(revision)s</span></div>
+%(rail)s</header>
 %(pending)s
+<div class="cols">
+<div class="col-main">
 <section><h2>文档 <span class="n">· 点名字就地阅读</span></h2>
 <div class="list">%(docs)s</div></section>
 <section><h2>代码变更 <span class="n">· 点文件看双排 diff</span></h2>
 <div class="list">%(commits)s</div>
 %(changes)s</section>
+</div>
+<div class="col-side">
 <section><h2>证据</h2><div class="list">%(evidence)s</div>
 %(degraded)s</section>
 <section><h2>本轮建议 <span class="n">· 非阻断</span></h2>
 <ul class="adv">%(advisories)s</ul></section>
 %(progress)s
+</div>
+</div>
 <details class="note"><summary>日志与任务卡</summary>
 <ul class="paths">%(logs)s</ul></details>
 <details class="note"><summary>出口自述（快照自己的降级说明）</summary>

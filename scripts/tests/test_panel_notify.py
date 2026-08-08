@@ -71,8 +71,8 @@ class NotifyTests(unittest.TestCase):
 
     def test_phase_change_rings_once(self):
         lines, printed = announce("grill", "build")
-        self.assertEqual(["🔔 进入「编码」阶段"], lines)
-        self.assertIn("编码", printed)
+        self.assertEqual(["🔔 进入「写代码」阶段"], lines)
+        self.assertIn("写代码", printed)
 
     def test_same_phase_movement_stays_silent(self):
         """同阶段内推进不响——噪声化的通知等于没有通知。"""
@@ -127,7 +127,7 @@ class NotifyTests(unittest.TestCase):
             inside = notify.announce(flow, "verify_ponytail",
                                      "verify_codecheck")
         self.assertTrue(any("需要你选择" in line for line in first))
-        self.assertEqual(["🔔 进入「编码」阶段"], crossing)
+        self.assertEqual(["🔔 进入「写代码」阶段"], crossing)
         self.assertEqual([], inside)       # 质量阶段内部推进保持安静
 
 

@@ -155,6 +155,7 @@ def _agent_evidence(state, name, label):
         return None
     return {"name": label, "at": task.get("at", ""),
             "head": (task.get("head") or "")[:7],
+            "step": task.get("step", ""),
             "files": len(task.get("task_files") or []),
             "task_card": task.get("path", "")}
 

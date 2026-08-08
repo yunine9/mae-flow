@@ -132,6 +132,10 @@ h2 .n{font-weight:400;letter-spacing:0;font-family:var(--mono);font-size:11px}
 .deg-note{margin-top:12px;padding:9px 13px;border-radius:7px;
   background:var(--warn-bg);color:var(--warn);font-size:12.5px;
   border-left:3px solid var(--warn)}
+.fineline{display:flex;align-items:center;gap:9px;padding:8px 2px;
+  color:var(--dim);font-size:12.5px}
+.fineline .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);
+  flex:none}
 
 /* ── 建议 ── */
 .adv{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}

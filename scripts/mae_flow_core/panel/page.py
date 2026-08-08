@@ -11,11 +11,6 @@ import os
 from . import assets, diffview, markdown, notify, plantuml
 from .markdown import escape
 
-STATUS_LABEL = {"PASS": "t-ok", "CLEAN": "t-ok", "OK": "t-ok",
-                "TOOL_ERROR": "t-deg", "UNAVAILABLE": "t-deg",
-                "FAIL": "t-bad", "BLOCKED": "t-bad"}
-
-
 def _fence_hook(language, body):
     """md 里的 plantuml 块就地出图;出不了就显示源码并说清为什么。"""
     if language != "plantuml":
@@ -135,8 +130,18 @@ def _pending_section(pending):
             '<div class="card">%s</div></section>' % "".join(cards))
 
 
-def _evidence_rows(evidence):
-    rows, degraded = [], False
+def _hm(stamp):
+    """"2026-08-08 16:35:28" → "16:35"。整页都是今天前后的事,日期是噪声。"""
+    return stamp[11:16] if len(stamp) >= 16 else stamp
+
+
+def _evidence_rows(evidence, steps_done):
+    """质量检查:只列需要注意的。
+
+    过了的关不值得占一行——全部压成一行小字;出问题的、在跑的才有自己的行,
+    并且用人话说清"发生了什么、缺了什么"。
+    """
+    fine, rows, degraded = [], [], False
 
     def row(name, tag, cls, why):
         rows.append('<div class="row"><span class="name">%s</span>'
@@ -144,36 +149,46 @@ def _evidence_rows(evidence):
                     '<span class="why">%s</span></div>'
                     % (escape(name), cls, escape(tag), escape(why)))
 
-    for key in ("compile", "reviewer"):
-        item = evidence.get(key)
-        if item:
-            row(item["name"], "已完成", "t-ok",
-                "%s · %d 个文件" % (item["at"], item["files"]))
-    ponytail = evidence.get("ponytail")
-    if ponytail:
-        row(ponytail["name"], "已完成", "t-ok",
-            "第 %s 轮" % ponytail["rounds"])
+    compile_ev = evidence.get("compile")
+    if compile_ev:
+        if compile_ev.get("step", "") in steps_done:
+            fine.append("编译")
+        else:
+            row("编译", "进行中", "t-run",
+                "%s 派发 · 覆盖 %d 个文件" % (_hm(compile_ev["at"]),
+                                              compile_ev["files"]))
+    if evidence.get("reviewer"):
+        fine.append("Agent 预检")
+    if evidence.get("ponytail"):
+        fine.append("代码精简")
     check = evidence.get("codecheck")
     if check:
         degraded = check["degraded"]
-        row(check["name"],
-            "工具未就绪" if degraded else (check["status"] or "已完成"),
-            STATUS_LABEL.get(check["status"], "t-ok"),
-            "%s · %d 个文件%s" % (check["at"], check["files"],
-                                  "未扫描" if degraded else ""))
+        if degraded:
+            row("CodeCheck", "没跑成", "t-deg",
+                "工具装不上，%d 个文件一次都没扫过 · %s"
+                % (check["files"], _hm(check["at"])))
+        elif isinstance(check["count"], int) and check["count"] > 0:
+            row("CodeCheck", "%d 项待修" % check["count"], "t-bad",
+                "扫了 %d 个文件 · %s" % (check["files"], _hm(check["at"])))
+        else:
+            fine.append("CodeCheck")
     unit = evidence.get("ut")
     if unit:
-        row(unit["name"], "已完成" if unit["complete"] else "进行中",
-            "t-ok" if unit["complete"] else "t-run",
-            "%s · 批次 %d/%d" % (unit["phase"], unit["completed_batches"],
-                                 unit["batches"]))
-    note = ('<div class="deg-note"><b>「工具未就绪」不是通过。</b>'
-            '这些文件至今没有被静态检查扫过——工具恢复前，这一格不能当绿灯。'
-            '</div>') if degraded else ""
+        if unit["complete"]:
+            fine.append("单元测试")
+        else:
+            total = max(unit["batches"], 1)
+            row("单元测试", "进行中", "t-run",
+                "正在生成用例 · 第 %d/%d 批"
+                % (min(unit["completed_batches"] + 1, total), total))
+    if fine:
+        rows.append('<div class="fineline"><span class="dot"></span>'
+                    '已过关：%s</div>' % escape(" · ".join(fine)))
+    note = ('<div class="deg-note"><b>「没跑成」不是通过。</b>'
+            'CodeCheck 工具未就绪，这些文件至今没有被静态检查扫过——'
+            '工具恢复前，这一格不能当绿灯。</div>') if degraded else ""
     return "".join(rows), note
-
-
-_PHASE_SHORT = {"需求澄清": "澄清"}
 
 
 def _phase_rail(step):
@@ -191,9 +206,7 @@ def _phase_rail(step):
     cells = []
     for slot, name in enumerate(order):
         cls = "past" if slot < index else ("cur" if slot == index else "todo")
-        cells.append('<span class="ph %s" title="%s">%s</span>'
-                     % (cls, escape(name),
-                        escape(_PHASE_SHORT.get(name, name))))
+        cells.append('<span class="ph %s">%s</span>' % (cls, escape(name)))
     return '<div class="rail">%s</div>' % "".join(cells)
 
 
@@ -220,7 +233,8 @@ def render(snapshot, changes=(), root="."):
     doc_rows, doc_tabs, doc_panes = _document_panes(
         snapshot["artifacts"]["documents"])
     change_html, change_tabs, change_panes = _change_sections(changes, root)
-    evidence_rows, degraded_note = _evidence_rows(snapshot["evidence"])
+    evidence_rows, degraded_note = _evidence_rows(
+        snapshot["evidence"], set(snapshot["progress"]["steps_done"]))
     advisories = snapshot["advisories"]
     context = {
         "css": assets.CSS + plantuml.SVG_CSS,
@@ -283,7 +297,8 @@ TEMPLATE = """<!doctype html>
 %(changes)s</section>
 </div>
 <div class="col-side">
-<section><h2>证据</h2><div class="list">%(evidence)s</div>
+<section><h2>质量检查 <span class="n">· 只列需要注意的</span></h2>
+<div class="list">%(evidence)s</div>
 %(degraded)s</section>
 <section><h2>本轮建议 <span class="n">· 非阻断</span></h2>
 <ul class="adv">%(advisories)s</ul></section>

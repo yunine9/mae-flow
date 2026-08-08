@@ -25,16 +25,18 @@ ENV_OFF = "MAE_FLOW_NO_NOTIFY"
 
 # 步骤 → 阶段。flow.json 里没有阶段字段,这里是唯一来源;
 # 漏掉任何步骤都会被 test_panel_notify 的覆盖断言拦下,不会静默错标。
+# 阶段名是给人看的,说人话:描述这一段在干什么,不用流程内部代号
+# ("质量"对用户是黑话,"验证"才是这一段实际发生的事)。
 PHASES = {
     "启动": ("config_confirm", "workflow_select", "code_reviewer_ask",
              "branch_create"),
-    "需求澄清": ("grill", "grill_ask", "rf_triage"),
-    "规格": ("open", "hf_open", "tw_open", "design", "archive",
-             "archive_confirm", "domain_archive"),
-    "设计": ("story", "story_ask"),
-    "编码": ("build", "build_agent_review", "build_review", "build_rework",
-             "build_commit"),
-    "质量": ("verify_comet", "verify_ponytail", "verify_post_ponytail_compile",
+    "澄清需求": ("grill", "grill_ask", "rf_triage"),
+    "定规格": ("open", "hf_open", "tw_open", "design", "archive",
+               "archive_confirm", "domain_archive"),
+    "写设计": ("story", "story_ask"),
+    "写代码": ("build", "build_agent_review", "build_review", "build_rework",
+               "build_commit"),
+    "验证": ("verify_comet", "verify_ponytail", "verify_post_ponytail_compile",
              "verify_codecheck", "verify_codecheck_compile", "verify_recompile",
              "verify_ut", "verify_spec", "quality_review", "quality_rework",
              "quality_recompile", "quality_commit",

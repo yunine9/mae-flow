@@ -275,7 +275,10 @@ def cmd_config_review(flow, st, args):
     api._ack_failure(st, success=True)
 
     _print_config_review(st["config_review"], step)
-    print("\n现在用**一次** AskUserQuestion 同时问完这两项开场决策"
+    print("\n⚠ 用户看不见工具输出:先把上面的确认单**逐项复制进你的回复正文**"
+          "(含分支名与需求摘录),再提问——只发一张没有配置内容的确认卡,"
+          "用户无从确认。")
+    print("然后用**一次** AskUserQuestion 同时问完这两项开场决策"
           "（合并成一张卡，避免连着打断用户两次）：")
     print("Q1 上述完整配置是否正确？")
     print("  - " + CONFIG_CONFIRM_ACK)

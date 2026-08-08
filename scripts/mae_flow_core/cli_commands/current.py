@@ -322,7 +322,8 @@ def print_current(flow, st):
         review = st.get("config_review") or {}
         if review.get("sha256"):
             api._print_config_review(review, step)
-            print("展示上述确认单后只问一次最终确认；不要再拼接前面的单项回答。")
+            print("把上述确认单逐项复制进你的回复正文(用户看不见工具输出),"
+                  "再只问一次最终确认；不要再拼接前面的单项回答。")
             print('python "%s" done' % os.path.abspath(sys.argv[0]))
         else:
             sets = " --set ".join(

@@ -417,3 +417,23 @@ class ContextAndUncertaintyOrderTests(unittest.TestCase):
         template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
         self.assertIn("困惑的调用方", template)
         self.assertIn("参数调换了会不会照样编译通过", template)
+
+
+class UserVisibilityDisciplineTests(unittest.TestCase):
+    """实战发现:工具 stdout 在宿主界面里折叠,模型以为"已展示"而用户全程没看见。
+
+    两个症状同根:确认卡不带配置内容、检视文档只给摘要不给路径。
+    修法 = 转述义务写进权威处(config-review 输出)+ 通用纪律进 SKILL。
+    """
+
+    def test_config_review_output_demands_restating_in_reply(self):
+        source = read("scripts/mae_flow_core/cli_commands/advancement.py")
+        self.assertIn("逐项复制进你的回复正文", source)
+        self.assertIn("用户看不见工具输出", source)
+        self.assertIn("逐项复制进你的回复正文",
+                      read("flow/steps/config_confirm.md"))
+
+    def test_skill_carries_the_general_relay_rule(self):
+        skill = read("skills/mae-flow/SKILL.md")
+        self.assertIn("文件完整路径", skill)
+        self.assertIn("工具输出用户看不见", skill)

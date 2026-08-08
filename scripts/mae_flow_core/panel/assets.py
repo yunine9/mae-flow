@@ -30,8 +30,8 @@ CSS = r"""
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:13px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-.workbench{max-width:1280px;margin:18px auto 42px;background:var(--paper);
-  border:1px solid var(--line);box-shadow:0 10px 34px rgba(25,27,23,.09)}
+.workbench{max-width:none;margin:0;min-height:100vh;background:var(--paper);
+  border:0}
 
 /* ── 紧凑页眉与阶段轨道 ── */
 header{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
@@ -180,7 +180,7 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
 #viewer{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;
   display:none;padding:24px 16px;overflow:auto}
 #viewer.on{display:block}
-.vbox{max-width:920px;margin:0 auto;background:var(--card);
+.vbox{max-width:min(1200px,94vw);margin:0 auto;background:var(--card);
   border:1px solid var(--line);border-radius:12px;
   box-shadow:0 16px 48px rgba(0,0,0,.25);
   display:flex;flex-direction:column;max-height:calc(100vh - 48px)}

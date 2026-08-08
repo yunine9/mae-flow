@@ -173,6 +173,8 @@ class SnapshotTests(unittest.TestCase):
         names = sorted(os.path.basename(path) for path in item["paths"])
         self.assertEqual(["story.md"], names)        # implementation.md 不存在则不列
         self.assertTrue(all(os.path.isabs(path) for path in item["paths"]))
+        # 未落盘的那份要说清"等的是什么",落盘后 hook 会自动把它变成门
+        self.assertEqual(["implementation.md"], item["expected"])
 
     def test_degraded_tool_is_distinguishable_from_passing(self):
         """"工具没跑起来"和"跑了且干净"混成一个绿灯,是这套系统最不能容忍的谎。"""

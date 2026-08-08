@@ -271,6 +271,12 @@ def _pending(state, flow, documents):
         "title": step.get("title", ""), "needs": "user_ack",
         "items": [],                    # 不倒配置:与本步无关的信息就是噪声
         "paths": paths,
+        # 文档还没落盘时说清"等的是什么"——空卡片只会让人困惑;
+        # 落盘瞬间 hook 会重生成面板,这些名字自动变成可点开的门。
+        "expected": ["%s.md" % kind for kind in kinds
+                     if not any(path.endswith("/%s.md" % kind)
+                                or path.endswith("\\%s.md" % kind)
+                                for path in paths)],
     }]
 
 

@@ -142,6 +142,11 @@ def _pending_section(pending, doc_key_by_path):
                                  % (escape(path), name))
             body += ('<div class="ask-sub">要检视的文件（点开就地阅读）：'
                      '</div><ul class="paths">%s</ul>' % "".join(links))
+        expected = [name for name in item.get("expected", ())]
+        if expected:
+            body += ('<div class="ask-sub">生成中：%s —— 落盘后自动出现'
+                     '在这里，切回本页即可看到。</div>'
+                     % escape("、".join(expected)))
         cards.append(
             '<div class="ask-title">%s</div>'
             '<div class="ask-sub">%s · 需要你逐项过目后确认</div>%s'

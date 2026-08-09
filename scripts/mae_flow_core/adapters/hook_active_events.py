@@ -313,10 +313,11 @@ class ActiveHookEventAdapter:
             if line.strip()
         ]
 
-    @staticmethod
-    def _explicit_transcript_path(payload, invocation_id=""):
-        # 宿主 payload 的 agent id 可能错位:显式路径缺失时按 meta 精确绑定
-        return resolve_agent_transcript(payload, invocation_id)
+    def _explicit_transcript_path(self, payload, invocation_id=""):
+        # 宿主 payload 的 agent id 可能错位、也可能贫载荷:显式路径缺失时
+        # 按 meta 精确绑定,并用确知的项目根反推目录(不靠 hook 进程 cwd)。
+        return resolve_agent_transcript(
+            payload, invocation_id, project_root=self.repository_root)
 
     @staticmethod
     def _quality_call(kind, calls, config, task=None):
@@ -352,7 +353,7 @@ class ActiveHookEventAdapter:
                 self._load_agent_transcript(path)).tool_calls,
             lambda calls: self._quality_call(
                 kind, calls, state.get("config", {}) or {}, task),
-            log=self.log)
+            log=self.log, project_root=self.repository_root)
         if call is None and lifecycle == "returned":
             self.log("quality transcript unresolved after retries"
                      "(fail-closed evidence)")

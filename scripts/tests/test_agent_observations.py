@@ -24,6 +24,9 @@ from mae_flow_core.workflow.agent_observations import (  # noqa: E402
 from mae_flow_core.adapters.hook_active_events import (  # noqa: E402
     ActiveHookEventAdapter,
 )
+from mae_flow_core.adapters.hook_transcript_paths import (  # noqa: E402
+    resolve_agent_transcript,
+)
 from mae_flow_core.workflow.quality_executions import (  # noqa: E402
     quality_input_snapshot,
     successful_quality_execution,
@@ -362,7 +365,7 @@ class AgentObservationTests(unittest.TestCase):
                 stream.write("{}\n")
         os.utime(unrelated, (2_000_000_000, 2_000_000_000))
 
-        resolved = ActiveHookEventAdapter._explicit_transcript_path(
+        resolved = resolve_agent_transcript(
             {"transcript_path": main, "agent_id": "agent-42"},
             invocation_id="toolu-42",
         )
@@ -378,7 +381,7 @@ class AgentObservationTests(unittest.TestCase):
         with open(unrelated, "w", encoding="utf-8") as stream:
             stream.write("{}\n")
 
-        resolved = ActiveHookEventAdapter._explicit_transcript_path(
+        resolved = resolve_agent_transcript(
             {"transcript_path": main, "agent_id": "agent-42"},
             invocation_id="toolu-42",
         )

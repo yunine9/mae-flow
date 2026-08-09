@@ -78,7 +78,7 @@ def _meta_bound_transcript(directory, invocation_id):
     return candidate if os.path.isfile(candidate) else ""
 
 
-def _project_subagent_dirs(projects_base=""):
+def _project_subagent_dirs(projects_base="", project_root=""):
     """从当前项目根反推宿主的 transcript 目录。
 
     实测(fieldtest 第三次编译):后台代理的 SubagentStop 是贫载荷——
@@ -90,7 +90,10 @@ def _project_subagent_dirs(projects_base=""):
     """
     base = projects_base or os.path.expanduser(
         os.path.join("~", ".claude", "projects"))
-    munged = os.getcwd().replace(os.sep, "-").replace("/", "-")
+    # 用调用方给的项目根,不靠 cwd:hook 进程的 cwd 未必是项目根
+    # (实战第四次:反推目录数=0,取证在正确目录下明明一次命中)。
+    munged = (project_root or os.getcwd()).replace(
+        os.sep, "-").replace("/", "-")
     root = os.path.join(base, munged)
     if not os.path.isdir(root):
         return []
@@ -102,7 +105,8 @@ def _project_subagent_dirs(projects_base=""):
     return out
 
 
-def resolve_agent_transcript(payload, invocation_id="", projects_base=""):
+def resolve_agent_transcript(payload, invocation_id="", projects_base="",
+                             project_root=""):
     """显式路径优先;缺失或错位时按 meta 绑定;贫载荷时从项目根反推目录。"""
     explicit = explicit_agent_transcript_path(payload, invocation_id)
     if explicit and os.path.isfile(explicit):
@@ -114,7 +118,8 @@ def resolve_agent_transcript(payload, invocation_id="", projects_base=""):
     if isinstance(main, str) and main:
         directories.append(
             os.path.join(os.path.splitext(main)[0], "subagents"))
-    directories.extend(_project_subagent_dirs(projects_base))
+    directories.extend(
+        _project_subagent_dirs(projects_base, project_root))
     for directory in dict.fromkeys(directories):
         bound = _meta_bound_transcript(directory, invocation_id)
         if bound:
@@ -124,7 +129,7 @@ def resolve_agent_transcript(payload, invocation_id="", projects_base=""):
 
 def transcript_quality_call(payload, invocation_id, load_calls, pick_call,
                             attempts=10, delay=0.6, sleep=None,
-                            log=lambda message: None):
+                            log=lambda message: None, project_root=""):
     """有界重试取证:宿主在 SubagentStop 事件之后才把子会话账本刷盘。
 
     实测误差表(fieldtest 2026-08-09):meta.json 启动即落盘,transcript
@@ -137,7 +142,8 @@ def transcript_quality_call(payload, invocation_id, load_calls, pick_call,
     for attempt in range(attempts):
         if attempt:
             sleep(delay)
-        path = resolve_agent_transcript(payload, invocation_id)
+        path = resolve_agent_transcript(
+            payload, invocation_id, project_root=project_root)
         if not path or not os.path.isfile(path):
             continue
         try:

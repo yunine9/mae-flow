@@ -459,6 +459,35 @@ class MetaBoundTranscriptTests(unittest.TestCase):
         self.assertEqual("", resolve_agent_transcript(
             {}, "toolu_MISSING", projects_base=projects))
 
+    def test_project_root_wins_over_process_cwd(self):
+        """实战第四次:反推依赖 cwd,而 hook 进程的 cwd 未必是项目根——
+        同一份账本在正确目录下一次命中、在别处解析为空。取证必须用
+        调用方确知的 repository_root,不看进程当时站在哪。"""
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            resolve_agent_transcript)
+        projects = tempfile.mkdtemp(prefix="projects-root-")
+        self.addCleanup(shutil.rmtree, projects, True)
+        project_root = tempfile.mkdtemp(prefix="repo-root-")
+        self.addCleanup(shutil.rmtree, project_root, True)
+        munged = project_root.replace(os.sep, "-").replace("/", "-")
+        sub = os.path.join(projects, munged, "s", "subagents")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "agent-r.jsonl"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("{}\n")
+        with open(os.path.join(sub, "agent-r.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"toolUseId": "toolu_ROOT"}, stream)
+        # 进程 cwd 与项目根无关,照样解析得到
+        resolved = resolve_agent_transcript(
+            {}, "toolu_ROOT", projects_base=projects,
+            project_root=project_root)
+        self.assertTrue(resolved.endswith("agent-r.jsonl"))
+        self.assertEqual("", resolve_agent_transcript(
+            {}, "toolu_ROOT", projects_base=projects))
+
     def test_existing_explicit_path_wins_over_meta(self):
         import json as jsonlib
         import tempfile, shutil

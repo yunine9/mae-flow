@@ -85,3 +85,34 @@ class BashGatePolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeredocCommitMessageTests(unittest.TestCase):
+    """多行提交信息走 heredoc 是通用写法,不该被当成不合规。
+
+    实战:模型写了 `git commit -m "$(cat <<'EOF' … EOF)"`,格式完全正确,
+    却被 bash-commit-format 拦下——因为拿到的是 `$(cat <<'EOF'\\n…` 整串。
+    与编译证据那次同源:拿 shell 原文去比对语义值,迟早误伤。
+    """
+
+    def test_heredoc_body_is_what_gets_checked(self):
+        from mae_flow_core.foundation import git_intent
+        command = (
+            'git commit -m "$(cat <<\'EOF\'\n'
+            "[REQ2026080901][feat]新增短信通知渠道与失败重试机制\n"
+            "\n正文若干\nEOF\n)\"")
+        present, message = git_intent.git_commit_message(command)
+        self.assertTrue(present)
+        self.assertTrue(message.startswith("[REQ2026080901][feat]"))
+        self.assertIn("正文若干", message)
+
+    def test_plain_message_is_untouched(self):
+        from mae_flow_core.foundation import git_intent
+        for command, expected in (
+                ('git commit -m "[REQ-1][fix]单行"', "[REQ-1][fix]单行"),
+                ('git commit --message="[REQ-1][feat]等号形式"',
+                 "[REQ-1][feat]等号形式"),
+                ('git commit -m"[REQ-1][feat]紧贴形式"',
+                 "[REQ-1][feat]紧贴形式")):
+            self.assertEqual((True, expected),
+                             git_intent.git_commit_message(command))

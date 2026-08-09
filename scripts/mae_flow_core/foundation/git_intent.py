@@ -18,6 +18,7 @@ from .git_shell import (
     shell_command_groups,
 )
 from .source_paths import normalize_path
+from .commit_message import message_from_tokens
 
 
 COMMIT_VALUE_OPTIONS = {
@@ -134,15 +135,7 @@ def git_commit_message(command):
     token_sets = git_subcommand_tokens(command, "commit")
     if not token_sets:
         return False, ""
-    tokens = token_sets[-1]
-    for index, token in enumerate(tokens):
-        if token in ("-m", "--message"):
-            return True, tokens[index + 1] if index + 1 < len(tokens) else ""
-        if token.startswith("--message="):
-            return True, token.split("=", 1)[1]
-        if token.startswith("-m") and token != "-m":
-            return True, token[2:]
-    return False, ""
+    return message_from_tokens(token_sets[-1])
 
 
 def _action_paths(operation, arguments):

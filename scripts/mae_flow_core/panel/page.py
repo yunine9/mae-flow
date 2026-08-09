@@ -8,7 +8,7 @@
 import io
 import os
 
-from . import assets, diffview, markdown, notify, plantuml
+from . import assets, banners, diffview, markdown, notify, plantuml
 from .markdown import escape
 
 def _fence_hook(language, body):
@@ -371,7 +371,8 @@ def render(snapshot, changes=(), root=".", born=None):
         "stamp": escape(snapshot["generated_at"]),
         "revision": snapshot["state_revision"] or 0,
         "summary": _summary(snapshot, changes),
-        "pending": _pending_section(snapshot["pending"], doc_key_by_path),
+        "pending": (banners.standalone_section(snapshot.get("standalone"))
+                    or _pending_section(snapshot["pending"], doc_key_by_path)),
         "asset_chain": _asset_chain(snapshot["artifacts"]["documents"]),
         "docs": "".join(doc_rows) or
                 '<div class="asset empty"><span class="asset-kind">—</span>'

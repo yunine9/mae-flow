@@ -57,6 +57,21 @@ class PanelPageTests(unittest.TestCase):
                         html.index(">流程细节<"))
         self.assertIn("REQ2026080901", html)
 
+    def test_standalone_banner_replaces_the_delivery_card(self):
+        """独立任务期间横幅顶在最前,并明说阶段轨道属于上一单——
+        否则用户会把上一单的进度误读成本次任务的进度。"""
+        data = snapshot.build(TESTS, STATE, FLOW)
+        data["standalone"] = {
+            "id": "x", "kind": "codecheck", "label": "规范检查",
+            "created_at": "2026-08-09 15:00:00",
+            "files": ["a.py"], "scope_confirmed": True, "work_dir": ""}
+        html = page.render(data, [], TESTS)
+        self.assertIn("独立任务进行中", html)
+        self.assertIn("规范检查", html)
+        self.assertIn("范围已确认", html)
+        self.assertIn("阶段轨道与交付信息属于上一单", html)
+        self.assertNotIn("当前不需要你处理", html)   # 不再谎报无事
+
     def test_quiet_when_nothing_needs_the_user(self):
         html = build()
         self.assertIn("当前不需要你处理", html)

@@ -217,6 +217,30 @@ class SnapshotTests(unittest.TestCase):
         # 二进制:列出但不出 diff,页面走"取不到"的降级文案
         self.assertEqual("", files["logo.bin"]["patch"])
 
+    def test_standalone_action_is_visible_not_silently_absent(self):
+        """独立任务(ut/codecheck/grill)期间,面板只读交付状态会显示
+        「无在途单 · 不需要你处理」——正有任务在跑却说没事,是显示与
+        现场不符的另一种形态(用户红线)。"""
+        work = os.path.join(self.root, ".mae-flow-work")
+        os.makedirs(work, exist_ok=True)
+        with open(os.path.join(work, "standalone-action.json"), "w",
+                  encoding="utf-8") as stream:
+            json.dump({"id": "20260809-abc-ut", "kind": "ut",
+                       "created_at": "2026-08-09 15:00:00",
+                       "files": ["src/a.py", "src/b.py"],
+                       "inferred_scope": True,
+                       "work_dir": os.path.join(work, "standalone", "x")},
+                      stream, ensure_ascii=False)
+        action = snapshot.build(self.root, None, FLOW)["standalone"]
+        self.assertEqual("ut", action["kind"])
+        self.assertEqual("单元测试", action["label"])
+        self.assertFalse(action["scope_confirmed"])   # 推断范围=待你确认
+        self.assertEqual(2, len(action["files"]))
+        self.assertEqual("", action["work_dir"])      # 目录不存在就不给假路径
+        # 没有独立任务时该字段为空,不制造幻觉
+        os.remove(os.path.join(work, "standalone-action.json"))
+        self.assertIsNone(snapshot.build(self.root, None, FLOW)["standalone"])
+
     def test_moonlight_report_surfaces_in_panel_logs(self):
         """月光报告进面板日志区:结构性感知,不只靠模型转述一条路。"""
         work = os.path.join(self.root, ".mae-flow-work")

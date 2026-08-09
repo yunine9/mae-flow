@@ -276,6 +276,38 @@ ACK_REVIEW_DOCS = {
 }
 
 
+ACTION_KINDS = {"ut": "单元测试", "codecheck": "规范检查", "grill": "需求拷问"}
+
+
+def _standalone(root):
+    """独立任务(ut/codecheck/grill)也是"正在发生的事"。
+
+    面板只读交付状态时,独立任务期间会显示「无在途单 · 不需要你处理」——
+    正有任务在跑却说没事,是显示与现场不符的另一种形态(用户红线)。
+    """
+    path = os.path.join(root, WORK_DIR, "standalone-action.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as stream:
+            action = json.load(stream)
+    except Exception:                      # noqa: BLE001
+        return None
+    if not isinstance(action, dict) or not action.get("id"):
+        return None
+    kind = str(action.get("kind", "") or "")
+    work_dir = str(action.get("work_dir", "") or "")
+    return {
+        "id": action.get("id", ""),
+        "kind": kind,
+        "label": ACTION_KINDS.get(kind, kind or "独立任务"),
+        "created_at": action.get("created_at", ""),
+        "files": list(action.get("files", []) or [])[:50],
+        "scope_confirmed": not bool(action.get("inferred_scope")),
+        "work_dir": work_dir if os.path.isdir(work_dir) else "",
+    }
+
+
 def _pending(state, flow, documents):
     """待你裁决:只列真正需要人拍板的事,且卡片内容必须与步骤对得上。"""
     current = (state or {}).get("current", "")
@@ -387,6 +419,7 @@ def build(root=".", state=None, flow=None):
         "state_revision": (state or {}).get("revision"),
         "repo": _repo(root, state, warnings),
         "delivery": _delivery(state),
+        "standalone": _standalone(root),
         "pending": _pending(state, flow, documents),
         "artifacts": {
             "documents": documents,

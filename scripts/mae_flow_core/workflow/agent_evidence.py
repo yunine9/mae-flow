@@ -1,9 +1,15 @@
 """Agent lifecycle and review-snapshot Evidence rules."""
 
 import os
+import re
 from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
+
+# 子 Agent 明确自报"任务卡输入缺失、拒绝执行"的标记。只做单向识别:
+# 出现 → 不算完成;不出现 → 照常。不要求任何格式令牌才算成功,
+# 与"返回自然语言不验签"铁律不冲突。
+_REFUSAL_RE = re.compile(r"\bNEEDS_INPUT\b")
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,7 @@ class AgentEvidencePorts:
     argv_output: object
     blocking_dirty_source_paths: object
     open_observation: object = None
+    finished_observations: object = None
 
 
 class AgentEvidenceRules:
@@ -75,20 +82,10 @@ class AgentEvidenceRules:
                 "自行改写标注/口头声称已确认均无效。"
                 % (timestamp or "无", entered),
             )
-        observation = self.ports.finished_observation(
-            kind, state.get("current", ""), entered)
-        if observation:
-            if (kind in ("COMPILE", "CODECHECK", "UT")
-                    and not observation.get("legacy")
-                    and not self.ports.quality_execution(
-                        kind, state.get("current", ""), state)):
-                return self._blocked(
-                    kind, accepted_why,
-                    "%s 子 Agent 已返回，但没有检测到与当前输入匹配的成功执行。"
-                    "请检查任务卡中的真实命令、退出状态和 timeout；"
-                    "返回文字不能替代机器执行。" % kind,
-                )
-            return EvidenceResult(True, "")
+        verdict = self._returned_verdict(kind, spec, state, entered,
+                                         accepted_why)
+        if verdict is not None:
+            return verdict
         open_observation = (
             self.ports.open_observation(
                 kind, state.get("current", ""), entered)
@@ -115,6 +112,77 @@ class AgentEvidenceRules:
             "请启动对应专项 Agent；返回内容可以使用任意自然语言格式。"
             % (kind, entered),
         )
+
+    def _returned_verdict(self, kind, spec, state, entered, accepted_why):
+        """已返回场景的裁决;None = 没有任何返回,交回启动/缺席分支处理。"""
+        observations, refused = self._effective_observations(
+            kind, state, entered)
+        observation = observations[-1] if observations else None
+        required = self._required_returns(spec, state, entered)
+        if observation and len(observations) >= required:
+            if (kind in ("COMPILE", "CODECHECK", "UT")
+                    and not observation.get("legacy")
+                    and not self.ports.quality_execution(
+                        kind, state.get("current", ""), state)):
+                return self._blocked(
+                    kind, accepted_why,
+                    "%s 子 Agent 已返回，但没有检测到与当前输入匹配的成功执行。"
+                    "请检查任务卡中的真实命令、退出状态和 timeout；"
+                    "返回文字不能替代机器执行。" % kind,
+                )
+            return EvidenceResult(True, "")
+        if observation:
+            return self._blocked(
+                kind, accepted_why,
+                "%s 本步发出了 %d 张任务卡，但只收到 %d 份有效返回——"
+                "派发过不等于检视过。请为未返回的维度重新派发对应任务卡。"
+                % (kind, required, len(observations)),
+            )
+        if refused:
+            return self._blocked(
+                kind, accepted_why,
+                "%s 子 Agent 返回 NEEDS_INPUT：任务卡自身输入缺失，检视并未发生，"
+                "不能当作已完成。重新执行本步的 role-task/agent-task 生成新卡再派发；"
+                "不要拿旧卡原样重试，也不要替它补结论。" % kind,
+            )
+        return None
+
+    def _effective_observations(self, kind, state, entered):
+        """→ (有效返回列表, 是否存在 NEEDS_INPUT 拒绝)。
+
+        实战事故:standards 检视卡自带矛盾占位,子 Agent 正当拒绝并返回
+        NEEDS_INPUT,旧逻辑照样算"跑过"——把拒绝执行当已检视,是机器自己
+        制造的误绿。拒绝的返回不计入有效返回。
+        """
+        if self.ports.finished_observations is not None:
+            rows = list(self.ports.finished_observations(
+                kind, state.get("current", ""), entered))
+        else:
+            single = self.ports.finished_observation(
+                kind, state.get("current", ""), entered)
+            rows = [single] if single else []
+        effective = [row for row in rows
+                     if not _REFUSAL_RE.search(str(row.get("detail", "")))]
+        return effective, len(effective) < len(rows)
+
+    def _required_returns(self, spec, state, entered):
+        """本步要求的有效返回数。
+
+        stage_role 指向 role_tasks 的键前缀(如 code-review):本步实际
+        发出的每张维度卡都必须有对应返回——两轴检视只回来一轴,
+        另一轴等于没检视过。
+        """
+        prefix = spec.get("stage_role", "")
+        if not prefix:
+            return 1
+        issued = sum(
+            1 for name, task in (state.get("role_tasks") or {}).items()
+            if name.startswith(prefix)
+            and isinstance(task, dict)
+            and task.get("step") == state.get("current", "")
+            and str(task.get("at", "")) >= entered
+        )
+        return max(issued, 1)
 
     def agent_or_no_source(self, spec, state):
         files, error = self.ports.changed_source_files(state)

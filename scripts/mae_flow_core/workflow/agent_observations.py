@@ -223,3 +223,15 @@ def finished_observation(
 
 def has_finished_observation(state_path, kind, step, since=""):
     return finished_observation(state_path, kind, step, since) is not None
+
+
+def finished_observations(state_path, kind, step, since=""):
+    """本步该 kind 的全部 returned 记录(时间序)。证据层据此数覆盖、辨拒绝。"""
+    return tuple(
+        dict(item) for item in _records(state_path)
+        if isinstance(item, dict)
+        and item.get("kind") == kind
+        and item.get("step") == step
+        and item.get("lifecycle") == "returned"
+        and str(item.get("at", "")) >= str(since or "")
+    )

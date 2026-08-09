@@ -44,7 +44,14 @@ def _story_context(state, role, document="", axis=""):
         if axis == "spec":
             return package, _existing(
                 (package.spec, package.story, package.implementation))
-        return package, ()
+        # standards 轴的权威输入=编码基准+卡内嵌增量本身。刻意不给 Spec/Story
+        # 是设计,但不能渲染成"缺失"占位——那是故障态文案,曾让 reviewer
+        # 正当地拒绝执行(NEEDS_INPUT),预检没做流程却照走(实战事故)。
+        taste = _existing((os.path.join(
+            ".mae-flow-work", "plugin-resources", "standards",
+            "code-taste-v1.md"),))
+        return package, taste + (
+            "本卡「实际增量」小节内嵌的完整 diff——即待检视对象,无需另行获取",)
 
     survey = os.path.join(package.root, "survey.md")
     terms = []

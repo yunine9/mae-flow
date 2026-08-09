@@ -401,7 +401,8 @@
       "evidence": [
         {
           "type": "agent_ran",
-          "agent": "REVIEWER"
+          "agent": "REVIEWER",
+          "stage_role": "code-review"
         }
       ],
       "next": "build_review"

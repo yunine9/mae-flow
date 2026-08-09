@@ -12,6 +12,7 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.workflow.advisories import record_advisory
+from mae_flow_core.workflow import agent_observations
 from mae_flow_core.workflow.agent_observations import (
     finished_observation,
     open_started_observations,
@@ -155,6 +156,8 @@ _AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
     script_path=lambda: sys.argv[0],
     risk_labels=RISK_AGENT_LABELS,
     finished_observation=_finished_agent_observation,
+    finished_observations=lambda kind, step, since: agent_observations
+        .finished_observations(STATE_PATH, kind, step, since),
     open_observation=_open_agent_observation,
     quality_execution=lambda kind, step, state: successful_quality_execution(
         STATE_PATH, kind, step, quality_input_snapshot(state, kind, step)),

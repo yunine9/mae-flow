@@ -92,5 +92,19 @@ class RoleTaskCliTests(unittest.TestCase):
                 cards["standards"], state["agent_tasks"]["REVIEWER"]["path"])
 
 
+class StandardsCardInputsTests(unittest.TestCase):
+    """standards 卡的合法留白曾被渲染成故障占位「缺失;返回 NEEDS_INPUT」,
+    reviewer 逐字执行契约正当拒绝,预检没发生流程却照走(实战事故)。
+    权威输入必须写明它真正要读的东西:编码基准+卡内嵌增量。"""
+
+    def test_standards_axis_declares_real_inputs_not_missing_placeholder(self):
+        source_path = os.path.join(
+            ROOT, "scripts", "mae_flow_core", "cli_commands", "role_task.py")
+        with open(source_path, encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("code-taste-v1.md", source)
+        self.assertIn("本卡「实际增量」小节内嵌的完整 diff", source)
+
+
 if __name__ == "__main__":
     unittest.main()

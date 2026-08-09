@@ -79,7 +79,14 @@ def _story_context(state, role, document="", axis=""):
                          "IMPLEMENTATION-TEMPLATE.md"),
         ))
     elif role == "story-review":
-        paths.extend((package.story, package.implementation))
+        # 生成给了模板、检视不给,等于让它判"合不合规"却不告诉它规矩是什么。
+        paths.extend((
+            package.story, package.implementation,
+            os.path.join(".mae-flow-work", "plugin-resources", "assets",
+                         "STORY-TEMPLATE.md"),
+            os.path.join(".mae-flow-work", "plugin-resources", "assets",
+                         "IMPLEMENTATION-TEMPLATE.md"),
+        ))
     if document:
         paths.append(document)
     return package, _existing(paths)

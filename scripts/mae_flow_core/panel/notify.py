@@ -104,15 +104,58 @@ def _popup(title, body):
     return True
 
 
-def _reason(flow, step_id):
+def deferred_ack(step_id):
+    """这一步要你确认的东西,是进门之后才产出的吗?
+
+    进门就喊"请检视 Story"是错的——那会儿 Story 还没开始写。要确认的
+    产物落地了才叫到人,和面板那条"不显示与当前阶段不符的信息"同源。
+    """
+    from . import snapshot
+    return step_id in snapshot.ACK_REVIEW_DOCS or step_id == "config_confirm"
+
+
+def _reason(flow, step_id, at_entry=True):
     """→ (标题, 详情) 或 None。只认两种时刻,其余安静。"""
     step = ((flow or {}).get("steps", {}) or {}).get(step_id) or {}
     title = step.get("title", step_id)
     if step.get("choice_key"):
         return "需要你选择", "%s（%s）" % (title, step_id)
     if step.get("user_ack"):
+        if at_entry and deferred_ack(step_id):
+            return None                    # 等产物落地那一刻再叫人
         return "需要你确认", "%s（%s）" % (title, step_id)
     return None
+
+
+_ACK_MARK = ".notify-ack"
+
+
+def _rang_before(root, token):
+    """同一份产物可能被改写多次,人只该被叫一次。失败一律当作"没响过"。"""
+    path = os.path.join(root, ".mae-flow-work", _ACK_MARK)
+    try:
+        with open(path, encoding="utf-8") as stream:
+            if stream.read().strip() == token:
+                return True
+    except OSError:
+        pass
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as stream:
+            stream.write(token)
+    except OSError:
+        pass
+    return False
+
+
+def announce_ready(flow, step_id, root=".", ticket="", token=""):
+    """待确认的产物已经落地——现在才是叫人的时刻。返回打印出的行。"""
+    reason = _reason(flow, step_id, at_entry=False)
+    if not reason:
+        return []
+    if _rang_before(root, token or step_id):
+        return []
+    return _ring(["🔔 %s: %s" % reason], root, ticket)
 
 
 def announce(flow, previous_step, next_step, root=".", ticket=""):
@@ -124,6 +167,10 @@ def announce(flow, previous_step, next_step, root=".", ticket=""):
     before, after = phase_of(previous_step), phase_of(next_step)
     if after and after != before:
         lines.append("🔔 进入「%s」阶段" % after)
+    return _ring(lines, root, ticket)
+
+
+def _ring(lines, root, ticket):
     if not lines:
         return []
     label = ("%s · " % ticket) if ticket else ""

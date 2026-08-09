@@ -86,7 +86,9 @@ def detect(lines):
 
 
 def unquote(name):
-    return name.strip().strip('"')
+    """顺带把参与者名里的字面 \n 折成空格——它是 plantuml 的换行记号,
+    照抄进 SVG 会变成两个可见字符(实战里 handler\n(sms/email/push) 就这么露的)。"""
+    return name.strip().strip('"').replace("\\n", " ")
 
 
 # ─────────────────────────── SVG 基元 ───────────────────────────

@@ -294,6 +294,11 @@ def cmd_config_review(flow, st, args):
     api._ack_failure(st, success=True)
 
     _print_config_review(st["config_review"], step)
+    # 确认单是这一刻当场打印出来的——产物就在眼前,现在叫人才准。
+    # (进入 config_confirm 那一刻还没有单子,所以进门不响。)
+    notify.announce_ready(flow, "config_confirm", os.getcwd(),
+                          pending.get("单号", ""),
+                          "config_confirm@" + review_id)
     # 面板路径并进确认单,搭"逐项复制进回复正文"的转述义务便车——
     # 实战验证过:单独一行"告诉用户"的指令会被模型跳过,进了卡就跳不过。
     panel_page = os.path.abspath(os.path.join(".mae-flow-work", "panel.html"))

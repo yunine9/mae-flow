@@ -63,9 +63,42 @@ def refresh_on_doc_write(state_path, written_path):
     if not is_review_doc(written_path):
         return False
     try:
-        return _rebuild(state_path)
+        done = _rebuild(state_path)
     except Exception:                      # noqa: BLE001 —— 软失败铁律
         return False
+    try:
+        ring_when_ready(state_path)
+    except Exception:                      # noqa: BLE001 —— 通知失败=没通知
+        pass
+    return done
+
+
+def ring_when_ready(state_path, root=None):
+    """待检视的产物全都落盘了,才叫人过来。
+
+    进入步骤就喊"请检视 Story"是错的:那一刻文档还没写。等齐(story 步
+    要 story + 附录两份都在)再响,人过来就有东西看。
+    """
+    from mae_flow_core.panel import notify, snapshot
+    from mae_flow_core.workflow import definition
+    root = root or os.getcwd()
+    with open(state_path, encoding="utf-8") as stream:
+        state = json.load(stream)
+    current = str(state.get("current", "") or "")
+    kinds = snapshot.ACK_REVIEW_DOCS.get(current)
+    if not kinds:
+        return False
+    ticket = str((state.get("config") or {}).get("单号", "") or "")
+    folder = os.path.join(root, ".mae-flow-work", ticket)
+    paths = [os.path.join(folder, kind + ".md") for kind in kinds]
+    if not all(os.path.isfile(path) for path in paths):
+        return False                       # 还没齐,再等等
+    plugin_root = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", ".."))
+    flow = definition.load_definition(
+        os.path.join(plugin_root, "flow", "flow.json"))
+    token = "%s@%s" % (current, max(os.path.getmtime(p) for p in paths))
+    return bool(notify.announce_ready(flow, current, root, ticket, token))
 
 
 # 整页重生成的节流窗口。实测(fieldtest,7 份文档 + 全量 diff)约 72ms:

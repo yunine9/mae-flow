@@ -29,6 +29,8 @@ FLOW = {
         "workflow_select": {"title": "交付方式选择", "user_ack": True,
                             "choice_key": "workflow"},
         "branch_create": {"title": "创建工作分支"},
+        "story": {"title": "Story 与实施附录生成及一次设计检视",
+                  "user_ack": True},
         "grill": {"title": "需求拷问"},
         "build": {"title": "编码"},
         "build_commit": {"title": "提交"},
@@ -59,10 +61,23 @@ class NotifyTests(unittest.TestCase):
         stale = sorted(step for step in notify._STEP_PHASE if step not in steps)
         self.assertEqual([], stale, "阶段表里有 flow.json 已删除的步骤")
 
-    def test_confirmation_step_rings(self):
-        lines, printed = announce("branch_create", "config_confirm")
-        self.assertTrue(any("需要你确认" in line for line in lines))
-        self.assertIn("配置确认", printed)
+    def test_confirmation_waits_for_the_thing_to_confirm(self):
+        """进门就喊"请确认"是错的——那一刻确认单/文档都还没有。
+        实战里用户就是这么撞上的:刚进 story 步就被叫去检视 Story。"""
+        lines, _printed = announce("branch_create", "config_confirm")
+        self.assertFalse(any("需要你确认" in line for line in lines))
+        lines, _printed = announce("build", "story")
+        self.assertFalse(any("需要你确认" in line for line in lines))
+        # 产物落地那一刻才响,而且只响一次
+        folder = tempfile.mkdtemp(prefix="ready-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        rung = notify.announce_ready(FLOW, "story", folder, "REQ1", "t1")
+        self.assertTrue(any("需要你确认" in line for line in rung))
+        self.assertEqual([], notify.announce_ready(FLOW, "story", folder,
+                                                   "REQ1", "t1"))
+        # 换一份新产物(令牌变了)可以再响
+        self.assertTrue(notify.announce_ready(FLOW, "story", folder,
+                                              "REQ1", "t2"))
 
     def test_choice_step_says_choose_not_confirm(self):
         lines, _printed = announce("config_confirm", "workflow_select")
@@ -79,7 +94,7 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(([], ""), announce("build", "build_commit"))
 
     def test_both_reasons_can_ring_together(self):
-        lines, _printed = announce("build", "config_confirm")
+        lines, _printed = announce("build", "workflow_select")
         self.assertEqual(2, len(lines))
 
     def test_desktop_popup_is_opt_in(self):

@@ -1,4 +1,6 @@
-Story 保持既有业务模板；实施附录只承载 Story 装不下的那一件事——文件结构与任务边界，不得出现代码块。
+Story 保持既有业务模板；实施附录只承载 Story 装不下的那一件事——文件结构与任务边界。
+附录写什么、写到什么程度，一律以 `IMPLEMENTATION-TEMPLATE.md` 为准（它已写明"只写签名不写实现、全文不出现函数体"），
+这里不再重复规定：同一件事在两处规定，迟早互相打架。
 
 1. 从项目本地资源取得 `STORY-TEMPLATE.md` 和 `IMPLEMENTATION-TEMPLATE.md` 精确路径。
 2. 执行 `python "{MAEFLOW_PATH}" role-task story-generate`，把输出的唯一启动话术原样交给 story-generator-agent。任务卡明确给出 `.mae-flow-work/{单号}/spec.md`、`grill.md`、相关 `docs/specs/*.md`、两个模板和代码路径。

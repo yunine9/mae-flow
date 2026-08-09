@@ -26,6 +26,8 @@ grill 的目标就是让开发和 AI 共同把边界和细节全部摆上台面�
    技术分歧记入「留给设计阶段」。
 4. **备课 Critic**：执行 `python "{MAEFLOW_PATH}" role-task grill-critic --stage prep --document ".mae-flow-work/{单号}/grill-prep.md"`，
    把输出的唯一启动话术原样交给 grill-critic-agent。它只读找遗漏；把真实缺口补入候选题后再开始提问。
+   **它在后台跑、还没回来时：直接结束回复等它。** 不要用占位问题、进度同步之类的提问占着——
+   等后台 Agent 不是需要用户决策的事，拿它打扰用户是白打扰一次。
 5. **逐题质询**：按候选题逐题进行，每题一回合，优先 AskUserQuestion
    （选项 = 推荐答案（标注"(推荐)"）+ 主要备选，用户可 Other 自由输入）。
    **选项文本保持短**：一个选项一行结论，推荐理由和代码佐证写在卡外的正文里——
@@ -37,7 +39,8 @@ grill 的目标就是让开发和 AI 共同把边界和细节全部摆上台面�
    超 15 题 → 告知规模由用户选（用户要继续就继续，不设硬上限）。
 7. **收尾 Critic**：先把当前完整树同步到 `.mae-flow-work/{单号}/grill.md`，再执行
    `python "{MAEFLOW_PATH}" role-task grill-critic --stage final --document ".mae-flow-work/{单号}/grill.md"`，
-   把输出的唯一启动话术原样交给 grill-critic-agent。它指出的新缺口回到第 5 步逐题问；
+   把输出的唯一启动话术原样交给 grill-critic-agent（同样：它没回来就结束回复等着，不发占位提问）。
+   它指出的新缺口回到第 5 步逐题问；
    无缺口、或新增题闭环后才收尾。Critic 只在这一步跑一次。
 8. **落盘并 done**：增量写 `.mae-flow-work/{单号}/decisions.md`，把完整问题树、用户答案、推荐依据、
    实现影响、未决项整理进 `.mae-flow-work/{单号}/grill.md`。两者都是本地 Spec 和 Story 的强制输入，

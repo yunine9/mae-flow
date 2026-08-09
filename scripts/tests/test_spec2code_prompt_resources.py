@@ -510,3 +510,37 @@ class UserVisibilityDisciplineTests(unittest.TestCase):
         skill = read("skills/mae-flow/SKILL.md")
         self.assertIn("文件完整路径", skill)
         self.assertIn("工具输出用户看不见", skill)
+
+
+class ReviewCarriesTheRulesTests(unittest.TestCase):
+    """让人判"合不合规",就得把规矩一起给它。"""
+
+    def test_story_review_card_carries_both_templates(self):
+        import io as _io
+        with _io.open(os.path.join(ROOT, "scripts", "mae_flow_core",
+                                   "cli_commands", "role_task.py"),
+                      encoding="utf-8") as stream:
+            source = stream.read()
+        block = source.split('elif role == "story-review":')[1][:600]
+        self.assertIn("STORY-TEMPLATE.md", block)
+        self.assertIn("IMPLEMENTATION-TEMPLATE.md", block)
+
+    def test_appendix_rules_live_in_one_place_only(self):
+        """同一件事在两处规定,迟早互相打架:步骤文档说"不得出现代码块",
+        模板说"只写签名"——签名算不算代码块,模型只能自己猜。"""
+        story = read("flow/steps/story.md")
+        self.assertNotIn("不得出现代码块", story)
+        self.assertIn("IMPLEMENTATION-TEMPLATE.md", story)
+        template = read("skills/mae-flow/assets/IMPLEMENTATION-TEMPLATE.md")
+        self.assertIn("只写签名不写实现", template)
+
+    def test_waiting_on_a_background_agent_is_not_a_user_decision(self):
+        """实战:子 Agent 在后台跑,模型不敢空手结束回复,于是发了个
+        "占位问题（请忽略此问）"——白打扰用户一次。规则读到了,
+        但规则没覆盖这个处境。"""
+        grill = read("flow/steps/grill.md")
+        self.assertIn("直接结束回复等它", grill)
+        self.assertIn("不要用占位问题", grill)
+        skill = read("skills/mae-flow/SKILL.md")
+        self.assertIn("等待不是决策", skill)
+        self.assertIn("占位问题", skill)

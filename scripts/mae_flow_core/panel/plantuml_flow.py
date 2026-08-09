@@ -277,13 +277,19 @@ def _levels(seen, edges):
     parents = {}
     for upper, lower in pairs:
         parents.setdefault(lower, []).append(upper)
+    # 同一行里,兄弟子类要挨在一起。四个 handler 和 AuditLog/SendResult
+    # 同挂在 ChannelHandler 下,重心一模一样,只按名字排就成了
+    # Email/Push/SendResult/Sms/Webhook——把值对象插进了继承家族中间。
+    kin = {lower for left, right, _t, style, _d in edges
+           for lower in (left,) if style == "inherit"}
     for depth in sorted(rows):          # 重心排序:少一堆交叉线
         if depth == 0:
             continue
         above = rows.get(depth - 1, [])
         index = {name: slot for slot, name in enumerate(above)}
-        rows[depth].sort(key=lambda name: (_barycenter(name, parents, index,
-                                                       len(above)), name))
+        rows[depth].sort(key=lambda name: (
+            _barycenter(name, parents, index, len(above)),
+            0 if name in kin else 1, name))
     return rows
 
 

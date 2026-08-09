@@ -3,7 +3,10 @@
 
 import importlib
 import importlib.util
+import io
 import os
+import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -88,3 +91,61 @@ class ProjectResourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MirrorCoverageTests(unittest.TestCase):
+    """指到 plugin-resources 的路径,必须真的镜像过去。
+
+    这类漏配没有任何报错:步骤文档写着"协议全文(必读): <路径>",
+    模型去读,文件不在,于是当没读到——功能静默降级成一句口号。
+    L3 的 build-fresh-context.md 就是这么漏的,而它恰恰是本轮要测的东西。
+    """
+
+    def _plugin_root(self):
+        return os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", ".."))
+
+    def _mirrored(self):
+        from mae_flow_core.cli_runtime import _RESOURCE_FILES
+        return {target for _, target in _RESOURCE_FILES}
+
+    def _cited(self, text):
+        return set(re.findall(r"plugin-resources/([A-Za-z0-9_./-]+\.\w+)",
+                              text))
+
+    def test_every_cited_resource_is_actually_mirrored(self):
+        root = self._plugin_root()
+        mirrored, missing = self._mirrored(), []
+        for folder in ("flow/steps", "runtime/guidance", "skills/mae-flow"):
+            base = os.path.join(root, *folder.split("/"))
+            for here, _dirs, names in os.walk(base):
+                for name in names:
+                    if not name.endswith(".md"):
+                        continue
+                    path = os.path.join(here, name)
+                    with io.open(path, encoding="utf-8") as stream:
+                        for cited in self._cited(stream.read()):
+                            if cited not in mirrored:
+                                missing.append("%s → %s"
+                                               % (os.path.relpath(path, root),
+                                                  cited))
+        self.assertEqual([], missing,
+                         "步骤文档引用了未镜像的资源: %s" % missing)
+
+    def test_prompt_code_cites_only_mirrored_resources(self):
+        """指令是拼出来的,路径不在文档里——照样得核。"""
+        from mae_flow_core.cli_commands import current as current_cmd
+        room = tempfile.mkdtemp(prefix="mirror-")
+        self.addCleanup(shutil.rmtree, room, True)
+        before = os.getcwd()
+        os.chdir(room)
+        try:
+            with io.open(".mae-flow-defaults.json", "w",
+                         encoding="utf-8") as stream:
+                stream.write('{"编码执行方式": "新上下文"}')
+            banner = current_cmd._apply_build_execution_mode("build", "原文")
+        finally:
+            os.chdir(before)
+        cited = self._cited(banner.replace(os.sep, "/"))
+        self.assertTrue(cited, "L3 指令应当指向协议全文")
+        self.assertEqual(set(), cited - self._mirrored())

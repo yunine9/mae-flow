@@ -296,9 +296,14 @@ class QualityEvidenceRules:
             if changed:
                 return EvidenceResult(
                     False,
+                    # 只说"不许"会让人原地打转:实战里模型在这儿改了又扫、
+                    # 扫不动又改,来回几轮才自己想通该回退。把两条出路一起给。
                     "CodeCheck 首检为 0 后源码又发生变化: "
                     + "、".join(changed[:5])
-                    + "。旧首检不背新代码的书,重新执行 codecheck-scan",
+                    + "。旧首检不背新代码的书:要么回退这些改动,"
+                    + "要么重新执行 codecheck-scan。"
+                    + "本步只改 CodeCheck 告警指出的问题;"
+                    + "顺手的精简记进交付说明,不在本步做",
                 )
             return EvidenceResult(True, "")
         return None

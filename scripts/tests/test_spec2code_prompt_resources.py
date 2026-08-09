@@ -544,3 +544,28 @@ class ReviewCarriesTheRulesTests(unittest.TestCase):
         skill = read("skills/mae-flow/SKILL.md")
         self.assertIn("等待不是决策", skill)
         self.assertIn("占位问题", skill)
+
+
+class NoSideQuestsInVerifyTests(unittest.TestCase):
+    """实战:模型在 CodeCheck 步顺手删了个没用的参数,首检随即失效,
+    门禁反复拦 done,来回几轮后它自己回退了 5 个文件才脱身。
+
+    两个毛病各修各的:步骤文档里那句"重构在此定稿"像是在邀请顺手改;
+    门禁只说"不许"不说出路,模型只能试错。"""
+
+    def test_step_does_not_invite_incidental_refactors(self):
+        step = read("flow/steps/verify_codecheck.md")
+        self.assertIn("本步不做", step)
+        self.assertIn("记进最终交付说明", step)
+        # "重构在此定稿"必须限定成"告警引出的重构",不能是泛指
+        self.assertNotIn("拆大函数等重构在此定稿", step)
+        self.assertIn("CodeCheck 告警引出的重构在此定稿", step)
+
+    def test_block_message_offers_a_way_out(self):
+        import io as _io
+        with _io.open(os.path.join(ROOT, "scripts", "mae_flow_core",
+                                   "quality", "evidence.py"),
+                      encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("要么回退这些改动", source)
+        self.assertIn("不在本步做", source)

@@ -29,7 +29,11 @@
 任务卡会按 `docs/specs/index.md` 自动附上本需求相关领域真相；禁止全量读取领域文档或读取历史 delivery notes。
 **大批量分批**:告警 >30 条或文件 >15 个 → 任务卡按文件划批，仍只派一轮修复；
 不要为每条告警重启全新实例。
-(本步在 Ponytail 之后——不给已删代码修规范;在 UT 之前——拆大函数等重构在此定稿,UT 才能覆盖到最终形态。)
+**本步不做"顺手精简"**:源码在这一步只因 CodeCheck 告警而改,由 codecheck-fix-agent 来改。
+看到可删的死参数、可合的重复分支——记进最终交付说明,不在本步动手:Ponytail 已经过去,
+现在改会让首检失效、门禁把 done 拦下,你会在"改—重扫—又改"里空转(实战撞过)。
+(本步在 Ponytail 之后——不给已删代码修规范;在 UT 之前——CodeCheck 告警引出的重构在此定稿,
+UT 才能覆盖到最终形态。)
 (Agent 返回自然语言仅供展示，不再解析 FOUND/FIXED/REMAINING_COUNT 或固定状态行；
 PreToolUse/SubagentStop/Agent PostToolUse 记录生命周期，harness 从真实 transcript 核对 fullcheck 调用和范围。
 检测到 started 但返回事件缺失时禁止自动重派，先执行 doctor。)

@@ -9,7 +9,7 @@ import io
 import os
 
 from . import (annotate, assets, banners, diffview, markdown,
-               notify, plantuml)
+               notes_drawer, notify, plantuml)
 from .markdown import escape
 
 def _fence_hook(language, body):
@@ -361,8 +361,8 @@ def render(snapshot, changes=(), root=".", born=None):
     doc_key_by_path = {doc["path"]: "doc-" + doc["kind"]
                        for doc in snapshot["artifacts"]["documents"]}
     context = {
-        "css": assets.CSS + plantuml.SVG_CSS + annotate.CSS,
-        "js": assets.JS + annotate.JS,
+        "css": assets.CSS + plantuml.SVG_CSS + annotate.CSS + notes_drawer.CSS,
+        "js": assets.JS + annotate.JS + notes_drawer.JS,
         "rail": _phase_rail(snapshot["progress"]["step"]),
         "born": born or _born_epoch(),
         "pulse": escape(pulse_marker(snapshot)),
@@ -479,7 +479,11 @@ TEMPLATE = """<!doctype html>
 <span class="sp"><a id="vraw" href="#">源文件 ↗</a>
 <button onclick="hide()">关闭 Esc</button></span></div>
 <div class="vtabs">%(tabs)s</div>%(panes)s</div></div>
-<button id="notes-badge">复制批注给 Agent<span>0</span></button>
+<div id="notes-drawer"><header><b id="notes-title">检视批注</b>
+<button id="notes-copy" class="primary">复制给 Agent</button>
+<button id="notes-close">收起</button></header>
+<div id="notes-list"></div></div>
+<button id="notes-badge">检视批注<span>0</span></button>
 <div id="notes-toast"></div>
 <script>%(js)s</script></body></html>
 """

@@ -91,6 +91,7 @@ JS = r"""
       node.remove();
     });
     list.forEach(function(item){ mark(item); });
+    if (window.__panelPaintDrawer) { window.__panelPaintDrawer(); }
   }
   // 靶子有两类:diff 行,以及文档里带源行号的块(段落/条目/表格/图)。
   function targetsOf(file){
@@ -131,10 +132,12 @@ JS = r"""
       drop.textContent = '删除';
       drop.onclick = function(event){
         event.stopPropagation();
-        save(load().filter(function(other){
-          return !(other.file === item.file && other.line === item.line
-                   && other.note === item.note);
-        }));
+        var at = -1;
+        load().forEach(function(other, index){
+          if (at < 0 && other.file === item.file && other.line === item.line
+              && other.note === item.note) { at = index; }
+        });
+        if (at >= 0) { window.__notes.drop(at); }
       };
       shown.appendChild(drop);
       place(row, shown);
@@ -144,6 +147,23 @@ JS = r"""
   function place(row, node){
     if (row.tagName === 'LI') { row.appendChild(node); }
     else { row.parentNode.insertBefore(node, row.nextSibling); }
+  }
+  // 改批注前人几乎总要再看一眼上下文,所以清单每条都能跳回原处。
+  function locate(item){
+    var pane = document.querySelector('.pane[data-rel^="' + item.file + '"]');
+    if (!pane) { return; }
+    if (window.show && pane.dataset.key) { window.show(pane.dataset.key); }
+    else { pane.classList.add('on'); }
+    setTimeout(function(){
+      var hit = null;
+      targetsOf(item.file).forEach(function(node){
+        if (!hit && lineOf(node) === item.line) { hit = node; }
+      });
+      if (!hit) { return; }
+      hit.scrollIntoView({block: 'center'});
+      hit.classList.add('flash');
+      setTimeout(function(){ hit.classList.remove('flash'); }, 1700);
+    }, 60);
   }
   function edit(row){
     if (row.querySelector && row.querySelector(':scope > .note-editor')){ return; }
@@ -191,11 +211,19 @@ JS = r"""
   });
   // 多条一次送:按文件分组、组内按行号升序。人是跳着圈的,Agent 却要
   // 一个文件一个文件地改——按点击顺序给它,它得来回翻。
+  // 带上 at(原始下标),清单据此改某一条、删某一条。
+  function ordered(){
+    return load().map(function(note, at){ return {note: note, at: at}; })
+      .sort(function(a, b){
+        if (a.note.file !== b.note.file){
+          return a.note.file < b.note.file ? -1 : 1;
+        }
+        return (parseInt(a.note.line, 10) || 0)
+             - (parseInt(b.note.line, 10) || 0);
+      });
+  }
   function render(){
-    var list = load().slice().sort(function(a, b){
-      if (a.file !== b.file) { return a.file < b.file ? -1 : 1; }
-      return (parseInt(a.line, 10) || 0) - (parseInt(b.line, 10) || 0);
-    });
+    var list = ordered().map(function(entry){ return entry.note; });
     var files = [];
     list.forEach(function(item){
       if (files.indexOf(item.file) < 0) { files.push(item.file); }
@@ -218,15 +246,13 @@ JS = r"""
     });
     return lines.join('\n');
   }
-  if (badge){
-    badge.onclick = function(){
-      var text = render();
-      if (navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).then(function(){
-          say('已复制 ' + load().length + ' 条批注，粘贴进会话即可');
-        }, function(){ fallback(text); });
-      } else { fallback(text); }
-    };
+  function copy(){
+    var text = render();
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        say('已复制 ' + load().length + ' 条批注，粘贴进会话即可');
+      }, function(){ fallback(text); });
+    } else { fallback(text); }
   }
   function fallback(text){
     var area = document.createElement('textarea');
@@ -239,5 +265,23 @@ JS = r"""
   }
   paint();
   window.__panelPaintNotes = paint;
+  window.__notes = {
+    ordered: ordered,
+    locate: locate,
+    copy: copy,
+    render: render,
+    amend: function(at, text){
+      var list = load();
+      if (!list[at]) { return; }
+      list[at].note = text;
+      save(list);
+    },
+    drop: function(at){
+      var list = load();
+      if (!list[at]) { return; }
+      list.splice(at, 1);
+      save(list);
+    }
+  };
 })();
 """

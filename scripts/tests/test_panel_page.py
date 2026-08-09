@@ -170,14 +170,14 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("maeflow.notes.", html)          # 按单号分键
         self.assertIn("localStorage", html)
         self.assertIn('id="notes-badge"', html)
-        self.assertIn("复制批注给 Agent", html)
+        self.assertIn("复制给 Agent", html)
         self.assertIn("检视批注 · ", html)               # 复制出去的抬头
         self.assertIn("请按下列位置修改；每条都给出了文件与行号。", html)
         self.assertIn("当前代码：", html)                # 带上原行内容
         # 多条一次送:按文件分组、组内按行号升序,Agent 不必来回翻文件
         self.assertIn("个文件）", html)
         self.assertIn("'【' + item.file + '】'", html)
-        self.assertIn("parseInt(a.line, 10)", html)
+        self.assertIn("parseInt(a.note.line, 10)", html)
         self.assertIn("window.__panelBusy = true", html)  # 编辑期间不重载
         self.assertIn('data-ticket=', html)
         # 仍然不是推进入口:批注只产出文本,不碰状态
@@ -205,7 +205,25 @@ class PanelPageTests(unittest.TestCase):
     def _page_source(self):
         from mae_flow_core.panel import page as page_module
         import io as _io
-        return _io.open(page_module.__file__, encoding="utf-8").read()
+        with _io.open(page_module.__file__, encoding="utf-8") as stream:
+            return stream.read()
+
+    def test_notes_drawer_lists_edits_and_deletes_each_note(self):
+        """检视是来回的:先圈十几处,再回头看哪条写重了、哪条太含糊。
+        没有清单就只能满页找那几道紫边。逐条可改、可删、可跳回原处。"""
+        html = build()
+        self.assertIn('id="notes-drawer"', html)
+        self.assertIn('id="notes-list"', html)
+        self.assertIn("还没有批注。", html)          # 空清单也说人话
+        self.assertIn("'定位'", html)
+        self.assertIn("'编辑'", html)
+        self.assertIn("'删除'", html)
+        self.assertIn("api.amend(entry.at", html)   # 改某一条,不是整表覆盖
+        self.assertIn("api.drop(entry.at", html)
+        self.assertIn("scrollIntoView", html)       # 定位要真跳过去
+        self.assertIn("window.__panelPaintDrawer", html)  # 重生成后清单同步
+        # 清单里的批注文本一律 textContent,不拼 HTML
+        self.assertNotIn("innerHTML", html.split("批注清单")[1])
 
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""

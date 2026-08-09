@@ -358,3 +358,54 @@ class NotifyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhaseMonotonicTests(unittest.TestCase):
+    """顺着流程往前走,阶段只许前进或原地,不许倒退。
+
+    实战:domain_archive(领域知识归档)按名字被归进「定规格」,可它跑在
+    verify_spec 之后。用户眼看着阶段轨道从「验证」倒退回「定规格」,
+    再跳去「交付」——进度条当场不可信。
+
+    人是按名字分组的,而阶段顺序由流程图决定;两者对不上,只有图知道。
+    """
+
+    # 明写的例外:返工流程处理完评审意见后本来就要回去重写代码。
+    # 例外必须逐条列出来——不列就说明是笔误,而不是设计。
+    BACKWARD_BY_DESIGN = {("rf_verify", "build")}
+
+    def _flow(self):
+        import json as _json
+        with io.open(os.path.join(ROOT, "flow", "flow.json"),
+                     encoding="utf-8") as stream:
+            return _json.load(stream)
+
+    def test_phase_never_moves_backwards_along_the_flow(self):
+        flow = self._flow()
+        order = {name: slot for slot, name in enumerate(notify.PHASES)}
+        steps = flow["steps"]
+        backwards = []
+        for name, step in steps.items():
+            here = notify.phase_of(name)
+            if not here:
+                continue
+            nxt = step.get("next")
+            # next 可能是单个步骤,也可能是 {选项: 步骤} 的分岔。
+            # 分岔里的"重做/回退"分支本就该倒回去,只看直行的那条。
+            targets = ([nxt] if isinstance(nxt, str)
+                       else list((nxt or {}).values()))
+            for target in targets:
+                if not isinstance(target, str) or target not in steps:
+                    continue
+                if "rework" in target or "recompile" in target:
+                    continue                 # 显式的返工分支,本来就往回走
+                if (name, target) in self.BACKWARD_BY_DESIGN:
+                    continue
+                there = notify.phase_of(target)
+                if there and order[there] < order[here]:
+                    backwards.append("%s(%s) → %s(%s)"
+                                     % (name, here, target, there))
+        self.assertEqual(
+            [], backwards,
+            "顺流程往前走,阶段却倒退了(回退/重做步骤请显式排除): %s"
+            % backwards)

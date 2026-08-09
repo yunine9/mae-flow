@@ -32,7 +32,7 @@ PHASES = {
              "branch_create"),
     "澄清需求": ("grill", "grill_ask", "rf_triage"),
     "定规格": ("open", "hf_open", "tw_open", "design", "archive",
-               "archive_confirm", "domain_archive"),
+               "archive_confirm"),
     "写设计": ("story", "story_ask"),
     "写代码": ("build", "build_agent_review", "build_review", "build_rework",
                "build_commit"),
@@ -42,7 +42,11 @@ PHASES = {
              "quality_recompile", "quality_commit",
              "tw_codecheck", "tw_ut", "tw_verify",
              "rf_codecheck", "rf_ut", "rf_verify"),
-    "交付": ("delivery_review", "push", "moonlight_review", "end"),
+    # domain_archive(领域知识归档)跑在 verify_spec 之后、最终检视之前。
+    # 它曾按名字被归进「定规格」,于是阶段轨道走到这一步会从「验证」倒退
+    # 两格——用户看到的"进度条不对"就是这么来的。
+    "交付": ("domain_archive", "delivery_review", "push", "moonlight_review",
+             "end"),
 }
 _STEP_PHASE = {step: phase for phase, steps in PHASES.items()
                for step in steps}

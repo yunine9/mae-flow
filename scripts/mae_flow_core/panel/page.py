@@ -38,7 +38,8 @@ def _document_panes(documents):
         display_label = doc["label"]
         try:
             with io.open(doc["path"], encoding="utf-8", errors="replace") as fh:
-                body = markdown.render(fh.read(), _fence_hook)
+                body = markdown.render(fh.read(), _fence_hook,
+                                       line_marks=True)
         except OSError as exc:
             body = '<p>读取失败：%s</p>' % escape(str(exc))
         rows.append(

@@ -183,6 +183,30 @@ class PanelPageTests(unittest.TestCase):
         # 仍然不是推进入口:批注只产出文本,不碰状态
         self.assertNotIn("mae-flow.py done", html)
 
+    def test_documents_are_annotatable_by_real_source_line(self):
+        """故事/规格同样是检视对象,而且改文档比改代码更早生效。
+        渲染时给每个块打上源文件行号,批注才能落成 story.md:42,
+        而不是"第三段那里"——后者模型还得猜。"""
+        from mae_flow_core.panel import markdown
+        body = "# 标题\n\n## 验收\n- 第一条\n  - 子条\n- 第二条\n\n一段话。\n"
+        marked = markdown.render(body, line_marks=True)
+        self.assertIn('<h1 data-l="1">', marked)
+        self.assertIn('<li data-l="4">', marked)     # 逐条打点,不是整段列表
+        self.assertIn('<li data-l="5">', marked)
+        self.assertIn('<p data-l="8">', marked)
+        # 不开开关时输出与从前逐字节相同——渲染器有别的调用方
+        self.assertNotIn("data-l", markdown.render(body))
+        html = build()
+        self.assertIn("line_marks", self._page_source())
+        self.assertIn(".md [data-l]", html)          # 文档块也有批注入口
+        self.assertIn("'原文：'", html)               # 文档用"原文",不叫"当前代码"
+        self.assertIn("window.getSelection()", html)  # 划词是在读,别弹编辑框
+
+    def _page_source(self):
+        from mae_flow_core.panel import page as page_module
+        import io as _io
+        return _io.open(page_module.__file__, encoding="utf-8").read()
+
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
         import re as _re, shutil, tempfile

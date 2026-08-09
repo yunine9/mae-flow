@@ -4,6 +4,10 @@
 准确传达出去。口述"那个短信处理器里面重试那块"要模型猜三轮;
 `sms_handler.py:23 + 一句意见` 它一次就到位。
 
+代码和文档一视同仁:故事、规格、设计同样是检视对象,而且改文档往往
+比改代码更早生效。markdown 渲染时给每个块打上源文件行号(data-l),
+所以批注文档也能落成 `story.md:42`,不是"第三段那里"。
+
 两个硬约束决定了形态:
 - file:// 页面不能写文件,批注只能走剪贴板——你点"复制给 Agent",
   粘进会话即可,不需要任何服务;
@@ -13,10 +17,15 @@
 
 CSS = r"""
 .dr{position:relative}
-.diff .dr:not(.hk):not(.cut):hover .c:first-of-type::before{
+.diff .dr:not(.hk):not(.cut):hover .c:first-of-type::before,
+.md [data-l]:hover::before{
   content:"批注";position:absolute;left:2px;font-size:9px;color:var(--accent);
   background:var(--accent-bg);border-radius:3px;padding:0 3px;cursor:pointer}
-.dr.noted{box-shadow:inset 3px 0 var(--accent)}
+.md [data-l]{position:relative}
+.md [data-l]:hover{background:var(--accent-bg);border-radius:4px}
+.md [data-l]::before{top:2px;left:-14px}
+.dr.noted,.md [data-l].noted{box-shadow:inset 3px 0 var(--accent)}
+.md [data-l].noted{padding-left:8px}
 .note-editor{grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;
   padding:8px 10px;background:var(--accent-bg);border-top:1px solid var(--accent)}
 .note-editor textarea{flex:1;min-height:46px;font:inherit;font-size:12px;
@@ -83,12 +92,16 @@ JS = r"""
     });
     list.forEach(function(item){ mark(item); });
   }
-  function rowsOf(file){
-    var pane = document.querySelector(
-      '.pane[data-rel^="' + file + '"]');
-    return pane ? pane.querySelectorAll('.dr') : [];
+  // 靶子有两类:diff 行,以及文档里带源行号的块(段落/条目/表格/图)。
+  function targetsOf(file){
+    var pane = document.querySelector('.pane[data-rel^="' + file + '"]');
+    if (!pane) { return []; }
+    var rows = pane.querySelectorAll('.dr');
+    return rows.length ? rows : pane.querySelectorAll('.md [data-l]');
   }
+  function isDoc(node){ return !node.classList.contains('dr'); }
   function lineOf(row){
+    if (isDoc(row)) { return row.dataset.l || ''; }
     var cells = row.querySelectorAll('.ln');
     var right = cells.length > 1 ? cells[1].textContent.trim() : '';
     return right || (cells.length ? cells[0].textContent.trim() : '');
@@ -99,12 +112,16 @@ JS = r"""
     return rel.split('（')[0];
   }
   function codeOf(row){
+    if (isDoc(row)){
+      var text = (row.textContent || '').replace(/\s+/g, ' ').trim();
+      return text.length > 90 ? text.slice(0, 90) + '…' : text;
+    }
     var cells = row.querySelectorAll('.c');
     var right = cells.length > 1 ? cells[1].textContent : '';
     return (right || (cells.length ? cells[0].textContent : '')).trim();
   }
   function mark(item){
-    rowsOf(item.file).forEach(function(row){
+    targetsOf(item.file).forEach(function(row){
       if (lineOf(row) !== item.line) { return; }
       row.classList.add('noted');
       var shown = document.createElement('div');
@@ -120,10 +137,16 @@ JS = r"""
         }));
       };
       shown.appendChild(drop);
-      row.parentNode.insertBefore(shown, row.nextSibling);
+      place(row, shown);
     });
   }
+  // 列表项要把批注放进 li 内部:塞在 <ul> 的两个 <li> 之间是坏结构。
+  function place(row, node){
+    if (row.tagName === 'LI') { row.appendChild(node); }
+    else { row.parentNode.insertBefore(node, row.nextSibling); }
+  }
   function edit(row){
+    if (row.querySelector && row.querySelector(':scope > .note-editor')){ return; }
     if (row.nextSibling && row.nextSibling.className === 'note-editor'){ return; }
     window.__panelBusy = true;           // 写字期间不许自动重载
     var box = document.createElement('div');
@@ -141,7 +164,8 @@ JS = r"""
       if (text){
         var list = load();
         list.push({file: fileOf(row), line: lineOf(row),
-                   code: codeOf(row), note: text});
+                   code: codeOf(row), note: text,
+                   doc: isDoc(row) ? 1 : 0});
         save(list);
       }
       close();
@@ -150,15 +174,19 @@ JS = r"""
     box.appendChild(area);
     box.appendChild(ok);
     box.appendChild(no);
-    row.parentNode.insertBefore(box, row.nextSibling);
+    place(row, box);
     area.focus();
   }
   document.addEventListener('click', function(event){
-    var row = event.target.closest ? event.target.closest('.dr') : null;
-    if (!row || row.classList.contains('hk') || row.classList.contains('cut')
-        || row.classList.contains('exp')) { return; }
-    if (event.target.tagName === 'BUTTON'
+    if (!event.target.closest) { return; }
+    if (event.target.tagName === 'BUTTON' || event.target.tagName === 'A'
         || event.target.tagName === 'TEXTAREA') { return; }
+    // 划词是在读,不是要批注——有选区就别弹编辑框。
+    if (String(window.getSelection() || '').trim()) { return; }
+    var row = event.target.closest('.dr') || event.target.closest('.md [data-l]');
+    if (!row) { return; }
+    if (row.classList.contains('hk') || row.classList.contains('cut')
+        || row.classList.contains('exp')) { return; }
     edit(row);
   });
   // 多条一次送:按文件分组、组内按行号升序。人是跳着圈的,Agent 却要
@@ -183,7 +211,9 @@ JS = r"""
       }
       index += 1;
       lines.push(index + '. 第 ' + item.line + ' 行');
-      if (item.code) { lines.push('   当前代码：' + item.code); }
+      if (item.code){
+        lines.push('   ' + (item.doc ? '原文：' : '当前代码：') + item.code);
+      }
       lines.push('   要求：' + item.note);
     });
     return lines.join('\n');

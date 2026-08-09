@@ -28,6 +28,7 @@ class AgentEvidencePorts:
     blocking_dirty_source_paths: object
     open_observation: object = None
     finished_observations: object = None
+    step_scoped_source_files: object = None
 
 
 class AgentEvidenceRules:
@@ -188,7 +189,19 @@ class AgentEvidenceRules:
         return max(issued, 1)
 
     def agent_or_no_source(self, spec, state):
-        files, error = self.ports.changed_source_files(state)
+        """无源码改动即放行;scope=step 时与发卡侧问同一个问题。
+
+        实战死锁(fieldtest 2026-08-09):重编译步的发卡侧看"本步进入后
+        还有没有未提交源码改动"——没有就拒发卡并说"证据层会自动放行";
+        证据侧却看"本单总共改没改源码"——改了,于是索要 COMPILE 证据。
+        没卡不能派 Agent、没 Agent 就没证据,流程原地锁死。两侧必须同源:
+        问的是同一件事,答案就不能相反。
+        """
+        source = self.ports.changed_source_files
+        if (spec.get("scope") == "step"
+                and self.ports.step_scoped_source_files is not None):
+            source = self.ports.step_scoped_source_files
+        files, error = source(state)
         if error:
             return EvidenceResult(False, error)
         if not files:

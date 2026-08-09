@@ -505,7 +505,8 @@
           "agent": "COMPILE",
           "statuses": [
             "OK"
-          ]
+          ],
+          "scope": "step"
         }
       ],
       "next": "quality_review",
@@ -548,7 +549,8 @@
           "agent": "COMPILE",
           "statuses": [
             "OK"
-          ]
+          ],
+          "scope": "step"
         }
       ],
       "next": "verify_codecheck"
@@ -563,7 +565,8 @@
           "agent": "COMPILE",
           "statuses": [
             "OK"
-          ]
+          ],
+          "scope": "step"
         }
       ],
       "next": "quality_review",
@@ -593,7 +596,8 @@
           "agent": "COMPILE",
           "statuses": [
             "OK"
-          ]
+          ],
+          "scope": "step"
         }
       ],
       "next": "verify_ut"

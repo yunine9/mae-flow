@@ -122,6 +122,21 @@ def _verification_passed(state):
     return True, ""
 
 
+def _step_scoped_source_files(state):
+    """本步进入后仍未提交的源码改动——与 agent-task 发卡侧同一套计算。"""
+    try:
+        step = str((state or {}).get("current", "") or "")
+        head = str(((state or {}).get("step_heads", {}) or {}).get(step, "")
+                   or "HEAD")
+        snapshot = api._worktree_snapshot_since(head)
+        return [
+            path for path in snapshot
+            if api._is_source_path(path, state, api.FLOW)
+        ], ""
+    except Exception as exc:              # noqa: BLE001
+        return None, "无法计算本步源码改动: %s" % exc
+
+
 def _finished_agent_observation(kind, step, since):
     observed = finished_observation(STATE_PATH, kind, step, since)
     if observed:
@@ -163,6 +178,7 @@ _AGENT_EVIDENCE = AgentEvidenceRules(AgentEvidencePorts(
         STATE_PATH, kind, step, quality_input_snapshot(state, kind, step)),
     askuser_tokens=lambda: api._agent_token_data(),
     changed_source_files=lambda state: api._changed_source_files(state),
+    step_scoped_source_files=lambda state: _step_scoped_source_files(state),
     shell_output=lambda command: api.sh(command),
     argv_output=lambda arguments: api.argv_out(arguments),
     blocking_dirty_source_paths=lambda state: api._blocking_dirty_source_paths(

@@ -275,7 +275,8 @@ class QualityEvidenceRules:
                 scan.get("head", ""), state)
             if error:
                 return EvidenceResult(
-                    False, "CodeCheck 两轮上限记录失效:" + error)
+                    False, "CodeCheck 两轮上限记录失效:" + error
+                    + "；重新执行 codecheck-scan 重建记录")
             if changed:
                 return EvidenceResult(
                     False,

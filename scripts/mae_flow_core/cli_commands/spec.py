@@ -164,7 +164,7 @@ def cmd_spec(flow, st, args):
         return
     if action == "validate":
         if not cn:
-            api.die("先记录 CHANGE_NAME。", 2)
+            api.die("先记录变更目录名:spec new <英文短名>", 2)
         try:
             ok, messages = specengine.validate(os.getcwd(), cn)
         except specengine.SpecEngineError as exc:
@@ -177,7 +177,7 @@ def cmd_spec(flow, st, args):
         return
     if action == "archive":
         if not cn:
-            api.die("先记录 CHANGE_NAME。", 2)
+            api.die("先记录变更目录名:spec new <英文短名>", 2)
         if api._spec_phase(st) != "archive":
             api.die("规格定稿只能在定稿阶段执行(当前阶段 %s):先完成验证并通过 spec verify-pass。"
                 % (api._spec_phase(st) or "未初始化"), 2)

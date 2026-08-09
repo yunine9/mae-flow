@@ -197,6 +197,12 @@ def _is_story_document(path):
             return False
     return bool(re.search(r"(?mi)^#\s*STORY[-：:]|Story转测自检表", sample))
 
+def _domain_archived_paths(st):
+    record = ((st or {}).get("domain_archive") or {})
+    return {re.sub(r"^(?:\./)+", "", norm(str(path)))
+            for path in (record.get("applied_paths") or ())}
+
+
 def _trusted_harness_commit_path(
         path, st=None, include_user_authorized=False):
     """Paths the current delivery may create without an Edit/Write event.
@@ -211,6 +217,11 @@ def _trusted_harness_commit_path(
             and api._authorized_delivery_path(p, st)):
         return True
     if p in {".gitignore", ".gitattributes"}:
+        return True
+    # 领域知识归档是 harness 自己写的文件,不经 Write/Edit,于是每一单都要
+    # 报一次"来路不明"——狼来了喊多了就没人听了。认账依据不是给
+    # docs/specs/ 开白名单,而是这一单归档时实际落盘的那份清单。
+    if p in _domain_archived_paths(st):
         return True
     if p.startswith("docs/req/"):
         return True

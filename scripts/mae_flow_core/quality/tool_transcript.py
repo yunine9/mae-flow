@@ -203,8 +203,28 @@ def exact_skill_call(
     return None
 
 
+_TRAILING_NOTE = re.compile(r"[（(][^()（）]*[)）]\s*$")
+
+
 def _normalized_command(value):
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def command_core(value):
+    """去掉配置里跟在命令后面的括号说明,得到真正要执行的命令。
+
+    实战根因(fieldtest 五连败):用户把「编译方式」填成
+    `make build (python3 -m compileall 语法检查 …各 src)`——命令 + 中文注解。
+    匹配拿整串去 startswith,而真实执行的是 `make build; echo ...`,
+    永远匹配不上;五次编译全被判无证据,却让人以为是宿主 transcript 问题。
+    配置里写清楚意图是好习惯,机器必须容得下。
+    """
+    text = str(value or "").strip()
+    previous = None
+    while text and text != previous:            # 允许多层括号注解
+        previous = text
+        text = _TRAILING_NOTE.sub("", text).strip()
+    return text or str(value or "").strip()
 
 
 def _command_of(call):
@@ -214,7 +234,7 @@ def _command_of(call):
 
 def bash_call(
         calls: Sequence[ToolCall], expected: str) -> Optional[ToolCall]:
-    wanted = _normalized_command(expected)
+    wanted = _normalized_command(command_core(expected))
     if not wanted:
         return None
     for call in reversed(calls or ()):
@@ -230,7 +250,7 @@ def bash_call(
 
 
 def bash_calls(calls: Sequence[ToolCall], expected: str):
-    wanted = _normalized_command(expected)
+    wanted = _normalized_command(command_core(expected))
     found = []
     if not wanted:
         return found

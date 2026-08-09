@@ -174,5 +174,48 @@ class ToolTranscriptTests(unittest.TestCase):
             "python -m unittest -v（全量）",
         ).call_id)
 
+class ConfigWithTrailingNoteTests(unittest.TestCase):
+    """实战根因(fieldtest 五连败,2026-08-09):用户把「编译方式」填成
+    `make build (python3 -m compileall 语法检查 …各 src)`——命令+中文注解。
+    匹配拿整串 startswith,真实执行的 `make build; echo ...` 永远匹配不上,
+    五次编译全被判无证据,还让人以为是宿主 transcript 不可读。
+    配置里写清楚意图是好习惯,机器必须容得下。"""
+
+    @staticmethod
+    def _calls(command):
+        from mae_flow_core.quality.tool_transcript import parse_transcript
+        rows = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t1", "name": "Bash",
+                 "input": {"command": command}}]}},
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1",
+                 "content": "BUILD OK"}]}},
+        ]
+        return parse_transcript(rows).tool_calls
+
+    def test_command_core_strips_trailing_notes(self):
+        from mae_flow_core.quality.tool_transcript import command_core
+        cases = {
+            "make build (python3 -m compileall 语法检查 各 src)": "make build",
+            "mvn -pl sdk,model -am compile -q（只编本服务模块）":
+                "mvn -pl sdk,model -am compile -q",
+            "make build": "make build",
+            "npm run build (fast) (ci)": "npm run build",
+            "(全是说明)": "(全是说明)",          # 抽空则退回原值,不返回空串
+        }
+        for value, expected in cases.items():
+            self.assertEqual(expected, command_core(value), value)
+
+    def test_annotated_config_matches_the_real_execution(self):
+        from mae_flow_core.quality.tool_transcript import bash_call
+        calls = self._calls('make build; echo "EXIT_CODE=$?"')
+        annotated = "make build (python3 -m compileall 语法检查 各 src)"
+        self.assertIsNotNone(bash_call(calls, annotated))
+        self.assertIsNotNone(bash_call(calls, "make build"))
+        # 不是放宽到"随便匹配":命令主体不同照旧不认
+        self.assertIsNone(bash_call(calls, "gradle build (说明)"))
+
+
 if __name__ == "__main__":
     unittest.main()

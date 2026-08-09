@@ -199,6 +199,24 @@ class SnapshotTests(unittest.TestCase):
         self.assertNotIn("# story.md", body)
         self.assertLess(len(body.encode("utf-8")), 64 * 1024)
 
+    def test_untracked_new_files_appear_in_uncommitted_changes(self):
+        """人工检视发生在提交之前,本单新建文件全是 untracked——git diff
+        看不见它们,检视时面板缺的正是最重要的新文件(实战反馈)。"""
+        with open(os.path.join(self.root, "brand_new.py"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("line one\nline two\n")
+        with open(os.path.join(self.root, "logo.bin"), "wb") as stream:
+            stream.write(b"\x00\x01binary")
+        groups = snapshot.changes(self.root, "")
+        assert groups, "未提交组不能为空"
+        files = {item["path"]: item for item in groups[-1]["files"]}
+        fresh = files["brand_new.py"]
+        self.assertEqual(2, fresh["added"])
+        self.assertIn("+line one", fresh["patch"])
+        self.assertIn("@@ -0,0 +1,2 @@", fresh["patch"])
+        # 二进制:列出但不出 diff,页面走"取不到"的降级文案
+        self.assertEqual("", files["logo.bin"]["patch"])
+
     def test_moonlight_report_surfaces_in_panel_logs(self):
         """月光报告进面板日志区:结构性感知,不只靠模型转述一条路。"""
         work = os.path.join(self.root, ".mae-flow-work")

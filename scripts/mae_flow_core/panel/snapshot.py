@@ -130,8 +130,43 @@ def _commits(root, base):
     return out
 
 
+_UNTRACKED_EMBED_CAP = 512 * 1024
+
+
+def _untracked_entries(root):
+    """未跟踪文件也是待检视增量——人工检视发生在提交之前,本单新建的
+    文件恰好全是 untracked,git diff 看不见它们(实战反馈:检视时没有
+    diff,提交后才冒出来——缺的正是最重要的新文件)。"""
+    raw = _git(root, "ls-files", "--others", "--exclude-standard")
+    entries = []
+    for path in sorted(line.strip() for line in raw.splitlines()
+                       if line.strip()):
+        full = os.path.join(root, path)
+        try:
+            if os.path.getsize(full) > _UNTRACKED_EMBED_CAP:
+                entries.append({"path": path, "added": 0, "removed": 0,
+                                "patch": ""})
+                continue
+            with open(full, "rb") as stream:
+                blob = stream.read()
+            if b"\0" in blob[:8192]:      # 二进制:列出但不出 diff
+                entries.append({"path": path, "added": 0, "removed": 0,
+                                "patch": ""})
+                continue
+            lines = blob.decode("utf-8", "replace").split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
+            patch = "@@ -0,0 +1,%d @@\n%s" % (
+                len(lines), "\n".join("+" + line for line in lines))
+            entries.append({"path": path, "added": len(lines),
+                            "removed": 0, "patch": patch})
+        except OSError:
+            continue
+    return entries
+
+
 def changes(root, base):
-    """两组变更:本单已提交范围、当前未提交。patch 不进快照,只进 HTML。"""
+    """两组变更:本单已提交范围、当前未提交(含未跟踪新文件)。"""
     from . import diffview
     groups = []
     # -U999999:整个文件都进 patch,页面把未改动长段折叠成"展开"——
@@ -149,6 +184,9 @@ def changes(root, base):
         files = [{"path": path, "added": stats[path][0],
                   "removed": stats[path][1], "patch": patches.get(path, "")}
                  for path in sorted(stats)]
+        if title == "未提交":
+            files = sorted(files + _untracked_entries(root),
+                           key=lambda item: item["path"])
         if files:
             groups.append({"title": title, "note": note, "files": files})
     return groups

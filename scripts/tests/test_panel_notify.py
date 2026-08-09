@@ -230,6 +230,49 @@ class NotifyTests(unittest.TestCase):
         with open(path, encoding="utf-8") as stream:
             return stream.read()
 
+    def test_regeneration_is_throttled_by_measured_cost(self):
+        """密集刷新的前提是便宜:实测 72ms(快照 29+变更 39+渲染 3)。
+        但内网大仓 git diff 会慢得多,所以窗口按上次耗时自适应——
+        花得越久等得越久,面板永远不该拖慢流程本身。"""
+        import subprocess, time as _time
+        from mae_flow_core.panel import sync
+        root = tempfile.mkdtemp(prefix="panel-throttle-")
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True)
+        state_path = os.path.join(root, ".mae-flow.json")
+        with open(state_path, "w", encoding="utf-8") as stream:
+            json.dump({"current": "build", "revision": 1, "config": {},
+                       "choices": {}, "history": [],
+                       "started": "2026-08-09 08:00:00"}, stream)
+        work = os.path.join(root, ".mae-flow-work")
+        os.makedirs(work, exist_ok=True)
+        before = os.getcwd()
+        os.chdir(root)
+        try:
+            # 没有面板文件 → 立刻生成
+            sync.on_tool_event(state_path, root)
+            page_path = os.path.join(work, "panel.html")
+            self.assertTrue(os.path.isfile(page_path))
+            first = os.path.getmtime(page_path)
+            # 窗口内的后续事件不重算(只写脉冲)
+            sync.on_tool_event(state_path, root)
+            self.assertEqual(first, os.path.getmtime(page_path))
+            self.assertTrue(os.path.isfile(os.path.join(
+                work, "panel-pulse.js")))
+            # 耗时越大窗口越长:写一个"很贵"的记录,窗口拉到上限
+            with open(os.path.join(work, ".panel-cost"), "w",
+                      encoding="utf-8") as stream:
+                stream.write("5.0")
+            os.utime(page_path, (_time.time() - 60, _time.time() - 60))
+            self.assertFalse(sync._due(root))     # 60 秒仍不到 90 秒上限
+            # 便宜时窗口收紧到下限
+            with open(os.path.join(work, ".panel-cost"), "w",
+                      encoding="utf-8") as stream:
+                stream.write("0.072")
+            self.assertTrue(sync._due(root))
+        finally:
+            os.chdir(before)
+
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""
         from mae_flow_core.cli_commands import panel as panel_command

@@ -9,6 +9,7 @@
 
 import json
 import os
+import time
 
 REVIEW_DOC_NAMES = frozenset({
     "spec.md", "story.md", "implementation.md", "grill.md",
@@ -67,16 +68,64 @@ def refresh_on_doc_write(state_path, written_path):
         return False
 
 
-def on_tool_event(state_path, root, written_path="", command=""):
-    """Hook 侧面板同步的唯一入口:轻的每次写,重的按节点重生成。
+# 整页重生成的节流窗口。实测(fieldtest,7 份文档 + 全量 diff)约 72ms:
+# 快照 29ms + 变更 39ms + 渲染 3ms,比预估的"几百毫秒"便宜得多,
+# 所以密集刷新负担得起。但内网 Java 大仓的 git diff 会慢得多,
+# 因此窗口按上一次实测耗时自适应:花得越久,下次等得越久。
+_MIN_PAGE_INTERVAL = 8.0
+_MAX_PAGE_INTERVAL = 90.0
+_COST_MULTIPLIER = 40          # 花 72ms → 约 8s 一次;花 1s → 40s 一次
 
-    脉冲(轻,2 秒节流)让页眉与阶段实时;整页(重,几百毫秒)只在检视文档
-    落盘或提交落地时重算——编码期间 hook 高频触发,全量重算会拖慢每一步。
+
+def _page_path(root):
+    return os.path.join(root, ".mae-flow-work", "panel.html")
+
+
+def _due(root):
+    """离上次整页重生成是否已过节流窗口(窗口由上次耗时自适应)。"""
+    try:
+        marker = os.path.join(root, ".mae-flow-work", ".panel-cost")
+        cost = 0.072
+        if os.path.isfile(marker):
+            with open(marker, encoding="utf-8") as stream:
+                cost = float(stream.read().strip() or cost)
+        window = min(max(cost * _COST_MULTIPLIER, _MIN_PAGE_INTERVAL),
+                     _MAX_PAGE_INTERVAL)
+        return (time.time() - os.path.getmtime(_page_path(root))) >= window
+    except OSError:
+        return True
+    except ValueError:
+        return True
+
+
+def _remember_cost(root, seconds):
+    try:
+        with open(os.path.join(root, ".mae-flow-work", ".panel-cost"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("%.3f" % seconds)
+    except OSError:
+        pass
+
+
+def on_tool_event(state_path, root, written_path="", command=""):
+    """Hook 侧面板同步的唯一入口。
+
+    三档:脉冲每次都写(几毫秒);检视文档落盘与提交落地立刻整页重生成
+    (那是用户马上要看的);其余工具事件按自适应节流也重生成——
+    实测 72ms 的代价换"面板始终是当前现场",值。
     """
     from mae_flow_core.panel import pulse
     pulse.write_pulse(state_path, root=root)
-    if written_path:
-        refresh_on_doc_write(state_path, written_path)
-    if command:
-        refresh_on_commit(state_path, command)
+    if written_path and refresh_on_doc_write(state_path, written_path):
+        return
+    if command and refresh_on_commit(state_path, command):
+        return
+    if not _due(root):
+        return
+    started = time.time()
+    try:
+        _rebuild(state_path)
+    except Exception:                      # noqa: BLE001 —— 软失败铁律
+        return
+    _remember_cost(root, time.time() - started)
 

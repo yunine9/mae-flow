@@ -147,11 +147,12 @@ def _pending_section(pending, doc_key_by_path):
             body += ('<div class="ask-sub">生成中：%s —— 落盘后自动出现'
                      '在这里，切回本页即可看到。</div>'
                      % escape("、".join(expected)))
+        # 不放命令占位符:用户从不敲 CLI,是模型在会话里问、用户在会话里答。
+        # "面板不提供执行按钮"是设计自辩,写给维护者看的话不进用户视野。
         cards.append(
             '<div class="ask-title">%s</div>'
             '<div class="ask-sub">%s · 需要你逐项过目后确认</div>%s'
-            '<div class="hint">python .mae-flow-work/bin/mae-flow.py done ...'
-            '\n<em># 给人复制到终端用 —— 面板不提供执行按钮</em></div>'
+            '<div class="ask-sub">看完后回到会话窗口回复即可。</div>'
             % (escape(item["title"] or item["step"]), escape(item["step"]),
                body))
     return ('<section class="current-action has"><h2>现在需要你看什么</h2>'

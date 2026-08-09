@@ -43,9 +43,12 @@ class PanelPageTests(unittest.TestCase):
         """面板上的"推进"按钮是绕过证据的官方通道,比模型偷懒危险得多。"""
         html = build()
         self.assertNotIn("<form", html)
-        for word in ("done --ack", "mae-flow.py done ", "goto ", "skip "):
-            self.assertNotIn(word, html.replace(
-                "done ...", ""), "页面不应提供可执行的推进入口: " + word)
+        for word in ("done --ack", "mae-flow.py done", "goto ", "skip "):
+            self.assertNotIn(word, html,
+                             "页面不应提供可执行的推进入口: " + word)
+        # 命令占位符与"面板不提供执行按钮"这类设计自辩不进用户视野
+        self.assertNotIn("给人复制到终端用", html)
+        self.assertNotIn("面板不提供执行按钮", html)
 
     def test_pending_section_precedes_progress_section(self):
         """当前动作优先，流程细节在侧栏，不抢用户注意力。"""

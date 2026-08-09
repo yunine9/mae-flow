@@ -39,7 +39,10 @@ _TEST_FILE = re.compile(
 _CONSTANT_WORD = re.compile(
     r"\b(?:const|constexpr|readonly)\b|\bstatic\s+final\b")
 _DEFINE = re.compile(r"^\s*#\s*define\s+[A-Za-z_]\w*(?:\s|$)")
-_PYTHON_CONSTANT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# 允许前导下划线:模块私有常量 _UPPER_CASE 是 Python 标准写法——
+# 实战冤案:模型把魔法数字改成 _PATH_DEPTH_TO_REPO_ROOT = 3,
+# 豁免不认,常量定义本身继续被报,两次修复机会全被建议噪声烧掉。
+_PYTHON_CONSTANT_NAME = re.compile(r"^_*[A-Z][A-Z0-9_]*$")
 _DIRECTIVE = re.compile(
     r"(?i)^\s*(?:todo|fixme|xxx|hack|noqa|nosonar|nolint|"
     r"lint(?:[-_: ]|$)|eslint(?:[-_: ]|$)|pylint(?:[-_: ]|$)|"

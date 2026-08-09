@@ -131,6 +131,20 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("文档是用户确认过的版本，记忆不是", build)
         self.assertNotIn("/compact", build)
 
+    def test_fresh_context_build_is_a_config_slot_with_unchanged_gates(self):
+        """L3:编码挪进新鲜上下文——唯一真正减 token 的杠杆(主会话大头是
+        Write 整文件内容,插件剪不动)。插槽纪律:默认主会话零行为变化;
+        开启也不动任何门禁与证据;工单必须自包含,产出不免检。"""
+        build = read("flow/steps/build.md")
+        self.assertIn("编码执行方式", build)
+        self.assertIn("build-fresh-context.md", build)
+        self.assertIn("门禁与证据完全相同", build)
+        guidance = read("runtime/guidance/build-fresh-context.md")
+        self.assertIn("不回放聊天记录", guidance)
+        self.assertIn("产出不免检", guidance)
+        self.assertIn("工单写不成自包含", guidance)
+        self.assertIn("门禁与证据一个都不变", guidance)
+
     def test_build_stops_instead_of_guessing_when_blocked(self):
         build = read("flow/steps/build.md")
         self.assertIn("卡住就停，不要猜", build)

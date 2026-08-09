@@ -307,6 +307,19 @@ class LightCheckTests(unittest.TestCase):
         magic = self.magic_findings(result)
         self.assertEqual(["9527"], [item["literal"] for item in magic], result)
 
+    def test_underscore_prefixed_python_constants_are_exempt(self):
+        """实战冤案:模型把魔法数字提成 _PATH_DEPTH_TO_REPO_ROOT = 3(模块私有
+        常量的标准写法),旧正则不认前导下划线,常量定义本身继续被报——
+        两次修复机会全被建议噪声烧掉,信任白白消耗。"""
+        source = (
+            "# service/src/demo_service/ 到仓库根的目录层数\n"
+            "_PATH_DEPTH_TO_REPO_ROOT = 3\n"
+            "__MAX_RETRIES = 7\n"
+            "def use(p):\n"
+            "    return p.parents[_PATH_DEPTH_TO_REPO_ROOT]\n")
+        result = self.analyze("depth.py", source, changed={1, 2, 3, 4, 5})
+        self.assertEqual([], self.magic_findings(result), result)
+
     def test_named_constants_are_extraction_not_magic_number_usage(self):
         fixtures = (
             ("limits.cpp", "constexpr int RETRY_LIMIT = 10;\n"),

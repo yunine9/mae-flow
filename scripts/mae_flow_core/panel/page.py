@@ -363,6 +363,7 @@ def render(snapshot, changes=(), root=".", born=None):
         "js": assets.JS,
         "rail": _phase_rail(snapshot["progress"]["step"]),
         "born": born or _born_epoch(),
+        "pulse": escape(pulse_marker(snapshot)),
         "ticket": escape(snapshot["delivery"]["ticket"] or "（无在途单）"),
         "branch": escape(snapshot["repo"]["branch"]),
         "baseline": escape(snapshot["repo"]["baseline"]),
@@ -425,12 +426,19 @@ def write_page(target, snapshot, changes=(), root="."):
     return len(html.encode("utf-8"))
 
 
+def pulse_marker(snapshot):
+    """页面自带的脉冲基准:与心跳文件比对,不同即说明现场已经变了。"""
+    progress = snapshot.get("progress") or {}
+    return "%s|%s" % (progress.get("step", ""),
+                      snapshot.get("state_revision") or 0)
+
+
 TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mae-Flow 交付工作台 · %(ticket)s</title>
-<style>%(css)s</style></head><body data-born="%(born)s">
-<div id="stale" hidden></div><div class="workbench">
+<style>%(css)s</style></head><body data-born="%(born)s" data-pulse="%(pulse)s">
+<div id="live" hidden></div><div id="stale" hidden></div><div class="workbench">
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
 <h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s</div>
 </div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>

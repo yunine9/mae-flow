@@ -216,8 +216,19 @@ class NotifyTests(unittest.TestCase):
                             "hook_active_events.py")
         with open(path, encoding="utf-8") as stream:
             source = stream.read()
-        self.assertIn("refresh_on_doc_write", source)
-        self.assertIn("refresh_on_commit", source)
+        # 2026-08-09 收口:三处面板调用合并为 panel_sync.on_tool_event,
+        # 适配器只留一行委托(500 行红线),语义不变
+        self.assertIn("panel_sync.on_tool_event", source)
+        entry = self._read_sync()
+        self.assertIn("refresh_on_doc_write", entry)
+        self.assertIn("refresh_on_commit", entry)
+        self.assertIn("pulse.write_pulse", entry)
+
+    @staticmethod
+    def _read_sync():
+        path = os.path.join(SCRIPTS, "mae_flow_core", "panel", "sync.py")
+        with open(path, encoding="utf-8") as stream:
+            return stream.read()
 
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""

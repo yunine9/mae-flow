@@ -34,6 +34,9 @@ body{margin:0;background:var(--bg);color:var(--ink);
   border:0}
 #stale{background:var(--warn-bg);color:var(--warn);font-size:12px;
   padding:8px 22px;border-bottom:1px solid var(--warn)}
+#live{background:var(--accent-bg);color:var(--accent);font-size:12px;
+  padding:8px 22px;border-bottom:1px solid var(--accent)}
+#live b{font-weight:700}
 #age{color:var(--faint);margin-right:8px}
 
 /* ── 紧凑页眉与阶段轨道 ── */
@@ -354,6 +357,30 @@ function hide(){
     document.head.appendChild(tag);
   }
   window.__panelProbe = probe;
+  // 状态脉冲:轻量事实每两秒一次,页眉与阶段随流程实时变化;
+  // 重内容(文档/diff)仍等整页重生成——脉冲只报事实,不假装自己有内容。
+  var mark = document.body.dataset.pulse || '';
+  var live = document.getElementById('live');
+  function pulse(){
+    var tag = document.createElement('script');
+    tag.src = 'panel-pulse.js?t=' + Date.now();
+    tag.onload = function(){
+      var p = window.__panelPulse;
+      tag.remove();
+      if (!p || !live) { return; }
+      var now = p.step + '|' + p.revision;
+      if (now === mark) { live.hidden = true; return; }
+      live.innerHTML = '● 流程已推进到 <b>' + (p.step_title || p.step) +
+        '</b>（' + (p.phase || '') + '）' +
+        (p.waiting ? ' — <b>正在等你确认</b>' : '') +
+        ' · 本页文档与 diff 仍是上一次生成的，重内容会在下个节点自动更新';
+      live.hidden = false;
+    };
+    tag.onerror = function(){ tag.remove(); };
+    document.head.appendChild(tag);
+  }
+  setInterval(pulse, 2000);
+  pulse();
   setInterval(probe, 5000);
   // 切回本标签时立刻查一次:人回来的那一刻最该看到最新现场,不等轮询。
   document.addEventListener('visibilitychange', function(){

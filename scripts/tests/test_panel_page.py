@@ -111,6 +111,42 @@ class PanelPageTests(unittest.TestCase):
         self.assertNotIn("流程重算", html)
         self.assertIn('id="age"', html)           # 页眉常显新鲜度
 
+    def test_pulse_keeps_light_facts_live_without_full_regeneration(self):
+        """轻重分离:全量重生成要渲染文档与全量 diff(几百毫秒),编码期间
+        hook 高频触发,每次都算会拖慢流程;而用户要"随时最新"的只是
+        轻量事实(到哪一步、要不要我出场)。脉冲报事实,不假装自己有内容。"""
+        html = build()
+        self.assertIn("panel-pulse.js", html)
+        self.assertIn('data-pulse=', html)
+        self.assertIn('id="live"', html)
+        self.assertIn("setInterval(pulse, 2000)", html)
+        self.assertIn("正在等你确认", html)
+        # 诚实:脉冲变了也要说清"文档与 diff 还是上一次的"
+        self.assertIn("重内容会在下个节点自动更新", html)
+
+    def test_pulse_payload_is_state_only_and_throttled(self):
+        import shutil, tempfile, time as _time
+        from mae_flow_core.panel import pulse
+        room = tempfile.mkdtemp(prefix="pulse-")
+        self.addCleanup(shutil.rmtree, room, True)
+        state_path = os.path.join(room, ".mae-flow.json")
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(dict(STATE, current="config_confirm"), handle,
+                      ensure_ascii=False)
+        self.assertTrue(pulse.write_pulse(state_path, FLOW, room))
+        with open(pulse.pulse_path(room), encoding="utf-8") as handle:
+            body = handle.read()
+        self.assertIn("window.__panelPulse=", body)
+        self.assertIn('"waiting": true', body)      # 该步要用户确认
+        self.assertIn('"step": "config_confirm"', body)
+        # 两秒内不重复写(hook 高频事件不能变成高频磁盘写)
+        self.assertFalse(pulse.write_pulse(state_path, FLOW, room))
+        # 状态坏了也只是不写,绝不抛错
+        with open(state_path, "w", encoding="utf-8") as handle:
+            handle.write("{broken")
+        os.utime(pulse.pulse_path(room), (0, 0))
+        self.assertFalse(pulse.write_pulse(state_path, FLOW, room))
+
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
         import re as _re, shutil, tempfile

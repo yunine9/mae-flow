@@ -65,3 +65,18 @@ def refresh_on_doc_write(state_path, written_path):
         return _rebuild(state_path)
     except Exception:                      # noqa: BLE001 —— 软失败铁律
         return False
+
+
+def on_tool_event(state_path, root, written_path="", command=""):
+    """Hook 侧面板同步的唯一入口:轻的每次写,重的按节点重生成。
+
+    脉冲(轻,2 秒节流)让页眉与阶段实时;整页(重,几百毫秒)只在检视文档
+    落盘或提交落地时重算——编码期间 hook 高频触发,全量重算会拖慢每一步。
+    """
+    from mae_flow_core.panel import pulse
+    pulse.write_pulse(state_path, root=root)
+    if written_path:
+        refresh_on_doc_write(state_path, written_path)
+    if command:
+        refresh_on_commit(state_path, command)
+

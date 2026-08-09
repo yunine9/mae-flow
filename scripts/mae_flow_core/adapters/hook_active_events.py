@@ -307,11 +307,7 @@ class ActiveHookEventAdapter:
 
     @staticmethod
     def _load_agent_transcript(path):
-        return [
-            json.loads(line)
-            for line in read_lines(path)
-            if line.strip()
-        ]
+        return [json.loads(line) for line in read_lines(path) if line.strip()]
 
     def _explicit_transcript_path(self, payload, invocation_id=""):
         # 宿主 payload 的 agent id 可能错位、也可能贫载荷:显式路径缺失时
@@ -431,9 +427,14 @@ class ActiveHookEventAdapter:
             ),
         )
 
+    def _panel_sync(self, written_path="", command=""):
+        panel_sync.on_tool_event(
+            self.state, self.repository_root, written_path, command)
+
     def posttool(self, payload):
         tool = payload.get("tool_name")
         tool_input = payload.get("tool_input") or {}
+        self._panel_sync()          # 脉冲:轻量事实实时化
         if tool in ("Task", "Agent"):
             return self.agent_lifecycle.posttool(payload)
         # 宿主可能用 file_path 也可能用 path;两者必须走同一条解析,否则写入台账
@@ -445,10 +446,7 @@ class ActiveHookEventAdapter:
         )
         if tool in ("Write", "Edit", "MultiEdit") and written_path:
             self.runtime._record_agent_write(written_path)
-            # 凡请用户检视的东西,面板必须能直接看(用户原话即契约)。
-            # open/story 在进步之后才生成文档,进步瞬间的面板拍不到它们——
-            # 检视文档落盘即重生成;非检视文档一行判断直接跳过,软失败。
-            panel_sync.refresh_on_doc_write(self.state, written_path)
+            self._panel_sync(written_path=written_path)   # 检视文档即上板
         if tool == "AskUserQuestion":
             answer = self.runtime._text_of(payload.get("tool_response"))
             self.runtime._capture_usermsg(
@@ -459,8 +457,7 @@ class ActiveHookEventAdapter:
             command = tool_input.get("command", "") or ""
             self.runtime._finalize_git_authorization(command)
             self.runtime._maybe_utrun(payload)
-            # 提交落地即刷新面板(实战:领域归档提交后仍显示未提交)
-            panel_sync.refresh_on_commit(self.state, command)
+            self._panel_sync(command=command)   # 提交落地即刷新
             return HookResponse()
         return self._template_response(written_path.replace("\\", "/"))
 

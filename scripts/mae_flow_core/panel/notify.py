@@ -70,13 +70,19 @@ def _command(title, body):
                 'display notification %s with title %s sound name "Ping"'
                 % (_applescript(body), _applescript(title))]
     if os.name == "nt":
+        # SystemIcons 在 System.Drawing 里,必须显式 Add-Type,不赌传递加载;
+        # 弹完驻留几秒再退出——NotifyIcon 随进程销毁,立刻退出 toast 会一闪而没。
+        # 弹窗进程不被等待(Popen),驻留不拖慢 done。Windows 腿在内网真机验证前
+        # 视为未证实(军规:没跑过的代码不算能跑)。
         script = (
             "Add-Type -AssemblyName System.Windows.Forms;"
+            "Add-Type -AssemblyName System.Drawing;"
             "$n=New-Object System.Windows.Forms.NotifyIcon;"
             "$n.Icon=[System.Drawing.SystemIcons]::Information;"
             "$n.Visible=$true;"
             "$n.ShowBalloonTip(8000,'%s','%s',"
-            "[System.Windows.Forms.ToolTipIcon]::Info)"
+            "[System.Windows.Forms.ToolTipIcon]::Info);"
+            "Start-Sleep -Seconds 6;$n.Dispose()"
             % (title.replace("'", " "), body.replace("'", " ")))
         return ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
                 "-Command", script]
@@ -88,9 +94,11 @@ def _applescript(text):
 
 
 def _popup(title, body):
+    """弹窗进程发射后不管:通知永远不能拖慢流程推进。"""
     try:
-        subprocess.run(_command(title, body), shell=False,
-                       capture_output=True, timeout=8)
+        subprocess.Popen(_command(title, body), shell=False,
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
     except Exception:                      # noqa: BLE001 —— 通知失败=没通知
         return False
     return True

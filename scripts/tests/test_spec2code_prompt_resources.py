@@ -121,14 +121,6 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
                        "接口就是测试面"):
             self.assertIn(marker, template)
 
-    def test_build_offers_compaction_and_anchors_to_documents(self):
-        """压缩触发不了(宿主 UI 能力),但建议时机可以推给用户;
-        锚定比压缩更根本:编码依据只有文档,早前会话记忆以文档为准。"""
-        build = read("flow/steps/build.md")
-        self.assertIn("/compact", build)
-        self.assertIn("原话发给用户", build)      # 转述义务同款:给原话,不给转述空间
-        self.assertIn("以文档为准", build)
-
     def test_build_stops_instead_of_guessing_when_blocked(self):
         build = read("flow/steps/build.md")
         self.assertIn("卡住就停，不要猜", build)

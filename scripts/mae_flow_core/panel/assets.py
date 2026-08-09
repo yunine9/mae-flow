@@ -66,20 +66,24 @@ h1{font-size:21px;line-height:1.2;margin:3px 0 0;font-weight:710}
   overflow:hidden;text-overflow:ellipsis}.summary-item .mono{font:12px var(--mono)}
 .current-action{margin:0;border-bottom:1px solid var(--line)}
 .current-action>h2{display:none}
-.action-card{padding:13px 16px;background:var(--card)}
-.current-action.has .action-card{background:var(--dark);color:#f6f6f2;
+.action-card{padding:11px 16px;background:var(--card)}
+/* 有事项时轻强调:浅紫底+紫左缘。整条变黑的旧样式视觉重量与信息量
+   完全不成比例——两行字撑一条横贯全屏的黑带(实战反馈)。 */
+.current-action.has .action-card{background:var(--accent-bg);
   border-left:3px solid var(--accent)}
 .quiet{color:var(--dim);display:flex;align-items:center;gap:8px;font-size:13px}
 .quiet .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
 .current-action.has .ask-title{font-weight:700;font-size:14px}
-.current-action.has .ask-sub{color:#c3c4c1;font-size:12px;margin:2px 0 7px}
+.current-action.has .ask-sub{color:var(--dim);font-size:12px;margin:2px 0 5px}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;
-  font-size:12px;margin:6px 0;padding:7px 9px;background:rgba(255,255,255,.06)}
-.kv dt{color:#b9bab7}.kv dd{margin:0;font-family:var(--mono);word-break:break-all}
-.hint{font:11px/1.5 var(--mono);color:#c9c9c6;background:rgba(255,255,255,.05);
-  border:1px dashed #55575a;padding:6px 8px;overflow-x:auto;white-space:pre;user-select:all}
-.hint em{font-style:normal;color:#8f9190}.current-action .paths{margin:4px 0}
-.current-action .open{border:0;background:none;color:#dcd5ff;padding:0;cursor:pointer}
+  font-size:12px;margin:6px 0;padding:7px 10px;background:var(--card);
+  border-radius:6px}
+.kv dt{color:var(--dim)}.kv dd{margin:0;font-family:var(--mono);word-break:break-all}
+.current-action .paths{margin:4px 0}
+.current-action .open{border:0;background:none;color:var(--accent);padding:0;
+  cursor:pointer;font:inherit;font-family:var(--mono);
+  border-bottom:1px solid var(--accent)}
+.current-action .open:hover{opacity:.75}
 
 /* ── 一级过程资产 ── */
 .section-head{display:flex;align-items:center;justify-content:space-between;gap:8px;

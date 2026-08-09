@@ -171,11 +171,16 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("localStorage", html)
         self.assertIn('id="notes-badge"', html)
         self.assertIn("复制给 Agent", html)
-        self.assertIn("检视批注 · ", html)               # 复制出去的抬头
-        self.assertIn("请按下列位置修改；每条都给出了文件与行号。", html)
+        # 抬头要说死身份与边界:检视结论、只改这些、按原文定位
+        self.assertIn("这是我人工检视 ", html)
+        self.assertIn("请按下面的意见逐条修改。", html)
+        self.assertIn("不是征求意见", html)
+        self.assertIn("只改这些地方", html)
+        self.assertIn("以原文为准定位", html)
+        self.assertIn("别默默跳过", html)
         self.assertIn("当前代码：", html)                # 带上原行内容
         # 多条一次送:按文件分组、组内按行号升序,Agent 不必来回翻文件
-        self.assertIn("个文件）", html)
+        self.assertIn("' 个文件。请按下面的意见逐条修改。'", html)
         self.assertIn("'【' + item.file + '】'", html)
         self.assertIn("parseInt(a.note.line, 10)", html)
         self.assertIn("window.__panelBusy = true", html)  # 编辑期间不重载

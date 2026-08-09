@@ -238,9 +238,19 @@ JS = r"""
     list.forEach(function(item){
       if (files.indexOf(item.file) < 0) { files.push(item.file); }
     });
-    var lines = ['检视批注 · ' + ticket + '（' + list.length + ' 条，'
-                 + files.length + ' 个文件）',
-                 '请按下列位置修改；每条都给出了文件与行号。', ''];
+    // 抬头要把三件事说死:这是人工检视的结论(不是讨论稿)、只改这些地方、
+    // 行号会因改动偏移所以按原文定位。弱模型最容易在这三处走偏。
+    var lines = [
+      '这是我人工检视 ' + ticket + ' 的结果，共 ' + list.length + ' 条，涉及 '
+        + files.length + ' 个文件。请按下面的意见逐条修改。',
+      '',
+      '几点要求：',
+      '- 这是检视结论，不是征求意见。逐条落实，不要只回复"已知悉"。',
+      '- 只改这些地方。确实要连带改别处，先说清为什么，再动。',
+      '- 行号按你收到时的文件；你一改行号就会偏移，所以每条都附了原文，'
+        + '以原文为准定位。',
+      '- 逐条回我改了什么。有哪条你认为不该改，说明理由，别默默跳过。',
+      ''];
     var seen = '', index = 0;
     list.forEach(function(item){
       if (item.file !== seen){

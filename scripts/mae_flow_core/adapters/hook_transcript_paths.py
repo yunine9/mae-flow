@@ -78,8 +78,32 @@ def _meta_bound_transcript(directory, invocation_id):
     return candidate if os.path.isfile(candidate) else ""
 
 
-def resolve_agent_transcript(payload, invocation_id=""):
-    """显式路径优先;路径存在直接用,不存在(宿主 id 错位)按 meta 绑定兜底。"""
+def _project_subagent_dirs(projects_base=""):
+    """从当前项目根反推宿主的 transcript 目录。
+
+    实测(fieldtest 第三次编译):后台代理的 SubagentStop 是贫载荷——
+    既无 agent transcript 键也无 transcript_path,解析器连该扫哪个目录
+    都不知道,meta 绑定没机会跑,而文件明明在重试窗口内就已落盘。
+    宿主的落盘规则是确定的: ~/.claude/projects/<cwd 以 - 转义>/<会话>/subagents;
+    hook 的 cwd 就是项目根,可零猜测地反推。toolUseId 全局唯一,
+    跨会话扫 meta 仍是精确绑定。
+    """
+    base = projects_base or os.path.expanduser(
+        os.path.join("~", ".claude", "projects"))
+    munged = os.getcwd().replace(os.sep, "-").replace("/", "-")
+    root = os.path.join(base, munged)
+    if not os.path.isdir(root):
+        return []
+    out = []
+    for name in sorted(os.listdir(root)):
+        directory = os.path.join(root, name, "subagents")
+        if os.path.isdir(directory):
+            out.append(directory)
+    return out
+
+
+def resolve_agent_transcript(payload, invocation_id="", projects_base=""):
+    """显式路径优先;缺失或错位时按 meta 绑定;贫载荷时从项目根反推目录。"""
     explicit = explicit_agent_transcript_path(payload, invocation_id)
     if explicit and os.path.isfile(explicit):
         return explicit
@@ -90,6 +114,7 @@ def resolve_agent_transcript(payload, invocation_id=""):
     if isinstance(main, str) and main:
         directories.append(
             os.path.join(os.path.splitext(main)[0], "subagents"))
+    directories.extend(_project_subagent_dirs(projects_base))
     for directory in dict.fromkeys(directories):
         bound = _meta_bound_transcript(directory, invocation_id)
         if bound:

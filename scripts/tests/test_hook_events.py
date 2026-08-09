@@ -433,6 +433,32 @@ class MetaBoundTranscriptTests(unittest.TestCase):
             attempts=3, delay=0, sleep=lambda _s: None)
         self.assertIsNone(missing)
 
+    def test_sparse_payload_resolves_via_project_root_scan(self):
+        """实测(第三次编译):后台代理的 SubagentStop 是贫载荷——无任何
+        transcript 线索,而文件明明在窗口内已落盘。从项目根反推宿主目录
+        (~/.claude/projects/<cwd 转义>/*/subagents),toolUseId 仍精确绑定。"""
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            resolve_agent_transcript)
+        projects = tempfile.mkdtemp(prefix="projects-")
+        self.addCleanup(shutil.rmtree, projects, True)
+        cwd = os.getcwd()
+        munged = cwd.replace(os.sep, "-").replace("/", "-")
+        sub = os.path.join(projects, munged, "session-1", "subagents")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "agent-z.jsonl"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("{}\n")
+        with open(os.path.join(sub, "agent-z.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"toolUseId": "toolu_SPARSE"}, stream)
+        resolved = resolve_agent_transcript(
+            {}, "toolu_SPARSE", projects_base=projects)
+        self.assertTrue(resolved.endswith("agent-z.jsonl"))
+        self.assertEqual("", resolve_agent_transcript(
+            {}, "toolu_MISSING", projects_base=projects))
+
     def test_existing_explicit_path_wins_over_meta(self):
         import json as jsonlib
         import tempfile, shutil

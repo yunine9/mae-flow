@@ -276,6 +276,40 @@ class NotifyTests(unittest.TestCase):
         finally:
             os.chdir(before)
 
+    def test_finished_delivery_panel_is_archived_per_ticket(self):
+        """面板是自包含单页,交付现场全在里面——只有一份且下一单即被覆盖,
+        不留等于白丢。归档件定格历史:去掉自动重载,免得它读到新一单的
+        stamp 把自己刷成"过期"。"""
+        from mae_flow_core.panel import sync
+        root = tempfile.mkdtemp(prefix="panel-archive-")
+        self.addCleanup(shutil.rmtree, root, True)
+        work = os.path.join(root, ".mae-flow-work")
+        os.makedirs(work, exist_ok=True)
+        with open(os.path.join(work, "panel.html"), "w",
+                  encoding="utf-8") as stream:
+            stream.write('<body data-born="1">x'
+                         'setInterval(probe, 5000);'
+                         'setInterval(pulse, 2000);</body>')
+        kept = sync.archive_panel(root, "REQ-1")
+        self.assertTrue(kept.endswith(os.path.join("REQ-1", "panel.html")))
+        with open(kept, encoding="utf-8") as stream:
+            body = stream.read()
+        self.assertIn('data-archived="1"', body)
+        self.assertNotIn("setInterval(probe", body)
+        self.assertNotIn("setInterval(pulse", body)
+        # 没有面板 / 没有单号 都只是静默跳过,绝不挡开单
+        os.remove(os.path.join(work, "panel.html"))
+        self.assertEqual("", sync.archive_panel(root, "REQ-1"))
+        self.assertEqual("", sync.archive_panel(root, ""))
+
+    def test_init_archives_the_previous_panel(self):
+        path = os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                            "init_capability.py")
+        with open(path, encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn("archive_panel", source)
+        self.assertIn("交付现场已留痕", source)
+
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""
         from mae_flow_core.cli_commands import panel as panel_command

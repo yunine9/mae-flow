@@ -78,6 +78,12 @@ def cmd_init(flow, args):
                 remove_with_retry(EXIT_PATH)
                 print("[mae-flow] 已收敛陈旧退出指针，旧记录保留在 %s。"
                       % api.norm(stale))
+            from mae_flow_core.panel import sync as panel_sync
+            kept = panel_sync.archive_panel(
+                os.getcwd(), (old.get("config") or {}).get("单号", ""))
+            if kept:
+                print("[mae-flow] 上一单的交付现场已留痕(自包含单页,随时可打开): "
+                      "%s" % api.norm(kept))
             os.replace(STATE_PATH, STATE_PATH + ".last")
             print(f"[mae-flow] 上一单({old.get('config', {}).get('单号', '?')})已交付完成,"
                   f"旧状态备份为 {STATE_PATH}.last,开启新流程。")

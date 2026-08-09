@@ -129,3 +129,36 @@ def on_tool_event(state_path, root, written_path="", command=""):
         return
     _remember_cost(root, time.time() - started)
 
+
+def archive_panel(root, ticket):
+    """把交付完成时的面板存进本单过程件目录,作为永久留痕。
+
+    面板是自包含单文件:文档、双排 diff、证据、执行记录全在里面,
+    多久之后打开都完整——它就是这一单最好的交付现场快照。
+    而 panel.html 只有一份,下一单 init 一刷就没了,不留等于白丢。
+
+    返回归档路径;没有面板或写不进去都静默返回空串(留痕失败绝不挡开单)。
+    """
+    try:
+        if not ticket:
+            return ""
+        source = os.path.join(root, ".mae-flow-work", "panel.html")
+        if not os.path.isfile(source):
+            return ""
+        folder = os.path.join(root, ".mae-flow-work", str(ticket))
+        os.makedirs(folder, exist_ok=True)
+        target = os.path.join(folder, "panel.html")
+        with open(source, encoding="utf-8") as reader:
+            body = reader.read()
+        # 归档件不再自动重载:它是定格的历史,去掉探测逻辑免得它
+        # 读到新一单的 stamp 就把自己刷成"过期"。
+        body = body.replace("setInterval(probe, 5000);", "")
+        body = body.replace("setInterval(pulse, 2000);", "")
+        body = body.replace("<body data-born=",
+                            "<body data-archived=\"1\" data-born=")
+        with open(target, "w", encoding="utf-8") as writer:
+            writer.write(body)
+        return target
+    except OSError:
+        return ""
+

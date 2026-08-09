@@ -89,36 +89,35 @@ class VerdictMatchingTests(unittest.TestCase):
 
 
 class TestIsolationTests(unittest.TestCase):
-    """整机共用的文件，测试跑完必须一个字节没多。"""
+    """整机共用的日志,测试不许写进去。
 
-    SHARED = (
-        os.path.join(tempfile.gettempdir(), "mae-flow-hook.log"),
-        os.path.join(tempfile.gettempdir(), "mae-flow-agent-autopsy.log"),
-    )
+    hook 入口只许它自己的协议用例动(架构红线),所以这里不加载 dispatch,
+    改成静态核对:凡是往 hook 入口注故障的用例,必须同时把 LOG 挪开。
+    """
 
-    def test_tests_do_not_write_to_machine_wide_logs(self):
-        """本用例只盯"注入故障"那一类：它们最容易顺手把噪声写进去。"""
-        before = {path: self._stat(path) for path in self.SHARED}
-        from mae_flow_core.adapters import hook_active_events  # noqa: F401
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "dispatch_probe", os.path.join(ROOT, "hooks", "dispatch.py"))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        quiet = os.path.join(tempfile.mkdtemp(prefix="isolated-"), "hook.log")
-        module.LOG = quiet
-        module._log("测试写入必须落在自己的临时目录")
-        self.assertTrue(os.path.isfile(quiet))
-        after = {path: self._stat(path) for path in self.SHARED}
-        self.assertEqual(before, after,
-                         "测试写脏了整机共用的日志——真流程的 doctor 读它")
+    def test_fault_injection_redirects_the_shared_log(self):
+        tests = os.path.join(SCRIPTS, "tests")
+        offenders = []
+        for name in sorted(os.listdir(tests)):
+            if not name.startswith("test_") or not name.endswith(".py"):
+                continue
+            with io.open(os.path.join(tests, name),
+                         encoding="utf-8") as stream:
+                source = stream.read()
+            injects = ("self.dispatch" in source and "side_effect" in source)
+            if injects and '"LOG"' not in source:
+                offenders.append(name)
+        self.assertEqual(
+            [], offenders,
+            "往 hook 注故障却没把日志挪开——那份日志真流程的 doctor 在读: %s"
+            % offenders)
 
-    @staticmethod
-    def _stat(path):
-        try:
-            return os.path.getsize(path)
-        except OSError:
-            return None
+    def test_the_shared_log_is_a_single_machine_wide_file(self):
+        """这条不变量正是上面那条存在的理由:日志只有一份,谁写都串。"""
+        with io.open(os.path.join(ROOT, "hooks", "dispatch.py"),
+                     encoding="utf-8") as stream:
+            source = stream.read()
+        self.assertIn('LOG = os.path.join(tempfile.gettempdir()', source)
 
 
 if __name__ == "__main__":

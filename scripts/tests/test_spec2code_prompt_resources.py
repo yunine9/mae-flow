@@ -156,6 +156,8 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
             self.assertIn("不写生产代码", switched)
             self.assertIn("build-fresh-context.md", switched)
             self.assertIn("门禁与证据一个都不变", switched)
+            self.assertIn("工单喂到嘴边,不给路径", switched)
+            self.assertIn("不通读代码库", switched)
             self.assertTrue(switched.endswith("原文"))
             # 只改 build 步,别的步骤一个字不动
             self.assertEqual("原文", current_cmd._apply_build_execution_mode(
@@ -173,6 +175,14 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("门禁与证据完全相同", build)
         guidance = read("runtime/guidance/build-fresh-context.md")
         self.assertIn("不回放聊天记录", guidance)
+        # 新鲜上下文是本模式唯一的资产:让子 Agent 自己读文档=当场挥霍掉
+        # (用户实战担忧,与派发三原则第一条"喂到嘴边"同源)
+        self.assertIn("喂到嘴边,不给路径", guidance)
+        self.assertIn("携带原文摘录", guidance)
+        self.assertIn("禁止", guidance)
+        self.assertIn("通读代码库", guidance)
+        self.assertIn("唯一允许打开的代码", guidance)
+        self.assertIn("NEEDS_INPUT", guidance)
         self.assertIn("产出不免检", guidance)
         self.assertIn("工单写不成自包含", guidance)
         self.assertIn("门禁与证据一个都不变", guidance)

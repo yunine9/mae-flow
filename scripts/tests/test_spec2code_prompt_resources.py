@@ -93,11 +93,15 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("implementation.md", build)
         self.assertIn("不编译、不 done、不询问用户", build)
         self.assertIn("跨块漂移", build)
-        # 反回退:仍然是一步、一次编译、无实现子 Agent、无批次文档
+        # 反回退:仍然是一步、一次编译、无批次文档
         self.assertIn("一次完成需求涉及的全部生产代码", build)
         self.assertIn("不要拆开发批次", build)
-        # 子 Agent 边界:设计不外包;只读侦察与机械扇出是仅有的两类合法用法,
-        # 且扇出产出不免检——放宽永远不得放宽到"实现整体外包"。
+        # 子 Agent 边界(主会话模式):设计不外包;只读侦察与机械扇出是仅有的
+        # 两类合法用法,且扇出产出不免检。
+        # 2026-08-09 语义修订:L3 插槽启用后,"写码由子 Agent 做"不再等于
+        # "实现整体外包"——外包的是打字,拆分决策、接口定稿、逐份验收、
+        # 编译与人工检视全部留在主 Agent。真正的红线重定义为:
+        # **连拆单与验收也丢掉**才是整体外包,那永远禁止。
         self.assertIn("设计承载的代码不外包", build)
         self.assertIn("只读侦察", build)
         self.assertIn("机械扇出", build)
@@ -130,6 +134,34 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
         self.assertIn("一律以文档为准", build)
         self.assertIn("文档是用户确认过的版本，记忆不是", build)
         self.assertNotIn("/compact", build)
+
+    def test_fresh_context_mode_is_dispatched_by_current(self):
+        """插槽必须真接线:预设开启后 current 打印的 build 指令首段就要改口径,
+        埋在文末等于没说(弱模型读长文档首段权重最高)。默认零变化。"""
+        import os as _os, tempfile, shutil, sys as _sys
+        _sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import mae_flow_core.cli_runtime  # noqa: F401  装配 api
+        from mae_flow_core.cli_commands import current as current_cmd
+        room = tempfile.mkdtemp(prefix="l3-slot-")
+        self.addCleanup(shutil.rmtree, room, True)
+        before = _os.getcwd()
+        _os.chdir(room)
+        try:
+            plain = current_cmd._apply_build_execution_mode("build", "原文")
+            self.assertEqual("原文", plain)          # 无预设:零变化
+            with open(".mae-flow-defaults.json", "w", encoding="utf-8") as fh:
+                fh.write('{"编码执行方式": "新上下文"}')
+            switched = current_cmd._apply_build_execution_mode("build", "原文")
+            self.assertTrue(switched.startswith("【本仓预设"))
+            self.assertIn("不写生产代码", switched)
+            self.assertIn("build-fresh-context.md", switched)
+            self.assertIn("门禁与证据一个都不变", switched)
+            self.assertTrue(switched.endswith("原文"))
+            # 只改 build 步,别的步骤一个字不动
+            self.assertEqual("原文", current_cmd._apply_build_execution_mode(
+                "verify_ut", "原文"))
+        finally:
+            _os.chdir(before)
 
     def test_fresh_context_build_is_a_config_slot_with_unchanged_gates(self):
         """L3:编码挪进新鲜上下文——唯一真正减 token 的杠杆(主会话大头是

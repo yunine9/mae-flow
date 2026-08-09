@@ -110,6 +110,31 @@ def _with_lightcheck_prompt(sid, text):
     )
     return text + prompt
 
+def _build_execution_mode():
+    """仓库预设「编码执行方式」: 主会话(默认) / 新上下文。"""
+    defaults, _warn = _defaults()
+    value = str((defaults or {}).get("编码执行方式", "") or "").strip()
+    return "新上下文" if value in ("新上下文", "fresh", "fresh-context") else "主会话"
+
+
+def _apply_build_execution_mode(sid, txt):
+    """开启 L3 时把协议顶到 build 指令最前——它改变的是"谁来写码"这件根本事,
+    埋在文末等于没说(弱模型读长文档,首段权重最高)。"""
+    if sid != "build" or _build_execution_mode() != "新上下文":
+        return txt
+    protocol = os.path.join(
+        ".mae-flow-work", "plugin-resources", "guidance",
+        "build-fresh-context.md")
+    banner = (
+        "【本仓预设「编码执行方式: 新上下文」】本步改为:主 Agent **不写生产代码**,\n"
+        "只按下述任务边界拆自包含工单、逐任务派实现子 Agent、逐份验收其 diff。\n"
+        "协议全文(必读,含工单格式与退回条件): %s\n"
+        "下文的判据、四项自查、跨块漂移、改动收口全部照常适用——它们是**验收标准**;\n"
+        "工单写不成自包含的任务,回主 Agent 亲写。门禁与证据一个都不变。\n"
+        "────────\n" % protocol)
+    return banner + txt
+
+
 def _step_md_text(sid, st):
     """步骤指令文本:模板路径与已确认配置全部替换后返回(无该 md 返回 None)。
     占位符替换 = 把"需要模型去拿"的信息直接喂到嘴边(弱模型会跳过"去拿"的动作);
@@ -124,6 +149,7 @@ def _step_md_text(sid, st):
         txt = txt.replace(ph, os.path.abspath(
             os.path.join(HERE, "..", "skills", "mae-flow", "assets", name)))
     txt = txt.replace("{MAEFLOW_PATH}", os.path.abspath(sys.argv[0]))
+    txt = _apply_build_execution_mode(sid, txt)
     for pack in re.findall(r"\{\{CAPABILITY_PACK:([a-z0-9-]+)\}\}", txt):
         marker = "{{CAPABILITY_PACK:%s}}" % pack
         try:

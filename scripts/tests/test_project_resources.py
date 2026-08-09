@@ -149,3 +149,54 @@ class MirrorCoverageTests(unittest.TestCase):
         cited = self._cited(banner.replace(os.sep, "/"))
         self.assertTrue(cited, "L3 指令应当指向协议全文")
         self.assertEqual(set(), cited - self._mirrored())
+
+
+class CitedArtifactsExistTests(unittest.TestCase):
+    """指令里提到的东西,必须真的存在、而且看得见。
+
+    L3 的协议全文漏配就是这么静默失效的。同一类还有另一头:步骤文档
+    让用户去看 `.mae-flow-work/{单号}/review.md`,而面板的产物清单里
+    根本没有这份文档——人被指去看一样面板上不存在的东西。
+    """
+
+    def _cited_ticket_docs(self):
+        root = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", ".."))
+        pattern = re.compile(r"\.mae-flow-work/[{<]单号[}>]/([\w.-]+)\.md")
+        found = set()
+        for folder in ("flow", "runtime/guidance", "skills"):
+            base = os.path.join(root, *folder.split("/"))
+            for here, _dirs, names in os.walk(base):
+                if "vendor" in here:
+                    continue
+                for name in names:
+                    if not name.endswith(".md"):
+                        continue
+                    with io.open(os.path.join(here, name),
+                                 encoding="utf-8") as stream:
+                        found.update(pattern.findall(stream.read()))
+        return found
+
+    def test_every_cited_ticket_doc_is_shown_on_the_panel(self):
+        from mae_flow_core.panel.snapshot import DOC_KINDS
+        known = {stem for stem, _label in DOC_KINDS}
+        missing = sorted(self._cited_ticket_docs() - known)
+        self.assertEqual(
+            [], missing,
+            "步骤文档让人去看这些产物,面板却不展示: %s" % missing)
+
+    def test_path_placeholder_syntax_is_uniform(self):
+        """路径模板只许一种写法:两种并存,弱模型每见一次就多猜一次。
+        (命令行取值仍用 `--ticket <单号>`,那是 CLI 惯例,不在此列。)"""
+        root = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", ".."))
+        offenders = []
+        for here, _dirs, names in os.walk(os.path.join(root, "flow")):
+            for name in names:
+                if not name.endswith(".md"):
+                    continue
+                path = os.path.join(here, name)
+                with io.open(path, encoding="utf-8") as stream:
+                    if ".mae-flow-work/<单号>" in stream.read():
+                        offenders.append(os.path.relpath(path, root))
+        self.assertEqual([], offenders)

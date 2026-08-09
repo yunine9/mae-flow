@@ -76,6 +76,15 @@ def _local_spec_valid(state):
     return True, ""
 
 
+# 结论只认"独立成行、并且就落在行尾"的那一句。整篇搜 \bFAIL\b 会把正文里的
+# `SendResult.fail(...)`、`test_..._fail` 当成结论——而"失败要重试"这类需求,
+# 报告里必然到处是 fail,机器于是诬告一份老实报告说谎(实战撞过,当场卡死)。
+# 前缀限长并排除表格行(|)与代码(`);FAIL 前一个字符不能是 . 或字母数字,
+# 免得把 SendResult.fail 这种收尾的行也算上。机器只拦谎言,不拦用词。
+_VERDICT_FAIL = re.compile(r"(?mi)^[^|`\n]{0,24}?(?<![.\w])FAIL\s*$")
+_VERDICT_PASS = re.compile(r"(?mi)^\s*(?:总体|结论)?\s*[:：]?\s*PASS\b")
+
+
 def _verification_passed(state):
     ticket = str(((state or {}).get("config") or {}).get("单号", "")).strip()
     try:
@@ -84,9 +93,9 @@ def _verification_passed(state):
         content = read_text(path, encoding="utf-8")
     except (OSError, TypeError, ValueError) as exc:
         return False, "本地验证报告不可读: %s" % exc
-    if re.search(r"(?i)\bFAIL\b", content):
+    if _VERDICT_FAIL.search(content):
         return False, "本地验证报告结论为 FAIL；修复后重新完成质量链"
-    if not re.search(r"(?mi)^\s*(?:总体|结论)?\s*[:：]?\s*PASS\b", content):
+    if not _VERDICT_PASS.search(content):
         return False, (
             "本地验证报告缺少独立一行的 PASS 结论；"
             "在 .mae-flow-work/<单号>/verification.md 补充真实结论")

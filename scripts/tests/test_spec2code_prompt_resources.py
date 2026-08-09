@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Story-centered prompts and retained coding roles."""
 
+import io
 import os
+import re
 import unittest
 
 
@@ -569,3 +571,33 @@ class NoSideQuestsInVerifyTests(unittest.TestCase):
             source = stream.read()
         self.assertIn("要么回退这些改动", source)
         self.assertIn("不在本步做", source)
+
+
+class SourceLockedStepsDeclareTheirEdgeTests(unittest.TestCase):
+    """会因源码变化而作废证据的步骤,必须自己说清"本步能不能改码"。
+
+    实战:verify_codecheck 一边写着"重构在此定稿",一边靠"源码一变首检
+    失效"卡住 done。模型照前半句派了 agent 去精简,然后在门禁前空转几轮。
+    两句话分别都对,合起来是个陷阱。
+
+    相似度比对抓不到这种——两句话措辞毫不相干,冲突在语义里。能机械
+    守住的是这条:**凡是锁源码的步骤,都得把边界正面写出来**。
+    """
+
+    def test_every_source_locked_step_states_whether_you_may_edit(self):
+        base = os.path.join(ROOT, "flow", "steps")
+        locked = re.compile(r"首检失效|源码变化会让|源码又发生变化|源码变化后")
+        edge = re.compile(r"本步不做|不在本步|不得在本步|只.{0,6}因.{0,10}告警")
+        silent = []
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".md"):
+                continue
+            with io.open(os.path.join(base, name),
+                         encoding="utf-8") as stream:
+                text = stream.read()
+            if locked.search(text) and not edge.search(text):
+                silent.append(name)
+        self.assertEqual(
+            [], silent,
+            "这些步骤会因源码变化作废证据,却没说清本步能不能改码: %s"
+            % silent)

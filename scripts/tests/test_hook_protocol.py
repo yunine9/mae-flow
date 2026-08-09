@@ -305,7 +305,11 @@ class HookProtocolTests(unittest.TestCase):
         self.assertIn("Agent", posttool)
 
     def test_unexpected_top_level_exception_fails_open(self):
-        with mock.patch.object(
+        # 日志文件是整机共用的(临时目录下一份),真流程的 doctor 就读它。
+        # 不隔离的话,本用例每跑一次就往别人的诊断里塞一条
+        # "EXC RuntimeError: boom"——实战里真的把人骗去查了半天 hook。
+        quiet = os.path.join(tempfile.mkdtemp(prefix="hooklog-"), "hook.log")
+        with mock.patch.object(self.dispatch, "LOG", quiet), mock.patch.object(
                 self.dispatch, "read_input", side_effect=RuntimeError("boom")):
             with mock.patch.object(self.dispatch, "_arm_watchdog"):
                 with self.assertRaises(SystemExit) as caught:

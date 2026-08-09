@@ -22,6 +22,9 @@ DOC_KINDS = (
     ("survey", "调研"), ("grill-prep", "拷问准备"), ("grill", "需求澄清"),
     ("decisions", "决策记录"), ("spec", "规格条目"), ("story", "Story"),
     ("implementation", "实现记录"),
+    # 返工与局部修改这两条路子的产物。原来不在册,面板对它们全瞎——
+    # 而它们恰恰就是那两条路上要人检视的东西。
+    ("review", "检视报告"), ("verification", "验收对齐"),
 )
 COMMIT_CAP = 50
 HISTORY_CAP = 50

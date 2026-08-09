@@ -97,11 +97,14 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("分钟前的快照", html)
         self.assertIn("以会话里的最新输出为准", html)
         self.assertIn("visibilitychange", html)   # 切回标签自动重取
-        # 重取按钮必须诚实:它只重读磁盘快照,不触发流程重算——
-        # 写成"刷新现场"会让人以为点完就是最新的,那是更坏的误解。
+        # 按钮必须说人话且诚实:它只重读文件,不能让面板重新生成——
+        # 写成"刷新现场"会让人点完以为是最新的,那是比陈旧更坏的误解;
+        # "触发流程重算"这类机器视角的词同样不进用户界面。
         self.assertIn('id="reget"', html)
-        self.assertIn("重新读取磁盘上的快照文件", html)
-        self.assertIn("不会触发流程重算", html)
+        self.assertIn("重新读一遍面板文件", html)
+        self.assertIn("若还没生成新版本，内容不会变", html)
+        self.assertIn("在会话里说一句「刷新面板」", html)   # 给出真正的出路
+        self.assertNotIn("流程重算", html)
         self.assertIn('id="age"', html)           # 页眉常显新鲜度
         # 它仍然不是推进入口
         self.assertNotIn("mae-flow.py done", html)

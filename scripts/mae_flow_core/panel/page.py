@@ -414,7 +414,7 @@ TEMPLATE = """<!doctype html>
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
 <h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s
 <button id="reget" onclick="location.reload()"
- title="重新读取磁盘上的快照文件；不会触发流程重算">↻ 重取</button></div>
+ title="重新读一遍面板文件。面板由流程在关键节点自动生成，若还没生成新版本，内容不会变——想要最新现场，在会话里说一句「刷新面板」">↻ 重读</button></div>
 </div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>
 <span>HEAD %(head)s</span></div>%(rail)s</header>
 %(summary)s

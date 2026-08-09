@@ -214,7 +214,9 @@ class PanelPageTests(unittest.TestCase):
         html = build()
         self.assertIn('id="notes-drawer"', html)
         self.assertIn('id="notes-list"', html)
-        self.assertIn("还没有批注。", html)          # 空清单也说人话
+        self.assertIn("还没有批注", html)            # 空清单也说人话:讲清怎么用
+        self.assertIn("就在那一行上点一下", html)
+        self.assertIn("#notes-badge.idle", html)   # 零条时入口仍在,只是收敛
         self.assertIn("'定位'", html)
         self.assertIn("'编辑'", html)
         self.assertIn("'删除'", html)

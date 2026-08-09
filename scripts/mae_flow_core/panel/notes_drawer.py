@@ -25,8 +25,10 @@ CSS = r"""
 #notes-drawer > header button.primary{color:#fff;background:var(--accent);
   border-color:var(--accent)}
 #notes-list{overflow:auto;padding-bottom:6px}
-#notes-list .empty{padding:22px 14px;color:var(--dim);font-size:12.5px;
-  text-align:center;line-height:1.7}
+#notes-list .empty{padding:22px 16px;color:var(--dim);font-size:12.5px;
+  line-height:1.8}
+#notes-list .empty b{display:block;color:var(--ink);font-size:13px;
+  margin-bottom:4px}
 .nt-file{position:sticky;top:0;background:var(--card);padding:9px 12px 3px;
   font-size:11.5px;color:var(--dim);word-break:break-all}
 .nt{padding:6px 12px 10px;border-bottom:1px solid var(--line)}
@@ -125,8 +127,13 @@ JS = r"""
     }
     if (copyAll) { copyAll.disabled = !list.length; }
     if (!list.length){
-      listBox.appendChild(el('div', 'empty',
-        '还没有批注。在代码或文档上点一行，写下要改什么。'));
+      var tip = el('div', 'empty');
+      tip.appendChild(el('b', '', '还没有批注'));
+      tip.appendChild(document.createTextNode(
+        '检视时看到哪里要改，就在那一行上点一下——代码的 diff 行、'
+        + '文档的段落和条目都可以。写下要改什么，攒够了从这里一次'
+        + '复制给 Agent，它拿到的是带文件和行号的清单。'));
+      listBox.appendChild(tip);
       return;
     }
     var seen = '';

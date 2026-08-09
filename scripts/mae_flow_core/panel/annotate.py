@@ -17,13 +17,18 @@
 
 CSS = r"""
 .dr{position:relative}
-.diff .dr:not(.hk):not(.cut):hover .c:first-of-type::before,
-.md [data-l]:hover::before{
-  content:"批注";position:absolute;left:2px;font-size:9px;color:var(--accent);
-  background:var(--accent-bg);border-radius:3px;padding:0 3px;cursor:pointer}
+/* 提示标压在行尾而不是行首:行首那点空间是行号和代码的,
+   9px 的字压在代码上既看不清又挡人。 */
+.diff .dr:not(.hk):not(.cut):hover::after,
+.md [data-l]:hover::after{
+  content:"✎ 批注";position:absolute;right:6px;top:50%;
+  transform:translateY(-50%);font:600 11.5px/1.5 inherit;
+  color:var(--accent);background:var(--card);border:1px solid var(--accent);
+  border-radius:5px;padding:1px 7px;cursor:pointer;pointer-events:none;
+  box-shadow:0 1px 6px rgba(0,0,0,.12)}
 .md [data-l]{position:relative}
 .md [data-l]:hover{background:var(--accent-bg);border-radius:4px}
-.md [data-l]::before{top:2px;left:-14px}
+.md [data-l]:hover::after{top:4px;transform:none}
 .dr.noted,.md [data-l].noted{box-shadow:inset 3px 0 var(--accent)}
 .md [data-l].noted{padding-left:8px}
 .note-editor{grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;
@@ -47,6 +52,10 @@ CSS = r"""
 #notes-badge.on{display:inline-flex}
 #notes-badge span{background:rgba(255,255,255,.22);border-radius:12px;
   padding:1px 8px;font-size:12px}
+/* 一条批注都没有时也留着入口,但收敛成描边,不喧宾夺主 */
+#notes-badge.idle{background:var(--card);color:var(--accent);
+  border:1px solid var(--accent);box-shadow:0 4px 14px rgba(0,0,0,.14)}
+#notes-badge.idle span{display:none}
 #notes-toast{position:fixed;right:22px;bottom:72px;z-index:61;display:none;
   background:var(--dark);color:#f6f6f2;border-radius:8px;padding:9px 14px;
   font-size:12px;max-width:420px;box-shadow:0 6px 20px rgba(0,0,0,.3)}
@@ -80,7 +89,8 @@ JS = r"""
   function paint(){
     var list = load();
     if (badge){
-      badge.classList.toggle('on', list.length > 0);
+      badge.classList.add('on');          // 常驻:空清单里写着怎么用
+      badge.classList.toggle('idle', list.length === 0);
       var count = badge.querySelector('span');
       if (count) { count.textContent = list.length; }
     }

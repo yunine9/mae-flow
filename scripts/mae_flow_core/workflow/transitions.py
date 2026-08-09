@@ -73,7 +73,13 @@ def next_step(step, state, choice_override=""):
     nxt = step.get("next")
     try:
         if step.get("next_by"):
-            return nxt[state.get("choices", {}).get(step["next_by"])]
+            # 选择项缺失时走明写的默认分支。没有兜底的话,这一步就"缺少可解析
+            # 的下一步"——done 拒绝推进,current 又不给恢复办法,流程当场活锁
+            # (实测:月光宝盒跑到 build,code_reviewer 从未被写进配置,卡死 38 轮)。
+            picked = state.get("choices", {}).get(step["next_by"])
+            if picked is None and step.get("next_default"):
+                picked = step["next_default"]
+            return nxt[picked]
         if isinstance(nxt, dict):
             choice = (
                 choice_override

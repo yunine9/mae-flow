@@ -90,7 +90,8 @@
         "hotfix": "hf_open",
         "tweak": "tw_open",
         "review": "rf_triage"
-      }
+      },
+      "next_default": "full"
     },
     "rf_triage": {
       "title": "处理评审意见 — 意见裁决",
@@ -394,7 +395,8 @@
       "next": {
         "disabled": "build_review",
         "enabled": "build_agent_review"
-      }
+      },
+      "next_default": "enabled"
     },
     "build_agent_review": {
       "title": "编码完成 — 可选 Agent 预检",
@@ -459,7 +461,8 @@
         "hotfix": "verify_ponytail",
         "tweak": "tw_codecheck",
         "review": "rf_codecheck"
-      }
+      },
+      "next_default": "full"
     },
     "quality_review": {
       "title": "质量改动 — 用户统一检视",

@@ -117,7 +117,10 @@ class NotifyTests(unittest.TestCase):
         # 面板只在响的时刻刷新(rang 守卫),其余时刻没人看,不刷。
         self.assertIn("_announce_and_sync_panel(flow, st, sid, nxt)", source)
         self.assertIn("_panel_refresh", source)
-        self.assertIn("if not rang:", source)
+        # 刷新与响铃解耦:实战中"交付完成"那一次推进既不跨阶段也不需裁决,
+        # 通知不响就不刷,而终态后 Hook 全旁路——面板永远停在"推送分支"。
+        self.assertNotIn("if not rang:", source)
+        self.assertIn("rang and panel_path", source)
 
     def test_init_is_the_first_perception_moment(self):
         """开启流程就生成面板并要求转述路径——没人知道存在的面板等于不存在。"""

@@ -164,18 +164,18 @@ def advance(flow, st, sid, step, tag, note=""):
 
 
 def _announce_and_sync_panel(flow, st, sid, nxt):
-    """通知响 = 面板刷新 = 告知路径,三件事同一个瞬间。
+    """每次推进都刷面板;通知只在"需要你裁决"与"跨入新阶段"两种时刻响。
 
-    只在"需要你裁决"与"进入新阶段"两种时刻响;人被叫来时看到的必须是
-    最新现场,其余时刻没人看、不刷。任何失败都静默,绝不影响推进。
+    刷新与响铃解耦(实战:交付完成那一次推进既不跨阶段也不需要裁决,
+    通知不响 → 面板不刷;而进入终态后 Hook 全旁路,再没有第二次机会,
+    面板永远停在"推送分支")。一次 72ms,一单也就几十次,买"面板绝不
+    显示与当前阶段不符的信息"这条红线,很划算。任何失败都静默。
     """
     rang = notify.announce(flow, sid, nxt, os.getcwd(),
                            st.get("config", {}).get("单号", ""))
-    if not rang:
-        return
     from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
     panel_path = _panel_refresh(flow, st)
-    if panel_path:
+    if rang and panel_path:
         print("[mae-flow] 现场面板已同步(切回浏览器标签页即自动刷新): %s"
               % panel_path)
 

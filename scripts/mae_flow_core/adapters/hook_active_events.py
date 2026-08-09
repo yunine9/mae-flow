@@ -456,9 +456,11 @@ class ActiveHookEventAdapter:
             self.runtime._record_agent_token("ASKUSER", "CONFIRMED")
             return HookResponse()
         if tool == "Bash":
-            self.runtime._finalize_git_authorization(
-                tool_input.get("command", "") or "")
+            command = tool_input.get("command", "") or ""
+            self.runtime._finalize_git_authorization(command)
             self.runtime._maybe_utrun(payload)
+            # 提交落地即刷新面板(实战:领域归档提交后仍显示未提交)
+            panel_sync.refresh_on_commit(self.state, command)
             return HookResponse()
         return self._template_response(written_path.replace("\\", "/"))
 

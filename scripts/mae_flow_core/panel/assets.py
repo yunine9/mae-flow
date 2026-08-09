@@ -32,6 +32,8 @@ body{margin:0;background:var(--bg);color:var(--ink);
   font:13px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
 .workbench{max-width:none;margin:0;min-height:100vh;background:var(--paper);
   border:0}
+#stale{background:var(--warn-bg);color:var(--warn);font-size:12px;
+  padding:8px 22px;border-bottom:1px solid var(--warn)}
 
 /* ── 紧凑页眉与阶段轨道 ── */
 header{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
@@ -320,6 +322,23 @@ function show(key){
   pane.scrollTop = 0;          // 滚动在内容区内部,切换文件回到顶部
 }
 function hide(){ V.classList.remove('on'); }
+// 陈旧自检:面板是快照不是实时视图,显示与当前阶段不符的信息会造成误解。
+// file:// 读不到新状态,只能诚实地按时间弱声明,绝不假装自己是最新的。
+(function(){
+  var born = Number(document.body.dataset.born || 0) * 1000;
+  var bar = document.getElementById('stale');
+  if (!bar || !born) { return; }
+  function tick(){
+    var mins = Math.floor((Date.now() - born) / 60000);
+    if (mins >= 10) {
+      bar.textContent = '⚠ 本页是 ' + mins + ' 分钟前的快照，流程可能已经推进——'
+        + '以会话里的最新输出为准；切出再切回本标签会自动重取。';
+      bar.hidden = false;
+    }
+  }
+  tick();
+  setInterval(tick, 60000);
+})();
 function dx(el){
   var gap = el.nextElementSibling;
   if (gap) { gap.hidden = false; }

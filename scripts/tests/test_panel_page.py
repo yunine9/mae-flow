@@ -88,6 +88,16 @@ class PanelPageTests(unittest.TestCase):
         self.assertNotIn("%</", html)
         self.assertIn("步", html)
 
+    def test_page_admits_when_it_may_be_stale(self):
+        """红线:面板是快照不是实时视图,显示与当前阶段不符的信息会造成误解。
+        file:// 读不到新状态,那就诚实地按时间弱声明,绝不假装最新。"""
+        html = build()
+        self.assertIn('data-born=', html)
+        self.assertIn('id="stale"', html)
+        self.assertIn("分钟前的快照", html)
+        self.assertIn("以会话里的最新输出为准", html)
+        self.assertIn("visibilitychange", html)   # 切回标签自动重取
+
     def test_missing_state_still_renders(self):
         html = page.render(snapshot.build(TESTS, None, FLOW), [], TESTS)
         self.assertIn("（无在途单）", html)

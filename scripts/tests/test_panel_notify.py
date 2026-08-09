@@ -178,6 +178,38 @@ class NotifyTests(unittest.TestCase):
         finally:
             os.chdir(before)
 
+    def test_commit_refreshes_the_panel(self):
+        """第五个感知时机:提交落地即刷新。实战反馈——领域归档提交后
+        面板仍把 docs/specs 显示在"未提交",因为提交发生在步内,
+        四个既有时机都不覆盖,用户看到的是提交前的旧快照。"""
+        import subprocess
+        from mae_flow_core.panel import sync
+        root = tempfile.mkdtemp(prefix="panel-commit-")
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True)
+        state_path = os.path.join(root, ".mae-flow.json")
+        with open(state_path, "w", encoding="utf-8") as stream:
+            json.dump({"current": "domain_archive", "revision": 1,
+                       "config": {"单号": "REQ-1"}, "choices": {},
+                       "history": [], "started": "2026-08-09 08:00:00"},
+                      stream, ensure_ascii=False)
+        before = os.getcwd()
+        os.chdir(root)
+        try:
+            self.assertTrue(sync.refresh_on_commit(
+                state_path, 'git commit -m "[REQ-1][feat]归档领域知识"'))
+            self.assertTrue(os.path.isfile(
+                os.path.join(root, ".mae-flow-work", "panel.html")))
+            # 非提交命令不触发;坏状态静默
+            self.assertFalse(sync.refresh_on_commit(state_path, "git status"))
+            self.assertFalse(sync.refresh_on_commit(state_path, "make test"))
+            with open(state_path, "w", encoding="utf-8") as stream:
+                stream.write("{broken")
+            self.assertFalse(sync.refresh_on_commit(
+                state_path, "git commit -m x"))
+        finally:
+            os.chdir(before)
+
     def test_doc_write_hook_stays_wired(self):
         """接线锁:posttool 的 Write 台账点必须同时触发面板重生成。"""
         path = os.path.join(SCRIPTS, "mae_flow_core", "adapters",
@@ -185,6 +217,7 @@ class NotifyTests(unittest.TestCase):
         with open(path, encoding="utf-8") as stream:
             source = stream.read()
         self.assertIn("refresh_on_doc_write", source)
+        self.assertIn("refresh_on_commit", source)
 
     def test_panel_refresh_is_soft_fail(self):
         """面板刷新失败只能返回 None——它永远不能反过来影响推进。"""

@@ -159,6 +159,14 @@ def _pending_section(pending, doc_key_by_path):
             '<div class="action-card">%s</div></section>' % "".join(cards))
 
 
+def _born_epoch():
+    """页面出生时刻:陈旧自检用。面板是快照不是实时视图,显示与当前阶段
+    不符的信息会造成误解(用户红线);file:// 读不到新状态,只能诚实地
+    按时间弱声明"可能已过期",绝不假装自己是最新的。"""
+    import time as _time
+    return int(_time.time())
+
+
 def _hm(stamp):
     """"2026-08-08 16:35:28" → "16:35"。整页都是今天前后的事,日期是噪声。"""
     return stamp[11:16] if len(stamp) >= 16 else stamp
@@ -356,6 +364,7 @@ def render(snapshot, changes=(), root="."):
         "css": assets.CSS + plantuml.SVG_CSS,
         "js": assets.JS,
         "rail": _phase_rail(snapshot["progress"]["step"]),
+        "born": _born_epoch(),
         "ticket": escape(snapshot["delivery"]["ticket"] or "（无在途单）"),
         "branch": escape(snapshot["repo"]["branch"]),
         "baseline": escape(snapshot["repo"]["baseline"]),
@@ -400,7 +409,8 @@ TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mae-Flow 交付工作台 · %(ticket)s</title>
-<style>%(css)s</style></head><body><div class="workbench">
+<style>%(css)s</style></head><body data-born="%(born)s">
+<div id="stale" hidden></div><div class="workbench">
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
 <h1>交付工作台</h1></div><div class="header-state">%(stamp)s · rev %(revision)s</div>
 </div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>

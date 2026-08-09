@@ -22,28 +22,48 @@ def is_review_doc(written_path):
             and "/.mae-flow-work/" in normalized)
 
 
+def _rebuild(state_path):
+    from mae_flow_core.panel import page, snapshot
+    from mae_flow_core.workflow import definition
+    root = os.getcwd()
+    with open(state_path, encoding="utf-8") as stream:
+        state = json.load(stream)
+    plugin_root = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "..", ".."))
+    flow = definition.load_definition(
+        os.path.join(plugin_root, "flow", "flow.json"))
+    data = snapshot.build(root, state, flow)
+    changes = snapshot.changes(
+        root, state.get("implementation_base_head", ""))
+    html = page.render(data, changes, root)
+    target = os.path.join(root, ".mae-flow-work", "panel.html")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8") as stream:
+        stream.write(html)
+    return True
+
+
+def refresh_on_commit(state_path, command):
+    """提交落地即重生成面板:第五个感知时机。
+
+    实战反馈:领域归档提交后,面板仍把 docs/specs 显示在"未提交"——
+    提交发生在步内,既不跨阶段也不是检视文档落盘,四个时机都不覆盖,
+    用户看到的是提交前的旧快照。而"刚提交完"恰恰是最想复核的时刻之一。
+    """
+    text = str(command or "")
+    if "git" not in text or "commit" not in text:
+        return False
+    try:
+        return _rebuild(state_path)
+    except Exception:                      # noqa: BLE001 —— 软失败铁律
+        return False
+
+
 def refresh_on_doc_write(state_path, written_path):
     """写的是检视文档才动手;返回是否真的重生成了面板。"""
     if not is_review_doc(written_path):
         return False
     try:
-        from mae_flow_core.panel import page, snapshot
-        from mae_flow_core.workflow import definition
-        root = os.getcwd()
-        with open(state_path, encoding="utf-8") as stream:
-            state = json.load(stream)
-        plugin_root = os.path.abspath(os.path.join(
-            os.path.dirname(__file__), "..", "..", ".."))
-        flow = definition.load_definition(
-            os.path.join(plugin_root, "flow", "flow.json"))
-        data = snapshot.build(root, state, flow)
-        changes = snapshot.changes(
-            root, state.get("implementation_base_head", ""))
-        html = page.render(data, changes, root)
-        target = os.path.join(root, ".mae-flow-work", "panel.html")
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "w", encoding="utf-8") as stream:
-            stream.write(html)
-        return True
+        return _rebuild(state_path)
     except Exception:                      # noqa: BLE001 —— 软失败铁律
         return False

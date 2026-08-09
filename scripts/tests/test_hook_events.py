@@ -320,5 +320,63 @@ class HookEventTests(unittest.TestCase):
         self.assertEqual(0, response.exit_code, response.stderr)
 
 
+class MetaBoundTranscriptTests(unittest.TestCase):
+    """实战事故:宿主 SubagentStop 给的 transcript 路径指向永不存在的文件
+    (payload agent id 与落盘 id 错位),真实执行的编译被 fail-closed 判无证据。
+    meta.json 的 toolUseId 提供确定性绑定;匹配不到照旧空返回,不猜最新文件。"""
+
+    def test_missing_explicit_path_binds_via_meta_tooluseid(self):
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            resolve_agent_transcript)
+        root = tempfile.mkdtemp(prefix="meta-bind-")
+        self.addCleanup(shutil.rmtree, root, True)
+        sub = os.path.join(root, "session", "subagents")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "agent-real123.jsonl"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("{}\n")
+        with open(os.path.join(sub, "agent-real123.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"agentType": "compile-agent",
+                          "toolUseId": "toolu_ABC"}, stream)
+        payload = {
+            "agent_transcript_path": os.path.join(sub, "agent-wrong999.jsonl"),
+            "transcript_path": os.path.join(root, "session.jsonl"),
+        }
+        resolved = resolve_agent_transcript(payload, "toolu_ABC")
+        self.assertTrue(resolved.endswith("agent-real123.jsonl"))
+        # 匹配不到 → 保持原显式路径(调用方 fail-closed 语义不变)
+        miss = resolve_agent_transcript(payload, "toolu_NOPE")
+        self.assertTrue(miss.endswith("agent-wrong999.jsonl"))
+        # 同一 toolUseId 命中多份 → 拒绝猜测
+        with open(os.path.join(sub, "agent-dup.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"toolUseId": "toolu_ABC"}, stream)
+        with open(os.path.join(sub, "agent-dup.jsonl"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("{}\n")
+        ambiguous = resolve_agent_transcript(payload, "toolu_ABC")
+        self.assertTrue(ambiguous.endswith("agent-wrong999.jsonl"))
+
+    def test_existing_explicit_path_wins_over_meta(self):
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            resolve_agent_transcript)
+        root = tempfile.mkdtemp(prefix="meta-bind2-")
+        self.addCleanup(shutil.rmtree, root, True)
+        sub = os.path.join(root, "s", "subagents")
+        os.makedirs(sub)
+        explicit = os.path.join(sub, "agent-good.jsonl")
+        with open(explicit, "w", encoding="utf-8") as stream:
+            stream.write("{}\n")
+        payload = {"agent_transcript_path": explicit,
+                   "transcript_path": os.path.join(root, "s.jsonl")}
+        self.assertEqual(explicit,
+                         resolve_agent_transcript(payload, "toolu_X"))
+
+
 if __name__ == "__main__":
     unittest.main()

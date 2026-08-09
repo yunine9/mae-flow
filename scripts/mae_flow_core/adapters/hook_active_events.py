@@ -30,7 +30,7 @@ from mae_flow_core.file_io import (
 from mae_flow_core.adapters.hook_agent_lifecycle import HookAgentLifecycle
 from mae_flow_core.panel import sync as panel_sync
 from mae_flow_core.adapters.hook_transcript_paths import (
-    explicit_agent_transcript_path,
+    resolve_agent_transcript,
 )
 from mae_flow_core.workflow.agent_observations import (
     record_agent_started,
@@ -314,7 +314,8 @@ class ActiveHookEventAdapter:
 
     @staticmethod
     def _explicit_transcript_path(payload, invocation_id=""):
-        return explicit_agent_transcript_path(payload, invocation_id)
+        # 宿主 payload 的 agent id 可能错位:显式路径缺失时按 meta 精确绑定
+        return resolve_agent_transcript(payload, invocation_id)
 
     @staticmethod
     def _quality_call(kind, calls, config, task=None):

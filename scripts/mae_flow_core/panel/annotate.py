@@ -161,12 +161,28 @@ JS = r"""
         || event.target.tagName === 'TEXTAREA') { return; }
     edit(row);
   });
+  // 多条一次送:按文件分组、组内按行号升序。人是跳着圈的,Agent 却要
+  // 一个文件一个文件地改——按点击顺序给它,它得来回翻。
   function render(){
-    var list = load();
-    var lines = ['检视批注 · ' + ticket + '（' + list.length + ' 条）',
+    var list = load().slice().sort(function(a, b){
+      if (a.file !== b.file) { return a.file < b.file ? -1 : 1; }
+      return (parseInt(a.line, 10) || 0) - (parseInt(b.line, 10) || 0);
+    });
+    var files = [];
+    list.forEach(function(item){
+      if (files.indexOf(item.file) < 0) { files.push(item.file); }
+    });
+    var lines = ['检视批注 · ' + ticket + '（' + list.length + ' 条，'
+                 + files.length + ' 个文件）',
                  '请按下列位置修改；每条都给出了文件与行号。', ''];
-    list.forEach(function(item, index){
-      lines.push((index + 1) + '. ' + item.file + ':' + item.line);
+    var seen = '', index = 0;
+    list.forEach(function(item){
+      if (item.file !== seen){
+        seen = item.file;
+        lines.push('【' + item.file + '】');
+      }
+      index += 1;
+      lines.push(index + '. 第 ' + item.line + ' 行');
       if (item.code) { lines.push('   当前代码：' + item.code); }
       lines.push('   要求：' + item.note);
     });

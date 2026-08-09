@@ -174,6 +174,10 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("检视批注 · ", html)               # 复制出去的抬头
         self.assertIn("请按下列位置修改；每条都给出了文件与行号。", html)
         self.assertIn("当前代码：", html)                # 带上原行内容
+        # 多条一次送:按文件分组、组内按行号升序,Agent 不必来回翻文件
+        self.assertIn("个文件）", html)
+        self.assertIn("'【' + item.file + '】'", html)
+        self.assertIn("parseInt(a.line, 10)", html)
         self.assertIn("window.__panelBusy = true", html)  # 编辑期间不重载
         self.assertIn('data-ticket=', html)
         # 仍然不是推进入口:批注只产出文本,不碰状态

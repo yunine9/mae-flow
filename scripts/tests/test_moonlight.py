@@ -57,3 +57,24 @@ class RepeatedBlockerTests(unittest.TestCase):
             "reason": long_a}]
         second = self._blocked(state, long_b)
         self.assertNotIn("同一原因已登记", "".join(second.stdout))
+
+
+class SameStepChurnTests(unittest.TestCase):
+    """同一步连登多条、每条措辞还不同——多半是自己在改动之后又改动。
+
+    实测:模型在 quality_commit 上连登 5 条阻塞,口口声声"系统清单与实际
+    状态不同步"。而 git 记录显示 notify_service.py 被提交了 4 次,每次
+    提交完它又改了一遍——"文件未提交"每次都属实,是它自己在制造脏改动。
+    """
+
+    def test_third_blocker_at_one_step_points_the_finger_back(self):
+        from mae_flow_core.delivery.moonlight import block_notice
+        self.assertNotIn("别把自己的改动", block_notice(1, at_step=2))
+        told = block_notice(1, at_step=3)
+        self.assertIn("本步已登记 3 条阻塞", told)
+        self.assertIn("先跑 status 看清现场", told)
+
+    def test_identical_reason_still_takes_priority(self):
+        from mae_flow_core.delivery.moonlight import block_notice
+        told = block_notice(2, at_step=5)
+        self.assertIn("同一原因已登记 2 次", told)

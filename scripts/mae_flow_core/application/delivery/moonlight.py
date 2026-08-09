@@ -4,7 +4,8 @@ from copy import deepcopy
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
 from mae_flow_core.delivery.moonlight import (
-    block_notice, finalize_target, issue_id, repeat_count)
+    block_notice, finalize_target, issue_id, repeat_count,
+    step_block_count)
 
 
 def _result(effects=(), stdout=(), stderr=(), exit_code=0):
@@ -194,6 +195,7 @@ def record_blocker(
             old["resolved_at"] = now
             old["resolved_as"] = "superseded"
     repeats = repeat_count(issues, current, reason)
+    at_step = step_block_count(issues, current)
     issue = {
         "id": issue_id(len(issues)),
         "step": current,
@@ -216,7 +218,7 @@ def record_blocker(
         updated, current, "moonlight:blocked",
         issue["id"] + " " + reason, now)
     return _result(effects=_effects(updated),
-                   stdout=(block_notice(repeats),))
+                   stdout=(block_notice(repeats, at_step),))
 
 
 def validate_blocker(state, can_block, reason, step_kind=""):

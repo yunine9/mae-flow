@@ -1,0 +1,197 @@
+"""检视批注:在 diff 上圈出问题,一键复制成 Agent 能直接执行的清单。
+
+为什么值得做:检视的瓶颈从来不是发现问题,是把"哪一行、要改成什么"
+准确传达出去。口述"那个短信处理器里面重试那块"要模型猜三轮;
+`sms_handler.py:23 + 一句意见` 它一次就到位。
+
+两个硬约束决定了形态:
+- file:// 页面不能写文件,批注只能走剪贴板——你点"复制给 Agent",
+  粘进会话即可,不需要任何服务;
+- 面板每几秒可能重生成并自动重载,所以批注必须落在 localStorage,
+  按单号分键;编辑期间禁止自动重载,不能把人写一半的字刷没。
+"""
+
+CSS = r"""
+.dr{position:relative}
+.diff .dr:not(.hk):not(.cut):hover .c:first-of-type::before{
+  content:"批注";position:absolute;left:2px;font-size:9px;color:var(--accent);
+  background:var(--accent-bg);border-radius:3px;padding:0 3px;cursor:pointer}
+.dr.noted{box-shadow:inset 3px 0 var(--accent)}
+.note-editor{grid-column:1/-1;display:flex;gap:8px;align-items:flex-start;
+  padding:8px 10px;background:var(--accent-bg);border-top:1px solid var(--accent)}
+.note-editor textarea{flex:1;min-height:46px;font:inherit;font-size:12px;
+  padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;
+  background:var(--card);color:var(--ink)}
+.note-editor button{font:inherit;font-size:11.5px;padding:4px 10px;cursor:pointer;
+  border:1px solid var(--line);border-radius:6px;background:var(--card);
+  color:var(--dim)}
+.note-editor button.primary{color:#fff;background:var(--accent);
+  border-color:var(--accent)}
+.note-shown{grid-column:1/-1;padding:6px 10px 8px 26px;background:var(--accent-bg);
+  color:var(--accent);font-size:12px;border-top:1px solid var(--accent)}
+.note-shown button{margin-left:8px;font:inherit;font-size:10.5px;color:var(--dim);
+  background:none;border:0;cursor:pointer;text-decoration:underline}
+#notes-badge{position:fixed;right:22px;bottom:22px;z-index:60;display:none;
+  align-items:center;gap:10px;background:var(--accent);color:#fff;
+  border:0;border-radius:24px;padding:10px 18px;font:inherit;font-size:13px;
+  cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+#notes-badge.on{display:inline-flex}
+#notes-badge span{background:rgba(255,255,255,.22);border-radius:12px;
+  padding:1px 8px;font-size:12px}
+#notes-toast{position:fixed;right:22px;bottom:72px;z-index:61;display:none;
+  background:var(--dark);color:#f6f6f2;border-radius:8px;padding:9px 14px;
+  font-size:12px;max-width:420px;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+#notes-toast.on{display:block}
+"""
+
+JS = r"""
+// ── 检视批注 ────────────────────────────────────────────────
+// 存 localStorage(按单号分键):面板可能随时重生成并自动重载,
+// 批注绝不能跟着页面一起没。编辑期间禁止自动重载(见 window.__panelBusy)。
+(function(){
+  var ticket = document.body.dataset.ticket || 'unknown';
+  var KEY = 'maeflow.notes.' + ticket;
+  var badge = document.getElementById('notes-badge');
+  var toast = document.getElementById('notes-toast');
+
+  function load(){
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); }
+    catch (err) { return []; }
+  }
+  function save(list){
+    try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (err) {}
+    paint();
+  }
+  function say(text){
+    if (!toast) { return; }
+    toast.textContent = text;
+    toast.classList.add('on');
+    setTimeout(function(){ toast.classList.remove('on'); }, 2600);
+  }
+  function paint(){
+    var list = load();
+    if (badge){
+      badge.classList.toggle('on', list.length > 0);
+      var count = badge.querySelector('span');
+      if (count) { count.textContent = list.length; }
+    }
+    document.querySelectorAll('.dr.noted').forEach(function(row){
+      row.classList.remove('noted');
+    });
+    document.querySelectorAll('.note-shown').forEach(function(node){
+      node.remove();
+    });
+    list.forEach(function(item){ mark(item); });
+  }
+  function rowsOf(file){
+    var pane = document.querySelector(
+      '.pane[data-rel^="' + file + '"]');
+    return pane ? pane.querySelectorAll('.dr') : [];
+  }
+  function lineOf(row){
+    var cells = row.querySelectorAll('.ln');
+    var right = cells.length > 1 ? cells[1].textContent.trim() : '';
+    return right || (cells.length ? cells[0].textContent.trim() : '');
+  }
+  function fileOf(row){
+    var pane = row.closest('.pane');
+    var rel = pane ? (pane.dataset.rel || '') : '';
+    return rel.split('（')[0];
+  }
+  function codeOf(row){
+    var cells = row.querySelectorAll('.c');
+    var right = cells.length > 1 ? cells[1].textContent : '';
+    return (right || (cells.length ? cells[0].textContent : '')).trim();
+  }
+  function mark(item){
+    rowsOf(item.file).forEach(function(row){
+      if (lineOf(row) !== item.line) { return; }
+      row.classList.add('noted');
+      var shown = document.createElement('div');
+      shown.className = 'note-shown';
+      shown.textContent = '批注：' + item.note;
+      var drop = document.createElement('button');
+      drop.textContent = '删除';
+      drop.onclick = function(event){
+        event.stopPropagation();
+        save(load().filter(function(other){
+          return !(other.file === item.file && other.line === item.line
+                   && other.note === item.note);
+        }));
+      };
+      shown.appendChild(drop);
+      row.parentNode.insertBefore(shown, row.nextSibling);
+    });
+  }
+  function edit(row){
+    if (row.nextSibling && row.nextSibling.className === 'note-editor'){ return; }
+    window.__panelBusy = true;           // 写字期间不许自动重载
+    var box = document.createElement('div');
+    box.className = 'note-editor';
+    var area = document.createElement('textarea');
+    area.placeholder = '这里要改什么？例如：这个重试应该只对网关失败生效';
+    var ok = document.createElement('button');
+    ok.className = 'primary';
+    ok.textContent = '记下';
+    var no = document.createElement('button');
+    no.textContent = '取消';
+    function close(){ box.remove(); window.__panelBusy = false; }
+    ok.onclick = function(){
+      var text = area.value.trim();
+      if (text){
+        var list = load();
+        list.push({file: fileOf(row), line: lineOf(row),
+                   code: codeOf(row), note: text});
+        save(list);
+      }
+      close();
+    };
+    no.onclick = close;
+    box.appendChild(area);
+    box.appendChild(ok);
+    box.appendChild(no);
+    row.parentNode.insertBefore(box, row.nextSibling);
+    area.focus();
+  }
+  document.addEventListener('click', function(event){
+    var row = event.target.closest ? event.target.closest('.dr') : null;
+    if (!row || row.classList.contains('hk') || row.classList.contains('cut')
+        || row.classList.contains('exp')) { return; }
+    if (event.target.tagName === 'BUTTON'
+        || event.target.tagName === 'TEXTAREA') { return; }
+    edit(row);
+  });
+  function render(){
+    var list = load();
+    var lines = ['检视批注 · ' + ticket + '（' + list.length + ' 条）',
+                 '请按下列位置修改；每条都给出了文件与行号。', ''];
+    list.forEach(function(item, index){
+      lines.push((index + 1) + '. ' + item.file + ':' + item.line);
+      if (item.code) { lines.push('   当前代码：' + item.code); }
+      lines.push('   要求：' + item.note);
+    });
+    return lines.join('\n');
+  }
+  if (badge){
+    badge.onclick = function(){
+      var text = render();
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(function(){
+          say('已复制 ' + load().length + ' 条批注，粘贴进会话即可');
+        }, function(){ fallback(text); });
+      } else { fallback(text); }
+    };
+  }
+  function fallback(text){
+    var area = document.createElement('textarea');
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); say('已复制，粘贴进会话即可'); }
+    catch (err) { say('复制失败，请手动选中下面文本框内容'); }
+    area.remove();
+  }
+  paint();
+  window.__panelPaintNotes = paint;
+})();
+"""

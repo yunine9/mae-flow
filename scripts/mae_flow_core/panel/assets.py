@@ -329,6 +329,7 @@ function hide(){
   V.classList.remove('on');
   // 关掉阅读层后补查一次:读文档期间攒下的更新此刻可以安全落地
   if (window.__panelProbe) { window.__panelProbe(); }
+  if (window.__panelPaintNotes) { window.__panelPaintNotes(); }
 }
 // 自动发现更新:file:// 不能 fetch 同目录文件,但能用 script src 加载。
 // 流程每次重生成面板都会更新 panel-stamp.js,页面探到更新即自动重载——
@@ -345,7 +346,8 @@ function hide(){
       // 同一个新版本只重载一次:万一读不到更新后的页面,
       // 也不能把用户困在无限刷新里。
       var acted = Number(sessionStorage.getItem('panelReloadedAt') || 0);
-      var reading = V && V.classList.contains('on');
+      // 正在写批注同样不打断:重载会把没提交的文字冲掉
+      var reading = (V && V.classList.contains('on')) || window.__panelBusy;
       // 读到一半不打扰:重载会关掉阅读层。关闭弹层时会再探一次(见 hide)。
       if (latest > born && latest > acted && !reading) {
         sessionStorage.setItem('panelReloadedAt', String(latest));

@@ -8,7 +8,8 @@
 import io
 import os
 
-from . import assets, banners, diffview, markdown, notify, plantuml
+from . import (annotate, assets, banners, diffview, markdown,
+               notify, plantuml)
 from .markdown import escape
 
 def _fence_hook(language, body):
@@ -359,8 +360,8 @@ def render(snapshot, changes=(), root=".", born=None):
     doc_key_by_path = {doc["path"]: "doc-" + doc["kind"]
                        for doc in snapshot["artifacts"]["documents"]}
     context = {
-        "css": assets.CSS + plantuml.SVG_CSS,
-        "js": assets.JS,
+        "css": assets.CSS + plantuml.SVG_CSS + annotate.CSS,
+        "js": assets.JS + annotate.JS,
         "rail": _phase_rail(snapshot["progress"]["step"]),
         "born": born or _born_epoch(),
         "pulse": escape(pulse_marker(snapshot)),
@@ -438,7 +439,8 @@ TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Mae-Flow 交付工作台 · %(ticket)s</title>
-<style>%(css)s</style></head><body data-born="%(born)s" data-pulse="%(pulse)s">
+<style>%(css)s</style></head><body data-born="%(born)s" data-pulse="%(pulse)s"
+ data-ticket="%(ticket)s">
 <div id="live" hidden></div><div id="stale" hidden></div><div class="workbench">
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
 <h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s</div>
@@ -476,5 +478,7 @@ TEMPLATE = """<!doctype html>
 <span class="sp"><a id="vraw" href="#">源文件 ↗</a>
 <button onclick="hide()">关闭 Esc</button></span></div>
 <div class="vtabs">%(tabs)s</div>%(panes)s</div></div>
+<button id="notes-badge">复制批注给 Agent<span>0</span></button>
+<div id="notes-toast"></div>
 <script>%(js)s</script></body></html>
 """

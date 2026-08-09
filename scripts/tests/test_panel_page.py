@@ -162,6 +162,23 @@ class PanelPageTests(unittest.TestCase):
         os.utime(pulse.pulse_path(room), (0, 0))
         self.assertFalse(pulse.write_pulse(state_path, FLOW, room))
 
+    def test_review_annotations_produce_actionable_locations(self):
+        """检视的瓶颈是把"哪一行改什么"准确传出去。批注存 localStorage
+        (面板随时重生成不能丢),一键复制成带 文件:行号 的清单;
+        写批注期间禁止自动重载,不能把人写一半的字冲掉。"""
+        html = build()
+        self.assertIn("maeflow.notes.", html)          # 按单号分键
+        self.assertIn("localStorage", html)
+        self.assertIn('id="notes-badge"', html)
+        self.assertIn("复制批注给 Agent", html)
+        self.assertIn("检视批注 · ", html)               # 复制出去的抬头
+        self.assertIn("请按下列位置修改；每条都给出了文件与行号。", html)
+        self.assertIn("当前代码：", html)                # 带上原行内容
+        self.assertIn("window.__panelBusy = true", html)  # 编辑期间不重载
+        self.assertIn('data-ticket=', html)
+        # 仍然不是推进入口:批注只产出文本,不碰状态
+        self.assertNotIn("mae-flow.py done", html)
+
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
         import re as _re, shutil, tempfile
@@ -321,7 +338,8 @@ class PanelPageTests(unittest.TestCase):
         读文档期间攒下的更新此刻安全落地。"""
         from mae_flow_core.panel import assets
         self.assertIn("visibilitychange", assets.JS)      # 切回即查
-        self.assertIn("reading = V && V.classList.contains('on')", assets.JS)
+        self.assertIn("V.classList.contains('on')) || window.__panelBusy",
+                      assets.JS)   # 读文档、写批注都不打断
         self.assertIn("&& !reading", assets.JS)
         self.assertIn("window.__panelProbe", assets.JS)   # 关闭弹层后补查
 

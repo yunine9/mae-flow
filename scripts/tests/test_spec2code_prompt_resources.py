@@ -121,6 +121,16 @@ class Spec2CodePromptResourceTests(unittest.TestCase):
                        "接口就是测试面"):
             self.assertIn(marker, template)
 
+    def test_build_anchors_attention_to_confirmed_documents(self):
+        """L1 注意力锚定(业界 recitation 同族):长会话尾部写码,记忆里混着
+        被否掉的方案——编码依据只认用户确认过的文档,不认会话记忆。
+        纯内部指令,用户无感;/compact 类有感提示经业界调研后永久不做。"""
+        build = read("flow/steps/build.md")
+        self.assertIn("注意力锚定", build)
+        self.assertIn("一律以文档为准", build)
+        self.assertIn("文档是用户确认过的版本，记忆不是", build)
+        self.assertNotIn("/compact", build)
+
     def test_build_stops_instead_of_guessing_when_blocked(self):
         build = read("flow/steps/build.md")
         self.assertIn("卡住就停，不要猜", build)

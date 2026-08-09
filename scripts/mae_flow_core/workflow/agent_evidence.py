@@ -127,8 +127,11 @@ class AgentEvidenceRules:
                 return self._blocked(
                     kind, accepted_why,
                     "%s 子 Agent 已返回，但没有检测到与当前输入匹配的成功执行。"
-                    "请检查任务卡中的真实命令、退出状态和 timeout；"
-                    "返回文字不能替代机器执行。" % kind,
+                    "两种可能:①命令确实没跑成——检查任务卡中的真实命令、"
+                    "退出状态和 timeout,返回文字不能替代机器执行;"
+                    "②宿主未提供可读的子会话记录(执行台账该次 command 为空"
+                    "即是此症)——这不是报告格式问题,改写报告没有用,"
+                    "重派一次仍如此就走 accept-risk 交用户裁决。" % kind,
                 )
             return EvidenceResult(True, "")
         if observation:

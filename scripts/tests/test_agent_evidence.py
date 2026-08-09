@@ -90,6 +90,17 @@ class AgentEvidenceRuleTests(unittest.TestCase):
             {"current": "build"},
         ).passed)
 
+    def test_quality_rejection_names_the_unreadable_transcript_cause(self):
+        """实战教训 x2:fail-closed 的拒绝必须说清'我看不到什么'。
+        只写'检查命令与退出状态'会把模型引去挖假线索(固定字段错误理论)。"""
+        rules = AgentEvidenceRules(make_ports(
+            finished_observation=lambda _k, _s, _e: {"detail": "编译通过"}))
+        result = rules.agent_ran(
+            {"agent": "COMPILE"}, {"current": "build"})
+        self.assertFalse(result.passed)
+        self.assertIn("宿主未提供可读的子会话记录", result.reason)
+        self.assertIn("改写报告没有用", result.reason)
+
     def test_quality_return_without_real_execution_is_not_enough(self):
         observation = {
             "kind": "UT", "step": "verify_ut", "lifecycle": "returned",

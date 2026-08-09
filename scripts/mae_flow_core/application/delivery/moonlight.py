@@ -3,7 +3,8 @@
 from copy import deepcopy
 
 from mae_flow_core.delivery.models import DeliveryEffect, DeliveryResult
-from mae_flow_core.delivery.moonlight import finalize_target, issue_id
+from mae_flow_core.delivery.moonlight import (
+    block_notice, finalize_target, issue_id, repeat_count)
 
 
 def _result(effects=(), stdout=(), stderr=(), exit_code=0):
@@ -192,6 +193,7 @@ def record_blocker(
         if old.get("kind") == "blocker":
             old["resolved_at"] = now
             old["resolved_as"] = "superseded"
+    repeats = repeat_count(issues, current, reason)
     issue = {
         "id": issue_id(len(issues)),
         "step": current,
@@ -199,6 +201,7 @@ def record_blocker(
         "at": now,
         "head": head,
         "reason": reason,
+        "repeats": repeats,
         "dirty_paths": list(dirty_paths)[:100],
     }
     issues.append(issue)
@@ -212,14 +215,8 @@ def record_blocker(
     _history(
         updated, current, "moonlight:blocked",
         issue["id"] + " " + reason, now)
-    return _result(
-        effects=_effects(updated),
-        stdout=(
-            "[mae-flow] 月光宝盒已记录无法自动解决的硬阻塞并保存现场。"
-            "本轮允许正常停止；早晨执行 moonlight report 查看，"
-            "条件补齐后执行 moonlight repair 继续当前步骤。",
-        ),
-    )
+    return _result(effects=_effects(updated),
+                   stdout=(block_notice(repeats),))
 
 
 def validate_blocker(state, can_block, reason, step_kind=""):

@@ -26,13 +26,7 @@ def _flow():
 
 
 def _write_page(data, changes, target):
-    html = page.render(data, changes, os.getcwd())
-    folder = os.path.dirname(target)
-    if folder and not os.path.isdir(folder):
-        os.makedirs(folder, exist_ok=True)
-    with open(target, "w", encoding="utf-8") as stream:
-        stream.write(html)
-    return len(html.encode("utf-8"))
+    return page.write_page(target, data, changes, os.getcwd())
 
 
 def refresh(flow, st):

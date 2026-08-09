@@ -97,14 +97,34 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("分钟前的快照", html)
         self.assertIn("以会话里的最新输出为准", html)
         self.assertIn("visibilitychange", html)   # 切回标签自动重取
-        # 按钮必须说人话且诚实:它只重读文件,不能让面板重新生成——
-        # 写成"刷新现场"会让人点完以为是最新的,那是比陈旧更坏的误解;
-        # "触发流程重算"这类机器视角的词同样不进用户界面。
-        self.assertIn('id="reget"', html)
-        self.assertIn("重新读一遍面板文件", html)
-        self.assertIn("若还没生成新版本，内容不会变", html)
-        self.assertIn("在会话里说一句「刷新面板」", html)   # 给出真正的出路
+        # 自动发现更新:手动按钮只在"文件刚重生成且你没切走"时有用,
+        # 其余时候点了没反应,反而制造"我刷新过了"的错觉——退役,
+        # 改为页面每 5 秒探 stamp,发现更新即自动重载。
+        self.assertIn("panel-stamp.js", html)
+        self.assertIn("setInterval(probe", html)
+        # 自动重载必须独立于陈旧横幅:横幅元素缺失曾让整段逻辑被守卫跳过
+        reload_block = html[html.index("// 自动发现更新"):html.index("// 陈旧兜底")]
+        self.assertIn("location.reload()", reload_block)
+        self.assertNotIn("getElementById('stale')", reload_block)
+        self.assertIn("panelReloadedAt", reload_block)   # 同版本只重载一次
+        self.assertNotIn('id="reget"', html)
         self.assertNotIn("流程重算", html)
+        self.assertIn('id="age"', html)           # 页眉常显新鲜度
+
+    def test_write_page_emits_the_stamp_beside_the_panel(self):
+        """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
+        import re as _re, shutil, tempfile
+        room = tempfile.mkdtemp(prefix="panel-stamp-")
+        self.addCleanup(shutil.rmtree, room, True)
+        target = os.path.join(room, "out", "panel.html")
+        page.write_page(target, snapshot.build(TESTS, STATE, FLOW), [], TESTS)
+        with open(target, encoding="utf-8") as handle:
+            html = handle.read()
+        with open(os.path.join(room, "out", "panel-stamp.js"),
+                  encoding="utf-8") as handle:
+            stamp = handle.read()
+        born = _re.search(r'data-born="(\d+)"', html).group(1)
+        self.assertIn("window.__panelStamp=%s;" % born, stamp)
         self.assertIn('id="age"', html)           # 页眉常显新鲜度
         # 它仍然不是推进入口
         self.assertNotIn("mae-flow.py done", html)
@@ -245,11 +265,14 @@ class PanelPageTests(unittest.TestCase):
         self.assertIn("overflow-y:auto", assets.CSS)
         self.assertIn("pane.scrollTop = 0", assets.JS)
 
-    def test_tab_return_triggers_reload_unless_reading(self):
-        """file:// 无推送,自动刷新=切回标签页时重载;阅读层开着不打扰。"""
+    def test_auto_reload_defers_while_reading_and_resumes_on_close(self):
+        """自动重载不能把读到一半的文档弹层关掉;关闭弹层时补查一次,
+        读文档期间攒下的更新此刻安全落地。"""
         from mae_flow_core.panel import assets
-        self.assertIn("visibilitychange", assets.JS)
-        self.assertIn("!V.classList.contains('on')", assets.JS)
+        self.assertIn("visibilitychange", assets.JS)      # 切回即查
+        self.assertIn("reading = V && V.classList.contains('on')", assets.JS)
+        self.assertIn("&& !reading", assets.JS)
+        self.assertIn("window.__panelProbe", assets.JS)   # 关闭弹层后补查
 
 
 if __name__ == "__main__":

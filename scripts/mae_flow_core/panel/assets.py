@@ -34,10 +34,6 @@ body{margin:0;background:var(--bg);color:var(--ink);
   border:0}
 #stale{background:var(--warn-bg);color:var(--warn);font-size:12px;
   padding:8px 22px;border-bottom:1px solid var(--warn)}
-#reget{margin-left:10px;font:inherit;font-size:11px;color:var(--dim);
-  background:var(--card);border:1px solid var(--line);border-radius:6px;
-  padding:2px 8px;cursor:pointer}
-#reget:hover{color:var(--accent);border-color:var(--accent)}
 #age{color:var(--faint);margin-right:8px}
 
 /* ── 紧凑页眉与阶段轨道 ── */
@@ -326,14 +322,51 @@ function show(key){
   V.scrollTop = 0;
   pane.scrollTop = 0;          // 滚动在内容区内部,切换文件回到顶部
 }
-function hide(){ V.classList.remove('on'); }
-// 陈旧自检:面板是快照不是实时视图,显示与当前阶段不符的信息会造成误解。
-// file:// 读不到新状态,只能诚实地按时间弱声明,绝不假装自己是最新的。
+function hide(){
+  V.classList.remove('on');
+  // 关掉阅读层后补查一次:读文档期间攒下的更新此刻可以安全落地
+  if (window.__panelProbe) { window.__panelProbe(); }
+}
+// 自动发现更新:file:// 不能 fetch 同目录文件,但能用 script src 加载。
+// 流程每次重生成面板都会更新 panel-stamp.js,页面探到更新即自动重载——
+// 用户不必记得点任何按钮,也就不会看到与当前阶段不符的旧现场。
+// 独立成段:不与陈旧横幅共用守卫,横幅缺失也不能让自动重载失效。
+(function(){
+  var born = Number(document.body.dataset.born || 0) * 1000;
+  if (!born) { return; }
+  function probe(){
+    var tag = document.createElement('script');
+    tag.src = 'panel-stamp.js?t=' + Date.now();
+    tag.onload = function(){
+      var latest = Number(window.__panelStamp || 0) * 1000;
+      // 同一个新版本只重载一次:万一读不到更新后的页面,
+      // 也不能把用户困在无限刷新里。
+      var acted = Number(sessionStorage.getItem('panelReloadedAt') || 0);
+      var reading = V && V.classList.contains('on');
+      // 读到一半不打扰:重载会关掉阅读层。关闭弹层时会再探一次(见 hide)。
+      if (latest > born && latest > acted && !reading) {
+        sessionStorage.setItem('panelReloadedAt', String(latest));
+        location.reload();
+      }
+      tag.remove();
+    };
+    tag.onerror = function(){ tag.remove(); };
+    document.head.appendChild(tag);
+  }
+  window.__panelProbe = probe;
+  setInterval(probe, 5000);
+  // 切回本标签时立刻查一次:人回来的那一刻最该看到最新现场,不等轮询。
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) { probe(); }
+  });
+  probe();
+})();
+// 陈旧兜底:自动重载在个别浏览器/设置下可能不工作,那就按时间诚实提示。
 (function(){
   var born = Number(document.body.dataset.born || 0) * 1000;
   var bar = document.getElementById('stale');
-  if (!bar || !born) { return; }
   var age = document.getElementById('age');
+  if (!born) { return; }
   function tick(){
     var mins = Math.floor((Date.now() - born) / 60000);
     if (age) {
@@ -341,27 +374,14 @@ function hide(){ V.classList.remove('on'); }
         : (mins < 60 ? mins + ' 分钟前 · '
           : Math.floor(mins / 60) + ' 小时前 · ');
     }
-    if (mins >= 10) {
-      bar.textContent = '⚠ 本页是 ' + mins + ' 分钟前的快照，流程可能已经推进——'
-        + '以会话里的最新输出为准；切出再切回本标签会自动重取。';
+    if (bar && mins >= 10) {
+      bar.textContent = '⚠ 本页是 ' + mins + ' 分钟前的快照。面板会在流程'
+        + '重新生成时自动更新；若长时间没动静，可能是流程还没走到会更新'
+        + '面板的节点——以会话里的最新输出为准。';
       bar.hidden = false;
     }
   }
   tick();
   setInterval(tick, 60000);
 })();
-function dx(el){
-  var gap = el.nextElementSibling;
-  if (gap) { gap.hidden = false; }
-  el.parentNode.removeChild(el);
-}
-V.addEventListener('click', function(e){ if (e.target === V) hide(); });
-document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape') hide();
-});
-// 自动刷新:file:// 没有服务端推送,退而求其次——切回本标签页时重载,
-// 你回来看的那一刻正好是它该最新的那一刻;阅读层开着时不打扰。
-document.addEventListener('visibilitychange', function(){
-  if (!document.hidden && !V.classList.contains('on')) { location.reload(); }
-});
 """

@@ -160,9 +160,7 @@ def _pending_section(pending, doc_key_by_path):
 
 
 def _born_epoch():
-    """页面出生时刻:陈旧自检用。面板是快照不是实时视图,显示与当前阶段
-    不符的信息会造成误解(用户红线);file:// 读不到新状态,只能诚实地
-    按时间弱声明"可能已过期",绝不假装自己是最新的。"""
+    """页面出生时刻:自动重载与陈旧自检共用的基准。"""
     import time as _time
     return int(_time.time())
 
@@ -349,7 +347,7 @@ def _progress_section(progress):
                progress["revisits"]["goto"]))
 
 
-def render(snapshot, changes=(), root="."):
+def render(snapshot, changes=(), root=".", born=None):
     """快照(+变更组) → 完整 HTML 文本。"""
     changes = tuple(changes)  # 既给摘要统计,也给 diff 渲染;生成器不能只消费一次
     doc_rows, doc_tabs, doc_panes = _document_panes(
@@ -364,7 +362,7 @@ def render(snapshot, changes=(), root="."):
         "css": assets.CSS + plantuml.SVG_CSS,
         "js": assets.JS,
         "rail": _phase_rail(snapshot["progress"]["step"]),
-        "born": _born_epoch(),
+        "born": born or _born_epoch(),
         "ticket": escape(snapshot["delivery"]["ticket"] or "（无在途单）"),
         "branch": escape(snapshot["repo"]["branch"]),
         "baseline": escape(snapshot["repo"]["baseline"]),
@@ -405,6 +403,28 @@ def render(snapshot, changes=(), root="."):
     return TEMPLATE % context
 
 
+def write_page(target, snapshot, changes=(), root="."):
+    """写面板,并在同目录留一个 stamp 文件供页面自动发现更新。
+
+    file:// 页面不能 fetch 自己所在目录的文件(浏览器拦),但可以用
+    <script src> 加载同目录脚本——于是页面每几秒探一次 stamp,
+    发现比自己新就自动重载。手动"重读"按钮因此退役:它只在
+    "文件刚被重生成、而你恰好没切走"这一种情况下有用,其余时候
+    点了没反应,反而制造"我刷新过了"的错觉。
+    """
+    born = _born_epoch()
+    html = render(snapshot, changes, root, born=born)
+    folder = os.path.dirname(target)
+    if folder and not os.path.isdir(folder):
+        os.makedirs(folder, exist_ok=True)
+    with io.open(target, "w", encoding="utf-8") as stream:
+        stream.write(html)
+    stamp = os.path.join(folder or ".", "panel-stamp.js")
+    with io.open(stamp, "w", encoding="utf-8") as stream:
+        stream.write("window.__panelStamp=%d;\n" % born)
+    return len(html.encode("utf-8"))
+
+
 TEMPLATE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -412,9 +432,7 @@ TEMPLATE = """<!doctype html>
 <style>%(css)s</style></head><body data-born="%(born)s">
 <div id="stale" hidden></div><div class="workbench">
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
-<h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s
-<button id="reget" onclick="location.reload()"
- title="重新读一遍面板文件。面板由流程在关键节点自动生成，若还没生成新版本，内容不会变——想要最新现场，在会话里说一句「刷新面板」">↻ 重读</button></div>
+<h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s</div>
 </div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>
 <span>HEAD %(head)s</span></div>%(rail)s</header>
 %(summary)s

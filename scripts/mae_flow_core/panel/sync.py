@@ -35,11 +35,9 @@ def _rebuild(state_path):
     data = snapshot.build(root, state, flow)
     changes = snapshot.changes(
         root, state.get("implementation_base_head", ""))
-    html = page.render(data, changes, root)
-    target = os.path.join(root, ".mae-flow-work", "panel.html")
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    with open(target, "w", encoding="utf-8") as stream:
-        stream.write(html)
+    page.write_page(
+        os.path.join(root, ".mae-flow-work", "panel.html"),
+        data, changes, root)
     return True
 
 

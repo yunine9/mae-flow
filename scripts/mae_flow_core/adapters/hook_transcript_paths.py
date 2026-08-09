@@ -95,3 +95,32 @@ def resolve_agent_transcript(payload, invocation_id=""):
         if bound:
             return bound
     return explicit
+
+
+def transcript_quality_call(payload, invocation_id, load_calls, pick_call,
+                            attempts=10, delay=0.6, sleep=None,
+                            log=lambda message: None):
+    """有界重试取证:宿主在 SubagentStop 事件之后才把子会话账本刷盘。
+
+    实测误差表(fieldtest 2026-08-09):meta.json 启动即落盘,transcript
+    却晚于事件 0~8 秒——当场读取天然竞态,fail-closed 会把真实执行过的
+    编译判成无证据。重试直到取到含最终 tool_result 的匹配调用;
+    半行 JSON(还在刷盘)同样重试;等不到按原 fail-closed 语义交还调用方。
+    """
+    import time as _time
+    sleep = sleep or _time.sleep
+    for attempt in range(attempts):
+        if attempt:
+            sleep(delay)
+        path = resolve_agent_transcript(payload, invocation_id)
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            calls = load_calls(path)
+        except Exception as exc:           # noqa: BLE001 —— 半个 JSON 行
+            log("quality transcript retry#%d: %s" % (attempt, exc))
+            continue
+        call = pick_call(calls)
+        if call is not None and getattr(call, "result_seen", False):
+            return call
+    return None

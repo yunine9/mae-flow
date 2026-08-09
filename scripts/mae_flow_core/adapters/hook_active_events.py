@@ -31,6 +31,7 @@ from mae_flow_core.adapters.hook_agent_lifecycle import HookAgentLifecycle
 from mae_flow_core.panel import sync as panel_sync
 from mae_flow_core.adapters.hook_transcript_paths import (
     resolve_agent_transcript,
+    transcript_quality_call,
 )
 from mae_flow_core.workflow.agent_observations import (
     record_agent_started,
@@ -343,17 +344,18 @@ class ActiveHookEventAdapter:
         if kind not in ("COMPILE", "CODECHECK", "UT"):
             return
         state = self.runtime._contract_state()
-        path = self._explicit_transcript_path(payload, invocation_id)
-        calls = ()
-        if path:
-            try:
-                calls = parse_transcript(
-                    self._load_agent_transcript(path)).tool_calls
-            except Exception as exc:
-                self.log("quality transcript EXC(fail-closed evidence): %s" % exc)
         task = (state.get("agent_tasks", {}) or {}).get(kind, {}) or {}
-        call = self._quality_call(
-            kind, calls, state.get("config", {}) or {}, task)
+        # 宿主把 transcript 刷盘晚于事件本身(实测 0~8 秒),必须重试等落盘
+        call = transcript_quality_call(
+            payload, invocation_id,
+            lambda path: parse_transcript(
+                self._load_agent_transcript(path)).tool_calls,
+            lambda calls: self._quality_call(
+                kind, calls, state.get("config", {}) or {}, task),
+            log=self.log)
+        if call is None and lifecycle == "returned":
+            self.log("quality transcript unresolved after retries"
+                     "(fail-closed evidence)")
         command = ""
         if call:
             value = call.input

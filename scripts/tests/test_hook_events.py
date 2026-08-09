@@ -360,6 +360,79 @@ class MetaBoundTranscriptTests(unittest.TestCase):
         ambiguous = resolve_agent_transcript(payload, "toolu_ABC")
         self.assertTrue(ambiguous.endswith("agent-wrong999.jsonl"))
 
+    def test_transcript_flush_race_is_absorbed_by_bounded_retry(self):
+        """实测误差表:meta 启动即落盘,transcript 晚于 SubagentStop 0~8 秒。
+        当场读取把真实执行过的编译判成无证据——重试等落盘,等到含最终
+        tool_result 的匹配调用才收工。"""
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            transcript_quality_call)
+        root = tempfile.mkdtemp(prefix="flush-race-")
+        self.addCleanup(shutil.rmtree, root, True)
+        sub = os.path.join(root, "s", "subagents")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "agent-x.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"toolUseId": "toolu_R"}, stream)
+        jsonl = os.path.join(sub, "agent-x.jsonl")
+        payload = {"transcript_path": os.path.join(root, "s.jsonl")}
+
+        class Call:
+            result_seen = True
+        ticks = {"n": 0}
+
+        def sleep(_seconds):
+            ticks["n"] += 1
+            if ticks["n"] == 2:            # 第三次尝试前文件才"刷盘"
+                with open(jsonl, "w", encoding="utf-8") as stream:
+                    stream.write("{}\n")
+
+        call = transcript_quality_call(
+            payload, "toolu_R",
+            load_calls=lambda path: ["parsed"],
+            pick_call=lambda calls: Call(),
+            attempts=6, delay=0, sleep=sleep)
+        self.assertIsNotNone(call)
+        self.assertGreaterEqual(ticks["n"], 2)
+
+    def test_partial_flush_and_never_arriving_transcript(self):
+        import json as jsonlib
+        import tempfile, shutil
+        from mae_flow_core.adapters.hook_transcript_paths import (
+            transcript_quality_call)
+        root = tempfile.mkdtemp(prefix="flush-race2-")
+        self.addCleanup(shutil.rmtree, root, True)
+        sub = os.path.join(root, "s", "subagents")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "agent-y.meta.json"), "w",
+                  encoding="utf-8") as stream:
+            jsonlib.dump({"toolUseId": "toolu_P"}, stream)
+        with open(os.path.join(sub, "agent-y.jsonl"), "w",
+                  encoding="utf-8") as stream:
+            stream.write("{broken\n")
+        attempts_seen = {"n": 0}
+
+        def load(_path):
+            attempts_seen["n"] += 1
+            if attempts_seen["n"] < 3:
+                raise ValueError("半行 JSON:还在刷盘")
+            return ["ok"]
+
+        class Call:
+            result_seen = True
+        call = transcript_quality_call(
+            {"transcript_path": os.path.join(root, "s.jsonl")}, "toolu_P",
+            load_calls=load, pick_call=lambda calls: Call(),
+            attempts=6, delay=0, sleep=lambda _s: None)
+        self.assertIsNotNone(call)         # 半行 JSON 重试后成功
+        # 永远等不到 → None,fail-closed 语义交还调用方
+        missing = transcript_quality_call(
+            {"transcript_path": os.path.join(root, "s.jsonl")}, "toolu_NONE",
+            load_calls=lambda p: [], pick_call=lambda c: None,
+            attempts=3, delay=0, sleep=lambda _s: None)
+        self.assertIsNone(missing)
+
     def test_existing_explicit_path_wins_over_meta(self):
         import json as jsonlib
         import tempfile, shutil

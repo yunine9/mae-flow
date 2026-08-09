@@ -412,7 +412,9 @@ TEMPLATE = """<!doctype html>
 <style>%(css)s</style></head><body data-born="%(born)s">
 <div id="stale" hidden></div><div class="workbench">
 <header><div class="header-top"><div><span class="eyebrow">MAE FLOW / %(ticket)s</span>
-<h1>交付工作台</h1></div><div class="header-state">%(stamp)s · rev %(revision)s</div>
+<h1>交付工作台</h1></div><div class="header-state"><span id="age"></span>%(stamp)s · rev %(revision)s
+<button id="reget" onclick="location.reload()"
+ title="重新读取磁盘上的快照文件；不会触发流程重算">↻ 重取</button></div>
 </div><div class="hd-meta"><span>分支 %(branch)s</span><span>基线 %(baseline)s</span>
 <span>HEAD %(head)s</span></div>%(rail)s</header>
 %(summary)s

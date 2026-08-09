@@ -34,6 +34,11 @@ body{margin:0;background:var(--bg);color:var(--ink);
   border:0}
 #stale{background:var(--warn-bg);color:var(--warn);font-size:12px;
   padding:8px 22px;border-bottom:1px solid var(--warn)}
+#reget{margin-left:10px;font:inherit;font-size:11px;color:var(--dim);
+  background:var(--card);border:1px solid var(--line);border-radius:6px;
+  padding:2px 8px;cursor:pointer}
+#reget:hover{color:var(--accent);border-color:var(--accent)}
+#age{color:var(--faint);margin-right:8px}
 
 /* ── 紧凑页眉与阶段轨道 ── */
 header{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
@@ -328,8 +333,14 @@ function hide(){ V.classList.remove('on'); }
   var born = Number(document.body.dataset.born || 0) * 1000;
   var bar = document.getElementById('stale');
   if (!bar || !born) { return; }
+  var age = document.getElementById('age');
   function tick(){
     var mins = Math.floor((Date.now() - born) / 60000);
+    if (age) {
+      age.textContent = mins < 1 ? '刚刚生成 · '
+        : (mins < 60 ? mins + ' 分钟前 · '
+          : Math.floor(mins / 60) + ' 小时前 · ');
+    }
     if (mins >= 10) {
       bar.textContent = '⚠ 本页是 ' + mins + ' 分钟前的快照，流程可能已经推进——'
         + '以会话里的最新输出为准；切出再切回本标签会自动重取。';

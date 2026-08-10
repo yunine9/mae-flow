@@ -4,7 +4,8 @@ from .shared import (
     CONFIG_CONFIRM_ACK, FAILURE_PATH, STATE_PATH, hashlib, json, re, read_text, time,
     update_json, workflow_completion,
 )
-from .ack_confirmation import is_full_config_confirmation
+from .ack_confirmation import (
+    is_full_config_confirmation, reviewed_config, whole_card_values)
 from .wiring import api
 
 def _evidence_failure_count(sid, success=False):
@@ -443,13 +444,18 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         and item.get("config_review_id") == review_id
     ]
     normalized_ack = re.sub(r"\s+", "", ack or "")
+    reviewed = reviewed_config(st)
     matched = False
     for item in messages:
-        for candidate in _trusted_answer_candidates(item.get("text", "")):
+        # 结构上有资格替整份背书的回答优先;拿不到结构就退回全部候选值
+        eligible = whole_card_values(item.get("text", ""), reviewed)
+        for candidate in (
+                eligible if eligible is not None
+                else _trusted_answer_candidates(item.get("text", ""))):
             same_answer = (
                 normalized_ack == candidate if normalized_ack else True)
             if same_answer and is_full_config_confirmation(
-                    candidate, (st or {}).get("config")):
+                    candidate, reviewed_config(st)):
                 matched = True
                 break
         if matched:
@@ -459,7 +465,7 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         return True, ""
 
     if normalized_ack and not is_full_config_confirmation(
-            normalized_ack, (st or {}).get("config")):
+            normalized_ack, reviewed_config(st)):
         why = (
             "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
             "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"

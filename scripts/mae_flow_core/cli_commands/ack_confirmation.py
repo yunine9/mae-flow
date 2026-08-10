@@ -1,5 +1,6 @@
 """配置确认的判定。单独成文件:ack.py 已顶到 500 行红线。"""
 
+import json
 import re
 
 
@@ -33,3 +34,38 @@ def is_full_config_confirmation(value, config=None):
         and str(item).strip() in compact
     ]
     return not named
+
+
+def whole_card_values(text, config):
+    """→ 这条收据里"有资格替整份配置背书"的回答值;不适用则返回 None。
+
+    最笨也最可靠的判据是看结构,不猜措辞:一轮提问里可以既有单项回答、又有
+    整份确认——
+        {"answers": {"基线分支": "确认 master",      ← 单项,永不算整份
+                     "最终确认": "确认以上全部配置"}}  ← 独立确认题,才算
+    键是配置项名的,回答的就是那一项;键是别的(专门的确认题),才可能是整份。
+    自然语言表达肯定的方式千奇百怪,而结构只有这一种。
+    """
+    keys = set(config or {})
+    if not keys:
+        return None
+    try:
+        payload = json.loads(str(text or ""))
+    except Exception:                      # noqa: BLE001 —— 不是 JSON 就不判
+        return None
+    answers = payload.get("answers") if isinstance(payload, dict) else None
+    if not isinstance(answers, dict):
+        return None
+    return [
+        re.sub(r"\s+", "", str(value or ""))
+        for key, value in answers.items()
+        if key not in keys
+    ]
+
+
+def reviewed_config(st):
+    """待确认的配置在 config_review.config 里;此刻 st["config"] 往往还是空的。
+    取错地方的后果:单项回答("确认 master")找不到可比对的值,就被当成整份确认。"""
+    state = st or {}
+    review = (state.get("config_review") or {}).get("config") or {}
+    return review or (state.get("config") or {})

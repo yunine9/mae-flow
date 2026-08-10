@@ -60,3 +60,47 @@ class UserDecisionIsFinalTests(unittest.TestCase):
                       encoding="utf-8") as stream:
             source = stream.read()
         self.assertIn('"shown"', source, "收据要留档用户看见的那一屏")
+
+
+class ConfirmationByStructureTests(unittest.TestCase):
+    """"肯定"不靠猜措辞,靠看结构——自然语言表达肯定的方式千奇百怪。
+
+    原来配置确认是措辞白名单(只认"确认以上全部配置"那几句),用户点了
+    「配置无误,开始交付」照样不通过;而选项文字是模型写的,弱模型必然换说法。
+    改判之后的判据是结构:一轮提问里可以既有单项回答又有整份确认,
+    键是配置项名的永远只代表那一项,键是独立确认题的才可能代表整份。
+    """
+
+    def _payload(self, answers, questions=None):
+        import json as _json
+        return _json.dumps({"questions": questions or [],
+                            "answers": answers}, ensure_ascii=False)
+
+    def test_mixed_receipt_keeps_the_whole_card_answer(self):
+        from mae_flow_core.cli_commands.ack_confirmation import (
+            whole_card_values)
+        config = {"基线分支": "master", "单号": "REQ1"}
+        values = whole_card_values(self._payload({
+            "基线分支": "确认 master",
+            "单号": "沿用 REQ1",
+            "最终确认": "确认以上全部配置",
+        }), config)
+        self.assertEqual(["确认以上全部配置"], values,
+                         "单项回答不算整份;同一轮里的确认题要留下")
+
+    def test_per_field_only_receipt_authorizes_nothing_whole(self):
+        from mae_flow_core.cli_commands.ack_confirmation import (
+            whole_card_values)
+        values = whole_card_values(
+            self._payload({"基线分支": "确认 master"}),
+            {"基线分支": "master", "单号": "REQ1"})
+        self.assertEqual([], values)
+
+    def test_wording_no_longer_decides(self):
+        from mae_flow_core.cli_commands.ack_confirmation import (
+            is_full_config_confirmation)
+        for said in ("确认以上全部配置", "全部正确", "配置无误，开始交付",
+                     "没问题，继续", "都正确", "ok"):
+            self.assertTrue(is_full_config_confirmation(said), said)
+        for said in ("需要修改", "不确认", "是否可以?", "看看再说", ""):
+            self.assertFalse(is_full_config_confirmation(said), said)

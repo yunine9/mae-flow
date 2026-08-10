@@ -46,9 +46,28 @@ def _active_change_count():
     from mae_flow_core import specengine
     return len(specengine._list_active_changes(os.getcwd()))
 
+def _quality_rounds(st):
+    """质量检视已经回环几轮:数历史里 quality_review 判了几次"要调整"。"""
+    return sum(
+        1 for item in (st or {}).get("history", []) or []
+        if isinstance(item, dict) and item.get("step") == "quality_review"
+        and "revise" in str(item.get("result", "")))
+
+
 def _sentinel_lines(sid, st):
     """在建区残留诊断。阶段错位这一整类随 v3 消失(阶段与流程同源,不可能不一致)。"""
     out = []
+    # 质量回环没有上限,转到不再有新问题为止——可它每轮都要重编、复验,
+    # 是全流程最贵的循环之一。第三轮起提醒收敛,与 CodeCheck 的两轮上限同口径:
+    # 剩下的不是不修,是记成遗留交给下一单,别在这儿逐轮打磨。
+    if sid == "quality_review":
+        rounds = _quality_rounds(st)
+        if rounds >= 2:
+            out.append(
+                "⚠ 本步已回环 %d 轮。第 3 轮起请收敛:只处理会让交付不可用的"
+                "问题;其余写进最终交付说明记为遗留,选「继续提交」推进——"
+                "每多转一轮都要重编译加复验,代价比遗留本身大。" % rounds)
+    return out
     n = _active_change_count()
     if n > 1:
         out.append(f"⚠ 在建区有 {n} 个 change 目录(应只有当前单一个)。当前单为 "

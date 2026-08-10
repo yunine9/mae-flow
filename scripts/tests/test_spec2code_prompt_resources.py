@@ -601,3 +601,43 @@ class SourceLockedStepsDeclareTheirEdgeTests(unittest.TestCase):
             [], silent,
             "这些步骤会因源码变化作废证据,却没说清本步能不能改码: %s"
             % silent)
+
+
+class PacingTests(unittest.TestCase):
+    """两处最贵的循环:澄清逐题问、质量反复回环。
+
+    实测:一轮交付里 grill 用掉 23 轮(全程约三分之一),质量回环每转一圈
+    都要重编译加复验。两处都不该靠"多转几轮"解决。
+    """
+
+    def test_independent_questions_may_be_asked_together(self):
+        grill = read("flow/steps/grill.md")
+        self.assertIn("彼此独立的题一次问 3～4 个", grill)
+        # 合并有边界:依赖前一题的、以及高影响裁决,必须单独问
+        self.assertIn("必须单独问的两类，不许合并", grill)
+        self.assertIn("高影响裁决", grill)
+        self.assertIn("拿不准是否相关就分开问", grill)
+        # 衍生检查跟着一组答案跑,不能因为合并就漏掉
+        self.assertIn("每拿到**一组**答案", grill)
+
+    def test_quality_loop_is_told_to_converge(self):
+        step = read("flow/steps/quality_review.md")
+        self.assertIn("回环要收敛", step)
+        self.assertIn("第 3 轮起", step)
+        self.assertIn("记为遗留", step)
+
+    def test_convergence_hint_counts_actual_revise_rounds(self):
+        from mae_flow_core.cli_commands.current import (
+            _quality_rounds, _sentinel_lines)
+        state = {"history": [
+            {"step": "quality_review", "result": "revise"},
+            {"step": "quality_review", "result": "revise"},
+            {"step": "build_review", "result": "revise"},
+        ]}
+        self.assertEqual(2, _quality_rounds(state))
+        told = " ".join(_sentinel_lines("quality_review", state))
+        self.assertIn("已回环 2 轮", told)
+        self.assertIn("记为遗留", told)
+        # 头两轮不啰嗦
+        first = {"history": [{"step": "quality_review", "result": "revise"}]}
+        self.assertEqual([], _sentinel_lines("quality_review", first))

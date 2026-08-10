@@ -54,12 +54,41 @@ def _quality_rounds(st):
         and "revise" in str(item.get("result", "")))
 
 
+def _scope_drift_line(sid, st):
+    """确认规格时提醒:哪些主题在规格里反复出现,而需求原文一次都没有。
+
+    实战:一次"新增短信渠道与失败重试"的交付,规格里凭空长出了告警(11 次)、
+    灰度(9 次)、回滚(9 次),一路实现到交付共 25 个文件 +2076 行。流程一直在
+    检查"验收项都实现了吗",从没检查反方向:这条验收项是从哪来的。
+    """
+    from mae_flow_core.panel.snapshot import ACK_REVIEW_DOCS
+    from mae_flow_core.workflow.scope_drift import (
+        drift_notice, invented_topics)
+    if "spec" not in (ACK_REVIEW_DOCS.get(sid) or ()):
+        return ""
+    config = (st or {}).get("config", {}) or {}
+    ticket = str(config.get("单号", "") or "")
+    want = str(config.get("需求文档", "") or "")
+    spec = os.path.join(".mae-flow-work", ticket, "spec.md")
+    try:
+        with open(want, encoding="utf-8", errors="replace") as stream:
+            requirement = stream.read()
+        with open(spec, encoding="utf-8", errors="replace") as stream:
+            drafted = stream.read()
+    except OSError:
+        return ""            # 读不到就不说话,绝不猜
+    return drift_notice(invented_topics(requirement, drafted))
+
+
 def _sentinel_lines(sid, st):
     """在建区残留诊断。阶段错位这一整类随 v3 消失(阶段与流程同源,不可能不一致)。"""
     out = []
     # 质量回环没有上限,转到不再有新问题为止——可它每轮都要重编、复验,
     # 是全流程最贵的循环之一。第三轮起提醒收敛,与 CodeCheck 的两轮上限同口径:
     # 剩下的不是不修,是记成遗留交给下一单,别在这儿逐轮打磨。
+    drift = _scope_drift_line(sid, st)
+    if drift:
+        out.append(drift)
     if sid == "quality_review":
         rounds = _quality_rounds(st)
         if rounds >= 2:

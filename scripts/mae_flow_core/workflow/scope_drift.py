@@ -31,49 +31,58 @@ _TERM = re.compile(r"[一-龥]{2,6}")
 _CODE_SPAN = re.compile(r"`[^`]*`|```.*?```", re.S)
 
 
-def _terms(text):
-    """取中文主题词;代码片段里的东西不算(那是实现细节,不是需求主题)。
+def _tally(text):
+    """→ ({词: 出现次数}, {词: 出现在哪几种连续串里})。
 
-    连续中文串要连同它的 2~3 字子串一起产出:整串取最长会把"失败率告警"当成
-    一个词,真正该报的"告警"反而漏掉——实战里就是这么差点错过的。
+    连续中文串要连同 2~3 字子串一起算:整串取最长会把"失败率告警"当成一个词,
+    真正该报的"告警"反而漏掉。但子串容易切出碎片("按租户开通短信"→"开通短"),
+    所以另记它出现在几种不同说法里——跨两种以上才当主题。
     """
     plain = _CODE_SPAN.sub(" ", text or "")
-    whole, inside = [], {}
+    counts, spread = {}, {}
     for run in _TERM.findall(plain):
-        if run not in _COMMON:
-            whole.append(run)
-        if len(run) <= 3:
-            continue
-        for size in (2, 3):
-            for start in range(len(run) - size + 1):
-                piece = run[start:start + size]
-                if piece not in _COMMON and piece != run:
-                    inside.setdefault(piece, set()).add(run)
-    # 子串只在"跨两种以上说法都出现"时才算主题:"告警"来自「失败率告警」
-    # 与「监控与告警」两处,是真主题;"开通短"只从「按租户开通短信」切出来,
-    # 是切碎的噪声。
-    for piece, runs in inside.items():
-        if len(runs) >= 2:
-            whole += [piece] * sum(1 for r in runs for _ in (0,))
-            whole += [piece] * (len(runs) - 1)
-    return whole
+        pieces = [run]
+        if len(run) > 3:
+            pieces += [run[i:i + n]
+                       for n in (2, 3)
+                       for i in range(len(run) - n + 1)]
+        for piece in pieces:
+            if piece in _COMMON:
+                continue
+            counts[piece] = counts.get(piece, 0) + 1
+            spread.setdefault(piece, set()).add(run)
+    return counts, spread
 
 
-def invented_topics(requirement, spec, floor=5, limit=5):
+def _is_new_topic(word, said, everything, spread, runs):
+    """这个词算不算"新开的范围"。
+
+    三道:说过的不算(整词或更长说法都算说过);只在一种说法里出现的子串是切碎的
+    噪声,不是主题("按租户开通短信"切出的"开通短")。
+    """
+    if word in said or word in everything:
+        return False
+    return len(spread.get(word) or ()) >= 2 or word in runs
+
+
+def invented_topics(requirement, spec, floor=5, limit=3, approved=""):
     """→ [(主题词, 在规格里出现次数)]，按出现次数从多到少。
 
-    只报"在规格里反复出现(默认 ≥3 次)、而需求原文一次都没有"的词。偶尔提一句
-    的不报——那多半是行文用语,不是新开的范围。
+    漂移的定义是"需求原文没有、用户也没说过"。用户在澄清阶段亲口说的词是合法
+    新增(他拍板加的),所以 approved 传用户真实回复原文,一并算作"说过"。
+    不这么做的话每轮都会报出一串行文词(格式/会话/号码…),报多了就没人看——
+    今晚修的一堆"每单必现的提示"就是这个毛病。
+
+    只报在规格里反复出现(默认 ≥5 次)的;偶尔提一句的不报,那多半是行文用语。
     """
-    said = set(_terms(requirement))
-    seen = {}
-    for word in _terms(spec):
-        if word in said:
-            continue
-        # 需求里没整词,但可能以更长的说法出现过(如"重试"vs"失败重试")
-        if word in (requirement or ""):
-            continue
-        seen[word] = seen.get(word, 0) + 1
+    said = set(_tally(requirement)[0]) | set(_tally(approved)[0])
+    counts, spread = _tally(spec)
+    runs = set(_TERM.findall(spec))
+    everything = (requirement or "") + "\n" + (approved or "")
+    seen = {
+        word: count for word, count in counts.items()
+        if _is_new_topic(word, said, everything, spread, runs)
+    }
     # 只报 2~4 字:真正的主题词都在这个长度,更长的是短语("按租户开通短信"),
     # 拿它当"需求里没有的新范围"报出来纯属噪声。
     ranked = sorted(

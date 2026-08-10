@@ -100,7 +100,18 @@ def note_scope_drift(state_path, written_path):
         requirement = stream.read()
     with open(written_path, encoding="utf-8", errors="replace") as stream:
         drafted = stream.read()
-    said = drift_notice(invented_topics(requirement, drafted))
+    # 用户在澄清阶段亲口说过的词算合法新增,一并排除
+    approved = ""
+    try:
+        with open(state_path + ".usermsg", encoding="utf-8") as stream:
+            approved = " ".join(
+                str(item.get("text", ""))
+                for item in (json.load(stream).get("messages") or [])
+                if isinstance(item, dict))
+    except Exception:                      # noqa: BLE001 —— 取不到就只比需求
+        approved = ""
+    said = drift_notice(invented_topics(requirement, drafted,
+                                        approved=approved))
     if not said:
         return False
     record_advisory(state_path, str(state.get("current", "")), "scope-drift",

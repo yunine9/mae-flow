@@ -58,6 +58,28 @@ class ScopeDriftTests(unittest.TestCase):
         self.assertEqual([], invented_topics(requirement, spec))
         self.assertEqual("", drift_notice([]))
 
+    def test_words_the_user_actually_said_are_not_drift(self):
+        """用户在澄清阶段亲口说的词是合法新增(他拍板加的),不能报成漂移。
+
+        不这么过滤,每轮都会报出一串行文词,报多了就没人看——今晚修的一堆
+        "每单必现的提示"正是这个毛病。真实宿主的 usermsg 台账里有用户原话;
+        无人值守宿主拿不到,那时就只比需求原文。
+        """
+        from mae_flow_core.workflow.scope_drift import invented_topics
+        requirement = "新增短信渠道,失败重试。\n"
+        # 主题词要跨两种说法出现才算主题(子串判据),所以两种写法各来几遍
+        spec = (("网关失败才重试\n" * 3) + ("网关抖动要重试\n" * 3)
+                + ("告警通知\n" * 3) + ("失败率告警\n" * 3))
+        # 只比需求:两个都报
+        bare = [word for word, _ in invented_topics(requirement, spec)]
+        self.assertIn("网关", bare)
+        self.assertIn("告警", bare)
+        # 用户说过"只对网关失败重试" → 网关不再算漂移,告警照报
+        filtered = [word for word, _ in invented_topics(
+            requirement, spec, approved="这个重试只对网关失败生效")]
+        self.assertNotIn("网关", filtered)
+        self.assertIn("告警", filtered)
+
     def test_fires_when_the_spec_lands_not_when_the_step_opens(self):
         """进 open 那会儿 spec.md 还不存在,读不到只能静默——实测就是这么
         没打出来的。改挂在写盘那一刻,记成非阻断提示。"""

@@ -223,7 +223,8 @@ def confirm_delivery_manifest(
             raise ValueError(error)
         if not str(answer or "").strip():
             raise ValueError("用户确认内容为空")
-        if not command_api._is_positive_confirmation(answer):
+        from mae_flow_core.workflow.consent import is_refusal
+        if is_refusal(answer):
             raise ValueError(
                 "用户回答没有明确批准当前交付清单；"
                 "清单保持待确认，请按用户意见修改后重新展示")

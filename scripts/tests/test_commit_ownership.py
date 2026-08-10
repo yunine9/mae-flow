@@ -150,7 +150,10 @@ class CommitOwnershipTests(unittest.TestCase):
         self.assertNotEqual(0, blocked.returncode, output)
         permit_id = mf._gate_block_id(rule, command)
         state = mf.load_state()
-        self.capture_user_message(state, ack)
+        # 按新契约:问用户的那句话里必须带上本次放行编号。编号是流程在拦截那一刻
+        # 生成的,Agent 只能从拦截消息里抄——抄了就意味着它真把这次动作摆给用户
+        # 看过,别处的同意也就挪不过来。
+        self.capture_user_message(state, "%s（放行编号 %s）" % (ack, permit_id))
         with contextlib.redirect_stdout(io.StringIO()):
             mf.cmd_allow(
                 mf.FLOW,

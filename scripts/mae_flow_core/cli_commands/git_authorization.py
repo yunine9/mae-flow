@@ -244,38 +244,6 @@ def _authorization_ack_covers(record, ack, shown=""):
     )
 
 
-AFFIRMED = ("允许", "同意", "可以", "批准", "放行", "确认", "授权",
-            "yes", "ok", "approve", "allow")
-REFUSED = ("不允许", "不同意", "拒绝", "取消", "别", "先不", "no", "deny")
-
-
-def answer_is_affirmative(answer):
-    """回答本身必须是肯定的。范围可以由所见问题界定,同意与否只能看回答。"""
-    said = str(answer or "").strip().lower()
-    if not said or any(word in said for word in REFUSED):
-        return False
-    return any(word in said for word in AFFIRMED)
-
-
-def authorization_gap(record, ack, shown=""):
-    """→ 用户原话没覆盖到的那些路径(或 commit)。
-
-    原来只说"原话未覆盖本动作的全部路径",不说缺哪些、也不说怎么补,
-    模型只能猜——实战里它去传 `allow --paths ...`,而 allow 根本没这个参数,
-    撞上参数错误。拒绝可以,但必须说清下一步。
-    """
-    acknowledged = (str(ack or "") + "\n" + str(shown or "")).replace(
-        "\\", "/")
-    if (record or {}).get("operation") == "revert":
-        commit = str((record or {}).get("commit", ""))
-        return [] if commit.lower() in acknowledged.lower() else [commit]
-    return [
-        str(path).replace("\\", "/")
-        for path in (record or {}).get("paths", ())
-        if str(path).replace("\\", "/") not in acknowledged
-    ]
-
-
 def _authorization_result_valid(record, path):
     if (
             not record.get("finalized")

@@ -237,7 +237,8 @@ def _apply(state, args, root, package):
             raise ValueError(error)
         if not str(answer or "").strip():
             raise ValueError("用户确认内容为空")
-        if not api._is_positive_confirmation(answer):
+        from mae_flow_core.workflow.consent import is_refusal
+        if is_refusal(answer):
             raise ValueError(
                 "用户回答没有明确批准本次领域归档；候选已保留，"
                 "按用户意见修改后重新 prepare/show")

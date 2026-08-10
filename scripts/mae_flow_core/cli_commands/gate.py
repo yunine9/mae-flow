@@ -69,6 +69,19 @@ def _lightcheck_advisory(result):
     return "\n".join(lines)
 
 
+def _relay_hint(block_id):
+    """告诉 Agent 怎么征求许可:编号必须写进问用户的那句话。
+
+    授权验真只认"这条回答里有本次编号"——所以编号不能只印在报错里给 Agent 看,
+    必须转述给用户。不说这一句,Agent 就会拿别处的同意来试,试不通再瞎猜参数
+    (实战里它去传了 allow --paths,而这个参数不存在)。
+    """
+    return ("\n如需放行:用 AskUserQuestion 征求用户许可,"
+            "**把放行编号 %s 原样写进问题正文**(选项照旧简短,如「允许」「不允许」),"
+            "再执行 allow %s --message-id <那条消息的 ID>。"
+            % (block_id, block_id))
+
+
 def _keep_advisory(st, kind, message):
     """Non-blocking Gate signals must survive the exit-0 stderr black hole."""
     if not message:

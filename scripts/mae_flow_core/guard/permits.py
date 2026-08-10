@@ -65,12 +65,18 @@ def strike_escalation(
             "(质量步骤用 defer)留痕停止,把拦截编号 %s 写进 reason,早晨由用户裁决。"
             % (count, permit_id)
         )
+    # 原来这段让 Agent 去"找用户明确授权 exact 动作/path/commit 的原话"——
+    # 于是它拿别处的同意来试,再瞎猜参数(实战撞过 allow --paths,这参数不存在)。
+    # 现在只说一件事:把编号写进问用户的那句话。验真只认这个,别的都不比。
     return (
-        "\n⚠ 本规则本次拦截编号 %s。不要重试写法变体；若当前步骤已捕获到用户"
-        "明确授权这一个 exact 动作/path/commit 的原话，先执行 messages 取得"
-        "该回答 ID，再执行 python \"%s\" allow %s --message-id <ID>。"
-        "否则先把动作原文和本次全部风险展示给用户裁决。放行只对这个动作"
-        "生效一次，绑定当前步骤与代码版本；Git exact 授权消费后会留下 delivery"
-        " 收据，push/done 不会重复否定。若动作确属违规，回到 current 指引。"
-        % (permit_id, script_path, permit_id)
+        "\n⚠ 本规则本次拦截编号 %s。不要重试写法变体。放行办法:\n"
+        "  1) 用 AskUserQuestion 把本次动作和风险摆给用户,"
+        "**问题正文里原样带上编号 %s**(选项照旧简短,如「允许」「不允许」);\n"
+        "  2) messages 取到那条回答的 ID;\n"
+        "  3) python \"%s\" allow %s --message-id <ID>。\n"
+        "验真只看两条:这条回答里有本次编号、且不是拒绝——不必让用户复述路径,"
+        "也不要替他补写或概括。放行只对这个动作生效一次,绑定当前步骤与代码版本;"
+        "Git exact 授权消费后会留下 delivery 收据,push/done 不会重复否定。"
+        "若动作确属违规,回到 current 指引。"
+        % (permit_id, permit_id, script_path, permit_id)
     )

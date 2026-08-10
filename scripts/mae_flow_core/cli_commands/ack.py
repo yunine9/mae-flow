@@ -201,6 +201,10 @@ def _authorization_message(st, message_id):
             answer.encode("utf-8")).hexdigest(),
         "captured_at": str(row.get("at", "") or ""),
         "step": str(row.get("step", "") or st.get("current", "")),
+        # 用户点选时"看见的那一屏"原样留档:多路径 Git 放行要靠它界定范围。
+        # 回答本身是个短选项标签(流程明令选项要短),装不下十几个路径;
+        # 而问题文本是宿主记录的、Agent 事后改不了的。点选授权的是所见内容。
+        "shown": str(row.get("text", "") or "")[:8000],
     }
     _ack_failure(st, success=True)
     return True, answer, receipt, ""

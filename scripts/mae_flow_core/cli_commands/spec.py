@@ -387,14 +387,29 @@ def cmd_allow(flow, st, args):
         if modeled_action is not None:
             action = api._git_authorization_record(
                 modeled_action)
+        shown = str((authorization_receipt or {}).get("shown", ""))
+        from .git_authorization import answer_is_affirmative
+        if action and not answer_is_affirmative(authorization):
+            api.die(
+                "这条回答不是明确同意(原话: %s)。用户高于一切,但同意与否只能"
+                "看用户自己的回答——请重新征求明确许可,不要替他解读。"
+                % (authorization or "(空)")[:60], 2)
         if (
                 action
                 and not api._authorization_ack_covers(
-                    action, authorization)):
+                    action, authorization, shown)):
+            from .git_authorization import authorization_gap
+            missing = authorization_gap(action, authorization, shown)
+            listed = "、".join(missing[:8]) + (
+                "…(共 %d 项)" % len(missing) if len(missing) > 8 else "")
             api.die(
-                "该 Git 放行必须绑定用户原话中明确写出的 exact path/commit；"
-                "当前原话未覆盖本动作的全部路径，已拒绝扩大授权。"
-                "请执行 messages 核对原话；不得让 Agent 补写或概括用户授权。",
+                "该 Git 放行必须绑定用户原话中明确写出的 exact path/commit;"
+                "用户这条话没有覆盖: " + (listed or "本动作的部分路径")
+                + "。\nallow 没有传路径的参数——范围只能来自用户看见的内容。"
+                "最省事的办法:用 AskUserQuestion 再问一次,"
+                "**把上面这些路径原样写进问题正文**(选项仍保持短,如"
+                "「允许对以上路径执行」),用户点选后用那条新消息的 ID 再 allow。"
+                "你点选时看见的问题就是授权范围;Agent 事后改不了它。",
                 2,
             )
 

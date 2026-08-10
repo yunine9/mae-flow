@@ -7,6 +7,14 @@ from .shared import (
 )
 from .wiring import api
 
+def _drop_round_residue():
+    """过程区里按步骤命名的残留必须跟着新一轮一起清——换单会同名撞上。"""
+    from .standalone_core import _clear_round_workspace
+    dropped = _clear_round_workspace()
+    if dropped:
+        print("[mae-flow] 已清理上一轮过程区残留: " + "、".join(dropped))
+
+
 def cmd_init(flow, args):
     from .lean_migration import migrate_legacy_spec_workspace
     moved, note = migrate_legacy_spec_workspace(os.getcwd())
@@ -69,6 +77,7 @@ def cmd_init(flow, args):
                     api.die("插件运行时预检失败，上一单状态和退出指针均未改动：%s" % exc, 2)
                 prepared = True
             api._clear_auxiliary_state()
+            _drop_round_residue()
             auxiliary_cleared = True
             api._append_history(old)
             if os.path.exists(EXIT_PATH):
@@ -98,6 +107,7 @@ def cmd_init(flow, args):
             api.die("插件运行时预检失败，尚未创建流程状态，因此不会拦截普通开发: %s" % exc, 2)
     if not auxiliary_cleared:
         api._clear_auxiliary_state()
+        _drop_round_residue()
     api._gitignore()
     dirty = api._dirty_paths()
     st = {"current": flow["start"], "config": {}, "choices": {},

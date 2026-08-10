@@ -80,5 +80,68 @@ class SidecarCoverageTests(unittest.TestCase):
         self.assertNotIn(".mae-flow.json.last", listed)
 
 
+
+
+class RoundResidueTests(unittest.TestCase):
+    """过程区里按步骤命名的东西,换单会同名撞上——旧内容被当成本单产物。
+
+    `agent-tasks/build-compile.md`、`role-tasks/story-story-review.md` 这些
+    只带步骤名不带单号,而任务卡正是模型要"原样转交给子 Agent"的话术;
+    `lightcheck/latest.md` 更直接——面板和 current 都把它当当前结论,
+    而它连生成时间都没有。
+    """
+
+    def _workspace(self, root):
+        base = os.path.join(root, ".mae-flow-work")
+        for name in ("agent-tasks", "role-tasks", "lightcheck",
+                     "REQ-OLD", "codecheck-logs", "spec",
+                     "plugin-resources", "bin"):
+            os.makedirs(os.path.join(base, name), exist_ok=True)
+        for rel in ("agent-tasks/build-compile.md",
+                    "role-tasks/story-story-review.md",
+                    "lightcheck/latest.md",
+                    "REQ-OLD/story.md",
+                    "codecheck-logs/REQ-OLD-verify.md",
+                    "spec/config.yaml",
+                    "plugin-resources/keep.md",
+                    "bin/mae-flow.py",
+                    "moonlight-report.md", ".notify-ack", ".panel-cost"):
+            path = os.path.join(base, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with io.open(path, "w", encoding="utf-8") as stream:
+                stream.write("x")
+        return base
+
+    def test_new_round_drops_step_named_residue_and_keeps_the_rest(self):
+        import shutil as _shutil
+        import tempfile
+        from mae_flow_core.cli_commands.standalone_core import (
+            _clear_round_workspace)
+        room = tempfile.mkdtemp(prefix="residue-")
+        self.addCleanup(_shutil.rmtree, room, True)
+        base = self._workspace(room)
+        dropped = _clear_round_workspace(room)
+        for gone in ("agent-tasks", "role-tasks", "lightcheck"):
+            self.assertFalse(os.path.exists(os.path.join(base, gone)),
+                             "按步骤命名的残留应当清掉: %s" % gone)
+            self.assertIn(gone, dropped)
+        for kept in ("REQ-OLD/story.md", "codecheck-logs/REQ-OLD-verify.md",
+                     "spec/config.yaml", "plugin-resources/keep.md",
+                     "bin/mae-flow.py"):
+            self.assertTrue(os.path.exists(os.path.join(base, kept)),
+                            "带单号/属于运行时的不该被清: %s" % kept)
+
+    def test_lightcheck_report_can_prove_it_is_fresh(self):
+        from mae_flow_core.lightcheck_runtime import render_markdown
+        body = render_markdown(
+            {"status": "CLEAN", "files": ["a.py"],
+             "at": "2026-08-10 09:30:00", "head": "abc123def4567890"},
+            "提交前")
+        self.assertIn("生成时间：2026-08-10 09:30:00", body)
+        self.assertIn("绑定版本：abc123def456", body)
+        # 拿不到就写"未记录",不许编
+        blank = render_markdown({"status": "CLEAN", "files": []}, "")
+        self.assertIn("生成时间：未记录", blank)
+
 if __name__ == "__main__":
     unittest.main()

@@ -104,9 +104,14 @@ def analyze_changed_with_timeout(
 
 
 def _report_header(result, scope):
+    # 报告要能自证新鲜:这份文件叫 latest.md,不写生成时间和绑定 HEAD 的话,
+    # 上一轮甚至上一单留下的"结果：CLEAN"会被当成当前结论——面板与 current
+    # 都把它当报告指给人看。
     return [
         "# Mae-Flow 轻量编码预检",
         "",
+        "- 生成时间：" + str(result.get("at") or "未记录"),
+        "- 绑定版本：" + (str(result.get("head") or "未记录"))[:12],
         "- 定位：前置预防建议，不替代正式 CodeCheck，不产生流程门禁",
         "- 范围：" + str(scope or "本轮 Agent 实际修改"),
         "- 结果：" + result.get("status", "UNKNOWN"),

@@ -30,6 +30,40 @@ def _state_sidecars():
             STATE_PATH + ".stop-guard", GATE_STRIKES_PATH, GATE_PERMITS_PATH,
             MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]
 
+# 过程区里"按步骤命名、不带单号"的东西:换单之后会同名撞上,旧内容被当成
+# 本单产物。任务卡是模型要原样转交给子 Agent 的话术,轻检报告叫 latest.md、
+# 面板与 current 都当它是当前结论——这两类留着最危险。
+_ROUND_SCOPED = ("agent-tasks", "role-tasks", "lightcheck")
+_ROUND_FILES = ("moonlight-report.md", ".notify-ack", ".panel-cost")
+
+
+def _clear_round_workspace(root=None):
+    """开新一轮时清掉过程区的按步骤命名残留;失败只报不拦。
+
+    保留的不动:<单号>/(带单号,天然隔离)、codecheck-logs/(文件名带单号,
+    是历史留痕)、spec/、plugin-resources/、bin/、以及已归档的面板。
+    """
+    base = os.path.join(root or os.getcwd(), ".mae-flow-work")
+    dropped = []
+    for name in _ROUND_SCOPED:
+        target = os.path.join(base, name)
+        if os.path.isdir(target):
+            try:
+                shutil.rmtree(target)
+                dropped.append(name)
+            except OSError:
+                pass
+    for name in _ROUND_FILES:
+        target = os.path.join(base, name)
+        if os.path.isfile(target):
+            try:
+                os.remove(target)
+                dropped.append(name)
+            except OSError:
+                pass
+    return tuple(dropped)
+
+
 def _clear_auxiliary_state():
     """A new delivery round must not inherit tokens/messages from the old one."""
     failed = []

@@ -5,6 +5,7 @@ from .lightcheck_source import (
     MAX_TOTAL_BYTES, SUPPORTED_EXTENSIONS, TAB_WIDTH, _code_lines,
     _generated_path, _load_lizard, _looks_generated, _normalized, os, time,
 )
+import subprocess
 from .lightcheck_functions import (
     _FUNCTION_RULES, _baseline_matches, _empty_result, _finding,
     _function_metrics, _function_start, _mark_pre_existing,
@@ -12,6 +13,17 @@ from .lightcheck_functions import (
 )
 from .lightcheck_magic import find_magic_numbers
 from .lightcheck_nesting import annotate_control_nesting
+
+def _current_head():
+    """取当前 HEAD;取不到就写"未记录",绝不编。"""
+    try:
+        done = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"], shell=False,
+            capture_output=True, text=True, timeout=10)
+        return done.stdout.strip() if done.returncode == 0 else ""
+    except Exception:                      # noqa: BLE001
+        return ""
+
 
 class _ChangedAnalyzer:
     def __init__(
@@ -264,6 +276,10 @@ class _ChangedAnalyzer:
             self.result["status"] = "SKIPPED"
         elapsed = time.monotonic() - self.started
         self.result["duration_ms"] = int(elapsed * 1000)
+        # 让报告能自证新鲜:latest.md 是覆盖写的,不带时间与版本就分不出
+        # 是本轮结论还是上一轮遗留。
+        self.result["at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.result["head"] = _current_head()
         return self.result
 
     def _truncate_result(self, key, label):

@@ -73,12 +73,21 @@ def _pre_commit_format(context):
 
 
 def decide_commit_branch(context):
+    """分支名一旦定下来,就不许在别的分支上提交——尤其不许提交在基线分支上。
+
+    原来对 config_confirm/workflow_select/code_reviewer_ask/branch_create 四步
+    显式跳过,理由是"工作分支还没建"。可跳过的后果是这四步里的提交一律无人阻挡,
+    而它们只有一个去处:基线分支。实战撞到了:无人值守跑到 workflow_select(第 3 步)
+    时,模型把整个需求写完、提交、推送,三个提交全落在 sim_liaoxiang_base 上,
+    branch_create 压根没跑过。而"build 之前不许写源码"这件事门禁从来不执行
+    (allow_source_edit 没有任何判据读它),提交这一关是最后的拦阻点。
+
+    不需要按步骤开天窗:分支名还没定时 wanted_branch 为空,本来就放行;
+    定了之后 current==wanted 才放行,这正是我们要的。
+    """
     if (
         not context.commit_message_present
         or not context.wanted_branch
-        or context.step in (
-            "config_confirm", "workflow_select",
-            "code_reviewer_ask", "branch_create")
         or not context.current_branch
         or context.current_branch == context.wanted_branch
     ):
@@ -86,7 +95,9 @@ def decide_commit_branch(context):
     return _block(
         "bash-commit-branch",
         "提交前拦截:当前分支 %s != 本单约定分支 %s。"
-        "先 git checkout %s 再提交;在错分支上积累提交,done 时才发现要整步返工。"
+        "先 git checkout %s 再提交(分支还没建就先走完 branch_create,"
+        "别把本单提交落在基线分支上);在错分支上积累提交,"
+        "done 时才发现要整步返工。"
         % (
             context.current_branch,
             context.wanted_branch,

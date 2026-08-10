@@ -116,3 +116,48 @@ class HeredocCommitMessageTests(unittest.TestCase):
                  "[REQ-1][feat]紧贴形式")):
             self.assertEqual((True, expected),
                              git_intent.git_commit_message(command))
+
+
+class CommitBeforeBranchExistsTests(unittest.TestCase):
+    """分支名定下来之后,不许把本单提交落在基线分支上。
+
+    实战(无人值守):跑到 workflow_select(第 3 步)时,模型把整个需求写完、提交、
+    推送——三个提交全落在基线分支 sim_liaoxiang_base 上,branch_create 压根没跑过。
+    没人拦是因为提交分支检查对启动阶段的四个步骤显式开了天窗,而"build 之前
+    不许写源码"这件事门禁从来不执行(allow_source_edit 没有任何判据读它)。
+    提交这一关是最后的拦阻点,不能也开天窗。
+    """
+
+    def _context(self, step, current, wanted):
+        from mae_flow_core.guard.bash import BashGateContext
+        return BashGateContext(
+            command='git commit -m "[REQ-1][feat]x"',
+            has_internal_state_path=False, branch_name="",
+            branch_creating=False, step=step, wanted_branch=wanted,
+            base_branch="master", ticket="REQ-1",
+            commit_message_present=True,
+            commit_message="[REQ-1][feat]x",
+            current_branch=current, add_paths=(),
+            recursive_delete_targets=(), state_active=True)
+
+    def test_startup_steps_no_longer_get_a_free_pass(self):
+        from mae_flow_core.guard.bash import decide_commit_branch
+        for step in ("config_confirm", "workflow_select",
+                     "code_reviewer_ask", "branch_create"):
+            decision = decide_commit_branch(
+                self._context(step, "master", "master_liao_REQ-1"))
+            self.assertEqual("block", decision.kind,
+                             "%s 上提交到基线分支必须拦" % step)
+            self.assertIn("别把本单提交落在基线分支上", decision.message)
+
+    def test_no_branch_name_yet_still_allowed(self):
+        """分支名还没定(配置确认前)本来就没法比对,照旧放行。"""
+        from mae_flow_core.guard.bash import decide_commit_branch
+        self.assertEqual("allow", decide_commit_branch(
+            self._context("config_confirm", "master", "")).kind)
+
+    def test_on_the_agreed_branch_is_allowed(self):
+        from mae_flow_core.guard.bash import decide_commit_branch
+        self.assertEqual("allow", decide_commit_branch(
+            self._context("build_commit", "master_liao_REQ-1",
+                          "master_liao_REQ-1")).kind)

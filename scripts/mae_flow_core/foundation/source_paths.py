@@ -159,6 +159,13 @@ def known_source_classification(
     if (require_membership and is_absolute_path(normalized)
             and relative is None):
         return False
+    # 流程自己的过程文件永远不是交付源码。必须抢在扩展名判定之前:
+    # .mae-flow-work/panel-stamp.js 以 .js 结尾、bin/mae-flow.py 以 .py 结尾,
+    # 光看后缀就都成了"业务源码"。实测后果:面板每次推进写一次 panel-stamp.js,
+    # 流程随即认定"源码变了必须重编译",把交付拐进重编译回环——而面板的铁律
+    # 恰恰是永不影响推进。
+    if is_flow_control_path(relative if relative is not None else normalized):
+        return False
     lowered = normalized.lower()
     if is_build_path(normalized) or lowered.endswith(SOURCE_EXTENSIONS):
         return True

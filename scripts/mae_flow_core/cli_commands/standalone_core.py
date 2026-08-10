@@ -14,8 +14,18 @@ from .shared import (
 from .wiring import api
 
 def _state_sidecars():
+    """退出要一并收走、开新单要一并清掉的旁路状态。
+
+    漏一个的后果不是少收拾一个文件,而是上一单的东西留在现场给新流程用:
+    .quality-executions 是编译/UT 的执行台账、.agent-observations 是 Agent
+    派发与返回的生命周期证据——这两个留着,新一单就可能拿旧证据充数。
+    名单的完整性由 test_state_sidecars 兜住:凡是代码会写的
+    .mae-flow.json.* 都必须在这里列出。
+    """
     return [STATE_PATH, STATE_PATH + ".tokens", STATE_PATH + ".usermsg",
             STATE_PATH + ".agent-rejections", STATE_PATH + ".agent-evidence",
+            STATE_PATH + ".agent-observations", STATE_PATH + ".advisories",
+            STATE_PATH + ".quality-executions",
             AGENT_WRITES_PATH,
             STATE_PATH + ".stop-guard", GATE_STRIKES_PATH, GATE_PERMITS_PATH,
             MOONLIGHT_INTENT_PATH, EXIT_INTENT_PATH, FAILURE_PATH, STATE_PATH + ".tmp"]

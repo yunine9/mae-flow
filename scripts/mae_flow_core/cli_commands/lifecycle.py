@@ -202,29 +202,6 @@ def _print_exit_preview(flow, st):
     print("  退出后按普通开发处理，不再强制执行本流程的编译、CodeCheck、UT、归档和提交检查。")
     print("  若之后明确重新接回 mae-flow，会恢复原断点；源码变过则回退质量链，旧质量结果不会复用。")
 
-_OPTION_ANSWER = (
-    re.compile(r"^\s*[（(]?\s*(\d{1,2})\s*[)）.、:：]?\s*$"),
-    re.compile(r"^\s*(?:选择|选|第)\s*(\d{1,2})\b"),
-    re.compile(r"^\s*确认[:：]?\s*我选择"),
-)
-
-
-def _looks_like_option_answer(text):
-    """这句话是在答选择题吗?是的话就不能当退出授权。
-
-    实战:流程在问"交付方式"(完整开发/已定位问题修复/局部修改/处理评审意见),
-    用户答"选择 1（退出 Mae-Flow，直接开发）"——他要的是选项 1,括号里那句
-    是他自己的注解。可 exit 的 ack 只做精确匹配,这句话原样对得上,于是一次
-    正常答题变成了退出流程。授权必须绑定到当时在问的那个问题。
-    """
-    said = str(text or "")
-    for pattern in _OPTION_ANSWER:
-        found = pattern.match(said)
-        if found:
-            return said.strip()[:40]
-    return ""
-
-
 def cmd_exit(flow, st, args):
     """保留现场并解除项目接管；确认链损坏时仍必须有独立出口。"""
     if flow.get("steps", {}).get(st.get("current", ""), {}).get("terminal"):
@@ -290,13 +267,25 @@ def cmd_exit(flow, st, args):
     if auth == "ack":
         if not reason:
             api.die("exit 必须 --reason 记录为什么退出。也可让用户直接发送 `/mae-flow:mae-flow exit`。", 2)
-        answering = _looks_like_option_answer(ack)
-        if answering:
+        # 这话必须是"要退出"这件事本身的回答。实战撞过反例:用户回答交付方式时
+        # 顺口写「选择 1（退出 Mae-Flow，直接开发）」,精确匹配照样对得上,于是
+        # 一次正常答题把流程退掉了。判据不是猜"他是不是在答别的题",而是正向要求
+        # 这条回答提到本次动作——与 allow 绑随机编号同一形状(退出没有编号,
+        # 用动作名当标识)。
+        from mae_flow_core.workflow.consent import (
+            is_refusal, relates_to_action)
+        if is_refusal(ack):
+            api.die("用户这条回答不是同意退出(原话: %s)。"
+                    "请重新征求明确许可。" % (ack or "(空)")[:60], 2)
+        relevant = relates_to_action(
+            api._current_ack_messages(st), ("退出", "exit"))
+        if not relevant:
             api.die(
-                "这句话是在回答上一个选择题(%s),不是要求退出流程——"
-                "用户答题时顺口提到的字眼不能拿来给不可逆动作背书。"
-                "真要退出,请用户直接发送 `/mae-flow:mae-flow exit`。" % answering,
-                2)
+                "用户是在回答别的问题(原话: %s),这次问的不是要不要退出流程——"
+                "别处的同意不能挪用到不可逆动作上。"
+                "请让用户直接发送 `/mae-flow:mae-flow exit`,"
+                "Hook 会把那次用户事件本身当作授权,无需二次确认。"
+                % (ack or "(空)")[:60], 2)
         ok, why = api._ack_verified(st, ack, exact=True)
         if not ok:
             api.die("exit 对话授权验真失败:" + why

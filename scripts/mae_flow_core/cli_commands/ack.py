@@ -5,7 +5,7 @@ from .shared import (
     update_json, workflow_completion,
 )
 from .ack_confirmation import (
-    is_full_config_confirmation, reviewed_config, whole_card_values)
+    reviewed_config, whole_card_answers, whole_card_values)
 from .wiring import api
 
 def _evidence_failure_count(sid, success=False):
@@ -265,18 +265,19 @@ def _is_positive_confirmation(value):
     )
 
 def _button_confirmation_alias(item, candidate, expected):
-    """Accept a topical positive alias only when it was a displayed button."""
+    """用户点的是这一屏真实存在的选项,而且不是拒绝——就算确认。
+
+    原来要剥掉"确认…并继续"前缀、再算主题词与 expected 的包含关系。可选项文字
+    是模型写的,换个说法就判不出来(实战:"choice 问了两遍")。判据换成结构:
+    标签在宿主记录的候选项里(Agent 伪造不了),内容不是拒绝。
+    """
+    del expected                 # 精确匹配已在调用方先试过;这里只兜别名
+    from mae_flow_core.workflow.consent import is_refusal, option_labels
     normalized = re.sub(
         r"[\s，。；;：:、!！]+", "", str(candidate or "")).lower()
-    labels = {
-        re.sub(r"[\s，。；;：:、!！]+", "", str(label or "")).lower()
-        for question in ((item.get("askuser") or {}).get("questions") or [])
-        for label in (question.get("options") or [])
-    }
-    if normalized not in labels or not _is_positive_confirmation(candidate):
+    if not normalized or normalized not in option_labels(item.get("text", "")):
         return False
-    subject = re.sub(r"(?:并)?继续$", "", re.sub(r"^(?:确认|同意)", "", normalized))
-    return len(subject) >= 2 and any(subject in value for value in expected)
+    return not is_refusal(candidate)
 
 def _implicit_ack_verified(step, st):
     """Use a fresh button/plain-text answer directly; no second typed ACK."""
@@ -298,7 +299,8 @@ def _implicit_ack_verified(step, st):
                     item, candidate, expected):
                 _ack_failure(st, success=True)
                 return True, ""
-            if _is_positive_confirmation(candidate):
+            from mae_flow_core.workflow.consent import is_refusal
+            if not is_refusal(candidate):
                 if expected:
                     continue
                 _ack_failure(st, success=True)
@@ -454,8 +456,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
                 else _trusted_answer_candidates(item.get("text", ""))):
             same_answer = (
                 normalized_ack == candidate if normalized_ack else True)
-            if same_answer and is_full_config_confirmation(
-                    candidate, reviewed_config(st)):
+            from mae_flow_core.workflow.consent import is_refusal
+            if same_answer and not is_refusal(candidate):
                 matched = True
                 break
         if matched:
@@ -464,11 +466,16 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         _ack_failure(st, success=True)
         return True, ""
 
-    if normalized_ack and not is_full_config_confirmation(
-            normalized_ack, reviewed_config(st)):
+    # 单项判定只对"绑定本轮确认单的收据"有意义;没有收据时走下面的
+    # "没捕获到绑定回复"分支——收据绑定(review_id/sha)本身就是配置确认的编号,
+    # 与 allow 绑拦截编号是同一形状。
+    if normalized_ack and messages and normalized_ack not in whole_card_answers(
+            messages, reviewed, _trusted_answer_candidates):
         why = (
-            "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
-            "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"
+            "配置确认必须针对完整配置:这条回答只针对配置单里的某一项(如“确认 master”),不能替整份背书。"
+            "判据不是措辞而是结构:宿主把回答按问题分开记录,键是配置项名的就只代表"
+            "那一项。做法:用 AskUserQuestion 展示 config-review 输出后,"
+            "只问一次“是否确认以上全部配置”,选项照旧简短。"
         )
     elif not messages and not current_rows and _out_of_scope_ack_reason(st):
         why = _out_of_scope_ack_reason(st)

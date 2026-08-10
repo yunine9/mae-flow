@@ -69,3 +69,17 @@ def reviewed_config(st):
     state = st or {}
     review = (state.get("config_review") or {}).get("config") or {}
     return review or (state.get("config") or {})
+
+
+def whole_card_answers(messages, reviewed, fallback):
+    """这些收据里"有资格替整份配置背书"的回答值(去空白)。
+
+    结构判据:宿主按问题分开记录回答,键是配置项名的只代表那一项。
+    """
+    out = set()
+    for item in messages:
+        eligible = whole_card_values(item.get("text", ""), reviewed)
+        for value in (eligible if eligible is not None
+                      else fallback(item.get("text", ""))):
+            out.add(re.sub(r"\s+", "", str(value or "")))
+    return out

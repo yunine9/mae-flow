@@ -1,3 +1,4 @@
+import re
 """CLI responsibilities extracted from the historical entrypoint."""
 
 from .shared import (
@@ -201,6 +202,29 @@ def _print_exit_preview(flow, st):
     print("  退出后按普通开发处理，不再强制执行本流程的编译、CodeCheck、UT、归档和提交检查。")
     print("  若之后明确重新接回 mae-flow，会恢复原断点；源码变过则回退质量链，旧质量结果不会复用。")
 
+_OPTION_ANSWER = (
+    re.compile(r"^\s*[（(]?\s*(\d{1,2})\s*[)）.、:：]?\s*$"),
+    re.compile(r"^\s*(?:选择|选|第)\s*(\d{1,2})\b"),
+    re.compile(r"^\s*确认[:：]?\s*我选择"),
+)
+
+
+def _looks_like_option_answer(text):
+    """这句话是在答选择题吗?是的话就不能当退出授权。
+
+    实战:流程在问"交付方式"(完整开发/已定位问题修复/局部修改/处理评审意见),
+    用户答"选择 1（退出 Mae-Flow，直接开发）"——他要的是选项 1,括号里那句
+    是他自己的注解。可 exit 的 ack 只做精确匹配,这句话原样对得上,于是一次
+    正常答题变成了退出流程。授权必须绑定到当时在问的那个问题。
+    """
+    said = str(text or "")
+    for pattern in _OPTION_ANSWER:
+        found = pattern.match(said)
+        if found:
+            return said.strip()[:40]
+    return ""
+
+
 def cmd_exit(flow, st, args):
     """保留现场并解除项目接管；确认链损坏时仍必须有独立出口。"""
     if flow.get("steps", {}).get(st.get("current", ""), {}).get("terminal"):
@@ -266,6 +290,13 @@ def cmd_exit(flow, st, args):
     if auth == "ack":
         if not reason:
             api.die("exit 必须 --reason 记录为什么退出。也可让用户直接发送 `/mae-flow:mae-flow exit`。", 2)
+        answering = _looks_like_option_answer(ack)
+        if answering:
+            api.die(
+                "这句话是在回答上一个选择题(%s),不是要求退出流程——"
+                "用户答题时顺口提到的字眼不能拿来给不可逆动作背书。"
+                "真要退出,请用户直接发送 `/mae-flow:mae-flow exit`。" % answering,
+                2)
         ok, why = api._ack_verified(st, ack, exact=True)
         if not ok:
             api.die("exit 对话授权验真失败:" + why

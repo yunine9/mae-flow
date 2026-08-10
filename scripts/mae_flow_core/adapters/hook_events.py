@@ -78,7 +78,33 @@ class HookEventAdapter:
                 payload,
                 session_start=(event == "sessionstart"),
             )
+        self._offer_first_entry(event, payload)
         return HookResponse()
+
+    def _offer_first_entry(self, event, payload):
+        """全新仓里,用户真的发起交付时才把入口绝对路径递过去。
+
+        三条路本来全断:桥只给"已有流程状态"的仓铺(不然每个仓都被写脏);
+        没状态时 Hook 直接旁路、一个字不说;而 SKILL 明令禁止读环境变量或猜
+        插件目录。于是模型拿不到任何可执行的起点——内网第一次开工就撞在这儿。
+        只在明确的交付请求上说这一句:无关项目照旧安静。
+        """
+        if event != "userprompt":
+            return
+        prompt = payload.get("prompt") or ""
+        started = False
+        try:
+            started = bool(self.runtime._explicit_flow_start_prompt(prompt))
+        except Exception:                  # noqa: BLE001 —— 判不出就不说话
+            started = False
+        if not (started or re.search(r"月光宝盒|moonlight", prompt, re.I)):
+            return
+        from .project_launcher import plugin_entry_path
+        print("[mae-flow] 本项目尚未开启流程,过程目录里还没有转发壳。"
+              "首次开工用插件入口的绝对路径:\n"
+              '  python "%s" init\n'
+              "它会在同一条命令里把 .mae-flow-work/bin/mae-flow.py 铺好,"
+              "之后一律用那个短路径。" % plugin_entry_path())
 
     def terminal(self, event, payload, _runtime):
         if event == "userprompt":

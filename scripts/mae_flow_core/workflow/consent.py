@@ -24,26 +24,45 @@
 import json
 import re
 
-# 拒绝的说法有限且明确;肯定的说法无穷,所以只列拒绝。
-_REFUSAL = re.compile(
-    r"不[\u4e00-\u9fa5]{1,3}|"          # 不确认/不同意/不退出/不要提交…通用式
-    r"没有|没法|否认|拒绝|"
-    r"暂不|先不|别|等等|取消|有误|有问题|需要修改|需要调整|重新|再想|"
-    r"看看|再说|回头|稍后|待定|观察|考虑|研究|讨论|确认一下|核对|"
-    r"什么意思|怎么|是否|能否|为什么|"
+# 拒绝分两档,这个区分是实测逼出来的:「考虑过了,放行」「核对过了,没问题,放行」
+# 被一刀切判成拒绝——用户明明说了放行,机器嫌他前面带了"考虑/核对"。
+#
+# 硬拒:说了就是不行,再多肯定词也救不回("先放行,不对,别")。
+# "不X"通用式豁免常用褒义:不错/不赖(它们是"好"的意思)。
+_HARD_REFUSAL = re.compile(
+    r"不(?!错|赖)[\u4e00-\u9fa5]{1,3}|"
+    r"没有|没法|否认|拒绝|暂不|先不|别|等等|取消|有误|有问题|"
+    r"需要修改|需要调整|重新|再想|"
     r"(?<![A-Za-z])(?:no|nope|deny|cancel|reject)(?![A-Za-z])",
     re.I,
 )
+# 犹豫:单独出现算没同意("看看再说");同一句里有明确的放行词就不作数
+# ("考虑过了,放行"——考虑是过程,放行才是结论)。
+_HESITATION = re.compile(
+    r"看看|再说|回头|稍后|待定|观察|考虑|研究|讨论|确认一下|核对|"
+    r"什么意思|怎么|是否|能否|为什么")
+_GRANT = re.compile(
+    r"放行|允许|同意|批准|通过|可以|确认|没问题|无异议|采纳|执行吧|去吧|"
+    r"(?<![A-Za-z])(?:ok|yes|approve|allow)(?![A-Za-z])", re.I)
 
 _TRIVIAL = re.compile(r"^[\s，。；;：:、!！?？.]*$")
 
 
 def is_refusal(answer):
-    """这句话是拒绝吗。空话、反问、疑问都按拒绝处理——机器不替用户表态。"""
+    """这句话是拒绝吗。空话、反问、犹豫都按"没同意"处理——机器不替用户表态;
+    但用户明确说了放行/同意,前面的过程词(考虑过了/核对过了)不作数。"""
     said = str(answer or "")
     if _TRIVIAL.match(said):
         return True
-    return bool(_REFUSAL.search(said))
+    if _HARD_REFUSAL.search(said):
+        return True
+    # 问句是在问,不是在答:「是否可以?」里有"可以",但那是把决定抛回来
+    if re.search(r"[?？]\s*$", said.strip()) or re.match(
+            r"^\s*(?:是否|能否|可不可以|行不行)", said.strip()):
+        return True
+    if _HESITATION.search(said) and not _GRANT.search(said):
+        return True
+    return False
 
 
 def mentions_token(shown, token):

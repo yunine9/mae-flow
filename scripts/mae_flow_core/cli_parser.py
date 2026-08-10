@@ -29,12 +29,18 @@ class MFParser(argparse.ArgumentParser):
             "注意:子命令不带连字符(是 current 不是 --current);"
             "done 的 --set 可重复,值含空格要加引号；"
             "高风险裁决先用 messages 取得回答 ID，再传 --message-id；"
-            "不要把用户原话复制进 shell。" % (me, me, me),
+            "不要把用户原话复制进 shell。"
+            "**不要自己发明参数**:每条拦截/指引消息给出的命令都是完整可复制的,"
+            "参数以它和 --help 为准;拼一个不存在的参数只会再撞一层错误。" % (me, me, me),
             file=sys.stderr)
         sys.exit(2)
 
 
-def parse_args(argv=None):
+def build_parser():
+    """解析器工厂。单独成函数是为了让不变量测试能内省:
+    拦截/指引消息里建议的每个命令参数,必须在这里真实存在——
+    实战里模型被拒后去拼了 `allow --paths ...`,这个参数从来不存在,
+    又撞一层参数错误。教出去的命令必须是真命令。"""
     parser = MFParser(prog="mae-flow")
     sub = parser.add_subparsers(dest="cmd", required=True)
     init = sub.add_parser("init")
@@ -273,4 +279,8 @@ def parse_args(argv=None):
     exemption.add_argument("--file", required=True)
     exemption.add_argument("--reason", required=True)
     exemption.add_argument("--message-id", required=True)
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv=None):
+    return build_parser().parse_args(argv)

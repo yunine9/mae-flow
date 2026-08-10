@@ -106,3 +106,89 @@ class RefusalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SuggestedCommandsAreRealTests(unittest.TestCase):
+    """教出去的命令必须是真命令——出路不能靠模型拼参数。
+
+    实战:用户点选批准后 allow 被拒,模型转头拼了 `allow --paths pom.xml …`,
+    这个参数从来不存在,又撞一层参数错误。拦了不给出路是死路,
+    给的出路里含不存在的参数是**假出路**,比死路更费轮次。
+    """
+
+    _SUGGEST = re.compile(
+        r"(?:allow|done|goto|unlock|accept-risk|messages|manifest|"
+        r"codecheck-(?:scan|scope|record)|requirement-record|moonlight|"
+        r"domain-archive|action|spec|config-review|lightcheck|agent-task|"
+        r"role-task|story-localize|local-spec|init|current|status|doctor|"
+        r"report|exit|skip|approve-exemption)"
+        r"((?:\s+(?:--[a-z][a-z-]*|-[a-zA-Z])\b)+)")
+
+    def _flags_by_subcommand(self):
+        from mae_flow_core.cli_parser import build_parser
+        parser = build_parser()
+        subs = next(
+            action.choices for action in parser._actions
+            if getattr(action, "choices", None))
+        return {
+            name: {flag for action in sub._actions
+                   for flag in action.option_strings}
+            for name, sub in subs.items()
+        }
+
+    @staticmethod
+    def _docstrings(tree):
+        """文档字符串不是发给模型的消息(有的正是在讲述历史 bug),不参与判定。"""
+        out = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(node, "body", [])
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    out.add(id(body[0].value))
+        return out
+
+    def test_every_suggested_flag_exists_in_the_real_parser(self):
+        real = self._flags_by_subcommand()
+        offenders = []
+        base = os.path.join(SCRIPTS, "mae_flow_core")
+        for here, _dirs, names in os.walk(base):
+            for name in sorted(names):
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(here, name)
+                with io.open(path, encoding="utf-8") as stream:
+                    tree = ast.parse(stream.read())
+                skip = self._docstrings(tree)
+                for node in ast.walk(tree):
+                    if not (isinstance(node, ast.Constant)
+                            and isinstance(node.value, str)):
+                        continue
+                    if id(node) in skip:
+                        continue
+                    for hit in self._SUGGEST.finditer(node.value):
+                        # git 也有 status/…:前文有 git 的不是 mae-flow 命令
+                        # (窗口给足 40 字,盖住 `git -c core.quotepath=false status`)
+                        lead = node.value[max(0, hit.start() - 40):hit.start()]
+                        if "git" in lead:
+                            continue
+                        sub = hit.group(0).split()[0]
+                        if sub not in real:
+                            continue
+                        for flag in re.findall(r"--?[a-zA-Z][a-z-]*",
+                                               hit.group(1)):
+                            if flag not in real[sub]:
+                                offenders.append(
+                                    "%s:%d %s %s"
+                                    % (os.path.relpath(path, ROOT),
+                                       node.lineno, sub, flag))
+        self.assertEqual(
+            [], offenders,
+            "消息里建议了不存在的参数(假出路,比死路更费轮次): %s" % offenders)
+
+    def test_parse_error_tells_the_model_not_to_invent_flags(self):
+        with io.open(os.path.join(SCRIPTS, "mae_flow_core",
+                                  "cli_parser.py"), encoding="utf-8") as s:
+            self.assertIn("不要自己发明参数", s.read())

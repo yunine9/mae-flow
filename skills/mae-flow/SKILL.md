@@ -21,11 +21,9 @@ python ".mae-flow-work/bin/mae-flow.py" current   # 拿当前步骤指令(用 py
 → python ".mae-flow-work/bin/mae-flow.py" done [--ack|--choice|--set]   # 声明完成,工具校验证据后给出下一步
 ```
 
-首次触发:过程目录里**还没有**转发壳(全新仓就是这样,插件不会往没开工的仓里写文件),
-用 Hook 注入行给出的**插件入口绝对路径**跑 `init` —— 它会在同一条命令里把
-`.mae-flow-work/bin/mae-flow.py` 铺好,之后所有命令一律用这个短路径
-(插件目录带版本号、升级即变;短路径不变,权限白名单也才稳得住)。
-已有 `.mae-flow.json` 则直接 `current` 续跑。转发壳客观缺失时同样只用 Hook 给的绝对路径,
+首次触发先执行 `python ".mae-flow-work/bin/mae-flow.py" init`(已有 `.mae-flow.json` 则直接
+`current` 续跑)。转发壳由 Hook 在你发起交付时自动铺好——铺桥是机器的活,你不需要找、
+也不需要传插件路径。它客观缺失时(Hook 会打一行降级提示),只用那行提示里给出的绝对路径,
 禁止读环境变量、搜插件缓存或猜版本目录。`python` 命令不可用时立即停止流程,
 告知用户先安装 Python 3,不做变通。
 

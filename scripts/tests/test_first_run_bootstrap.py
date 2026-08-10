@@ -27,30 +27,31 @@ if SCRIPTS not in sys.path:
 
 
 class BootstrapTests(unittest.TestCase):
-    def test_skill_does_not_send_the_model_to_a_file_that_cannot_exist(self):
+    def test_skill_never_asks_the_model_to_handle_plugin_paths(self):
+        """铺桥是机器的活:模型从头到尾只知道短路径。第一版修法让 Hook 打印
+        插件绝对路径给 Agent 抄——内网实测它把 Windows 长路径抄错了两处。"""
         with io.open(os.path.join(ROOT, "skills", "mae-flow", "SKILL.md"),
                      encoding="utf-8") as stream:
             skill = stream.read()
         head = skill.split("首次触发")[1][:400]
-        self.assertIn("还没有", head)
-        self.assertIn("插件入口绝对路径", head)
-        # 首次那句里不能再出现"用转发壳去 init"
-        self.assertNotIn('先执行 `python ".mae-flow-work/bin/mae-flow.py" init`',
-                         skill)
+        self.assertIn("转发壳由 Hook 在你发起交付时自动铺好", head)
+        self.assertIn("不需要找", head)
+        self.assertIn('先执行 `python ".mae-flow-work/bin/mae-flow.py" init`',
+                      skill)
 
-    def test_hook_hands_over_the_entry_path_on_a_real_delivery_request(self):
-        from mae_flow_core.adapters.project_launcher import plugin_entry_path
-        entry = plugin_entry_path()
-        self.assertTrue(entry.endswith(os.path.join("scripts", "mae-flow.py")))
+    def test_hook_lays_the_bridge_itself_on_a_delivery_request(self):
+        """hook 直接铺桥,不递路径;铺不动才降级——那是宿主故障,不该常见。"""
         with io.open(os.path.join(SCRIPTS, "mae_flow_core", "adapters",
                                   "hook_events.py"), encoding="utf-8") as s:
             source = s.read()
-        self.assertIn("_offer_first_entry", source)
-        self.assertIn("尚未开启流程", source)
-        # 只在明确的交付请求上说话,无关项目保持安静
         block = source.split("_offer_first_entry")[2]
+        self.assertIn("install_project_launcher()", block)
+        self.assertIn("转发壳已就位", block)
+        # 只在明确的交付请求上动手,无关项目一个文件都不写
         self.assertIn("_explicit_flow_start_prompt", block)
         self.assertIn('event != "userprompt"', block)
+        # 降级路径必须自我声明"这不该经常出现"
+        self.assertIn("这不该经常出现", block)
 
     def test_the_bridge_explains_itself_when_the_entry_is_gone(self):
         """内网反馈"明显报错了,不知道从哪来的"——原来只甩一句

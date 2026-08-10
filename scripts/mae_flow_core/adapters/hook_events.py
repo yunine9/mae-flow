@@ -82,12 +82,14 @@ class HookEventAdapter:
         return HookResponse()
 
     def _offer_first_entry(self, event, payload):
-        """全新仓里,用户真的发起交付时才把入口绝对路径递过去。
+        """全新仓里,用户明确发起交付时——hook 直接把转发壳铺好,不递路径。
 
-        三条路本来全断:桥只给"已有流程状态"的仓铺(不然每个仓都被写脏);
-        没状态时 Hook 直接旁路、一个字不说;而 SKILL 明令禁止读环境变量或猜
-        插件目录。于是模型拿不到任何可执行的起点——内网第一次开工就撞在这儿。
-        只在明确的交付请求上说这一句:无关项目照旧安静。
+        acd904b 的铁律"不往没开工的仓写文件"防的是随便一条消息就写脏任意仓;
+        但用户点名要交付时顾虑不成立:他就是要在这个仓开工。第一版修法是打印
+        插件绝对路径让 Agent 抄——内网实测 Agent 把 Windows 长路径抄错了两处
+        (mae-flow\\.py、丢反斜杠)。路径接力本身就是错的:铺桥是机器的活,
+        Agent 从头到尾只该知道 .mae-flow-work/bin/mae-flow.py 这一个短路径。
+        只有铺不动(权限/只读)才降级递路径——那是宿主故障,本就不该常见。
         """
         if event != "userprompt":
             return
@@ -95,16 +97,22 @@ class HookEventAdapter:
         started = False
         try:
             started = bool(self.runtime._explicit_flow_start_prompt(prompt))
-        except Exception:                  # noqa: BLE001 —— 判不出就不说话
+        except Exception:                  # noqa: BLE001 —— 判不出就不动
             started = False
         if not (started or re.search(r"月光宝盒|moonlight", prompt, re.I)):
             return
-        from .project_launcher import plugin_entry_path
-        print("[mae-flow] 本项目尚未开启流程,过程目录里还没有转发壳。"
-              "首次开工用插件入口的绝对路径:\n"
+        from .project_launcher import install_project_launcher, plugin_entry_path
+        bridge = install_project_launcher()
+        if bridge:
+            print("[mae-flow] 转发壳已就位: .mae-flow-work/bin/mae-flow.py。"
+                  "首次开工直接执行:\n"
+                  '  python ".mae-flow-work/bin/mae-flow.py" init')
+            return
+        print("[mae-flow] ⚠ 转发壳写入失败(权限或只读目录?)。本次用插件入口"
+              "的绝对路径顶上:\n"
               '  python "%s" init\n'
-              "它会在同一条命令里把 .mae-flow-work/bin/mae-flow.py 铺好,"
-              "之后一律用那个短路径。" % plugin_entry_path())
+              "这不该经常出现;若反复出现,检查项目目录的写权限。"
+              % plugin_entry_path())
 
     def terminal(self, event, payload, _runtime):
         if event == "userprompt":

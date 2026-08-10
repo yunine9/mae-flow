@@ -11,6 +11,7 @@ spec 10 次、story 13 次——范围是在需求澄清那一步凭空长出来
 流程一直在检查"验收项都实现了吗",从没检查反方向:**这条验收项是从哪来的**。
 """
 
+import io
 import os
 import sys
 import unittest
@@ -57,12 +58,32 @@ class ScopeDriftTests(unittest.TestCase):
         self.assertEqual([], invented_topics(requirement, spec))
         self.assertEqual("", drift_notice([]))
 
-    def test_only_speaks_up_at_spec_confirmation(self):
-        from mae_flow_core.panel.snapshot import ACK_REVIEW_DOCS
-        spec_steps = [sid for sid, kinds in ACK_REVIEW_DOCS.items()
-                      if "spec" in kinds]
-        self.assertTrue(spec_steps, "总得有确认规格的步骤")
-        self.assertNotIn("build", spec_steps)
+    def test_fires_when_the_spec_lands_not_when_the_step_opens(self):
+        """进 open 那会儿 spec.md 还不存在,读不到只能静默——实测就是这么
+        没打出来的。改挂在写盘那一刻,记成非阻断提示。"""
+        import json as _json
+        import shutil as _shutil
+        import tempfile
+        from mae_flow_core.panel.sync import note_scope_drift
+        room = tempfile.mkdtemp(prefix="drift-")
+        self.addCleanup(_shutil.rmtree, room, True)
+        want = os.path.join(room, "req.md")
+        spec = os.path.join(room, "spec.md")
+        state = os.path.join(room, ".mae-flow.json")
+        with io.open(want, "w", encoding="utf-8") as stream:
+            stream.write("新增短信渠道,失败重试三次。\n")
+        with io.open(spec, "w", encoding="utf-8") as stream:
+            stream.write("监控与告警\n失败率告警\n告警通知\n告警阈值\n"
+                         "灰度发布\n灰度开关\n灰度回滚\n灰度比例\n灰度名单\n")
+        with io.open(state, "w", encoding="utf-8") as stream:
+            _json.dump({"current": "open",
+                        "config": {"需求文档": want, "单号": "REQ-1"}}, stream)
+        self.assertTrue(note_scope_drift(state, spec), "有漂移就该记一条")
+        # 写的不是规格就不出声
+        other = os.path.join(room, "story.md")
+        with io.open(other, "w", encoding="utf-8") as stream:
+            stream.write("告警告警告警灰度灰度灰度\n")
+        self.assertFalse(note_scope_drift(state, other))
 
 
 if __name__ == "__main__":

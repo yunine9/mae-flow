@@ -59,7 +59,7 @@ def _terms(text):
     return whole
 
 
-def invented_topics(requirement, spec, floor=3, limit=8):
+def invented_topics(requirement, spec, floor=5, limit=5):
     """→ [(主题词, 在规格里出现次数)]，按出现次数从多到少。
 
     只报"在规格里反复出现(默认 ≥3 次)、而需求原文一次都没有"的词。偶尔提一句
@@ -81,7 +81,17 @@ def invented_topics(requirement, spec, floor=3, limit=8):
          if count >= floor and 2 <= len(word) <= 4),
         key=lambda item: (-item[1], item[0]),
     )
-    return ranked[:limit]
+    # 同一个概念的两种切法(互为子串、次数还完全相同)只留长的那个:
+    # "可重"就是"可重试"切出来的碎片。但次数不同就是两个不同粒度的主题,
+    # 都留——"回滚"和"回滚策略"各有各的意思,把短的去掉会丢掉真信号。
+    kept = []
+    for word, count in ranked:
+        shadowed = any(
+            word != other and word in other and count == other_count
+            for other, other_count in ranked)
+        if not shadowed:
+            kept.append((word, count))
+    return kept[:limit]
 
 
 def drift_notice(topics):

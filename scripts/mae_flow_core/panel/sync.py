@@ -70,7 +70,42 @@ def refresh_on_doc_write(state_path, written_path):
         ring_when_ready(state_path)
     except Exception:                      # noqa: BLE001 —— 通知失败=没通知
         pass
+    try:
+        note_scope_drift(state_path, written_path)
+    except Exception:                      # noqa: BLE001 —— 提示失败绝不挡流程
+        pass
     return done
+
+
+def note_scope_drift(state_path, written_path):
+    """规格刚落盘就比一次:哪些主题在规格里反复出现、需求原文里一次都没有。
+
+    放在写盘这一刻而不是进步骤时:进 open 那会儿 spec.md 还不存在,读不到就
+    只能静默——实测就是这么没打出来的。记成非阻断提示,current 与面板都会带出来,
+    由人判断是"澄清阶段拍板的新增"还是"凭空发明"。
+    """
+    import time as _time
+    from mae_flow_core.workflow.advisories import record_advisory
+    from mae_flow_core.workflow.scope_drift import (
+        drift_notice, invented_topics)
+    if os.path.basename(str(written_path or "")) != "spec.md":
+        return False
+    with open(state_path, encoding="utf-8") as stream:
+        state = json.load(stream)
+    config = (state.get("config") or {})
+    want = str(config.get("需求文档", "") or "")
+    if not want:
+        return False
+    with open(want, encoding="utf-8", errors="replace") as stream:
+        requirement = stream.read()
+    with open(written_path, encoding="utf-8", errors="replace") as stream:
+        drafted = stream.read()
+    said = drift_notice(invented_topics(requirement, drafted))
+    if not said:
+        return False
+    record_advisory(state_path, str(state.get("current", "")), "scope-drift",
+                    said, _time.strftime("%Y-%m-%d %H:%M:%S"))
+    return True
 
 
 def ring_when_ready(state_path, root=None):

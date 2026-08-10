@@ -4,6 +4,7 @@ from .shared import (
     CONFIG_CONFIRM_ACK, FAILURE_PATH, STATE_PATH, hashlib, json, re, read_text, time,
     update_json, workflow_completion,
 )
+from .ack_confirmation import is_full_config_confirmation
 from .wiring import api
 
 def _evidence_failure_count(sid, success=False):
@@ -433,23 +434,6 @@ def _config_sha256(config, requirement_sha=""):
         separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
-def _is_full_config_confirmation(value):
-    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
-    if not compact or re.search(
-            r"不确认|不是|不要|不能|没有|没法|否认|拒绝|暂不|修改|调整|"
-            r"不对|有误|有问题|什么意思|怎么|是否|能否|为什么|[?？]",
-            compact):
-        return False
-    return (
-        compact in (
-            re.sub(r"\s+", "", CONFIG_CONFIRM_ACK),
-            "全部正确",
-            "以上配置全部正确",
-            "所有配置都正确",
-        )
-        or bool(re.search(r"确认(?:以上|全部|所有).{0,4}配置", compact))
-    )
-
 def _config_ack_verified(st, ack, config_sha, review_id):
     """Verify one final confirmation bound to the exact reviewed config."""
     current_rows = _current_ack_messages(st)
@@ -464,7 +448,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         for candidate in _trusted_answer_candidates(item.get("text", "")):
             same_answer = (
                 normalized_ack == candidate if normalized_ack else True)
-            if same_answer and _is_full_config_confirmation(candidate):
+            if same_answer and is_full_config_confirmation(
+                    candidate, (st or {}).get("config")):
                 matched = True
                 break
         if matched:
@@ -473,7 +458,8 @@ def _config_ack_verified(st, ack, config_sha, review_id):
         _ack_failure(st, success=True)
         return True, ""
 
-    if normalized_ack and not _is_full_config_confirmation(normalized_ack):
+    if normalized_ack and not is_full_config_confirmation(
+            normalized_ack, (st or {}).get("config")):
         why = (
             "配置确认必须针对完整配置，不能用“确认 master”等单项回答给整份配置背书。"
             "请展示 config-review 输出后，只询问一次“是否确认以上全部配置”。"

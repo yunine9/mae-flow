@@ -15,6 +15,8 @@ from ..workflow.quality_executions import (
     quality_input_snapshot,
     successful_quality_execution,
 )
+from mae_flow_core.foundation.worktree_intent import (
+    worktree_discard_paths)
 from .wiring import api
 
 
@@ -466,6 +468,10 @@ def cmd_gate(flow, st, args):
             recursive_delete_targets=
                 guard_intent.recursive_delete_targets(intent),
             state_active=bool(st),
+            # 带着用户流程启动前未提交改动的文件,被 checkout/restore 瞄准丢弃
+            user_scene_discards=tuple(
+                path for path in worktree_discard_paths(c)
+                if api._unchanged_initial_dirty(path, st or {})),
         )
         pre = decide_pre_commit(context)
         if pre.kind == "absolute":

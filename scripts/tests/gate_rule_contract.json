@@ -80,6 +80,12 @@
       "escape": "permit",
       "why": "清空工作区会丢未提交成果"
     },
+    "bash-discard-user-scene": {
+      "kind": "permit",
+      "tier": "A",
+      "escape": "permit",
+      "why": "单文件丢弃若命中用户流程启动前的未提交改动,等于销毁用户现场"
+    },
     "bash-git-revert-user-authorization": {
       "kind": "permit",
       "tier": "A",

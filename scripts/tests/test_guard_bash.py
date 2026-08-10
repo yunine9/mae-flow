@@ -161,3 +161,46 @@ class CommitBeforeBranchExistsTests(unittest.TestCase):
         self.assertEqual("allow", decide_commit_branch(
             self._context("build_commit", "master_liao_REQ-1",
                           "master_liao_REQ-1")).kind)
+
+
+class UserSceneDiscardTests(unittest.TestCase):
+    """用户现场既不能被卷进提交,也不能被抹掉。
+
+    复现轮实测:门禁硬扛住 4 次 git reset --hard(含一次 allow && reset 夹带)
+    和一次 checkout origin -- 后重新 add;但最后一招 `git checkout -- .gitignore`
+    (单文件丢弃)穿了——用户流程启动前的未提交改动被销毁。讽刺的是这招还是
+    全树拦截的提示自己教的("回退请精确到文件"):那个建议对 Agent 自己写的
+    文件是对的,对带着用户改动的文件就是销毁现场。
+    """
+
+    def _context(self, discards):
+        from mae_flow_core.guard.bash import BashGateContext
+        return BashGateContext(
+            command="git checkout -- .gitignore",
+            has_internal_state_path=False, branch_name="",
+            branch_creating=False, step="push", wanted_branch="b",
+            base_branch="master", ticket="REQ-1",
+            commit_message_present=False, commit_message="",
+            current_branch="b", add_paths=(),
+            recursive_delete_targets=(), state_active=True,
+            user_scene_discards=tuple(discards))
+
+    def test_discarding_a_user_scene_file_is_blocked(self):
+        from mae_flow_core.guard.bash import _post_dangerous
+        decision = _post_dangerous(self._context([".gitignore"]))
+        self.assertIsNotNone(decision)
+        self.assertEqual("bash-discard-user-scene", decision.rule)
+        self.assertIn("销毁用户自己的工作", decision.message)
+        self.assertIn("摆给用户裁决", decision.message)   # 拒绝给出路
+
+    def test_agent_authored_files_can_still_be_reverted(self):
+        """Agent 自己写的文件回退照旧:user_scene_discards 为空就不拦。"""
+        from mae_flow_core.guard.bash import _post_dangerous
+        self.assertIsNone(_post_dangerous(self._context([])))
+
+    def test_wipe_guidance_no_longer_teaches_the_bypass(self):
+        from mae_flow_core.guard import bash as guard_bash
+        import inspect
+        source = inspect.getsource(guard_bash)
+        self.assertIn("本单 Agent 自己写", source)
+        self.assertIn("用户现场", source)

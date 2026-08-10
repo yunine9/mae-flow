@@ -23,6 +23,7 @@ class BashGateContext:
     add_paths: tuple
     recursive_delete_targets: tuple
     state_active: bool
+    user_scene_discards: tuple = ()
 
 
 def _absolute(rule, message):
@@ -211,12 +212,21 @@ def _post_dangerous(context):
             "危险命令拦截:git clean -x 会删除 ignore 文件(含 mae-flow 状态与令牌)，"
             "不可逆。改用精确路径删除真正要清的文件;确需整树清理，"
             "把命令和风险交给用户手动运行。")
+    if context.state_active and context.user_scene_discards:
+        return _block(
+            "bash-discard-user-scene",
+            "用户现场保护:%s 带着流程启动前就存在的未提交改动,本单 Agent 没有"
+            "改写过它——丢弃它就是销毁用户自己的工作,与提交它进交付同样越界"
+            "(carryover 拦截保护它不被卷进提交,这里保护它不被抹掉)。"
+            "不要动它,让它保持原样;确要丢弃,把文件与改动内容摆给用户裁决。"
+            % "、".join(context.user_scene_discards[:4]))
     if context.state_active and _git_wipes_worktree(git_commands):
         return _block(
             "bash-wipe-worktree",
             "全树不可逆清除拦截(git reset --hard / checkout -- .):未提交的"
-            "工作区改动会全部蒸发。回退越权改动请精确到文件:"
-            "git checkout HEAD -- <文件>;确需全树清除,把风险展示给用户裁决。",
+            "工作区改动会全部蒸发。回退**本单 Agent 自己写**的文件可以精确到文件:"
+            "git checkout HEAD -- <文件>;流程启动前就存在改动的文件一律不许动"
+            "(那是用户现场);确需全树清除,把风险展示给用户裁决。",
         )
     if context.recursive_delete_targets:
         return _absolute(

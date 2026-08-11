@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 TESTS = os.path.abspath(os.path.dirname(__file__))
 SCRIPTS = os.path.abspath(os.path.join(TESTS, ".."))
@@ -409,3 +410,41 @@ class PhaseMonotonicTests(unittest.TestCase):
             [], backwards,
             "顺流程往前走,阶段却倒退了(回退/重做步骤请显式排除): %s"
             % backwards)
+
+
+class WindowsAndOptInTests(unittest.TestCase):
+    """内网反馈"Windows 下通知未生效"——两个可能的原因都堵上。
+
+    ① 最可能的:桌面通知默认关闭,仓根没有 .mae-flow-defaults.json 就一个都不弹。
+       静默不弹让人以为功能坏了却查不到原因,所以改成每单提示一次怎么打开。
+    ② Win10/11 上 NotifyIcon.ShowBalloonTip 已被系统当作过时接口、常常直接不
+       显示。改为先走 WinRT toast(用 PowerShell 自己的 AppId,无需注册应用),
+       失败再退回气泡;powershell 不在 PATH 时退到 System32 绝对路径。
+    """
+
+    def test_windows_command_prefers_winrt_toast_with_fallback(self):
+        from mae_flow_core.panel import notify
+        with mock.patch.object(notify.os, "name", "nt"), \
+             mock.patch.object(notify.sys, "platform", "win32"), \
+             mock.patch.object(notify, "_windows_shell",
+                               return_value="powershell"):
+            command = notify._command("标题", "正文")
+        script = " ".join(command)
+        self.assertIn("ToastNotificationManager", script, "先走 WinRT toast")
+        self.assertIn("catch", script, "失败要有退路")
+        self.assertIn("ShowBalloonTip", script, "退路是气泡提示")
+        self.assertIn("-NoProfile", script)
+
+    def test_powershell_falls_back_to_an_absolute_path(self):
+        from mae_flow_core.panel import notify
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch.object(notify.os.path, "isfile", return_value=True):
+            self.assertTrue(notify._windows_shell().endswith("powershell.exe"))
+
+    def test_being_switched_off_says_so_once(self):
+        folder = tempfile.mkdtemp(prefix="notify-hint-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        first = notify._notice_due(folder)
+        second = notify._notice_due(folder)
+        self.assertTrue(first, "第一次要提示怎么打开")
+        self.assertFalse(second, "每次响铃都念一遍就成了新的噪声")

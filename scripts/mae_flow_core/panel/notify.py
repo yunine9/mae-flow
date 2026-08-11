@@ -74,23 +74,53 @@ def _command(title, body):
                 'display notification %s with title %s sound name "Ping"'
                 % (_applescript(body), _applescript(title))]
     if os.name == "nt":
-        # SystemIcons 在 System.Drawing 里,必须显式 Add-Type,不赌传递加载;
-        # 弹完驻留几秒再退出——NotifyIcon 随进程销毁,立刻退出 toast 会一闪而没。
-        # 弹窗进程不被等待(Popen),驻留不拖慢 done。Windows 腿在内网真机验证前
-        # 视为未证实(军规:没跑过的代码不算能跑)。
+        # 先走 WinRT toast:Win10/11 上 NotifyIcon.ShowBalloonTip 已被系统当作
+        # 过时接口,常常直接不显示(内网实测"通知未生效")。toast 用 PowerShell
+        # 自己的 AppId,无需注册应用。失败再退回气泡提示——两条都不成也无所谓,
+        # 正文那一行始终会打印,通知只是加强,从不承担告知责任。
+        safe_title = title.replace("'", " ")
+        safe_body = body.replace("'", " ")
         script = (
+            "$ErrorActionPreference='Stop';"
+            "try{"
+            "[Windows.UI.Notifications.ToastNotificationManager,"
+            "Windows.UI.Notifications,ContentType=WindowsRuntime]>$null;"
+            "$t=[Windows.UI.Notifications.ToastNotificationManager]::"
+            "GetTemplateContent("
+            "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+            "$x=$t.GetElementsByTagName('text');"
+            "$x.Item(0).AppendChild($t.CreateTextNode('%(t)s'))>$null;"
+            "$x.Item(1).AppendChild($t.CreateTextNode('%(b)s'))>$null;"
+            "[Windows.UI.Notifications.ToastNotificationManager]::"
+            "CreateToastNotifier("
+            "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell"
+            "\\v1.0\\powershell.exe').Show("
+            "[Windows.UI.Notifications.ToastNotification]::new($t))"
+            "}catch{"
             "Add-Type -AssemblyName System.Windows.Forms;"
             "Add-Type -AssemblyName System.Drawing;"
             "$n=New-Object System.Windows.Forms.NotifyIcon;"
             "$n.Icon=[System.Drawing.SystemIcons]::Information;"
             "$n.Visible=$true;"
-            "$n.ShowBalloonTip(8000,'%s','%s',"
+            "$n.ShowBalloonTip(8000,'%(t)s','%(b)s',"
             "[System.Windows.Forms.ToolTipIcon]::Info);"
-            "Start-Sleep -Seconds 6;$n.Dispose()"
-            % (title.replace("'", " "), body.replace("'", " ")))
-        return ["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+            "Start-Sleep -Seconds 6;$n.Dispose()}"
+            % {"t": safe_title, "b": safe_body})
+        return [_windows_shell(), "-NoProfile", "-WindowStyle", "Hidden",
                 "-Command", script]
     return ["notify-send", title, body]
+
+
+def _windows_shell():
+    """powershell 不在 PATH 时退到绝对路径:内网机器的 PATH 常被裁剪。"""
+    import shutil
+    for name in ("powershell", "powershell.exe", "pwsh"):
+        if shutil.which(name):
+            return name
+    fallback = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    return fallback if os.path.isfile(fallback) else "powershell"
 
 
 def _applescript(text):
@@ -186,6 +216,32 @@ def _ring(lines, root, ticket):
     except Exception:                      # noqa: BLE001
         pass
     if desktop_enabled(root):
-        _popup("Mae-Flow · " + label.rstrip(" ·· ").strip(),
-               "；".join(item.replace("🔔 ", "") for item in lines))
+        if not _popup("Mae-Flow · " + label.rstrip(" ·· ").strip(),
+                      "；".join(item.replace("🔔 ", "") for item in lines)):
+            # 弹窗失败要说一声。静默失败的后果是用户以为功能坏了却查不到原因
+            # (内网实测"Windows 下通知未生效",而真因可能只是没开开关)。
+            print("[mae-flow] （桌面通知这次没弹出来;上面这行才是正文,"
+                  "不影响流程。反复不弹可把「桌面通知」预设关掉免打扰。）",
+                  file=sys.stderr)
+    elif _notice_due(root):
+        print("[mae-flow] 想让这类提醒同时弹系统通知?在仓根 "
+              ".mae-flow-defaults.json 里加 {\"桌面通知\": true}"
+              "(默认关闭:不问自取地弹通知是打扰)。", file=sys.stderr)
     return lines
+
+
+_NOTICE_MARK = ".notify-hint"
+
+
+def _notice_due(root):
+    """开关提示每单只说一次——每次响铃都念一遍就成了新的噪声。"""
+    path = os.path.join(root, ".mae-flow-work", _NOTICE_MARK)
+    if os.path.exists(path):
+        return False
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as stream:
+            stream.write("said\n")
+    except OSError:
+        return False
+    return True

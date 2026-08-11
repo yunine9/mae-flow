@@ -41,15 +41,31 @@ class BootstrapTests(unittest.TestCase):
 
     def test_hook_lays_the_bridge_itself_on_a_delivery_request(self):
         """hook 直接铺桥,不递路径;铺不动才降级——那是宿主故障,不该常见。"""
+        # 用 ast 取方法体,不按字符串切段:方法一挪位置,切分就指到别处,
+        # 断言会变成在验证无关代码(刚才就这么假绿过一次)。
+        import ast as _ast
         with io.open(os.path.join(SCRIPTS, "mae_flow_core", "adapters",
                                   "hook_events.py"), encoding="utf-8") as s:
             source = s.read()
-        block = source.split("_offer_first_entry")[2]
+        tree = _ast.parse(source)
+        found = [node for node in _ast.walk(tree)
+                 if isinstance(node, _ast.FunctionDef)
+                 and node.name == "_offer_first_entry"]
+        self.assertEqual(1, len(found), "铺桥方法应当只有一处定义")
+        whole = _ast.get_source_segment(source, found[0]) or ""
+        # 注释与文档字符串在讲历史("原来复用了 …"),不是现行代码,不参与判定
+        block = "\n".join(
+            line.split("#")[0] for line in whole.splitlines()
+            if not line.strip().startswith("#"))
+        doc = _ast.get_docstring(found[0]) or ""
+        block = block.replace(doc, "")
         self.assertIn("install_project_launcher()", block)
         self.assertIn("转发壳已就位", block)
         # 只在明确的交付请求上动手,无关项目一个文件都不写
-        self.assertIn("_explicit_flow_start_prompt", block)
-        self.assertIn('event != "userprompt"', block)
+        # 判据不能再复用终态重入那条(只认裸 /mae-flow),它对真实输入永远 False
+        self.assertNotIn("_explicit_flow_start_prompt", block)
+        self.assertIn("wants_delivery", block)
+        self.assertIn('event not in ("userprompt", "sessionstart")', block)
         # 降级路径必须自我声明"这不该经常出现"
         self.assertIn("这不该经常出现", block)
 
@@ -82,6 +98,52 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn("由 Mae-Flow 自动生成", body)
         self.assertIn("生成于 2026-08-10 18:00:00", body)
         self.assertIn("插件根 /plug", body)
+
+
+class RealHookEntryTests(unittest.TestCase):
+    """打真实入口:全新仓 + userprompt 事件 → 桥必须出现。
+
+    内网首战没生效,根因是两处都错而单测都没照出来:
+    ① 铺桥调用误挂在 corrupt(状态损坏)分支,而全新仓走的是 inject;
+    ② 判据复用了 _explicit_flow_start_prompt——那是给"终态重入"设计的,
+       只认裸 /mae-flow;真实输入 "/mae-flow\n交付 REQ…" 里 action 取到
+       "交付",不在白名单,一律 False。
+    教训:验证要打真实入口(dispatch.py + 真 payload),只测自己新写的函数
+    会把"没接上"这类错完全漏掉——今天两处都是这么漏的。
+    """
+
+    def _run(self, prompt):
+        import json as _json
+        import shutil
+        import subprocess
+        import tempfile
+        room = tempfile.mkdtemp(prefix="bootstrap-")
+        self.addCleanup(shutil.rmtree, room, True)
+        subprocess.run(["git", "init", "-q", room], check=False, timeout=60)
+        payload = _json.dumps({"prompt": prompt, "cwd": room})
+        subprocess.run(
+            [sys.executable, os.path.join(ROOT, "hooks", "dispatch.py"),
+             "userprompt"],
+            input=payload, text=True, capture_output=True, cwd=room,
+            timeout=120)
+        return os.path.isfile(
+            os.path.join(room, ".mae-flow-work", "bin", "mae-flow.py"))
+
+    def test_slash_command_with_requirement_lays_the_bridge(self):
+        self.assertTrue(
+            self._run("/mae-flow\n交付 REQ2026081101，需求文档在 docs/se/x.md"),
+            "真实形态:斜杠命令 + 换行 + 需求描述")
+
+    def test_plain_delivery_request_lays_the_bridge(self):
+        self.assertTrue(self._run("交付 REQ2026081101，需求文档在 docs/se/x.md"))
+
+    def test_moonlight_lays_the_bridge(self):
+        self.assertTrue(self._run("/mae-flow 月光宝盒\n交付 REQ2026081101"))
+
+    def test_unrelated_message_writes_nothing(self):
+        """铁律不破:无关消息一个文件都不写。"""
+        self.assertFalse(self._run("帮我改个错别字"))
+        self.assertFalse(self._run("这个函数是干什么的"))
 
 
 if __name__ == "__main__":

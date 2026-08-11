@@ -1,6 +1,7 @@
 """Install a stable project-local bridge to the CodeAgent plugin entry."""
 
 import os
+import re
 import time
 
 from ..runtime import ACTION_FILE, EXIT_FILE, FLOW_FILE
@@ -49,6 +50,23 @@ def plugin_entry_path(plugin_root=None):
             os.path.dirname(__file__), "..", "..", ".."))
     )
     return os.path.join(root, "scripts", "mae-flow.py")
+
+
+_DELIVERY = re.compile(
+    r"/mae-flow|mae[- ]?flow|月光宝盒|moonlight|"
+    r"交付|开发需求|落地|提\s*MR|走流程|"
+    r"\b(?:REQ|DTS)\d{4,}", re.I)
+
+
+def wants_delivery(prompt):
+    """这条用户消息像不像"要在这个仓开工"。
+
+    宽判是有意的:铺一个转发壳的代价是过程目录多一个文件(已在 .gitignore 内),
+    判严的代价是用户开不了工——内网首战正是判据永远 False,模型只好自己去找
+    python 和插件路径。真正的"不写脏仓"由 install_launcher_when_active 那条
+    铁律守着(它只在真有流程状态时铺);这里额外放宽的仅限"用户点名要交付"。
+    """
+    return bool(_DELIVERY.search(str(prompt or "")))
 
 
 def project_has_runtime_state(project_root=None):

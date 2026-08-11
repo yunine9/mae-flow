@@ -78,7 +78,6 @@ class HookEventAdapter:
                 payload,
                 session_start=(event == "sessionstart"),
             )
-        self._offer_first_entry(event, payload)
         return HookResponse()
 
     def _offer_first_entry(self, event, payload):
@@ -91,17 +90,20 @@ class HookEventAdapter:
         Agent 从头到尾只该知道 .mae-flow-work/bin/mae-flow.py 这一个短路径。
         只有铺不动(权限/只读)才降级递路径——那是宿主故障,本就不该常见。
         """
-        if event != "userprompt":
+        if event not in ("userprompt", "sessionstart"):
             return
-        prompt = payload.get("prompt") or ""
-        started = False
-        try:
-            started = bool(self.runtime._explicit_flow_start_prompt(prompt))
-        except Exception:                  # noqa: BLE001 —— 判不出就不动
-            started = False
-        if not (started or re.search(r"月光宝盒|moonlight", prompt, re.I)):
+        if os.path.isfile(self.state):
+            return                         # 已在途,桥由既有路径维护
+        # 判据要宽:铺一个转发壳的代价是过程目录里多一个文件(且 .gitignore 已
+        # 覆盖),而判严的代价是用户开不了工。原来复用了 _explicit_flow_start_prompt
+        # ——那是给"终态重入"设计的,只认裸 /mae-flow 命令;真实输入
+        # "/mae-flow\n交付 REQ…" 里 action 取到"交付",不在白名单,于是一律不铺。
+        # 内网首战就是栽在这:判据永远 False,模型只好自己去找 python 和插件路径。
+        from .project_launcher import wants_delivery
+        if not wants_delivery(payload.get("prompt") or ""):
             return
-        from .project_launcher import install_project_launcher, plugin_entry_path
+        from .project_launcher import (
+            install_project_launcher, plugin_entry_path, wants_delivery)
         bridge = install_project_launcher()
         if bridge:
             print("[mae-flow] 转发壳已就位: .mae-flow-work/bin/mae-flow.py。"
@@ -169,6 +171,12 @@ class HookEventAdapter:
         return self._invoke(self.standalone_pretool_handler, payload)
 
     def inject(self, payload, session_start):
+        # 全新仓(INACTIVE)的 userprompt/sessionstart 也落在这里——首次铺桥必须
+        # 挂在这条路上。之前误挂进 corrupt 分支(只在状态文件损坏时走),
+        # 于是内网首战完全没生效:模型照旧自己去找 python 和插件路径。
+        # 教训:验证要打真实入口,不能只测自己新写的那段函数。
+        self._offer_first_entry(
+            "sessionstart" if session_start else "userprompt", payload)
         return self._invoke(
             self.inject_handler, payload, session_start=session_start)
 

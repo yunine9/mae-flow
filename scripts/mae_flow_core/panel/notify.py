@@ -57,15 +57,23 @@ def phase_of(step_id):
 
 
 def desktop_enabled(root="."):
-    """默认关闭:不问自取地弹系统通知是打扰。"""
+    """默认开启;要静音就把「桌面通知」预设写成 false,或设 MAE_FLOW_NO_NOTIFY。
+
+    原来默认关闭,理由是"不问自取地弹通知是打扰"。这条顾虑放在这里不成立:
+    它只在"需要你裁决"和"跨入新阶段"两种时刻响,一单几次而已;而这个流程真正
+    的痛点恰恰是"你不知道它什么时候需要你"——通知就是为解决它而生的。
+    更要紧的是,要用户先知道有这功能、再去建一个 JSON 文件才生效的贴心功能,
+    等于没有(内网反馈"Windows 下通知未生效",真因就是它压根没开)。
+    """
     if os.environ.get(ENV_OFF):
         return False
     try:
         defaults = load_json(os.path.join(root, DEFAULTS_PATH),
                              encoding="utf-8-sig") or {}
-    except Exception:                      # noqa: BLE001
-        return False
-    return bool(defaults.get(FIELD))
+    except Exception:                      # noqa: BLE001 —— 读不到预设按默认开
+        return True
+    value = defaults.get(FIELD)
+    return True if value is None else bool(value)
 
 
 def _command(title, body):
@@ -224,9 +232,8 @@ def _ring(lines, root, ticket):
                   "不影响流程。反复不弹可把「桌面通知」预设关掉免打扰。）",
                   file=sys.stderr)
     elif _notice_due(root):
-        print("[mae-flow] 想让这类提醒同时弹系统通知?在仓根 "
-              ".mae-flow-defaults.json 里加 {\"桌面通知\": true}"
-              "(默认关闭:不问自取地弹通知是打扰)。", file=sys.stderr)
+        print("[mae-flow] 桌面通知已静音(预设或 MAE_FLOW_NO_NOTIFY);"
+              "需要裁决的时刻只会打印上面这行。", file=sys.stderr)
     return lines
 
 

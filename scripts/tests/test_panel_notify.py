@@ -98,17 +98,28 @@ class NotifyTests(unittest.TestCase):
         lines, _printed = announce("build", "workflow_select")
         self.assertEqual(2, len(lines))
 
-    def test_desktop_popup_is_opt_in(self):
+    def test_desktop_popup_is_on_by_default(self):
+        """默认开启。要用户先知道有这功能、再建一个 JSON 文件才生效的贴心功能
+        等于没有——内网反馈"Windows 下通知未生效",真因就是它压根没开。
+        静音仍然做得到:预设写 false,或设 MAE_FLOW_NO_NOTIFY。"""
         folder = tempfile.mkdtemp(prefix="notify-")
         self.addCleanup(shutil.rmtree, folder, True)
         os.environ.pop(notify.ENV_OFF, None)
-        self.assertFalse(notify.desktop_enabled(folder))   # 无预设 → 关闭
+        self.assertTrue(notify.desktop_enabled(folder), "全新仓就该弹")
+        with open(os.path.join(folder, notify.DEFAULTS_PATH), "w",
+                  encoding="utf-8") as stream:
+            json.dump({"编译方式": "make build"}, stream)
+        self.assertTrue(notify.desktop_enabled(folder), "有预设但没这一项也该弹")
+        with open(os.path.join(folder, notify.DEFAULTS_PATH), "w",
+                  encoding="utf-8") as stream:
+            json.dump({notify.FIELD: False}, stream)
+        self.assertFalse(notify.desktop_enabled(folder), "写 false 要能静音")
         with open(os.path.join(folder, notify.DEFAULTS_PATH), "w",
                   encoding="utf-8") as stream:
             json.dump({notify.FIELD: True}, stream)
         self.assertTrue(notify.desktop_enabled(folder))
         os.environ[notify.ENV_OFF] = "1"
-        self.assertFalse(notify.desktop_enabled(folder))   # 环境变量总能关掉
+        self.assertFalse(notify.desktop_enabled(folder), "环境变量总能关掉")
 
     def test_popup_failure_is_swallowed(self):
         """通知失败就是没通知,绝不许影响流程。"""

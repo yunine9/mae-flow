@@ -232,6 +232,27 @@ class PanelPageTests(unittest.TestCase):
         # 清单里的批注文本一律 textContent,不拼 HTML
         self.assertNotIn("innerHTML", html.split("批注清单")[1])
 
+    def test_collapsed_context_can_actually_be_expanded(self):
+        """折叠行写着 onclick="dx(this)",而 dx 从来没被定义过——点了毫无反应,
+        这个功能自始至终没工作过(用户实战发现)。凡是页面里调用的函数,
+        必须在页面自己的 JS 里定义得出来。"""
+        from mae_flow_core.panel import assets, diffview
+        rendered = diffview.render(
+            "@@ -1,30 +1,30 @@\n" + "\n".join(
+                [" ctx%d" % i for i in range(12)]
+                + ["-old", "+new"]
+                + [" tail%d" % i for i in range(12)]))
+        self.assertIn('onclick="dx(this)"', rendered,
+                      "长段未改动应当折叠成可展开行")
+        self.assertIn("function dx(", assets.JS, "调用的函数必须真的存在")
+        html = build()
+        # 页面里 onclick 调到的每个函数都得有定义,不能再有第二个 dx
+        called = set(re.findall(r'onclick="(\w+)\(', html))
+        for name in sorted(called):
+            self.assertRegex(
+                html, r"function\s+%s\s*\(" % name,
+                "页面调用了 %s() 但没有定义它" % name)
+
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
         import re as _re, shutil, tempfile

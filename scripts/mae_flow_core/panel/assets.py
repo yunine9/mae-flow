@@ -304,6 +304,19 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
 """
 
 JS = r"""
+// 展开被折叠的未改动行。diffview 生成的展开行写着 onclick="dx(this)",
+// 而这个函数从来没被定义过——点了毫无反应,这个功能自始至终没工作过。
+// 折叠内容就在紧邻的下一个兄弟节点里(<div hidden>…</div>),点一下去掉 hidden、
+// 把展开行自己隐去即可;再点相邻的展开行不受影响。
+function dx(row){
+  var hidden = row && row.nextElementSibling;
+  if (!hidden || !hidden.hasAttribute('hidden')) { return; }
+  hidden.removeAttribute('hidden');
+  row.setAttribute('hidden', '');
+  // 展开会改变高度,批注的行标记要跟着重画(它按行号定位)
+  if (window.__panelPaintNotes) { window.__panelPaintNotes(); }
+}
+
 var V = document.getElementById('viewer');
 function show(key){
   var panes = document.querySelectorAll('.pane');

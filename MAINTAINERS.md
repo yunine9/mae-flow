@@ -460,7 +460,7 @@ maxTurns 现值：ut=200 / compile=100 / codecheck=100 / story=60（FIELD-TEST 0
 
 **通知**：`advance()` 落地后调用 `notify.announce()`，只在两种时刻响——到了需要用户
 裁决的步骤、跨入新阶段；同阶段内推进保持安静（噪声化的通知等于没有通知）。
-桌面弹窗默认关闭，在 `.mae-flow-defaults.json` 写 `"桌面通知": true` 才启用；
+桌面弹窗默认开启；静音把 `.mae-flow-defaults.json` 的 `"桌面通知"` 写成 `false`，或设 `MAE_FLOW_NO_NOTIFY`。（原来默认关闭——而要人先建个 JSON 才生效的功能等于没有：内网反馈"通知未生效"真因就是它压根没开。）
 `MAE_FLOW_NO_NOTIFY=1` 可强制关闭。阶段表在 `notify.PHASES`，是 step→阶段的唯一来源，
 `test_panel_notify` 用覆盖断言拦住 flow.json 增删步骤造成的漂移。
 

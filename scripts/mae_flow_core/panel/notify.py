@@ -86,6 +86,9 @@ def _command(title, body):
         # 过时接口,常常直接不显示(内网实测"通知未生效")。toast 用 PowerShell
         # 自己的 AppId,无需注册应用。失败再退回气泡提示——两条都不成也无所谓,
         # 正文那一行始终会打印,通知只是加强,从不承担告知责任。
+        #
+        # 2026-08-12 内网真机确认可弹(此前一直挂着"未证实"标记)。真因是两条:
+        # ShowBalloonTip 不显示,以及桌面通知当时默认关闭——后者才是主因。
         safe_title = title.replace("'", " ")
         safe_body = body.replace("'", " ")
         script = (

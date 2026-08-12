@@ -149,9 +149,17 @@ def _prepare_ut_session(
             if len(batches) <= 1 else
             "按任务卡自适应批次执行；上下文接近上限时自然语言收尾，"
             "由主会话用下一批范围启动新实例")
+    # 记同一批签发了几次:没前进就一直加。它是判断"卡在取不到的证据上"的
+    # 唯一客观依据——不然只能靠人数轮次。
+    same_batch = (
+        previous.get("head") == task_head
+        and previous.get("active_batch") == advanced.record.get("active_batch")
+        and previous.get("phase") == advanced.record.get("phase"))
     st["ut_session"] = dict(advanced.record, **{
         "step": sid,
         "head": task_head,
+        "issued": (int(previous.get("issued", 0) or 0) + 1
+                   if same_batch else 1),
         "accumulated_test_files": list(dict.fromkeys(
             list(previous.get("accumulated_test_files", ()))
             + list(accumulated))),

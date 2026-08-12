@@ -44,12 +44,22 @@ class QualityEvidenceRules:
             return EvidenceResult(False, error)
         if not files:
             return EvidenceResult(True, "")
+        # 批次记账靠"上一批 agent 返回了"来推进,而那份返回证据正是用户已经
+        # 接受风险的那一份。宿主取不到子会话记录时,这里会形成死循环:
+        # 派 agent → 无证据 → 批次不前进 → done 拒 → 再派 agent…
+        # 用户接受风险后仍被同一份缺失证据的衍生记账挡住,等于 accept-risk 无效,
+        # 只剩"整步跳过"这条最差的路(把本步其余所有检查一起扔掉)。
+        # 实战撞过:限流后新开 session 续跑,连撞 6 次,最终整步跳过。
+        accepted, _why = self.ports.risk_acceptance("UT", state)
+        if accepted:
+            return EvidenceResult(True, "")
         session = state.get("ut_session") or {}
         if (session.get("step") != state.get("current")
                 or session.get("phase") != "final"):
             return EvidenceResult(
                 False, "UT 自适应生成批尚未全部完成；按 current 继续下一批，"
-                "最后必须签发并完成全量收口批")
+                "最后必须签发并完成全量收口批。"
+                + _ut_loop_hint(session))
         return legacy_result(self.ports.agent_ran({"agent": "UT"}, state))
 
     def _scan_cache_result(self, state, files):
@@ -341,3 +351,21 @@ class QualityEvidenceRules:
         if result is not None:
             return result
         return self._review_agent_result(state)
+
+
+def _ut_loop_hint(session):
+    """同一批反复签发却never前进,就该说出真相,而不是让人再派一轮。
+
+    宿主拿不到子会话记录时,批次记账永远推不动;此时正确的出路是 accept-risk
+    (它现在会一并放行批次记账),不是整步跳过——跳过会把本步其余检查一起扔掉。
+    """
+    issued = int((session or {}).get("issued", 0) or 0)
+    if issued < 3:
+        return ""
+    return (
+        "\n⚠ 同一批已签发 %d 次仍未前进:批次推进依赖"
+        "「上一批 Agent 真实返回」这份证据,宿主取不到子会话记录时它永远不会成立"
+        "(限流后新开 session 续跑最容易撞上)。不要再派下一轮:"
+        "把实际跑过的 UT 结果摆给用户,取得同意后执行 accept-risk ut"
+        "——它会一并放行批次记账;整步跳过会把本步其余检查一起扔掉,别用。"
+        % issued)

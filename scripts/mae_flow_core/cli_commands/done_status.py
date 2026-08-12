@@ -217,6 +217,18 @@ def cmd_skip(flow, st, args):
         api.die("skip 必须 --reason 说明理由(留痕)。", 2)
     if step.get("skip_requires_ack"):
         api.die("本步不能由 Agent 自行 skip；请走当前步骤的用户确认分支。", 2)
+    kinds = sorted(_step_agent_kinds(step))
+    if kinds:
+        # 整步跳过会把本步**全部**检查一起扔掉;而 accept-risk 只放行拿不到的
+        # 那一份证据,其余照查。实战撞过:UT 证据取不到,连试 6 次后用户被引到
+        # "整步跳过 verify_ut"——UT 的其他机器检查也一起没了,代价大得多。
+        api.die(
+            "别整步跳过:本步有更精确的出口。拿不到的只是 %s 的执行证据时,"
+            "把实际跑过的结果摆给用户,取得同意后逐个执行 "
+            "accept-risk %s --reason ... --message-id <ID>"
+            "——它只放行这一份证据,本步其余检查照查。"
+            "整步 skip 会把它们一起扔掉,只在确实整步都不适用时才用,"
+            "且需要用户明确要求。" % ("、".join(kinds), kinds[0].lower()), 2)
     api.advance(flow, st, sid, step, "skipped", args.reason)
 
 def _step_agent_kinds(step):

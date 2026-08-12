@@ -89,3 +89,50 @@ class UtRiskDeadlockTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkipIsNotTheEscapeTests(unittest.TestCase):
+    """有更精确的出口时,不许整步跳过。
+
+    实战最坏的结局:UT 证据取不到,连试 6 次后模型把用户引到"整步跳过
+    verify_ut"——本步其余机器检查也一起没了。accept-risk 只放行拿不到的那一份,
+    其余照查;skip 是大炮打蚊子。
+    """
+
+    def test_skip_points_at_accept_risk_instead(self):
+        import types
+        from mae_flow_core.cli_commands import done_status
+        step = {"skippable": True,
+                "evidence": [{"type": "agent_or_no_source", "agent": "UT"},
+                             {"type": "ut_session_complete"}]}
+        flow = {"steps": {"verify_ut": step}}
+        said = []
+
+        def die(message, code):
+            said.append(message)
+            raise SystemExit(code)
+
+        # api 是延迟绑定的注册表:直接塞进它的 _values,别指望属性已存在
+        # (CliApi 用 __getattr__ 从 _values 取,未注册时读它会抛 AttributeError)
+        import mae_flow_core.cli_runtime  # noqa: F401 —— 触发注册
+        original = done_status.api.exports().get("die")
+        done_status.api.register_values({"die": die})
+        try:
+            with self.assertRaises(SystemExit):
+                done_status.cmd_skip(
+                    flow, {"current": "verify_ut"},
+                    types.SimpleNamespace(reason="宿主取不到证据"))
+        finally:
+            if original is not None:
+                done_status.api.register_values({"die": original})
+        message = "".join(said)
+        self.assertIn("别整步跳过", message)
+        self.assertIn("accept-risk ut", message)
+        self.assertIn("本步其余检查照查", message)
+
+    def test_steps_without_agent_evidence_can_still_be_skipped(self):
+        """没有 Agent 证据的步骤本来就该能跳——放宽只针对"有更精确出口"这一种。"""
+        from mae_flow_core.cli_commands import done_status
+        self.assertEqual(
+            set(), done_status._step_agent_kinds({"evidence": [
+                {"type": "glob"}, {"type": "content_free"}]}))

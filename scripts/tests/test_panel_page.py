@@ -266,9 +266,11 @@ class PanelPageTests(unittest.TestCase):
                         "Cascadia 要排在 Consolas 之前")
         # 连字关掉:!= >= -> 变成合字后与相邻列对不齐,也不像源码
         self.assertIn("font-variant-ligatures:none", assets.CSS)
-        # 断行不许劈开单词
-        self.assertNotIn("word-break:break-all", assets.CSS)
-        self.assertIn("overflow-wrap:break-word", assets.CSS)
+        # diff 单元不许劈开单词。别处(长路径、键值)用 break-all 是对的:
+        # 路径必须能断,否则撑破布局——所以只盯 .dr .c 这一条规则。
+        cell = assets.CSS.split(".dr .c{")[1].split("}")[0]
+        self.assertNotIn("break-all", cell)
+        self.assertIn("overflow-wrap:break-word", cell)
         # 行号列宽度要稳
         self.assertIn("tabular-nums", assets.CSS)
 

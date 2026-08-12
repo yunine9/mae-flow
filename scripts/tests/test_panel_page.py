@@ -253,6 +253,25 @@ class PanelPageTests(unittest.TestCase):
                 html, r"function\s+%s\s*\(" % name,
                 "页面调用了 %s() 但没有定义它" % name)
 
+    def test_code_typography_survives_windows_and_mixed_scripts(self):
+        """diff 的等宽字体在 Windows 上曾落到 Consolas——对中文回退宋体类,
+        粗细不匀看着毛糙(用户实测"字体好丑")。另外 word-break:break-all
+        会在任意字符处断行,把 False 劈成 F|alse(中英混排注释里最明显)。"""
+        from mae_flow_core.panel import assets
+        stack = assets.CSS.split("--mono:")[1].split(";")[0]
+        for wanted in ("Cascadia", "Sarasa Mono SC", "JetBrains Mono"):
+            self.assertIn(wanted, stack,
+                          "字体链要照顾 Windows 与中文等宽: 缺 %s" % wanted)
+        self.assertLess(stack.index("Cascadia"), stack.index("Consolas"),
+                        "Cascadia 要排在 Consolas 之前")
+        # 连字关掉:!= >= -> 变成合字后与相邻列对不齐,也不像源码
+        self.assertIn("font-variant-ligatures:none", assets.CSS)
+        # 断行不许劈开单词
+        self.assertNotIn("word-break:break-all", assets.CSS)
+        self.assertIn("overflow-wrap:break-word", assets.CSS)
+        # 行号列宽度要稳
+        self.assertIn("tabular-nums", assets.CSS)
+
     def test_write_page_emits_the_stamp_beside_the_panel(self):
         """stamp 与页面同一个 born:早一秒都会让新页面自认过期而反复重载。"""
         import re as _re, shutil, tempfile

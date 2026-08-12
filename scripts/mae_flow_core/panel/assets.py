@@ -16,7 +16,13 @@ CSS = r"""
   --ok:#247253;--ok-bg:#e7f3ed;--warn:#95601c;--warn-bg:#fff1d9;
   --bad:#a5483f;--bad-bg:#f9eae8;--run:#2e648e;--run-bg:#e8f1f7;
   --accent:#6654d9;--accent-bg:#eeeaff;--dark:#292a2d;--code-bg:#f1f1ef;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* 等宽字体链要照顾 Windows:原来 ui-monospace/SFMono/Menlo 全是 mac 的,
+     Windows 上第一个命中 Consolas——对中文回退到宋体类,粗细不匀、看着毛糙。
+     Cascadia 是 Win10 1909+ 与 Terminal 自带的编程字体,优先它;
+     再退 Sarasa/JetBrains(开发机常有,中文等宽对齐),最后才是 Consolas。 */
+  --mono:ui-monospace,SFMono-Regular,Menlo,"Cascadia Mono","Cascadia Code",
+    "Sarasa Mono SC","JetBrains Mono","Source Han Mono SC",
+    "Microsoft YaHei Mono",Consolas,monospace;
 }
 @media (prefers-color-scheme:dark){
   :root{
@@ -244,7 +250,8 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
   border-bottom:1px solid var(--line)}
 .fence pre{margin:0;padding:12px 14px;overflow-x:auto}
 .fence code{font-family:var(--mono);font-size:12.5px;background:none;
-  padding:0;white-space:pre;line-height:1.55}
+  padding:0;white-space:pre;line-height:1.65;
+  font-variant-ligatures:none;-webkit-font-smoothing:antialiased}
 .pfig{margin:16px 0;padding:12px 12px 8px;border:1px solid var(--line);
   border-radius:9px;background:var(--card);overflow-x:auto}
 .pfig figcaption{margin-top:8px;font-size:11px;color:var(--faint);
@@ -266,7 +273,11 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
 
 /* ── 双排 diff ── */
 .dwrap{padding:14px 18px 28px}
-.diff{font-family:var(--mono);font-size:12px;line-height:1.62;
+.diff{font-family:var(--mono);font-size:12.5px;line-height:1.7;
+  /* 关掉连字:diff 里 != >= -> 变成合字后,与相邻列对不齐、也不像源码。
+     tabular-nums 让行号列宽度稳定;font-smoothing 治 Windows 上的毛边。 */
+  font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0,"tnum" 1;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
   border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .dhead{display:grid;
   grid-template-columns:38px minmax(0,1fr) 38px minmax(0,1fr);
@@ -277,10 +288,14 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
 .dhead span:last-child{grid-column:3/5;border-left:1px solid var(--line)}
 .dr{display:grid;grid-template-columns:38px minmax(0,1fr) 38px minmax(0,1fr);
   background:var(--card);border-top:1px solid var(--line)}
-.dr .ln{color:var(--faint);font-size:10.5px;text-align:right;padding:0 6px;
+.dr .ln{color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums;
+  text-align:right;padding:0 6px;
   background:var(--bg);user-select:none}
-.dr .c{padding:0 10px;white-space:pre-wrap;word-break:break-all;
-  background:none;min-width:0}
+/* 不用 word-break:break-all——它在任意字符处断行,把 False 劈成 F|alse
+   (中英混排的注释里最明显,用户实测截图里就有)。break-word 只在单个词
+   确实放不下时才断;中文本身可以逐字换行,不受影响。 */
+.dr .c{padding:0 10px;white-space:pre-wrap;word-break:normal;
+  overflow-wrap:break-word;background:none;min-width:0}
 .dr .c:nth-of-type(2){border-left:1px solid var(--line)}
 .dr .c.add{background:var(--ok-bg);color:var(--ok)}
 .dr .c.del{background:var(--bad-bg);color:var(--bad)}

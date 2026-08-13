@@ -68,6 +68,10 @@ def _pre_commit_format(context):
         return _block(
             "bash-commit-format",
             "commit message「%s」不符合 [%s][feat|fix]描述 格式。"
+            "类型只有 feat 与 fix 两种:**单元测试提交也用它们**"
+            "(新增能力配套的测试写 feat,修缺陷配套的测试写 fix)。"
+            "无人值守八条线里这条拦截出现最多,原因几乎都是在 verify_ut 步骤"
+            "顺手写了 [test]——那不是格式笔误,是类型表里根本没有的值。"
             % (message, context.ticket),
         )
     return None

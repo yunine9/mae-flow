@@ -92,17 +92,40 @@ def _story_context(state, role, document="", axis=""):
     return package, _existing(paths)
 
 
+# 依赖目录与构建产物不是交付内容。--exclude-standard 只认 .gitignore,
+# 而仓里没忽略 node_modules 是很常见的事(内网实测:几千个 openspec 运行时文件
+# 被整段塞进任务卡,"### 未跟踪文件: node_modules/…" 无穷重复,Agent 当场卡死)。
+_NEVER_IN_CARD = (
+    "node_modules/", "vendor/", "target/", "build/", "dist/", "out/",
+    ".venv/", "venv/", "__pycache__/", ".gradle/", ".idea/", ".vscode/",
+    ".mae-flow-work/", ".git/", "coverage/", ".pytest_cache/", ".mvn/",
+)
+_MAX_UNTRACKED_FILES = 40
+
+
+def _skip_in_card(path):
+    normalized = "/" + str(path or "").replace("\\", "/")
+    return any(("/" + part) in normalized for part in _NEVER_IN_CARD)
+
+
 def _untracked_patch():
     paths = api.argv_out([
         "git", "-c", "core.quotepath=false", "ls-files", "--others",
         "--exclude-standard",
     ]).splitlines()
+    kept = [path for path in paths
+            if path and os.path.isfile(path) and not _skip_in_card(path)]
     result = []
-    for path in paths:
-        if path.startswith(".mae-flow-work/") or not os.path.isfile(path):
-            continue
+    for path in kept[:_MAX_UNTRACKED_FILES]:
         body = read_text(path, encoding="utf-8", errors="replace")
         result.extend(("### 未跟踪文件: " + path, body[:100000]))
+    dropped = len(kept) - _MAX_UNTRACKED_FILES
+    if dropped > 0:
+        # 截断必须说出来:任务卡看起来完整、实则少了一半,比报错更难查。
+        result.append(
+            "### 还有 %d 个未跟踪文件未内嵌(超过 %d 个上限)。"
+            "若它们属于本次交付,先 git add 让它们进入正式 diff;"
+            "若不属于,加进 .gitignore。" % (dropped, _MAX_UNTRACKED_FILES))
     return "\n".join(result)
 
 

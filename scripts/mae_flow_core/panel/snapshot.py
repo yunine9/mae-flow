@@ -136,14 +136,40 @@ def _commits(root, base):
 _UNTRACKED_EMBED_CAP = 512 * 1024
 
 
+_UNTRACKED_FILE_CAP = 60
+_DEPENDENCY_DIRS = (
+    "node_modules/", "vendor/", "target/", "build/", "dist/", "out/",
+    ".venv/", "venv/", "__pycache__/", ".gradle/", ".idea/", ".vscode/",
+    ".git/", "coverage/", ".pytest_cache/", ".mvn/",
+)
+
+
+def _dependency_path(path):
+    normalized = "/" + str(path or "").replace("\\", "/")
+    return any(("/" + part) in normalized for part in _DEPENDENCY_DIRS)
+
+
 def _untracked_entries(root):
     """未跟踪文件也是待检视增量——人工检视发生在提交之前,本单新建的
     文件恰好全是 untracked,git diff 看不见它们(实战反馈:检视时没有
     diff,提交后才冒出来——缺的正是最重要的新文件)。"""
+    # 依赖目录与构建产物不是待检视增量。--exclude-standard 只认 .gitignore,
+    # 仓里没忽略 node_modules 很常见——那会把几千个文件渲染成"新增",
+    # 面板当场没法看(与任务卡那处同一个洞的第二个出口)。
     raw = _git(root, "ls-files", "--others", "--exclude-standard")
     entries = []
-    for path in sorted(line.strip() for line in raw.splitlines()
-                       if line.strip()):
+    candidates = [line.strip() for line in raw.splitlines() if line.strip()]
+    candidates = [path for path in candidates if not _dependency_path(path)]
+    if len(candidates) > _UNTRACKED_FILE_CAP:
+        # 截断要说出来:面板看起来完整、实则少了一半,比明说更难查。
+        entries.append({
+            "path": "（另有 %d 个未跟踪文件未展示,超过 %d 个上限;"
+                    "属于本次交付就先 git add,不属于就加进 .gitignore）"
+                    % (len(candidates) - _UNTRACKED_FILE_CAP,
+                       _UNTRACKED_FILE_CAP),
+            "added": 0, "removed": 0, "patch": ""})
+        candidates = candidates[:_UNTRACKED_FILE_CAP]
+    for path in sorted(candidates):
         full = os.path.join(root, path)
         try:
             if os.path.getsize(full) > _UNTRACKED_EMBED_CAP:

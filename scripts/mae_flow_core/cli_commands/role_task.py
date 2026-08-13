@@ -4,6 +4,7 @@ import hashlib
 import os
 import time
 
+from mae_flow_core.foundation import source_paths
 from mae_flow_core.application.quality.role_task_documents import (
     CODE_REVIEW_AXES,
     RoleTaskContext,
@@ -92,20 +93,18 @@ def _story_context(state, role, document="", axis=""):
     return package, _existing(paths)
 
 
-# 依赖目录与构建产物不是交付内容。--exclude-standard 只认 .gitignore,
-# 而仓里没忽略 node_modules 是很常见的事(内网实测:几千个 openspec 运行时文件
-# 被整段塞进任务卡,"### 未跟踪文件: node_modules/…" 无穷重复,Agent 当场卡死)。
-_NEVER_IN_CARD = (
-    "node_modules/", "vendor/", "target/", "build/", "dist/", "out/",
-    ".venv/", "venv/", "__pycache__/", ".gradle/", ".idea/", ".vscode/",
-    ".mae-flow-work/", ".git/", "coverage/", ".pytest_cache/", ".mvn/",
-)
 _MAX_UNTRACKED_FILES = 40
 
 
 def _skip_in_card(path):
-    normalized = "/" + str(path or "").replace("\\", "/")
-    return any(("/" + part) in normalized for part in _NEVER_IN_CARD)
+    """依赖目录与构建产物不是交付内容(内网实测:几千个 openspec 运行时文件
+    被整段塞进任务卡,"### 未跟踪文件: node_modules/…" 无穷重复,Agent 当场卡死)。
+    口径来自 foundation/source_paths,与面板、独立任务共用一份。
+    另加流程自己的过程目录——它当然也不该被当成交付内容内嵌进卡片。"""
+    return (source_paths.is_tool_managed_path(path)
+            or source_paths.is_derived_path(path)
+            or source_paths.is_artifact_path(path)
+            or source_paths.is_flow_control_path(path))
 
 
 def _untracked_patch():

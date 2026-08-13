@@ -16,6 +16,8 @@ import os
 import subprocess
 import time
 
+from mae_flow_core.foundation import source_paths
+
 SCHEMA = "mae-flow-status/1"
 WORK_DIR = ".mae-flow-work"
 DOC_KINDS = (
@@ -137,16 +139,17 @@ _UNTRACKED_EMBED_CAP = 512 * 1024
 
 
 _UNTRACKED_FILE_CAP = 60
-_DEPENDENCY_DIRS = (
-    "node_modules/", "vendor/", "target/", "build/", "dist/", "out/",
-    ".venv/", "venv/", "__pycache__/", ".gradle/", ".idea/", ".vscode/",
-    ".git/", "coverage/", ".pytest_cache/", ".mvn/",
-)
 
 
 def _dependency_path(path):
-    normalized = "/" + str(path or "").replace("\\", "/")
-    return any(("/" + part) in normalized for part in _DEPENDENCY_DIRS)
+    """依赖目录与构建产物目录——口径来自 foundation/source_paths,共用一份。
+
+    只按目录排,不按扩展名排。面板回答的是"这次要检视什么",不是"这是不是源码":
+    本单新加的 logo.bin 不是源码,却实实在在是待检视增量(列出来、不出 diff)。
+    按扩展名排会把它一起吞掉——那正是面板最不能犯的错:显示与现场不符。
+    """
+    return (source_paths.is_tool_managed_path(path)
+            or source_paths.is_derived_path(path))
 
 
 def _untracked_entries(root):

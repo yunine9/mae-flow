@@ -189,12 +189,34 @@ def _standalone_config(terminal_state=None):
         pass
     return merged
 
+# 自动推导范围的上限。用户没点名文件时范围来自"整棵工作树的脏文件",
+# 而脏文件数量不受流程控制:内网实测有仓没忽略 node_modules,几千个依赖文件
+# 全成了范围,被拼进任务卡的"本次子任务范围"一行里无穷重复,Agent 当场卡死。
+# 依赖目录与编译产物已在 source_paths 统一排除,这里再留一道有界防线。
+#
+# 上限定在 200 而不是"看着够用"的几十:这道线是拦病态,不是拦大改动。真人做一次
+# 独立 UT/检视,几十个文件很正常(实测里一个测试沙箱就有 68 个),卡在那儿等于
+# 平白让人多走一步——门禁越严、返工越多,那是红线。而洪水场景是几千个,
+# 200 这条线两边分得很开。
+_MAX_INFERRED_FILES = 200
+
+
 def _action_files(raw, st=None):
     values = []
     for item in raw or []:
         values.extend(x.strip() for x in item.split(",") if x.strip())
     if not values:
         values = [p for p in api._dirty_paths() if api._is_source_path(p, st or {}, api.FLOW or {})]
+        if len(values) > _MAX_INFERRED_FILES:
+            # 拒绝必须给出路:说清多少个、怎么继续。
+            api.die(
+                "工作区有 %d 个改动源码文件，超过自动推导上限 %d，"
+                "无法替你确定独立任务的范围。"
+                "请用 --files 明确传入本次要处理的文件（逗号分隔）；"
+                "若这些文件不属于本次工作，先 git add 或加进 .gitignore。"
+                "前几个是：%s"
+                % (len(values), _MAX_INFERRED_FILES,
+                   "、".join(values[:5])), 2)
     out = []
     root = os.path.abspath(os.getcwd())
     for value in values:

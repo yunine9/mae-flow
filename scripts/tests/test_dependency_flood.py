@@ -9,8 +9,14 @@ node_modules/@fission-ai/openspec/dist/cli/index.js"无穷重复,Agent 当场卡
 node_modules 是很常见的事,于是几千个依赖文件被逐个整段(每个上限 10 万字符)
 塞进卡片。总量 20 万字符的上限是**事后截断**,拼完才切,卡片早爆了。
 
-同一个洞有两个出口:任务卡(role_task)与面板的未跟踪增量(snapshot)。两处都堵,
-并且都要把"截断了多少"说出来——看起来完整、实则少了一半,比明说更难查。
+同一个洞有**三个**出口,而我先只堵了两个:任务卡(role_task)、面板的未跟踪增量
+(snapshot),漏了独立任务的范围自动推导(standalone_core._action_files——用户没点名
+文件时取整棵工作树的脏源码)。用户报的文件名恰恰是 grill-prep-task.md,那正是独立
+任务这条路的卡片命名,我却按完整交付那条路去找,得出"不是我们生成的"这个错判。
+
+教训写在这儿:同一个概念(什么是"我们的源码")散在三处各自过滤,就一定会漏第三处。
+现在口径统一在 foundation/source_paths(is_tool_managed_path / is_derived_path),
+本文件对三个出口分别验证,任何一处绕开共用口径都会在这里失败。
 """
 
 import os
@@ -31,6 +37,17 @@ FLOOD = (
     "__pycache__/m.cpython-313.pyc",
     ".gradle/caches/x.bin",
 )
+# 按扩展名认的产物。与上面按目录认的分开,是因为两个消费点问的不是同一件事:
+# "是不是源码"(门禁/范围推导)必须排除它们——flow 默认源码模式含 `(^|/)lib/`,
+# pyenv 的 python3.13/lib/*.pyc 正好命中,跑全量测试时一个沙箱凭空多出 68 个
+# "改动源码";而"是不是待检视增量"(面板)不能排除——本单新加的 logo.bin
+# 不是源码,却确实要让人看见(列出、不出 diff)。
+ARTIFACTS = (
+    "opt/python3.13/lib/__future__.cpython-313.pyc",
+    "service/lib/App.class",
+    "src/libapp.so",
+    "app/release/app.jar",
+)
 DELIVERY = (
     "service/src/main/java/A.java",
     "docs/se/REQ2026081101.md",
@@ -42,7 +59,8 @@ DELIVERY = (
 class TaskCardFloodTests(unittest.TestCase):
     def test_dependency_paths_never_enter_a_card(self):
         from mae_flow_core.cli_commands.role_task import _skip_in_card
-        for path in FLOOD:
+        for path in FLOOD + ARTIFACTS:
+            # 卡片内嵌的是文件**内容**,把 .jar/.class 的字节塞进去纯属灌水
             self.assertTrue(_skip_in_card(path), "该排除: %s" % path)
 
     def test_delivery_paths_still_enter(self):
@@ -64,6 +82,14 @@ class PanelFloodTests(unittest.TestCase):
         for path in DELIVERY:
             self.assertFalse(_dependency_path(path), "不该排除: %s" % path)
 
+    def test_panel_still_shows_new_binary_assets(self):
+        """面板问的是"这次要检视什么",不是"这是不是源码"。本单新加的
+        logo.bin 不是源码,却确实要让人看见——按扩展名排会把它吞掉,
+        那是"显示与现场不符"(用户红线)。"""
+        from mae_flow_core.panel.snapshot import _dependency_path
+        for path in ("assets/logo.bin", "res/icon.png", "libs/vendor.jar"):
+            self.assertFalse(_dependency_path(path), "不该排除: %s" % path)
+
     def test_panel_caps_and_says_so(self):
         """截断必须说出来,否则面板看起来完整、实则少了一半。"""
         import io as _io
@@ -74,6 +100,93 @@ class PanelFloodTests(unittest.TestCase):
             source = s.read()
         self.assertIn("未展示", source)
         self.assertIn(".gitignore", source, "要告诉人怎么根治")
+
+
+class SharedVerdictTests(unittest.TestCase):
+    """口径只有一份:三个出口都必须由 foundation/source_paths 说了算。"""
+
+    def test_tool_managed_dirs_are_never_source(self):
+        from mae_flow_core.foundation.source_paths import (
+            known_source_classification)
+        # node_modules 里全是 .js,光看后缀就成了"业务源码"——排除必须抢在
+        # 扩展名判定之前,这条断言就是钉住那个顺序的。
+        self.assertIs(False, known_source_classification(
+            "node_modules/@fission-ai/openspec/dist/cli/index.js"))
+        self.assertIs(False, known_source_classification(
+            ".venv/lib/python3.13/site-packages/x.py"))
+
+    def test_artifacts_are_never_source_whatever_the_repo_configures(self):
+        """产物按扩展名硬判:目录模式会把它们捞进来(flow 默认含 `(^|/)lib/`,
+        pyenv 的 lib/*.pyc 正好命中),仓库配置不该有翻案余地。"""
+        from mae_flow_core.foundation.source_paths import (
+            is_source_path, known_source_classification)
+        for path in ARTIFACTS:
+            self.assertIs(False, known_source_classification(path), path)
+            # 连仓库显式配了模式也翻不了案
+            self.assertFalse(is_source_path(path, [r".*"]), path)
+
+    def test_lock_files_are_not_mistaken_for_artifacts(self):
+        """.lock 不在产物表里:cargo.lock/yarn.lock 是构建描述文件,
+        它们的变更恰恰是要检视的。"""
+        from mae_flow_core.foundation.source_paths import is_source_path
+        for path in ("Cargo.lock", "yarn.lock", "poetry.lock"):
+            self.assertTrue(is_source_path(path, []), path)
+
+    def test_build_output_defers_to_repo_config(self):
+        """构建产物不硬判:默认不是源码,但仓库显式配了就仍然算——
+        确有仓库把源码放在 build/ 下,硬判会把真源码误杀成不用检视。"""
+        from mae_flow_core.foundation.source_paths import (
+            is_source_path, known_source_classification)
+        self.assertIsNone(known_source_classification("build/libs/App.java"))
+        self.assertFalse(is_source_path("build/libs/App.java", []))
+        self.assertTrue(is_source_path("build/libs/App.java", [r"^build/"]))
+
+    def test_vendor_dir_defers_to_repo_config(self):
+        """vendor/ 不能硬判。我起初把它归进"谁都不会放自己代码"那一档,
+        selftest 当场打脸:确有仓库把 `vendor/private/` 配成自己的源码路径
+        (Go 的 vendor/ 又确实是机器管的)。有歧义就交给仓库自己说了算——
+        默认不是源码(挡住洪水),配了就仍然是(不误杀真源码)。"""
+        from mae_flow_core.foundation.source_paths import is_source_path
+        self.assertFalse(is_source_path("vendor/private/schema", []))
+        self.assertTrue(is_source_path(
+            "vendor/private/schema", [r"(^|/)vendor/private/"]))
+
+    def test_real_source_unaffected(self):
+        from mae_flow_core.foundation.source_paths import is_source_path
+        for path in DELIVERY:
+            if path.endswith(".md"):
+                continue
+            self.assertTrue(is_source_path(path, []), "不该排除: %s" % path)
+
+
+class StandaloneScopeFloodTests(unittest.TestCase):
+    """第三个出口:独立任务的范围推导。用户实际撞的就是这条路。"""
+
+    def test_inferred_scope_is_bounded(self):
+        """有界即可。这条线是拦病态(几千个)而不是拦大改动(几十个)——
+        卡住正常改动等于凭空多一步返工。"""
+        from mae_flow_core.cli_commands import standalone_core
+        self.assertGreaterEqual(standalone_core._MAX_INFERRED_FILES, 100,
+                                "太低会误伤正常的大改动")
+        self.assertLessEqual(standalone_core._MAX_INFERRED_FILES, 500,
+                             "太高就等于没有防线")
+
+    def test_over_cap_refusal_tells_the_way_out(self):
+        """拒绝必须给出路——否则就是把人堵死在这儿。"""
+        import io as _io
+        with _io.open(os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                                   "standalone_core.py"),
+                      encoding="utf-8") as stream:
+            source = stream.read()
+        head = source.split("def _action_files", 1)[1][:1200]
+        self.assertIn("--files", head, "要告诉人怎么明确范围")
+        self.assertIn(".gitignore", head, "要告诉人怎么根治")
+
+    def test_card_scope_line_would_not_explode(self):
+        """任务卡把范围拼成一行「本次子任务范围: a、b、c」。
+        上限乘以典型路径长度必须还在 Agent 读得动的量级(实战爆的是几十万字符)。"""
+        from mae_flow_core.cli_commands import standalone_core
+        self.assertLess(standalone_core._MAX_INFERRED_FILES * 80, 30000)
 
 
 if __name__ == "__main__":

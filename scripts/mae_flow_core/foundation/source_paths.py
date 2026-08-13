@@ -32,6 +32,72 @@ BUILD_DESCRIPTOR_EXTENSIONS = (
 BUILD_SCRIPT_EXTENSIONS = (".sh", ".bash", ".bat", ".cmd", ".ps1")
 DOCUMENT_EXTENSIONS = (".md", ".rst", ".adoc", ".txt")
 
+# 依赖目录分两档,区别在于"仓库有没有资格说不"。
+#
+# 为什么口径必须在这里而不是各处自己过滤:实战里同一个洞开了三个出口——
+# 独立任务的范围推导(几千个依赖文件全进任务卡,"node_modules/@fission-ai/
+# openspec/dist/cli/index.js"无穷重复,Agent 当场卡死)、检视卡片的未跟踪内嵌、
+# 面板的未跟踪清单。前两次都是在撞到的那处加一份本地清单,眼看要出现第三份。
+# 判定"这是不是我们的代码"只该有一个口径,就是这里。
+#
+# 触发条件很常见:仓里没把 node_modules 写进 .gitignore(前端子目录、
+# 临时装的工具链),git ls-files --others 就把它们全当"新文件"报出来。
+
+# 第一档:包管理器/IDE/工具自己建的目录,内容是机器生成或下载的,
+# 没有人会把手写代码放进去。硬判"不是源码",仓库配置也翻不了案。
+TOOL_MANAGED_DIRS = (
+    "node_modules/", "bower_components/",
+    ".venv/", "venv/", "site-packages/", "__pycache__/", ".tox/",
+    ".git/", ".gradle/", ".mvn/", ".idea/", ".vscode/",
+    ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", ".cache/",
+    "Pods/", ".next/", ".nuxt/", ".terraform/",
+)
+# 第二档:通常是产物或外部代码,但仓库确实可能把自己的源码放在这里——
+# selftest 就covers 了一个把 `vendor/private/` 配成源码路径的仓,而 Go 的
+# vendor/ 又是机器管的;build/ 同理。所以这里不硬判,只判成"未知",
+# 交给仓库自己配的 source_patterns 定夺:没配就默认不是(默认安全),
+# 配了就仍然算源码(不误杀真源码)。
+DERIVED_DIRS = (
+    "vendor/", "third_party/",
+    "build/", "dist/", "out/", "target/", "coverage/", "obj/",
+)
+
+
+# 编译产物/归档:任何仓库配置下都不是源码。必须按扩展名硬判,因为目录模式会
+# 把它们捞进来——flow 默认的源码模式含 `(^|/)lib/`,而 pyenv 的
+# `python3.13/lib/xxx.cpython-313.pyc` 正好落在 lib/ 下,于是几十个 .pyc 成了
+# "改动源码"。同理仓内构建会留下成千上万的 .o/.class,是同一类洪水。
+ARTIFACT_EXTENSIONS = (
+    ".pyc", ".pyo", ".pyd", ".class", ".o", ".obj", ".a", ".lib",
+    ".so", ".dylib", ".dll", ".exe", ".bin", ".elf", ".pdb", ".ilk",
+    ".jar", ".war", ".ear", ".nar", ".whl", ".egg",
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf",
+)
+# 注意不含 .lock:cargo.lock/yarn.lock/poetry.lock 是构建描述文件,
+# SOURCE_FILENAMES 里认它们,硬排会把真正该检视的锁文件变更漏掉。
+
+
+def is_artifact_path(path):
+    """编译产物、归档与二进制资源——永远不是源码,不受仓库配置影响。"""
+    return normalize_path(path).strip().strip("\"'").lower().endswith(
+        ARTIFACT_EXTENSIONS)
+
+
+def _under_any_dir(path, directories):
+    normalized = "/" + normalize_path(path).strip().strip("\"'").lstrip("/")
+    return any(("/" + item) in normalized for item in directories)
+
+
+def is_tool_managed_path(path):
+    """包管理器/IDE/工具自建目录下的文件——任何仓库都不是自己的源码。"""
+    return _under_any_dir(path, TOOL_MANAGED_DIRS)
+
+
+def is_derived_path(path):
+    """产物/外部代码目录下的文件——默认不是源码,但允许仓库配置拉回来。"""
+    return _under_any_dir(path, DERIVED_DIRS)
+
 
 def normalize_path(path):
     return (path or "").replace("\\", "/")
@@ -166,6 +232,13 @@ def known_source_classification(
     # 恰恰是永不影响推进。
     if is_flow_control_path(relative if relative is not None else normalized):
         return False
+    # 依赖目录同样要抢在扩展名判定之前:node_modules 里全是 .js,
+    # 光看后缀就都成了"业务源码"。
+    checked = relative if relative is not None else normalized
+    if is_tool_managed_path(checked) or is_artifact_path(checked):
+        return False
+    if is_derived_path(checked):
+        return None            # 交给仓库配置的 source_patterns 定夺
     lowered = normalized.lower()
     if is_build_path(normalized) or lowered.endswith(SOURCE_EXTENSIONS):
         return True

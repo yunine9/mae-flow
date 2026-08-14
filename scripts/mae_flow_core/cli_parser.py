@@ -179,11 +179,6 @@ def build_parser():
         "symbol-refs",
         help="全仓符号引用清单(含 XML/YAML/SQL 等编译器看不见的文件),改动收口用")
     symbol_refs.add_argument("symbols", nargs="+", help="要核对的符号,可多个")
-    cloud_probe = sub.add_parser(
-        "cloud-probe",
-        help="云端宿主适配层样机演练:参考 Pi 跑一轮完整链路,现场留档可检视")
-    cloud_probe.add_argument(
-        "--out", help="现场输出目录,默认 .mae-flow-work/cloud-probe")
     panel = sub.add_parser(
         "panel",
         help="交付现场只读面板(文档/变更/证据/建议);--json 输出结构化快照")

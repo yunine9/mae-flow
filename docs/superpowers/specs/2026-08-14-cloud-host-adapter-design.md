@@ -2,6 +2,20 @@
 
 本文是 [2026-08-14-mae-flow-cloud-mvp-design.md](2026-08-14-mae-flow-cloud-mvp-design.md) §5.3/§5.4 的详细设计,覆盖整个迁移里最核心的一层:**Pi 事件流 → 语义事件 → 内核(门禁 / 证据 / 人工节点 / 子 Agent 生命周期)**。内核规则零改动是本设计的验收标准之一。
 
+> **2026-08-14 实施定案**:实现落在独立仓 `mae-flow-cloud`(TypeScript,
+> Pi 经 SDK 进程内嵌入),本文的语义模型、D1–D5 决定、验收判据全部照用;
+> 具体机制按进程内形态映射——`tool_call` 钩子承担 §4 同步裁决,
+> 自定义工具的未 resolve Promise 承担 §5 挂起,同进程平行 AgentSession
+> 承担 §6。§7 的模块表对应 `src/*.ts`,证据裁判是内核仓契约
+> (harness/verify_transcript.py 调 `mae_flow_core`,TS 不复刻判定)。
+> 五问已全部实证为"是":同步拦截(tool_call 可 block,reason 即打回文案)、
+> 结构化输入(自定义工具)、子会话(SDK 多 session)、工具流证据
+> (tool_execution_* 事件)、恢复(SessionManager 持久化,首版未启用)。
+> Python 版曾以「pi --mode rpc + HTTP 环回桥」全链验证(本仓历史
+> 2add07b),进程内形态使桥与 RPC 解析两层消失,该版本已随仓库边界
+> 调整移除。实战教训:环回流量必须直连(内网代理劫持 127.0.0.1);
+> pi 只认 throw 作为工具失败信号;被打回的调用也必须登记 tool_use 行。
+
 ## 0. 设计总纲:冻结内核面向的接口,翻译只发生在一处
 
 内核今天消费的东西盘点下来只有五样(见 §1),而且全部是**数据形状**,不是 Claude/CodeAgent 私有 API。因此适配层的总策略:

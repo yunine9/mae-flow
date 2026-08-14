@@ -8,7 +8,6 @@ from .cli_commands import shared
 from .cli_commands import symbol_refs as _symbol_refs
 from .cli_commands import panel as _panel
 from .cli_commands import codespec_engine as _codespec_engine
-from .cli_commands import cloud_probe as _cloud_probe
 from .cli_commands.shared import *  # noqa: F401,F403
 from .cli_commands.wiring import api
 from .cli_commands import git_authorization as _git_authorization
@@ -132,7 +131,6 @@ _COMMAND_MODULES = (
     _symbol_refs,
     _panel,
     _codespec_engine,
-    _cloud_probe,
     _local_spec,
     _domain_docs,
     _domain_archive,

@@ -81,14 +81,20 @@ flowchart LR
 
 系统采用一台 Linux 服务器和 Docker Compose 部署。Web、API、编排器和管理功能在同一个云端应用中实现，避免首版微服务化；PostgreSQL 独立容器保存结构化状态。任务执行通过 Docker 创建隔离工作区，最大并发由管理员配置，超出后排队。
 
-推荐实现技术：
+实现技术（2026-08-14 拍板：语言按亲和选，仓库按权威分）：
 
-- 后端与流程内核：Python 3.11+；
-- Web API 与事件流：FastAPI；命令使用 REST，任务事件使用 SSE 单向推送；
+- 流程内核：Python 3.11+，仓库 `mae-flow`，唯一规则权威，容器内以 CLI 形态被调用；
+- 云端服务层：TypeScript/Node，仓库 `mae-flow-cloud`——Pi 是 TypeScript，
+  经 SDK **进程内**嵌入（`createAgentSession`），tool_call 钩子即同步拦截，
+  自定义工具的未 resolve Promise 即人工节点挂起，子 Agent 为同进程平行会话；
+- 服务层与内核的接缝是**语言中立的数据契约**：transcript 同形 JSONL、
+  `.mae-flow.json` 状态文件、结构化事件——TS 写现场，内核契约裁决，
+  两侧不共享代码、不复刻规则；
+- Web API 与事件流：Node HTTP；命令使用 REST，任务事件使用 SSE 单向推送；
 - 前端：React、TypeScript、Vite；
 - 数据库：PostgreSQL；
 - 任务隔离：Docker Engine；
-- Agent Runtime：固定版本 Pi，通过独立适配器接入；
+- Agent Runtime：固定版本 Pi（开源 pi-mono coding agent），版本随 mae-flow-cloud 锁定；
 - 部署：Docker Compose；
 - 文件存储：服务器受控目录，路径与摘要写入 PostgreSQL。
 

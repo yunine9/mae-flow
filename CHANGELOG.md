@@ -1,5 +1,27 @@
 # 更新记录
 
+## 2026-08-14（三）：云端代码移出内核仓——边界与语言双拍板
+
+用户两次拍板落地:**云端服务新开仓**(`mae-flow-cloud`),**语言按亲和选**
+(Pi 是 TypeScript,SDK 支持进程内嵌入,服务层用 TS)。本仓移除上一条落地的
+`adapters/cloud/`、`cloud-probe` 命令与 pi 桥扩展,回归纯内核+插件;
+架构测试的"入口可达"约束随之自然恢复,不留豁免。
+
+为什么这不是白干:Python 版把整条链在真 pi 进程上验证过
+(RPC 子进程 + HTTP 环回桥,五问全部实证),TS 版是**同一份灵魂的
+进程内形态**——tool_call 钩子即同步拦截,未 resolve 的 Promise 即
+人工节点挂起,平行 AgentSession 即子 Agent,桥和 RPC 解析两层直接消失。
+mae-flow-cloud 首提交九项事实全绿,裁判是本仓的契约函数
+(harness/verify_transcript.py import mae_flow_core)——
+**内核唯一权威**在跨语言边界上的落法:TS 写现场,Python 裁决,
+transcript JSONL 是中立契约。
+
+跨语言迁移三条实战教训(两边都踩过、都堵上了):
+环回流量必须直连(内网 Clash 把 127.0.0.1 的模型请求劫走回 502,
+模型侧零请求,报错却指向"网络");pi 只认 throw 作为工具失败信号
+(返回对象里的 isError 被 agent-loop 忽略);被打回的调用也必须登记
+tool_use 行,否则 tool_result 按 id join 不上,"打回"在审计中不可见。
+
 ## 2026-08-14：云端宿主适配层落地——Pi 事件流进内核的第一段真实管道
 
 云端 MVP 详设(docs/superpowers/specs/2026-08-14-cloud-host-adapter-design.md)

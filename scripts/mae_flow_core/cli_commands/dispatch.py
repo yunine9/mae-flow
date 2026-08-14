@@ -45,7 +45,6 @@ def _dispatch_global_command(flow, state, runtime, args):
     args_only_handler = {
         "symbol-refs": api.cmd_symbol_refs,
         "capability": api.cmd_capability,
-        "cloud-probe": api.cmd_cloud_probe,   # 阶段0样机演练:不碰流程状态
     }.get(args.cmd)
     if args_only_handler is not None:
         return args_only_handler(args)

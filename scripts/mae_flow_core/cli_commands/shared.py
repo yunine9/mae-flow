@@ -257,11 +257,9 @@ RISK_AGENT_LABELS = {
     "TIER_SCOPE": "本单改动文件数超过所选交付档的升级阈值，继续按轻量档走会绕过设计与规格环节",
 }
 
-CODE_EXTS = (
-    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp",
-    ".java", ".cs", ".js", ".jsx", ".cjs", ".mjs",
-    ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
-)
+# 口径在 foundation/source_paths.CODE_EXTENSIONS,这里只做转发——
+# 原来这份与 lightcheck_source.SUPPORTED_EXTENSIONS 是逐字节相同的两份副本。
+CODE_EXTS = source_paths.CODE_EXTENSIONS
 
 DEFAULT_TEST_PATS = [
     r"(^|/)(tests?|__tests__|spec|[^/]+[_-]tests?)/", r"(^|/)src/test/",

@@ -188,6 +188,9 @@ def cmd_unlock(flow, st, args):
         print("[mae-flow] 本仓未启用测试路径收紧,无需实际解锁;裁决已留痕。"
               "修复源码后保持未提交并执行 done，由状态机安排编译、检视、提交和 UT 收尾。")
 
+_MAX_LISTED_DIRTY = 40
+
+
 def _print_exit_preview(flow, st):
     sid = st.get("current", "?")
     title = (flow.get("steps", {}).get(sid, {}) or {}).get("title", "未知步骤")
@@ -197,7 +200,14 @@ def _print_exit_preview(flow, st):
     print("[mae-flow] 准备退出流程（尚未执行）")
     print("  当前步骤: %s — %s" % (sid, title))
     print("  当前分支/HEAD: %s / %s" % (branch, head))
-    print("  未提交文件: %s" % ("、".join(dirty) if dirty else "无"))
+    # 全量 join 会拼出一行几万字符:_dirty_paths 用的是 --untracked-files=all,
+    # 仓里没忽略 node_modules 时实测 3000 个文件拼成 105000 字符的一行。
+    # 这里是给人看的退出预览,截断无害——但要说出来,不然看着像"就这几个"。
+    shown = "、".join(dirty[:_MAX_LISTED_DIRTY])
+    if len(dirty) > _MAX_LISTED_DIRTY:
+        shown += "…（共 %d 个，另有 %d 个未列出）" % (
+            len(dirty), len(dirty) - _MAX_LISTED_DIRTY)
+    print("  未提交文件: %s" % (shown if dirty else "无"))
     print("  退出会保留全部代码、提交和文档，不回滚、不删除业务文件。")
     print("  退出后按普通开发处理，不再强制执行本流程的编译、CodeCheck、UT、归档和提交检查。")
     print("  若之后明确重新接回 mae-flow，会恢复原断点；源码变过则回退质量链，旧质量结果不会复用。")

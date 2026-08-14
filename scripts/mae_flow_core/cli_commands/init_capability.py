@@ -1,5 +1,7 @@
 """CLI responsibilities extracted from the historical entrypoint."""
 
+from mae_flow_core.foundation import source_paths
+
 from .shared import (
     AGENT_WRITES_PATH, CapabilityError, EXIT_PATH, STATE_PATH, atomic_write_json,
     capability_diagnostics, ensure_codecheck, json, os, prepare_project,
@@ -109,7 +111,16 @@ def cmd_init(flow, args):
         api._clear_auxiliary_state()
         _drop_round_residue()
     api._gitignore()
-    dirty = api._dirty_paths()
+    # initial_dirty 记的是"用户现场":流程启动前就存在、本单不该动的改动。
+    # 工具自管目录(node_modules/.venv/…)不是用户现场——没人手写它们,也没人
+    # 需要保护它们不被改。而 _dirty_paths 用的是 --untracked-files=all,仓里
+    # 没忽略 node_modules 时实测 3000 个文件全被逐个算指纹写进 .mae-flow.json,
+    # 单这一项就 422 KB,而状态文件每推进一步都要整份重写。
+    #
+    # 只滤第一档,不滤 build/ vendor/ 那档:后者仓库可能真在里面放代码,
+    # 从现场保护里摘掉它们是有风险的,而体积问题第一档就解决了。
+    dirty = [path for path in api._dirty_paths()
+             if not source_paths.is_tool_managed_path(path)]
     st = {"current": flow["start"], "config": {}, "choices": {},
           "protocols": {},
           "history": [], "started": time.strftime("%Y-%m-%d %H:%M:%S"),

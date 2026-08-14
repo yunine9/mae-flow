@@ -31,6 +31,16 @@ BUILD_DESCRIPTOR_EXTENSIONS = (
 )
 BUILD_SCRIPT_EXTENSIONS = (".sh", ".bash", ".bat", ".cmd", ".ps1")
 DOCUMENT_EXTENSIONS = (".md", ".rst", ".adoc", ".txt")
+# 能被静态分析(复杂度/嵌套/圈复杂度)处理的代码扩展名。与 SOURCE_EXTENSIONS 不同:
+# 那份回答"算不算交付源码"(含 .proto/.sql/构建脚本),这份回答"分析器认不认"。
+# 曾经在 cli_commands/shared.py 与 lightcheck_source.py 各存一份逐字节相同的
+# 副本——两份同义清单迟早各改各的,现在只留这一份。
+CODE_EXTENSIONS = (
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+    ".inl", ".ipp", ".tpp", ".java", ".cs",
+    ".js", ".jsx", ".cjs", ".mjs",
+    ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
+)
 
 # 依赖目录分两档,区别在于"仓库有没有资格说不"。
 #
@@ -97,6 +107,17 @@ def is_tool_managed_path(path):
 def is_derived_path(path):
     """产物/外部代码目录下的文件——默认不是源码,但允许仓库配置拉回来。"""
     return _under_any_dir(path, DERIVED_DIRS)
+
+
+def tool_managed_exclude_pathspecs():
+    """给 git 命令用的排除串,只排第一档(工具自管目录)。
+
+    刻意不含第二档:搜索类命令(git grep 找符号引用)漏掉一处真引用的代价是
+    "编译全绿功能坏",而 build/ vendor/ 里确实可能有仓库自己的代码。宁可多列,
+    不可漏列——这跟"判定源码"的取舍方向相反,所以单独给一个函数。
+    """
+    return tuple(":(exclude)%s" % item.rstrip("/")
+                 for item in TOOL_MANAGED_DIRS)
 
 
 def normalize_path(path):

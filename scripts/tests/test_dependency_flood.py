@@ -189,5 +189,117 @@ class StandaloneScopeFloodTests(unittest.TestCase):
         self.assertLess(standalone_core._MAX_INFERRED_FILES * 80, 30000)
 
 
+class LateralSweepTests(unittest.TestCase):
+    """横向排查:同一个洞在别处的出口。
+
+    洞的形状是"从仓库枚举出来的清单,不设上限地进了给 Agent 或用户看的文本"。
+    _dirty_paths() 用的是 --untracked-files=all,仓里没忽略 node_modules 时它
+    返回几千条——下面三处都实测过后果。
+    """
+
+    def test_symbol_refs_excludes_tool_managed_dirs(self):
+        """实测:3000 文件的 node_modules 里搜一个普通符号命中 2400 处,
+        排除后 0 处。而这份清单要求 Agent"每一处要么适配、要么写明为何不需要",
+        2400 条等于当场压死它。"""
+        import io as _io
+        with _io.open(os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                                   "symbol_refs.py"), encoding="utf-8") as s:
+            source = s.read()
+        self.assertIn("tool_managed_exclude_pathspecs", source,
+                      "必须复用共用口径,不许再抄一份目录清单")
+
+    def test_symbol_refs_truncation_forbids_false_closure(self):
+        """这份清单的用途是"逐条对钩才算收口",静默截断=假收口。
+        所以截断时必须明说不能据此判定收口。"""
+        import io as _io
+        from mae_flow_core.cli_commands import symbol_refs
+        self.assertLessEqual(symbol_refs._MAX_LISTED_HITS, 500)
+        with _io.open(os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                                   "symbol_refs.py"), encoding="utf-8") as s:
+            source = s.read()
+        self.assertIn("不能据这份清单判定收口", source)
+
+    def test_exit_preview_does_not_print_one_giant_line(self):
+        """实测 3000 个未跟踪文件会拼成一行 105000 字符。"""
+        from mae_flow_core.cli_commands import lifecycle
+        self.assertLessEqual(lifecycle._MAX_LISTED_DIRTY, 100)
+        self.assertLess(lifecycle._MAX_LISTED_DIRTY * 80, 10000)
+
+    def test_initial_dirty_skips_tool_managed_dirs(self):
+        """initial_dirty 记的是"用户现场"。工具自管目录不是现场——没人手写
+        node_modules,也不需要保护它不被改。实测 3000 个文件被逐个算指纹
+        写进 .mae-flow.json,单这一项 422 KB,而状态每推进一步整份重写。"""
+        import io as _io
+        with _io.open(os.path.join(SCRIPTS, "mae_flow_core", "cli_commands",
+                                   "init_capability.py"), encoding="utf-8") as s:
+            source = s.read()
+        self.assertIn("is_tool_managed_path", source,
+                      "必须复用共用口径,不许再抄一份目录清单")
+        # 过滤必须发生在算指纹之前,否则省不掉那几千次文件读
+        self.assertLess(source.index("is_tool_managed_path"),
+                        source.index("initial_dirty_fingerprints"))
+
+    def test_search_exclusions_are_narrower_than_source_verdict(self):
+        """搜索类命令只排第一档:漏掉一处真引用的代价是"编译全绿功能坏",
+        而 build/ vendor/ 里确实可能有仓库自己的代码。方向与"判定源码"相反。"""
+        from mae_flow_core.foundation.source_paths import (
+            DERIVED_DIRS, tool_managed_exclude_pathspecs)
+        specs = " ".join(tool_managed_exclude_pathspecs())
+        self.assertIn("node_modules", specs)
+        for item in DERIVED_DIRS:
+            self.assertNotIn(item.rstrip("/"), specs.split(),
+                             "第二档不该进搜索排除: %s" % item)
+
+
+class OneVerdictPerConceptTests(unittest.TestCase):
+    """同义清单不许有第二份——这正是漏掉第三个出口的根因。"""
+
+    def test_lightcheck_reuses_the_shared_dependency_verdict(self):
+        """lightcheck 的 _generated_path 曾是第四份手抄清单,而且抄漏一档:
+        没有 .venv/site-packages/__pycache__,于是虚拟环境里的三方代码
+        会被当成本单源码去报复杂度告警。"""
+        from mae_flow_core.lightcheck_source import _generated_path
+        for path in (".venv/lib/python3.13/site-packages/x.py",
+                     "node_modules/a/b.js", "__pycache__/m.pyc",
+                     "build/out.js", "vendor/lib.go"):
+            self.assertTrue(_generated_path(path), "该跳过: %s" % path)
+        for path in ("src/app.py", "service/src/main/java/A.java"):
+            self.assertFalse(_generated_path(path), "不该跳过: %s" % path)
+
+    def test_code_extension_list_has_exactly_one_home(self):
+        """CODE_EXTS 与 SUPPORTED_EXTENSIONS 曾是逐字节相同的两份副本。
+        两份同义清单迟早各改各的——用 is 断言它们是同一个对象。"""
+        from mae_flow_core.cli_commands.shared import CODE_EXTS
+        from mae_flow_core.foundation import source_paths
+        from mae_flow_core.lightcheck_source import SUPPORTED_EXTENSIONS
+        self.assertIs(CODE_EXTS, source_paths.CODE_EXTENSIONS)
+        self.assertIs(SUPPORTED_EXTENSIONS, source_paths.CODE_EXTENSIONS)
+
+    def test_no_module_hand_rolls_a_dependency_dir_list(self):
+        """任何模块再抄一份 node_modules 目录清单都会在这里失败。
+        允许出现的只有 foundation/source_paths 那一份定义。"""
+        import io as _io
+        import glob as _glob
+        offenders = []
+        pattern = os.path.join(SCRIPTS, "mae_flow_core", "**", "*.py")
+        for path in _glob.glob(pattern, recursive=True):
+            if path.endswith(os.path.join("foundation", "source_paths.py")):
+                continue
+            with _io.open(path, encoding="utf-8") as stream:
+                text = stream.read()
+            # 判据是"清单":同一处既写 node_modules 又写另外两个依赖目录名
+            for line in text.splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                if "node_modules" in line and sum(
+                        item in line for item in
+                        ("vendor", "site-packages", ".venv", "third_party",
+                         "bower_components")) >= 1:
+                    offenders.append("%s: %s" % (
+                        os.path.relpath(path, SCRIPTS), line.strip()[:70]))
+        self.assertEqual([], offenders,
+                         "又抄了一份依赖目录清单,应改用 source_paths 的判据")
+
+
 if __name__ == "__main__":
     unittest.main()

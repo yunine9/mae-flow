@@ -18,6 +18,8 @@ import tokenize
 from dataclasses import dataclass
 from io import StringIO
 
+from mae_flow_core.foundation import source_paths
+
 
 PARAMETER_LIMIT = 5
 FUNCTION_LINE_LIMIT = 50
@@ -29,17 +31,14 @@ MAX_TOTAL_BYTES = 12 * 1024 * 1024
 MAX_FILES = 100
 MAX_REPORTED_ITEMS = 200
 
-SUPPORTED_EXTENSIONS = (
-    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
-    ".inl", ".ipp", ".tpp", ".java", ".cs",
-    ".js", ".jsx", ".cjs", ".mjs",
-    ".ts", ".tsx", ".cts", ".mts", ".py", ".pyi",
-)
+# 同上:口径在 foundation/source_paths,这里只转发。
+SUPPORTED_EXTENSIONS = source_paths.CODE_EXTENSIONS
 
-_GENERATED_PATH_PARTS = {
-    "build", "dist", "out", "node_modules", "vendor", "third_party",
-    "third-party", "generated", "gen",
-}
+# 只留本模块特有的"生成代码"判据。依赖目录与产物目录那部分已经收拢到
+# foundation/source_paths(见 _generated_path)——这里原本是第四份手抄清单,
+# 而且抄漏了一档:没有 .venv/site-packages/__pycache__,于是 Python 虚拟环境里
+# 的三方代码会被当成本单源码去报复杂度告警。
+_GENERATED_PATH_PARTS = {"generated", "gen", "third-party"}
 _GENERATED_MARKERS = re.compile(
     r"(?i)(?:@generated|auto[- ]generated|generated code|do not edit|"
     r"automatically generated)")
@@ -66,11 +65,18 @@ def _normalized(path):
 
 
 def _generated_path(path):
+    """不该被当成本单源码去查复杂度的文件:三方依赖、构建产物、生成代码。
+
+    前两类的口径来自 foundation/source_paths,与任务卡、面板、范围推导共用
+    同一份——这个概念曾经在四个文件里各有一份手抄清单,补一处漏一处。
+    """
     value = _normalized(path)
     parts = {part.lower() for part in value.split("/")}
     name = os.path.basename(value).lower()
     return bool(
-        parts & _GENERATED_PATH_PARTS
+        source_paths.is_tool_managed_path(value)
+        or source_paths.is_derived_path(value)
+        or parts & _GENERATED_PATH_PARTS
         or name.endswith((".min.js", ".min.css"))
         or ".generated." in name
     )

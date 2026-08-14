@@ -5,6 +5,7 @@ from .shared import (
     update_json, workflow_completion,
 )
 from .ack_confirmation import (
+    _button_confirmation_alias, _is_positive_confirmation,
     reviewed_config, whole_card_answers, whole_card_values)
 from .wiring import api
 
@@ -245,40 +246,6 @@ def _fresh_askuser(st):
     ok, _ = api.ev_agent_ran({"agent": "ASKUSER"}, st)
     return ok
 
-def _is_positive_confirmation(value):
-    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
-    compact = re.sub(r"[（(]推荐[）)]", "", compact)
-    if not compact or re.search(
-            r"不确认|不同意|不是|不要|不能|没有|没法|拒绝|暂不|取消|"
-            r"需要修改|需要调整|先别|等等|不对|有误|有问题|但是|不过|"
-            r"什么意思|怎么|是否|能否|为什么|[?？]",
-            compact, re.I):
-        return False
-    return (
-        compact.lower() in {
-            "确认", "确认并继续", "确认范围并继续", "确认定稿",
-            "同意", "可以", "没问题", "继续", "按此执行", "以上正确",
-            "无异议", "yes", "y", "ok",
-        }
-        or bool(re.match(
-            r"^(?:确认|同意|可以|没问题|继续|按此|无异议)", compact, re.I))
-    )
-
-def _button_confirmation_alias(item, candidate, expected):
-    """用户点的是这一屏真实存在的选项,而且不是拒绝——就算确认。
-
-    原来要剥掉"确认…并继续"前缀、再算主题词与 expected 的包含关系。可选项文字
-    是模型写的,换个说法就判不出来(实战:"choice 问了两遍")。判据换成结构:
-    标签在宿主记录的候选项里(Agent 伪造不了),内容不是拒绝。
-    """
-    del expected                 # 精确匹配已在调用方先试过;这里只兜别名
-    from mae_flow_core.workflow.consent import is_refusal, option_labels
-    normalized = re.sub(
-        r"[\s，。；;：:、!！]+", "", str(candidate or "")).lower()
-    if not normalized or normalized not in option_labels(item.get("text", "")):
-        return False
-    return not is_refusal(candidate)
-
 def _implicit_ack_verified(step, st):
     """Use a fresh button/plain-text answer directly; no second typed ACK."""
     expected = {
@@ -286,9 +253,21 @@ def _implicit_ack_verified(step, st):
         for value in step.get("confirmation_answers", [])
         if str(value).strip()
     }
+    from mae_flow_core.workflow.consent import is_refusal
     rows = _current_ack_messages(st)
+    refused_card = False
     for item in reversed(rows):
-        for candidate in reversed(_trusted_answer_candidates(item.get("text", ""))):
+        candidates = _trusted_answer_candidates(item.get("text", ""))
+        # 同一张卡上用户按过"需要修改"类按钮:这张卡整体是打回。
+        # 卡上其他问题的回答(如"交付方式: 完整开发")不是拒绝词,
+        # 但不能替确认题背书——独立判每个答案会把否定卡放行
+        # (云端实测:配置卡答"需要修改"+"完整开发",done 曾照样推进)。
+        # break 不是 continue:从新到旧遍历,最新的打回封路,
+        # 更旧的确认不能越过它复活。
+        if any(is_refusal(value) for value in candidates):
+            refused_card = True
+            break
+        for candidate in reversed(candidates):
             normalized = re.sub(r"[\s，。；;：:、!！]+", "", candidate)
             normalized = re.sub(
                 r"[（(]推荐[）)]", "", normalized).lower()
@@ -299,7 +278,6 @@ def _implicit_ack_verified(step, st):
                     item, candidate, expected):
                 _ack_failure(st, success=True)
                 return True, ""
-            from mae_flow_core.workflow.consent import is_refusal
             if not is_refusal(candidate):
                 if expected:
                     continue
@@ -309,6 +287,9 @@ def _implicit_ack_verified(step, st):
     actual = " / ".join(dict.fromkeys(value for item in rows for value in
         _trusted_answer_values(item.get("text", ""))))
     why = (_out_of_scope_ack_reason(st) if not rows else "") or (
+        ("用户在确认卡上选择了修改/打回(%s)。按用户意见修订后重新用 "
+         "AskUserQuestion 出卡确认;不能直接 done,也不要原样重复提问。"
+         % (actual or "无")) if refused_card else
         ("已捕获当前步骤答案「%s」，但未匹配标准确认按钮「%s」。"
          "不要猜 --choice 或重复询问；按 current 输出原样展示标准按钮。"
          % (actual or "无", wanted or "肯定")) if rows else
@@ -448,15 +429,25 @@ def _config_ack_verified(st, ack, config_sha, review_id):
     normalized_ack = re.sub(r"\s+", "", ack or "")
     reviewed = reviewed_config(st)
     matched = False
-    for item in messages:
+    refused_card = False
+    from mae_flow_core.workflow.consent import is_refusal
+    # 从新到旧:用户的最新意志优先——最新一张卡若是打回,更旧的确认
+    # 不能越过它复活。
+    for item in reversed(messages):
         # 结构上有资格替整份背书的回答优先;拿不到结构就退回全部候选值
         eligible = whole_card_values(item.get("text", ""), reviewed)
-        for candidate in (
-                eligible if eligible is not None
-                else _trusted_answer_candidates(item.get("text", ""))):
+        candidates = (
+            eligible if eligible is not None
+            else _trusted_answer_candidates(item.get("text", "")))
+        # 同一张卡上有"需要修改"类回答=整卡打回:卡上其他问题的回答
+        # (如"交付方式: 完整开发")不是拒绝词,但不能替确认题背书。
+        # 独立判每个答案曾把否定卡放行(云端宿主实测)。
+        if any(is_refusal(value) for value in candidates):
+            refused_card = True
+            break
+        for candidate in candidates:
             same_answer = (
                 normalized_ack == candidate if normalized_ack else True)
-            from mae_flow_core.workflow.consent import is_refusal
             if same_answer and not is_refusal(candidate):
                 matched = True
                 break
@@ -465,6 +456,13 @@ def _config_ack_verified(st, ack, config_sha, review_id):
     if matched:
         _ack_failure(st, success=True)
         return True, ""
+    if refused_card:
+        why = (
+            "用户在配置确认卡上选择了修改/打回。按用户意见修正配置后"
+            "重新 config-review 并出卡确认;不能直接 done,也不要原样重复提问。"
+        )
+        count = _ack_failure(st, why)
+        return False, why + _ack_retry_guidance(count)
 
     # 单项判定只对"绑定本轮确认单的收据"有意义;没有收据时走下面的
     # "没捕获到绑定回复"分支——收据绑定(review_id/sha)本身就是配置确认的编号,

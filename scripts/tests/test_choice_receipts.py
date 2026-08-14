@@ -165,5 +165,105 @@ class ReorderedParaphrasedOptionsTests(unittest.TestCase):
             step, item, "完整开发 (推荐)"))
 
 
+class ConfigCardPolarityTests(unittest.TestCase):
+    """配置卡的整卡极性:卡上任一"需要修改"类回答=整卡打回。
+
+    独立判每个答案会让卡上其他问题的回答(如"交付方式: 完整开发")
+    替确认题背书——云端宿主实测踩中:用户答"需要修改"+"完整开发",
+    done 照样推进。此处用同一条 dispatch/CLI 链钉住两个方向。
+    """
+
+    CARD = {"questions": [
+        {"question": "上述完整配置是否正确?",
+         "options": [{"label": "确认以上全部配置"}, {"label": "需要修改"}]},
+        {"question": "交付方式?",
+         "options": [{"label": "完整开发"}, {"label": "局部修改"}]},
+    ]}
+
+    def _project(self):
+        project = tempfile.mkdtemp(prefix="mae-polarity-")
+        subprocess.run(["git", "init", "-q", "-b", "master", project],
+                       check=True, capture_output=True)
+        # 证据链是真的:需求文档必须真实存在,基线分支必须可解析。
+        os.makedirs(os.path.join(project, "docs", "req"), exist_ok=True)
+        with open(os.path.join(project, "docs", "req", "REQ-REQ9.md"),
+                  "w", encoding="utf-8") as stream:
+            stream.write("# REQ9 极性演练\n")
+        subprocess.run(["git", "-C", project, "add", "."], check=True,
+                       capture_output=True)
+        subprocess.run(
+            ["git", "-C", project, "-c", "user.email=t@t",
+             "-c", "user.name=t", "commit", "-q", "-m", "init"],
+            check=True, capture_output=True)
+        with open(os.path.join(project, ".mae-flow.json"), "w",
+                  encoding="utf-8") as stream:
+            json.dump({
+                "current": "config_confirm",
+                "config": {}, "choices": {}, "history": [],
+                "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, stream)
+        subprocess.run(
+            [sys.executable, MAE, "config-review",
+             "--set", "工号=cloudbot", "--set", "基线分支=master",
+             "--set", "单号=REQ9", "--set", "单号类型=REQ",
+             "--set", "需求文档=docs/req/REQ-REQ9.md",
+             "--set", "编译方式=echo ok", "--set", "UT生成方式=java-autout",
+             "--set", "UT运行命令=echo ok"],
+            cwd=project, check=True, text=True, capture_output=True,
+            timeout=30)
+        return project
+
+    def _answer(self, project, answers):
+        payload = json.dumps({
+            "cwd": project,
+            "tool_name": "AskUserQuestion",
+            "tool_input": self.CARD,
+            "tool_response": {"answers": answers},
+        }, ensure_ascii=False) + "\n"
+        captured = subprocess.run(
+            [sys.executable, DISPATCH, "posttooluse"],
+            cwd=project, input=payload, text=True,
+            capture_output=True, timeout=15)
+        self.assertEqual(0, captured.returncode, captured.stderr)
+
+    def _done(self, project):
+        return subprocess.run(
+            [sys.executable, MAE, "done"],
+            cwd=project, text=True, capture_output=True, timeout=30)
+
+    def _current(self, project):
+        with open(os.path.join(project, ".mae-flow.json"),
+                  encoding="utf-8") as stream:
+            return json.load(stream)["current"]
+
+    def test_needs_change_on_card_blocks_done_even_with_sibling_answer(self):
+        project = self._project()
+        self._answer(project, {
+            "上述完整配置是否正确?": "需要修改", "交付方式?": "完整开发"})
+        refused = self._done(project)
+        self.assertNotEqual(0, refused.returncode,
+                            refused.stdout + refused.stderr)
+        self.assertIn("修改", refused.stdout + refused.stderr)
+        self.assertEqual("config_confirm", self._current(project))
+        # 打回后重审确认:最新的肯定卡放行。
+        self._answer(project, {
+            "上述完整配置是否正确?": "确认以上全部配置", "交付方式?": "完整开发"})
+        advanced = self._done(project)
+        self.assertEqual(0, advanced.returncode,
+                         advanced.stdout + advanced.stderr)
+        self.assertEqual("workflow_select", self._current(project))
+
+    def test_newest_refusal_overrides_older_confirmation(self):
+        project = self._project()
+        self._answer(project, {
+            "上述完整配置是否正确?": "确认以上全部配置", "交付方式?": "完整开发"})
+        self._answer(project, {
+            "上述完整配置是否正确?": "需要修改", "交付方式?": "完整开发"})
+        refused = self._done(project)
+        self.assertNotEqual(0, refused.returncode,
+                            refused.stdout + refused.stderr)
+        self.assertEqual("config_confirm", self._current(project))
+
+
 if __name__ == "__main__":
     unittest.main()

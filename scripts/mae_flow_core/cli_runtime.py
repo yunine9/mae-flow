@@ -17,6 +17,7 @@ from .cli_commands import source_facts as _source_facts
 from .cli_commands import lightcheck as _lightcheck
 from .cli_commands import codecheck_facts as _codecheck_facts
 from .cli_commands import ack as _ack
+from .cli_commands import ack_confirmation as _ack_confirmation
 from .cli_commands import current as _current
 from .cli_commands import standalone_core as _standalone_core
 from .cli_commands import standalone_commands as _standalone_commands
@@ -111,6 +112,7 @@ _COMMAND_MODULES = (
     _lightcheck,
     _codecheck_facts,
     _ack,
+    _ack_confirmation,
     _current,
     _standalone_core,
     _standalone_commands,

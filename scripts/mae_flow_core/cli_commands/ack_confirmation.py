@@ -83,3 +83,38 @@ def whole_card_answers(messages, reviewed, fallback):
                       else fallback(item.get("text", ""))):
             out.add(re.sub(r"\s+", "", str(value or "")))
     return out
+
+
+def _is_positive_confirmation(value):
+    compact = re.sub(r"[\s，。；;：:、!！]+", "", value or "")
+    compact = re.sub(r"[（(]推荐[）)]", "", compact)
+    if not compact or re.search(
+            r"不确认|不同意|不是|不要|不能|没有|没法|拒绝|暂不|取消|"
+            r"需要修改|需要调整|先别|等等|不对|有误|有问题|但是|不过|"
+            r"什么意思|怎么|是否|能否|为什么|[?？]",
+            compact, re.I):
+        return False
+    return (
+        compact.lower() in {
+            "确认", "确认并继续", "确认范围并继续", "确认定稿",
+            "同意", "可以", "没问题", "继续", "按此执行", "以上正确",
+            "无异议", "yes", "y", "ok",
+        }
+        or bool(re.match(
+            r"^(?:确认|同意|可以|没问题|继续|按此|无异议)", compact, re.I))
+    )
+
+def _button_confirmation_alias(item, candidate, expected):
+    """用户点的是这一屏真实存在的选项,而且不是拒绝——就算确认。
+
+    原来要剥掉"确认…并继续"前缀、再算主题词与 expected 的包含关系。可选项文字
+    是模型写的,换个说法就判不出来(实战:"choice 问了两遍")。判据换成结构:
+    标签在宿主记录的候选项里(Agent 伪造不了),内容不是拒绝。
+    """
+    del expected                 # 精确匹配已在调用方先试过;这里只兜别名
+    from mae_flow_core.workflow.consent import is_refusal, option_labels
+    normalized = re.sub(
+        r"[\s，。；;：:、!！]+", "", str(candidate or "")).lower()
+    if not normalized or normalized not in option_labels(item.get("text", "")):
+        return False
+    return not is_refusal(candidate)

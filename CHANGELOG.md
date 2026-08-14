@@ -1,5 +1,42 @@
 # 更新记录
 
+## 2026-08-14：云端宿主适配层落地——Pi 事件流进内核的第一段真实管道
+
+云端 MVP 详设(docs/superpowers/specs/2026-08-14-cloud-host-adapter-design.md)
+的第一个可运行增量:`mae_flow_core/adapters/cloud/` 七个文件 + 22 个新测试 +
+`cloud-probe` 演练命令。总纲一句话:**冻结内核面向的接口,翻译只发生在
+pi_event_map.py 一个文件里**。为什么这么切——盘点发现内核消费的五样东西
+(Hook payload 字段、transcript JSONL、pretool 纯函数裁决、AskUserQuestion
+工具结果、Task 派发+生命周期对账)全是**数据形状**,不是宿主私有 API,
+所以正确做法不是让契约学新格式,而是让云端把 Pi 事件流写成契约已认识的格式:
+
+- **semantic_events**:十种语义事件 + 追加式事件日志。幂等锚是任务内单调
+  event_id,重放 no-op、倒退拒收、畸形抛错(静默丢事件=投影缺页还查不出来);
+- **transcript_store**:事件 → transcript 同形 JSONL,quality 四契约零改动
+  (测试直接拿 parse_transcript/bash_call/call_failed/select_contract_marker
+  验收云端产物);子 Agent 落 `subagents/agent-<call_id>.jsonl`,旧插件的
+  确定性绑定(tool_use_id → 文件名)原样命中;
+- **gate_service**:tool_requested 的同步裁决点,路由复用
+  active_pretool_decision,深层契约留端口注入;fail-open 语义保留
+  (门禁自身故障=放行+留痕,与看门狗同一精神);
+- **human_gate**:AskUserQuestion 永不真实执行——拦下转结构化待办,
+  决定按 call_id 以工具结果回注,**34 处步骤文档零改动**;同 call_id 幂等
+  (恢复重放不出第二张待办),先到决定生效、后到抛 StateConflictError;
+- **pi_session/agent_bridge**:会话驱动 + 平行会话模拟 Task。登记归属规则
+  防双行:谁执行谁登记——Pi 跑的工具由 Pi 事件登记,宿主代演的(人工决定、
+  子 Agent 结果)由 driver 登记,Pi 回声丢弃;子 Agent 不设人工节点,
+  提问被打回而不是挂起整个任务(旧插件"子 Agent 非交互"契约同款);
+- **reference_runtime + cloud-probe**:参考线格式的唯一可执行定义,契约测试
+  与演练命令共用,不留两份格式各自漂移。架构测试拦过一次
+  "cloud 包不可达"——这正是"预埋≠接线"的机器化身,修法不是白名单豁免,
+  而是按 codespec 先例给真实入口:`cloud-probe` 跑通整链(同步拦截、打回、
+  子 Agent、人工挂起回注、证据验收)并留档现场;真 Pi 客户端就位后,
+  同一剧本换实现对拍,就是阶段 0 的验收动作。
+
+没做的(诚实边界):gate 深层契约(gate-edit/gate-bash 的证据链)尚未接进
+GateService 端口;真 Pi 客户端未写(线格式待阶段 0 拿到);云端服务/Web 层
+一行没动。这些都在详设里有位置,不影响本段管道的验收。
+
 ## 2026-08-14（续）：横向排查——同一个洞还有三个出口,同一个概念还有两份副本
 
 上一条修完立刻横扫了同形状的问题。洞的形状是**"从仓库枚举出来的清单,不设上限

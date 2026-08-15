@@ -30,3 +30,19 @@ def user_on_this_machine():
     宁可不说,也不能给一条他做不到的指令。
     """
     return host_kind() != CLOUD
+
+
+def worker_agent_ledger_gates():
+    """子 Agent 生命周期台账还作不作机器门禁。
+
+    云端宿主(pi 进程内)取不到内核格式的子会话执行台账:agent 真跑了、
+    真返回了,证据口就是看不见,同一批签发多少次都不前进,最后只能
+    accept-risk——令牌仪式在云端退化成纯摩擦(实战 verify_ut 连撞 3 次)。
+
+    云端的机器把关走另一条路:交付事实来自远端真实状态,流水线结果绑
+    SHA(见 mae-flow-cloud 红线)。所以云端放开的只是"子会话记账"这一种
+    证据形态,不是放弃验证;本地 CLI 一字不变。
+
+    ASKUSER 不在此列——那是人工闸,云端决定卡走得通,放开它等于把人踢出局。
+    """
+    return host_kind() != CLOUD

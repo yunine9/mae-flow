@@ -140,6 +140,14 @@ def _applescript(text):
 
 def _popup(title, body):
     """弹窗进程发射后不管:通知永远不能拖慢流程推进。"""
+    # 测试进程绝不弹真桌面通知。用例路过通知路径是常态,弹到开发者桌面
+    # 就是测试泄漏(2026-08-15 实锤:跑内核全量,用户的 mac 被弹了一串
+    # "需要你确认");靠每个用例自觉设 MAE_FLOW_NO_NOTIFY 不可靠——这次
+    # 就是忘了才漏的。闸设在真副作用这一步,不动 desktop_enabled 的判定
+    # 逻辑,"全新仓默认弹"的契约照常可测。生产 CLI 不导入 unittest/pytest
+    # (grep 过 mae_flow_core 全目录,一处都没有),真用户路径不受影响。
+    if "unittest" in sys.modules or "pytest" in sys.modules:
+        return False
     try:
         subprocess.Popen(_command(title, body), shell=False,
                          stdout=subprocess.DEVNULL,

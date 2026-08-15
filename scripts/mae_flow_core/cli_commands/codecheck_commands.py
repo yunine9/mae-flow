@@ -6,6 +6,7 @@ from .shared import (
     write_text,
 )
 from .wiring import api
+from mae_flow_core import host_env
 from mae_flow_core.orchestration.work_package import ensure_work_package
 from mae_flow_core.quality.attempts import begin_attempt
 
@@ -33,6 +34,27 @@ def _begin_codecheck_round(st, sid, head, files):
           "剩余问题已写入交付风险，直接 done 进入 UT。")
     raise SystemExit(0)
 
+def _die_unless_legal_fix_round(st, sid, changed):
+    """进入规范检查后源码变了:必须有一轮可核实的 Agent 收尾令牌背书。
+
+    "谁修的"合法轮令牌由子 Agent 返回钩子签发;云端宿主没有那个钩子,
+    令牌恒缺,任何修复轮都会死在这里——同族死点,随台账门禁一起放开。
+    机器真相不受影响:重扫本身就是对当前代码重新跑扫描器,零信任自述。
+    """
+    if not host_env.worker_agent_ledger_gates():
+        return
+    try:
+        tok = load_json(STATE_PATH + ".tokens").get("CODECHECK", {})
+    except Exception:
+        tok = {}
+    legal_round = (isinstance(tok, dict) and tok.get("step") == sid
+                   and tok.get("status") in ("CLEAN", "REMAINING"))
+    after, token_err = api._source_changed_since(tok.get("head", ""), st) if legal_round else (None, "无合法令牌")
+    if not legal_round or token_err or after:
+        api.die("进入规范检查后源码已被修改，但没有一轮可核实的 CodeCheck Agent 收尾: " + "、".join(changed[:5])
+            + "。禁止主会话先修再补跑首检；回退越权改动。若确为上一轮 Agent 修复，先让它按契约合法收尾。", 2)
+
+
 def cmd_codecheck_scan(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
         api.die("codecheck-scan 只能在规范检查步骤执行；先按 current 进入对应步骤。", 2)
@@ -43,16 +65,7 @@ def cmd_codecheck_scan(flow, st, args):
         if why:
             api.die("无法核对规范检查入口 HEAD:" + why, 2)
         if changed:
-            try:
-                tok = load_json(STATE_PATH + ".tokens").get("CODECHECK", {})
-            except Exception:
-                tok = {}
-            legal_round = (isinstance(tok, dict) and tok.get("step") == sid
-                           and tok.get("status") in ("CLEAN", "REMAINING"))
-            after, token_err = api._source_changed_since(tok.get("head", ""), st) if legal_round else (None, "无合法令牌")
-            if not legal_round or token_err or after:
-                api.die("进入规范检查后源码已被修改，但没有一轮可核实的 CodeCheck Agent 收尾: " + "、".join(changed[:5])
-                    + "。禁止主会话先修再补跑首检；回退越权改动。若确为上一轮 Agent 修复，先让它按契约合法收尾。", 2)
+            _die_unless_legal_fix_round(st, sid, changed)
     files, err = api._biz_changed_files(st)
     if err:
         api.die(err, 2)

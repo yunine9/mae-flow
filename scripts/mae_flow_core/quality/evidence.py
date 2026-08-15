@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
 from ..workflow.evidence import legacy_result
+from .. import host_env
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,12 @@ class QualityEvidenceRules:
         accepted, _why = self.ports.risk_acceptance("UT", state)
         if accepted:
             return EvidenceResult(True, "")
+        # 云端宿主:批次记账靠"上一批 agent 返回"推进,而返回台账在云端
+        # 恒不可见——批次永远走不到 final,这里就是死循环的第二道闸。
+        # 随子会话台账一起放开;机器把关在交付点由流水线(绑 SHA)接手。
+        if not host_env.worker_agent_ledger_gates():
+            return EvidenceResult(
+                True, "云端宿主:UT 批次记账不作门禁,交付点流水线核对")
         session = state.get("ut_session") or {}
         if (session.get("step") != state.get("current")
                 or session.get("phase") != "final"):

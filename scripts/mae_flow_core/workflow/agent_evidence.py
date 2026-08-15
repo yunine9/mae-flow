@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from ..foundation.models import EvidenceResult
+from .. import host_env
 
 # 子 Agent 明确自报"任务卡输入缺失、拒绝执行"的标记。只做单向识别:
 # 出现 → 不算完成;不出现 → 照常。不要求任何格式令牌才算成功,
@@ -63,6 +64,12 @@ class AgentEvidenceRules:
         kind = spec["agent"]
         if kind == "ASKUSER" and self.ports.moonlight(state):
             return EvidenceResult(True, "")
+        # 云端宿主取不到子会话台账,工作类 Agent 的生命周期证据不再作机器
+        # 门禁——机器把关移到交付点(流水线结果绑 SHA)。ASKUSER 是人工闸,
+        # 云端决定卡走得通,照常验。为什么与何时收紧见 host_env 的说明。
+        if kind != "ASKUSER" and not host_env.worker_agent_ledger_gates():
+            return EvidenceResult(
+                True, "云端宿主:子会话台账不作门禁,交付点流水线核对")
         entered = self.ports.step_entered(state)
         accepted, accepted_why = self.ports.risk_acceptance(
             kind, state)

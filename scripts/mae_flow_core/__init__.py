@@ -4,6 +4,16 @@ Only infrastructure that must be shared by the CLI and Hook adapter belongs here
 Workflow semantics stay in flow/modes modules; host event details stay in dispatch.py.
 """
 
+# 测试进程以及它派生的一切内核子进程,绝不弹真桌面通知。
+# _popup 里的 unittest 探测只护得住本进程;测试常拉起真内核 CLI 当裁判,
+# 子进程里没有 unittest,只能靠环境变量随继承传下去(2026-08-15 实锤:
+# 跑内核全量,用户的 mac 被弹了一串"需要你确认")。setdefault 不覆盖用户
+# 显式设置;生产 CLI 不导入 unittest/pytest,真用户路径恒为无操作。
+import os as _os
+import sys as _sys
+if "unittest" in _sys.modules or "pytest" in _sys.modules:
+    _os.environ.setdefault("MAE_FLOW_NO_NOTIFY", "1")
+
 from .runtime import (
     ACTION_FILE,
     EXIT_FILE,

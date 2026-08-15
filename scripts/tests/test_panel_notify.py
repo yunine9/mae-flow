@@ -104,7 +104,11 @@ class NotifyTests(unittest.TestCase):
         静音仍然做得到:预设写 false,或设 MAE_FLOW_NO_NOTIFY。"""
         folder = tempfile.mkdtemp(prefix="notify-")
         self.addCleanup(shutil.rmtree, folder, True)
-        os.environ.pop(notify.ENV_OFF, None)
+        saved = os.environ.pop(notify.ENV_OFF, None)
+        # 用完必须还原:整个测试进程靠这个环境变量兜底静音,裸 pop 会让
+        # 后续用例派生的内核子进程重新开始弹真通知(实测弹过一串)。
+        if saved is not None:
+            self.addCleanup(os.environ.__setitem__, notify.ENV_OFF, saved)
         self.assertTrue(notify.desktop_enabled(folder), "全新仓就该弹")
         with open(os.path.join(folder, notify.DEFAULTS_PATH), "w",
                   encoding="utf-8") as stream:

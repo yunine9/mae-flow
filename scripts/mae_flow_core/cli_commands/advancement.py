@@ -3,7 +3,7 @@
 from .shared import (
     CONFIG_CONFIRM_ACK, EXIT_PATH, HISTORY_PATH, hashlib, json, os, re, read_lines,
     read_text, review_status_count, review_statuses, sys, tempfile, time,
-    workflow_advancement, write_text,
+    workflow_advancement, workflow_transitions, write_text,
 )
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
@@ -313,16 +313,30 @@ def cmd_config_review(flow, st, args):
     print("Q1 上述完整配置是否正确？")
     print("  - " + CONFIG_CONFIRM_ACK)
     print("  - 需要修改")
-    workflow_labels = [
-        (labels or [key])[0]
+    workflow_options = [
+        (key, (labels or [key])[0])
         for key, labels in (
             (flow["steps"].get("workflow_select", {})
              .get("choice_answers") or {}).items())
     ]
-    if workflow_labels:
-        print("Q2 交付方式？（推荐项排第一并给一句依据）")
-        for label in workflow_labels:
-            print("  - " + label)
+    if workflow_options:
+        # 选档是全流程最贵的一次选择,却和"配置对不对"排在同一张卡里、长得
+        # 一模一样,实战里被当例行公事点过去——然后小改动走了完整开发,
+        # 多花三道前期工序。把代价现算出来摆在选项后面,并把"不能换道"
+        # 说死:代价不对称,选重了纯亏,选轻了还能这轮交小的、大的另开一轮。
+        print("Q2 交付方式？（**不给推荐、不排序、不加\"(推荐)\"**，"
+              "照下面的顺序原样列出，让用户自己选；"
+              "每项后面的代价必须一并转述给用户，用户看不见工具输出）")
+        for key, label in workflow_options:
+            cost = workflow_transitions.workflow_cost(flow, key)
+            print("  - %s：%d 步，其中 %d 处要你拍板"
+                  % (label, cost["steps"], cost["acks"]))
+            if cost["unique"]:
+                print("      与其他路不同的环节：" + "、".join(cost["unique"]))
+        print("⚠ 一旦选定，本轮不能中途换道。选重了白走几道前期工序、"
+              "多占你几次拍板；选轻了发现不够，这轮先把小的交付掉，"
+              "大的另开一轮。编码、检视、提交、推送四条路都要走，"
+              "轻的只是前期工序更少、验证形态更小，不是免检。")
         print("Q2 的答案由随后的 workflow_select 直接消费，那一步不再重复提问。")
     print("不要把前面多个单项回答拼成 ack，也不要再次调用 config-review。")
     print("用户选择确认后执行：")

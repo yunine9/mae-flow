@@ -26,6 +26,7 @@ from mae_flow_core.workflow.transitions import (  # noqa: E402
     resolved_next,
     transition_targets,
     workflow_chain,
+    workflow_cost,
 )
 from mae_flow_core import cli_runtime  # noqa: E402
 
@@ -125,6 +126,62 @@ class WorkflowTransitionTests(unittest.TestCase):
             ["start", "fix", "end"],
             workflow_chain(flow, "hotfix"),
         )
+
+    def test_workflow_chain_follows_non_workflow_branch_by_default(self):
+        """按 workflow 以外的键分叉时走 next_default,链条不许在此断掉。
+
+        真实仓的 build 是按 code_reviewer 分叉的,原来拿 workflow 去查那张
+        表查不到就 None,四条道的链条全断在「编码实现」,验证与交付整段从未
+        被打印过——而 `steps` 命令存在的理由正是"选档前看得见全貌"。
+        """
+        flow = {
+            "start": "code",
+            "steps": {
+                "code": {
+                    "next_by": "reviewer",
+                    "next": {"off": "commit", "on": "agent_review"},
+                    "next_default": "on",
+                },
+                "agent_review": {"next": "commit"},
+                "commit": {"next": "done"},
+                "done": {"terminal": True},
+            },
+        }
+        self.assertEqual(
+            ["code", "agent_review", "commit", "done"],
+            workflow_chain(flow, "full"),
+        )
+
+    def test_real_flow_chains_reach_delivery_end(self):
+        flow = load_definition(os.path.join(ROOT, "flow", "flow.json"))
+        for workflow in ("full", "hotfix", "tweak", "review"):
+            chain = workflow_chain(flow, workflow)
+            with self.subTest(workflow=workflow):
+                self.assertEqual("end", chain[-1])
+                for tail in ("build_review", "delivery_review", "push"):
+                    self.assertIn(tail, chain)
+
+    def test_workflow_cost_reports_own_steps_not_a_false_skip_list(self):
+        """代价按"本道特有"报,不许报成"比 full 少了什么"。
+
+        后者会把 tweak 的「小改—规范检查/单元测试」算成"省掉了验证
+        1/4~4/4",等于告诉用户选轻的免检——四条道的验证一步都不能免,
+        轻的只是形态更小。这个误导比不显示还糟。
+        """
+        flow = load_definition(os.path.join(ROOT, "flow", "flow.json"))
+        full = workflow_cost(flow, "full")
+        tweak = workflow_cost(flow, "tweak")
+        self.assertGreater(full["steps"], tweak["steps"])
+        self.assertGreaterEqual(full["acks"], tweak["acks"])
+        # 轻档自己的验证步骤必须出现在"本道特有"里,用户才看得见它要验证
+        joined = "".join(tweak["unique"])
+        self.assertIn("规范检查", joined)
+        self.assertIn("单元测试", joined)
+        # 四条道共有的步骤(编码、推送)不算任何一条道"特有"
+        for workflow in ("full", "hotfix", "tweak", "review"):
+            titles = "".join(workflow_cost(flow, workflow)["unique"])
+            with self.subTest(workflow=workflow):
+                self.assertNotIn("推送分支", titles)
 
     def test_workflow_chain_stops_at_first_cycle(self):
         flow = {

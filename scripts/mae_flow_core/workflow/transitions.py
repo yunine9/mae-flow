@@ -97,6 +97,14 @@ def resolved_next(flow, state, step_id):
 
 
 def workflow_chain(flow, workflow):
+    """某条交付方式的完整步骤链(展示用:可选环节一律取"做"的那支)。
+
+    坑:分叉不只按 workflow 分。build 是按 code_reviewer 分叉的
+    ({disabled,enabled}),原来一律拿 workflow 去查那张表,查不到就 None,
+    链条在「编码实现」处直接断——四条道的验证与交付整段(build_review 到
+    push/end)从来没被打印过,而 `steps` 命令存在的理由正是"选档前看得见
+    全貌"。非 workflow 的分叉按 next_default 取,与"取完整形态"一致。
+    """
     chain = []
     step_id = flow["start"]
     seen = set()
@@ -105,9 +113,37 @@ def workflow_chain(flow, workflow):
         chain.append(step_id)
         step = flow["steps"][step_id]
         nxt = step.get("next")
-        if step.get("next_by"):
-            nxt = nxt.get(workflow) if isinstance(nxt, dict) else nxt
-        elif isinstance(nxt, dict):
-            nxt = nxt.get("yes") or next(iter(nxt.values()))
+        if isinstance(nxt, dict):
+            key = step.get("next_by")
+            if key == "workflow":
+                nxt = nxt.get(workflow)
+            elif key:
+                nxt = nxt.get(step.get("next_default"))
+            else:
+                nxt = nxt.get("yes") or next(iter(nxt.values()))
         step_id = nxt
     return chain
+
+
+def workflow_cost(flow, workflow):
+    """选交付方式时该看见的代价:多少步、要用户拍板几次、哪些环节与别条路不同。
+
+    数字一律从 flow 现算,不许在任何地方手写一份——流程一改,手写的说明
+    就开始骗人,而这段话恰恰是用户据以选档的唯一依据。
+
+    `unique` 报的是"不是四条路都有的环节",不是"比 full 少了什么":后者
+    会把 tweak 的 `小改—规范检查/单元测试/对照需求检查` 算成"省掉了验证
+    1/4~4/4",等于告诉用户选轻的就免检——四条道的验证一步都不能免,轻的
+    只是换成了更小的形态。这个误导比不显示还糟。
+    """
+    chains = {wf: workflow_chain(flow, wf)
+              for wf in ("full", "hotfix", "tweak", "review")}
+    chain = chains.get(workflow) or workflow_chain(flow, workflow)
+    common = set(chains["full"])
+    for other in chains.values():
+        common &= set(other)
+    steps = flow["steps"]
+    acks = [sid for sid in chain if steps[sid].get("user_ack")]
+    unique = [steps[sid].get("title", sid)
+              for sid in chain if sid not in common]
+    return {"steps": len(chain), "acks": len(acks), "unique": unique}

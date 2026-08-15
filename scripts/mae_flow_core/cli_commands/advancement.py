@@ -7,6 +7,7 @@ from .shared import (
 )
 from .wiring import api
 from mae_flow_core.orchestration.work_package import ensure_work_package
+from mae_flow_core import host_env
 from mae_flow_core.panel import notify
 from mae_flow_core.quality.attempts import begin_attempt
 from mae_flow_core.workflow.build_scope import (
@@ -175,7 +176,9 @@ def _announce_and_sync_panel(flow, st, sid, nxt):
                            st.get("config", {}).get("单号", ""))
     from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
     panel_path = _panel_refresh(flow, st)
-    if rang and panel_path:
+    # 面板路径只对"坐在这台机器前"的人有意义;云端控制台里用户看的是
+    # 另一台机器,这条路径他打不开,而材料本来就在页面上。
+    if rang and panel_path and host_env.user_on_this_machine():
         print("[mae-flow] 现场面板已同步(切回浏览器标签页即自动刷新): %s"
               % panel_path)
 
@@ -301,13 +304,15 @@ def cmd_config_review(flow, st, args):
                           "config_confirm@" + review_id)
     # 面板路径并进确认单,搭"逐项复制进回复正文"的转述义务便车——
     # 实战验证过:单独一行"告诉用户"的指令会被模型跳过,进了卡就跳不过。
+    local = host_env.user_on_this_machine()
     panel_page = os.path.abspath(os.path.join(".mae-flow-work", "panel.html"))
-    if os.path.exists(panel_page):
+    if local and os.path.exists(panel_page):
         print("🖥 现场面板(浏览器打开一次,之后每到确认点自动刷新): %s"
               % panel_page)
     print("\n⚠ 用户看不见工具输出:先把上面的确认单**逐项复制进你的回复正文**"
-          "(含分支名、需求摘录与现场面板路径),再提问——只发一张没有配置内容"
-          "的确认卡,用户无从确认。")
+          "(含分支名、需求摘录%s),再提问——只发一张没有配置内容"
+          "的确认卡,用户无从确认。"
+          % ("与现场面板路径" if local else ""))
     print("然后用**一次** AskUserQuestion 同时问完这两项开场决策"
           "（合并成一张卡，避免连着打断用户两次）：")
     print("Q1 上述完整配置是否正确？")

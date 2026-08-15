@@ -10,6 +10,8 @@
 import json
 import os
 
+from mae_flow_core import host_env
+
 from mae_flow_core.panel import page, snapshot
 
 from .shared import STATE_PATH
@@ -63,7 +65,10 @@ def cmd_panel(st, args):
         return None
     print("[mae-flow] 交付现场面板已生成: %s (%.1f KB)"
           % (os.path.abspath(target), size / 1024.0))
-    print("  用浏览器打开即可;它是只读快照,不含任何推进入口。")
+    if host_env.user_on_this_machine():
+        print("  用浏览器打开即可;它是只读快照,不含任何推进入口。")
+    else:
+        print("  只读快照,由宿主界面呈现;别把这条本机路径告诉用户。")
     if not os.path.exists(STATE_PATH):
         print("  当前没有在途交付,面板只展示仓库信息。")
     for warning in data["warnings"]:

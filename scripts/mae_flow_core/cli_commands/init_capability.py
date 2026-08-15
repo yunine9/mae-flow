@@ -8,6 +8,7 @@ from .shared import (
     remove_with_retry, run_comet, run_openspec, sys, time,
 )
 from .wiring import api
+from mae_flow_core import host_env
 
 def _drop_round_residue():
     """过程区里按步骤命名的残留必须跟着新一轮一起清——换单会同名撞上。"""
@@ -144,10 +145,15 @@ def cmd_init(flow, args):
     # 开启流程就是面板的第一个感知时刻:此后每到需要用户裁决/跨阶段时自动同步。
     from mae_flow_core.cli_commands.panel import refresh as _panel_refresh
     panel_path = _panel_refresh(flow, st)
-    if panel_path:
+    if panel_path and host_env.user_on_this_machine():
         print("[mae-flow] 现场面板已生成(浏览器打开即可,确认点自动同步,切回标签页自动刷新): %s"
               % panel_path)
         print("  ⚠ 把上面这个面板路径原样告诉用户——工具输出用户看不见。")
+    elif panel_path:
+        # 云端:用户在远端界面上,这条本机路径他打不开,材料本来就在页面里。
+        # 生成照旧(控制台会读它),但绝不让模型把路径念给用户。
+        print("[mae-flow] 现场面板已生成(宿主自行呈现,勿把路径告诉用户): %s"
+              % panel_path)
     api.print_current(flow, st)
 
 def _capability_arguments(args):

@@ -185,15 +185,19 @@ def _append_full_ut(document, groups, targets, batches=(), phase="generate"):
             "各批共享未提交测试工作区，不 commit、不询问用户；最后必须有一个收口实例"
             "只运行配置的全量 UT 命令。")
     if not host_env.unit_tests_run_locally():
-        # 云端形态:测试照常写,但这台机器上跑不了(没有构建链),
-        # 也没有 AutoUT/java-autout 这类 Skill——见 host_env。
+        # 云端形态:测试照常写——**AutoUT/java-autout 这类 skill 的价值是
+        # "怎么写单测"的写法指南,云端一样照用**(宿主把仓里的 SKILL.md
+        # 直接注进提示词给模型读);对不上的只是"调用 Skill 工具"这个通道
+        # 和它文档里"编译通过"那类本地动作。见 host_env.unit_tests_run_locally。
         route = (
-            "云端形态:本机没有构建链,**不要执行任何 UT 命令**,也不要调用"
-            "AutoUT/java-autout 之类的生成 Skill——它们在这台机器上不存在。"
-            "你自己按被测代码把测试写出来(这一步的价值全在这里),写完就交;"
-            "运行与统计由交付后的权威流水线负责(结果绑 SHA),红灯有专职修复"
-            "会话跟进。报告里如实写明本地未运行,**不要编造 TESTS_TOTAL/"
-            "PASSED/FAILED 数字**——没跑就没有数字,编了就是谎。")
+            "云端形态:**按本会话已带的 UT 写法指南(AutoUT/java-autout 等 "
+            "skill,由宿主注入)写测试**——命名、分层、断言口径照旧生效,"
+            "是本步的主要依据;"
+            "但这台机器没有构建链,指南里「编译通过」「执行构建/运行测试」"
+            "那类段落做不到,直接跳过,不要为此找工具或改写指南。"
+            "写完就交:运行与统计由交付后的权威流水线负责(结果绑 SHA),"
+            "红灯有专职修复会话跟进。报告里如实写明本地未运行,"
+            "**不要编造 TESTS_TOTAL/PASSED/FAILED 数字**——没跑就没有数字。")
     elif phase == "final":
         route = (
             "本任务是最终收口批，不再调用生成 Skill 或修改测试，只真实执行完整 UT。")

@@ -125,6 +125,39 @@ class CloudReleasesWorkerLedger(unittest.TestCase):
             self.assertTrue(result.passed, result.reason)
 
 
+class CloudDelegatesCodecheckToPipeline(unittest.TestCase):
+    def test_review_codecheck_passes_in_cloud_without_scan(self):
+        """云端不做本地 CodeCheck:工具是内网 npm 件,装不上时只剩安装
+        空撞和 TOOL_ERROR 噪声(task-1 实锤);交由流水线,lightcheck 照常。"""
+        from mae_flow_core.quality.evidence import QualityEvidenceRules
+
+        class _Ports(object):
+            def business_changed_files(self, _state):
+                return ["service/src/A.java"], ""
+
+        with _CloudEnv(host_env.CLOUD):
+            result = QualityEvidenceRules(_Ports()).review_codecheck(
+                {}, {"current": "verify_codecheck"})
+            self.assertTrue(result.passed, result.reason)
+            self.assertIn("流水线", result.reason)
+
+    def test_review_codecheck_still_gates_locally(self):
+        from mae_flow_core.quality.evidence import QualityEvidenceRules
+
+        class _Ports(object):
+            def business_changed_files(self, _state):
+                return ["service/src/A.java"], ""
+
+            def risk_acceptance(self, _kind, _state):
+                return False, ""
+
+        with _CloudEnv(None):
+            result = QualityEvidenceRules(_Ports()).review_codecheck(
+                {}, {"current": "verify_codecheck"})
+            self.assertFalse(result.passed)
+            self.assertIn("机器首检", result.reason)
+
+
 class TestsNeverPopDesktop(unittest.TestCase):
     def test_desktop_popup_refuses_to_fire_under_test_runner(self):
         """测试进程绝不弹真通知——跑全量把用户桌面弹一串,就是测试泄漏。

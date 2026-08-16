@@ -59,6 +59,23 @@ def cmd_codecheck_scan(flow, st, args):
     if st["current"] not in ("verify_codecheck", "tw_codecheck", "rf_codecheck"):
         api.die("codecheck-scan 只能在规范检查步骤执行；先按 current 进入对应步骤。", 2)
     sid = st["current"]
+    # 云端:不装工具、不扫、不冷却,如实记账后交由流水线。装不上还每次
+    # 空撞安装 + TOOL_ERROR 引人走恢复通道,是纯噪声(云端 task-1 实锤)。
+    if not host_env.codecheck_runs_locally():
+        st.setdefault("quality", {})["codecheck_scan"] = {
+            "step": sid,
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "head": api.sh("git rev-parse --verify HEAD"),
+            "count": None,
+            "status": "PIPELINE",
+            "pairs": [],
+            "commands": [],
+            "error": "",
+        }
+        api.save_state(st)
+        print("[mae-flow] 云端宿主:CodeCheck 交由流水线核对,本地不扫;"
+              "lightcheck 照常执行。直接继续本步其余检查。")
+        return
     entry_head = (st.get("step_heads", {}) or {}).get(sid, "")
     if entry_head:
         changed, why = api._source_changed_since(entry_head, st)

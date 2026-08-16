@@ -337,6 +337,11 @@ class QualityEvidenceRules:
         return result if not result.passed else EvidenceResult(True, "")
 
     def review_codecheck(self, _spec, state):
+        # 云端:CodeCheck 交由流水线核对(工具是内网 npm 件,云端装不上,
+        # 本地扫描只剩安装空撞和 TOOL_ERROR 噪声)。lightcheck 不走这里,
+        # 照常;本地 CLI 照常。
+        if not host_env.codecheck_runs_locally():
+            return EvidenceResult(True, "云端宿主:CodeCheck 交由流水线核对")
         scan = (state.get("quality", {}) or {}).get(
             "codecheck_scan", {})
         files, error = self.ports.business_changed_files(state)

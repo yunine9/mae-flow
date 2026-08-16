@@ -46,3 +46,15 @@ def worker_agent_ledger_gates():
     ASKUSER 不在此列——那是人工闸,云端决定卡走得通,放开它等于把人踢出局。
     """
     return host_kind() != CLOUD
+
+
+def codecheck_runs_locally():
+    """CodeCheck 本地扫描还做不做。
+
+    CodeCheck 是内网 npm 工具(fullcheck,内部源安装)。云端宿主装不上,
+    每次扫描都要空撞一次"尽力安装"(附带 30 分钟冷却),再落一个
+    TOOL_ERROR 引人去走恢复通道——纯噪声(2026-08-15 云端 task-1 实锤)。
+    用户拍板:云端 CodeCheck 交由流水线核对,本地不扫;lightcheck
+    (内核自带轻检查,不依赖外部工具)不受影响照常跑。本地 CLI 一字不变。
+    """
+    return host_kind() != CLOUD

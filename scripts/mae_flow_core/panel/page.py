@@ -114,14 +114,17 @@ def _change_sections(groups, root):
     return "".join(blocks), tabs, panes
 
 
-def _pending_section(pending, doc_key_by_path):
+def _pending_section(pending, doc_key_by_path, progress):
     """卡片内容必须与步骤对得上:确认 Story 的卡里就是 Story,点开即读。"""
     if not pending:
+        current = progress.get("step_title") or progress.get("step") or "未知步骤"
         return ('<section class="current-action"><h2>现在需要你看什么</h2>'
                 '<div class="action-card">'
                 '<div class="quiet"><span class="dot"></span>'
-                '当前不需要你处理，流程正在按已有决定继续。</div>'
-                '</div></section>')
+                '<span class="quiet-label">正在执行</span>'
+                '<strong class="quiet-step">%s</strong>'
+                '<span class="quiet-note">当前无需你处理</span></div>'
+                '</div></section>' % escape(current))
     cards = []
     for item in pending:
         body = ""
@@ -197,15 +200,10 @@ def _history_section(progress):
             '%s</span><span class="history-result">%s</span></div>'
             % (escape(_hm(item.get("at", "")) or "—"), escape(title),
                escape(result)))
-    current = progress.get("step_title") or progress.get("step") or "未知步骤"
-    rows.append(
-        '<div class="history-row current"><time>现在</time>'
-        '<span class="history-step">%s</span>'
-        '<span class="history-result">当前步骤</span></div>' % escape(current))
     return ('<section class="panel-section history"><div class="section-head">'
             '<h2>执行记录</h2><span>最近 %d 条</span></div>'
             '<div class="history-table">%s</div></section>'
-            % (len(rows) - 1, "".join(rows)))   # "现在"行不是记录,不计入条数
+            % (len(rows), "".join(rows)))
 
 
 def _summary(snapshot, changes):
@@ -216,13 +214,10 @@ def _summary(snapshot, changes):
     # 同一文件常同时出现在"已提交"与"未提交"两组——文件数必须去重,
     # 否则首屏第一个数字就在撒谎(实测 11 vs 真实 8)。
     distinct = len({item.get("path", "") for item in files})
-    progress = snapshot["progress"]
-    current = progress.get("step_title") or progress.get("step") or "—"
     cells = (
         ("当前分支", snapshot["repo"].get("branch") or "—", "mono"),
         ("代码增量", "%d 个文件 · +%d / −%d" %
          (distinct, added, removed), ""),
-        ("当前步骤", current, ""),
         ("提交位置", snapshot["repo"].get("head") or "—", "mono"),
         ("状态修订", "rev %s" % (snapshot.get("state_revision") or 0), "mono"),
     )
@@ -374,7 +369,8 @@ def render(snapshot, changes=(), root=".", born=None):
         "revision": snapshot["state_revision"] or 0,
         "summary": _summary(snapshot, changes),
         "pending": (banners.standalone_section(snapshot.get("standalone"))
-                    or _pending_section(snapshot["pending"], doc_key_by_path)),
+                    or _pending_section(snapshot["pending"], doc_key_by_path,
+                                        snapshot["progress"])),
         "asset_chain": _asset_chain(snapshot["artifacts"]["documents"]),
         "docs": "".join(doc_rows) or
                 '<div class="asset empty"><span class="asset-kind">—</span>'

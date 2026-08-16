@@ -74,7 +74,13 @@ class PanelPageTests(unittest.TestCase):
 
     def test_quiet_when_nothing_needs_the_user(self):
         html = build()
-        self.assertIn("当前不需要你处理", html)
+        self.assertIn("当前无需你处理", html)
+        action = html[html.index("现在需要你看什么"):
+                      html.index("需求与设计资产")]
+        self.assertIn('class="quiet-step">编码</strong>', action)
+        summary = html[html.index('<div class="summary-grid">'):
+                       html.index("现在需要你看什么")]
+        self.assertNotIn("当前步骤", summary)
 
     def test_degraded_tool_gets_its_own_banner(self):
         html = build()
@@ -411,11 +417,12 @@ class PanelPageTests(unittest.TestCase):
         html = build(changes=overlapping)
         self.assertIn("1 个文件 · +15 / −1", html)
 
-    def test_history_count_excludes_the_now_row(self):
-        """"现在"行不是执行记录,不计入"最近 N 条"。"""
+    def test_history_contains_only_completed_records(self):
+        """当前动作有专属位置，不再伪装成一条历史记录。"""
         html = build()
         self.assertIn("最近 2 条", html)     # STATE 里恰有两条 history
-        self.assertIn(">现在<", html.replace("<time>现在</time>", ">现在<"))
+        self.assertNotIn('<time>现在</time>', html)
+        self.assertNotIn('class="history-row current"', html)
 
     def test_viewer_scrolls_inside_the_pane_not_under_a_sticky_bar(self):
         """弹层标题栏固定、滚动只发生在内容区内部。

@@ -69,7 +69,7 @@ h1{font-size:21px;line-height:1.2;margin:3px 0 0;font-weight:710}
   background:var(--accent);border-color:var(--accent-bg);box-shadow:0 0 0 3px var(--accent-bg)}
 
 /* ── 首屏事实与当前动作 ── */
-.summary-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr .8fr .7fr;
+.summary-grid{display:grid;grid-template-columns:1.35fr 1fr .75fr .6fr;
   background:var(--card);border-bottom:1px solid var(--line)}
 .summary-item{padding:10px 14px;border-right:1px solid var(--line2);min-width:0}
 .summary-item:last-child{border-right:0}
@@ -83,8 +83,13 @@ h1{font-size:21px;line-height:1.2;margin:3px 0 0;font-weight:710}
    完全不成比例——两行字撑一条横贯全屏的黑带(实战反馈)。 */
 .current-action.has .action-card{background:var(--accent-bg);
   border-left:3px solid var(--accent)}
-.quiet{color:var(--dim);display:flex;align-items:center;gap:8px;font-size:13px}
+.quiet{color:var(--dim);display:grid;
+  grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;font-size:13px}
 .quiet .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.quiet-label{color:var(--faint);font-size:11px;letter-spacing:.06em}
+.quiet-step{color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.quiet-note{color:var(--ok);font-size:11.5px;white-space:nowrap}
 .current-action.has .ask-title{font-weight:700;font-size:14px}
 .current-action.has .ask-sub{color:var(--dim);font-size:12px;margin:2px 0 5px}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;
@@ -185,8 +190,9 @@ footer{display:flex;justify-content:space-between;padding:9px 13px;border-top:1p
 
 @media (max-width:860px){
   .workbench{margin:0;border-left:0;border-right:0}.header-state{display:none}
-  .phase-node{font-size:10px}.summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .summary-item:nth-child(3){border-right:0}.summary-item:nth-child(n+4){border-top:1px solid var(--line2)}
+  .phase-node{font-size:10px}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .summary-item:nth-child(2n){border-right:0}.summary-item:nth-child(n+3){border-top:1px solid var(--line2)}
+  .quiet{grid-template-columns:auto auto minmax(0,1fr)}.quiet-note{grid-column:2/-1}
   .asset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.asset:nth-child(2n){border-right:0}
   .workspace{grid-template-columns:minmax(0,1fr)}.workspace main{border-right:0}
   .workspace aside{border-top:1px solid var(--line)}.low-frequency{display:block}

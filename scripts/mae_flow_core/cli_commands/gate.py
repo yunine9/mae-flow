@@ -18,6 +18,7 @@ from ..workflow.quality_executions import (
 )
 from mae_flow_core.foundation.worktree_intent import (
     worktree_discard_paths)
+from .external_repair_gate import gate_repair_add, gate_repair_commit
 from .wiring import api
 
 
@@ -193,6 +194,8 @@ def _gate_compile_task_window(st):
 
 
 def _gate_confirmed_manifest_candidates(st, candidate_snapshot):
+    if gate_repair_commit(st, candidate_snapshot, _die_rule):
+        return
     manifest = st.get("delivery_manifest") or {}
     if not manifest:
         return
@@ -220,6 +223,8 @@ def _gate_confirmed_manifest_candidates(st, candidate_snapshot):
 
 
 def _gate_confirmed_manifest_add(st, add_paths):
+    if gate_repair_add(st, add_paths, _die_rule):
+        return
     manifest = st.get("delivery_manifest") or {}
     if not add_paths or not manifest:
         return

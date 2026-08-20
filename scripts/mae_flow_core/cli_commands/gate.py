@@ -8,7 +8,7 @@ from .shared import (
     guard_intent, os, re, replace, source_unlocked_for, sys, time,
     workflow_chosen,
 )
-from ..workflow.advisories import record_advisory
+from ..workflow.advisories import lightcheck_advisory, record_advisory
 # quality_input_snapshot/successful_quality_execution 必须静态导入。经 api.* 动态
 # 取时它们并未注册,AttributeError 被 _gate_compile_task_window 的 except 吞掉 →
 # completed 恒为假 → 已签发 COMPILE 任务卡的步骤里任何提交都被永久拦死。
@@ -46,30 +46,7 @@ def _advisory_lightcheck_before_commit(st, snapshot):
         result["report_path"] = api._save_lightcheck_result(
             result, "提交前：异常安全降级")
     api._print_lightcheck_result(result, quiet=True)
-    _keep_advisory(st, "lightcheck", _lightcheck_advisory(result))
-
-
-def _lightcheck_advisory(result):
-    """Summarize findings for the channel the Agent reads; empty when clean."""
-    findings = result.get("findings") or []
-    if not findings:
-        return ""
-    lines = [
-        "提交前轻量编码预检发现 %d 个本轮新触发问题(建议修复，不阻断):"
-        % len(findings)
-    ]
-    for item in findings[:12]:
-        function = (" " + item["function"]) if item.get("function") else ""
-        lines.append("%s %s:%s%s — %s (%s > %s)" % (
-            item["rule"], item["file"], item["line"], function,
-            item["message"], item["actual"], item["limit"]))
-    if len(findings) > 12:
-        lines.append("…其余 %d 项见报告" % (len(findings) - 12))
-    if result.get("report_path"):
-        lines.append("人类可读报告: " + str(result["report_path"]))
-    lines.append(
-        "只修高置信且属于本次范围的项，最多两轮；仍不确定的留给正式 CodeCheck。")
-    return "\n".join(lines)
+    _keep_advisory(st, "lightcheck", lightcheck_advisory(result))
 
 
 def _relay_hint(block_id):
@@ -110,14 +87,24 @@ def _redirect_targets(c):
         out.append(t)
     return out
 
+def _ut_preempt_facts(step, p, pm, test_patterns):
+    """UT 抢跑提醒的三个事实(纯计算,裁决在 guard 侧的 decide_edit)。"""
+    return dict(
+        compile_step=any(
+            isinstance(item, dict) and item.get("agent") == "COMPILE"
+            for item in step.get("evidence") or ()),
+        new_file=not os.path.exists(p),
+        is_test_path=any(
+            re.search(pattern, pm, re.I) for pattern in test_patterns),
+    )
+
+
 def _gate_edit(flow, st, sid, step, intent, jdie):
     p = intent.subject
     rel = api._repo_rel_for_match(p)
     pm = rel if rel is not None else p
     plugin_root = api.norm(os.path.abspath(os.path.join(HERE, ".."))).lower()
-    patterns = (
-        tuple(api._effective_test_patterns(st))
-        if step.get("tests_only") else ())
+    test_patterns = tuple(api._effective_test_patterns(st))
     decision = decide_edit(EditGateContext(
         path=p,
         match_path=pm,
@@ -125,14 +112,17 @@ def _gate_edit(flow, st, sid, step, intent, jdie):
         inside_plugin=api.norm(os.path.abspath(p)).lower().startswith(
             plugin_root + "/"),
         is_source=api._is_source_path(p, st, flow),
-        tests_only_patterns=patterns,
+        tests_only_patterns=test_patterns if step.get("tests_only") else (),
         source_unlocked=source_unlocked_for(st, sid),
         workflow_chosen=workflow_chosen(st),
+        **_ut_preempt_facts(step, p, pm, test_patterns),
     ))
     if decision.kind == "absolute":
         _die_decision(decision)
     if decision.kind == "block":
         jdie(decision.rule, decision.message)
+    if decision.kind == "advisory":
+        _keep_advisory(st, decision.rule, decision.message)
     sys.exit(0)
 
 

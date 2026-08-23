@@ -13,23 +13,23 @@ from .state_config import _is_source_path
 
 SCHEMA = "mae-flow-user-intervention/1"
 _LATE_FULL = {
-    "verify_ponytail", "verify_post_ponytail_compile", "verify_recompile",
-    "verify_codecheck", "verify_codecheck_compile", "verify_ut",
     "verify_spec", "verify_comet", "domain_archive", "delivery_review",
-    "archive_confirm", "archive", "push", "external_verify", "end",
+    "archive_confirm", "archive", "push", "external_verify",
+    "moonlight_review", "end",
 }
 _LATE_REVIEW = {
-    "rf_codecheck", "rf_ut", "delivery_review", "push",
-    "external_verify", "end",
+    "domain_archive", "delivery_review", "archive_confirm", "archive",
+    "push", "external_verify", "moonlight_review", "end",
 }
 _LATE_TWEAK = {
-    "tw_codecheck", "tw_ut", "tw_verify", "delivery_review",
-    "archive_confirm", "archive", "push", "external_verify", "end",
+    "tw_verify", "domain_archive", "delivery_review", "archive_confirm",
+    "archive", "push", "external_verify", "moonlight_review", "end",
 }
 _EVIDENCE_SIDECARS = (
     ".tokens", ".agent-evidence", ".agent-observations",
     ".agent-rejections", ".quality-executions", ".advisories",
 )
+_DOC_FINAL = {"push", "external_verify", "moonlight_review", "end"}
 
 
 def _text(value, limit):
@@ -64,7 +64,14 @@ def _paths(payload):
     return result[:200]
 
 
-def intervention_target(state, changed, paths):
+def _is_document_path(path):
+    value = str(path or "").replace("\\", "/").lower()
+    return (value.startswith(("docs/", "doc/"))
+            or value.endswith((".md", ".mdx", ".rst", ".adoc", ".txt")))
+
+
+def intervention_target(state, changed, paths, paths_truncated=False,
+                        derived_only=False):
     """Choose a non-forward re-entry point; uncertainty rewinds, never blocks."""
     current = str(state.get("current", "") or "")
     if not changed:
@@ -72,20 +79,37 @@ def intervention_target(state, changed, paths):
     if current in ("build", "build_rework"):
         return current
     if current in ("build_review", "build_commit", "build_agent_review"):
-        return "build_review"
+        # 用户已经用旁路助手实际改过代码，这个动作本身就是对旧检视
+        # 对象的“需要调整”。直接进入返工承接现场，禁止把旧卡答案
+        # 回放给一张内容已经变化的新卡，否则审批对象绑定会必然打回。
+        return "build_rework"
     if current in ("quality_review", "quality_commit"):
-        return "quality_review"
+        return "quality_rework"
 
     tests = [path for path in paths if _is_test_file(path, state)]
     sources = [
         path for path in paths
         if _is_source_path(path, state) and path not in tests
     ]
+    unknown = [
+        path for path in paths
+        if path not in tests and path not in sources
+        and not _is_document_path(path)
+    ]
+    documents = [path for path in paths if _is_document_path(path)]
     # Missing path detail is a diagnostic loss, not a reason to reject the
     # user's workspace.  Conservatively treat it as source work and rewind.
-    source_changed = bool(sources) or not paths
+    source_changed = (bool(sources) or bool(unknown) or paths_truncated
+                      or (not paths and not derived_only))
     test_changed = bool(tests)
     workflow = (state.get("choices", {}) or {}).get("workflow", "")
+
+    if documents and not source_changed and not test_changed:
+        if current in ("archive_confirm", "archive"):
+            return "domain_archive"
+        if current in _DOC_FINAL:
+            return "delivery_review"
+        return current
 
     if test_changed and not source_changed:
         if workflow == "review" and current in _LATE_REVIEW:
@@ -134,24 +158,45 @@ def cmd_user_intervention(flow, state, args):
     if args.intervention_action != "reconcile":
         api.die("未知用户介入动作", 2)
     payload = _load_payload(args.file)
+    intervention_id = _text(payload.get("intervention_id"), 120)
+    previous = state.get("user_intervention") or {}
+    if (intervention_id and isinstance(previous, dict)
+            and previous.get("id") == intervention_id):
+        print(json.dumps({
+            "schema": SCHEMA,
+            "changed": bool(previous.get("changed")),
+            "from": str(previous.get("from_step", "") or ""),
+            "target": str(previous.get("target_step", "") or ""),
+        }, ensure_ascii=False))
+        return
     paths = _paths(payload)
-    changed = bool(payload.get("changed", False))
+    raw_paths = payload.get("changed_paths", []) or []
+    paths_truncated = (bool(payload.get("paths_truncated"))
+                       or (isinstance(raw_paths, list)
+                           and len(raw_paths) > len(paths)))
+    derived_only = bool(payload.get("derived_only"))
+    changed = bool(payload.get("changed", False)) and not (
+        derived_only and not paths and not paths_truncated)
     old = str(state.get("current", "") or "")
-    target = intervention_target(state, changed, paths)
+    target = intervention_target(
+        state, changed, paths, paths_truncated,
+        derived_only)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     if changed:
         _clear_stale_evidence(state)
-        if target != "quality_review":
+        if target not in ("quality_review", "quality_rework"):
             state.pop("quality_review", None)
     state["current"] = target
     state["user_intervention"] = {
+        "id": intervention_id,
         "at": now,
         "actor": _text(payload.get("actor"), 100) or "用户",
         "request": _text(payload.get("request"), 2000),
         "assistant_summary": _text(payload.get("assistant_summary"), 4000),
         "changed": changed,
         "changed_paths": paths,
+        "paths_truncated": paths_truncated,
         "executions": _execution_rows(payload),
         "from_step": old,
         "target_step": target,

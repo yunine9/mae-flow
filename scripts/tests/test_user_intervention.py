@@ -45,13 +45,42 @@ class UserInterventionTests(unittest.TestCase):
             self.state("external_verify"), True, []),
             "路径摘要缺失也应保守回退，不能拒绝用户现场")
 
-    def test_test_change_reenters_ut_and_review_cards_are_refreshed(self):
+    def test_test_change_reenters_ut_and_old_review_cards_are_closed(self):
         self.assertEqual("verify_ut", intervention_target(
             self.state("external_verify"), True, ["tests/test_a.py"]))
-        self.assertEqual("build_review", intervention_target(
+        self.assertEqual("build_rework", intervention_target(
             self.state("build_commit"), True, ["src/a.cpp"]))
-        self.assertEqual("quality_review", intervention_target(
+        self.assertEqual("quality_rework", intervention_target(
             self.state("quality_commit"), True, ["src/a.cpp"]))
+
+    def test_test_only_changes_never_jump_forward_and_unknown_rewinds(self):
+        for step in ("verify_ponytail", "verify_codecheck", "verify_ut"):
+            self.assertEqual(step, intervention_target(
+                self.state(step), True, ["tests/test_a.py"]))
+        self.assertEqual("rf_codecheck", intervention_target(
+            self.state("rf_codecheck", "review"), True, ["tests/a_test.cpp"]))
+        self.assertEqual("tw_codecheck", intervention_target(
+            self.state("tw_codecheck", "tweak"), True, ["tests/a_test.cpp"]))
+        self.assertEqual("verify_ut", intervention_target(
+            self.state("moonlight_review"), True, ["tests/test_a.py"]))
+        self.assertEqual("quality_recompile", intervention_target(
+            self.state("external_verify"), True, ["generated/opaque.bin"]))
+        self.assertEqual("quality_recompile", intervention_target(
+            self.state("external_verify"), True, ["docs/readme.md"], True))
+        self.assertEqual("external_verify", intervention_target(
+            self.state("external_verify"), True, [], False, True),
+            "明确只有构建产物时不应伪装成源码修改")
+        self.assertEqual("delivery_review", intervention_target(
+            self.state("external_verify"), True, ["docs/readme.md"]))
+        self.assertEqual("domain_archive", intervention_target(
+            self.state("archive"), True, ["docs/readme.md"]))
+        self.assertEqual("verify_spec", intervention_target(
+            self.state("verify_spec"), True, ["docs/readme.md"]))
+        for step in ("verify_ponytail", "verify_codecheck"):
+            self.assertEqual(step, intervention_target(
+                self.state(step), True, ["src/main.cpp"]))
+        self.assertEqual("rf_codecheck", intervention_target(
+            self.state("rf_codecheck", "review"), True, ["src/main.cpp"]))
 
     def test_current_explains_what_user_and_assistant_did(self):
         text = render_user_intervention({"user_intervention": {
@@ -73,6 +102,7 @@ class UserInterventionTests(unittest.TestCase):
             with open(facts, "w", encoding="utf-8") as stream:
                 json.dump({
                     "schema": "mae-flow-user-intervention/1",
+                    "intervention_id": "handoff-1",
                     "actor": "alice",
                     "request": "修空指针",
                     "assistant_summary": "已修并跑 UT",
@@ -102,9 +132,19 @@ class UserInterventionTests(unittest.TestCase):
             self.assertNotIn("quality", saved)
             self.assertNotIn("approval_subject", saved)
             self.assertEqual("alice", saved["user_intervention"]["actor"])
+            self.assertEqual("handoff-1", saved["user_intervention"]["id"])
             self.assertIn("已修并跑 UT", render_user_intervention(saved))
             result = json.loads(output.getvalue().strip().splitlines()[-1])
             self.assertEqual("quality_recompile", result["target"])
+
+            history_size = len(saved["history"])
+            state.clear()
+            state.update(json.loads(json.dumps(saved)))
+            with redirect_stdout(StringIO()):
+                cmd_user_intervention({}, state, SimpleNamespace(
+                    intervention_action="reconcile", file=facts))
+            self.assertEqual(history_size, len(state["history"]),
+                             "同一 intervention_id 重放必须幂等")
 
 
 if __name__ == "__main__":

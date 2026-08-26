@@ -52,13 +52,14 @@ def _done_validate_choice_and_ack(step, st, args, sid):
     if step.get("approval_subject") and not api._moonlight(st):
         previous_subject = dict(st.get("approval_subject") or {})
         ok, why = subject_matches(os.getcwd(), st, sid, step)
+        # subject_matches rotates a missing/stale subject in-memory.  Persist
+        # every rotation — including the first-bind pass-through path (2026-08-26
+        # 单次确认修复) — so the ledger filter and any later card render see the
+        # same bound identifier; no Agent loop through current/reasoning is
+        # needed merely to mint another identifier.
+        if st.get("approval_subject") != previous_subject:
+            api.save_state(st)
         if not ok:
-            # subject_matches rotates a missing/stale subject in-memory.  Save
-            # it before returning the recoverable error so the next human card
-            # is already bound to the new stable content; no Agent loop through
-            # current/reasoning is needed merely to mint another identifier.
-            if st.get("approval_subject") != previous_subject:
-                api.save_state(st)
             api.die(why, 2)
     error = workflow_completion.choice_error(step, args.choice)
     if error:

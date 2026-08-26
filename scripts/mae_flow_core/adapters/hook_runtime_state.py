@@ -266,6 +266,10 @@ class HookStateMixin:
                     flow_state = normalize_document(
                         raw, "flow") if not err and raw else {}
                     step = flow_state.get("current", "")
+                    # 迟到绑卡(单次确认修复,机制见该模块 docstring)。
+                    from mae_flow_core.application.hooks.late_approval_binding import (
+                        bind_missing_approval_subject)
+                    bind_missing_approval_subject(flow_state, step, self.log)
                     from mae_flow_core.application.hooks.decision_bindings import (
                         decision_bindings)
                     bindings = decision_bindings(flow_state, step)

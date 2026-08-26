@@ -434,14 +434,14 @@ class HookStateMixin:
 
     def _maybe_utrun(self, d):
         """UT 运行命令被真实调起 → UTRUN 事件令牌。当前仅观测(doctor 可见);
-        升级为 verify_ut 硬证据前,须公司机确认子 agent 的 Bash 也触发 PostToolUse。
+        升级为 UT 硬证据前,须公司机确认子 agent 的 Bash 也触发 PostToolUse。
         只在 UT 步骤检测(FIELD-TEST 0.2 待办):这是每条 Bash 都要付的 PostToolUse 开销,
         其他步骤读状态+比对纯属浪费,令牌也只会在 UT 步骤被消费。"""
         try:
             if not os.path.exists(self.STATE):
                 return
             st = load_json(self.STATE)
-            if st.get("current") not in ("verify_ut", "rf_ut", "tw_ut"):
+            if st.get("current") != "standalone_ut":
                 return
             cmd = re.sub(r"\s+", " ", ((d.get("tool_input") or {}).get("command", "") or ""))
             ut = re.sub(r"\s+", " ", (st.get("config", {}) or {}).get("UT运行命令", "") or "").strip()

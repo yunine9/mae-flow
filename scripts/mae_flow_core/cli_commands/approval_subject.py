@@ -71,11 +71,6 @@ def _artifact_payload(root, state, spec):
 
 
 def _review_base(state, step_id):
-    if step_id == "quality_review":
-        base = str(((state or {}).get("quality_review") or {}).get(
-            "entered_head", ""))
-        if base:
-            return base
     return str((state or {}).get("implementation_base_head", "") or "HEAD")
 
 

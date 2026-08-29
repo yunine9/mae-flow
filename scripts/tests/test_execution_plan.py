@@ -75,6 +75,8 @@ def structural_profile(items=None):
          "description": "读取任务固定的 Skill 索引后按需执行",
          "instructions": "先覆盖失败与重试路径", "locked": False,
          "editable": True, "source": "workflow",
+         "asset_ref": {"registry": "team_skill", "id": "notify-test",
+                       "version": "pkg-v2", "digest": "sha256:" + "b" * 64},
          "use": {"mode": "before_item", "anchor": "implementation"}},
     ])
     snapshot = {"standard_id": "mae-flow.standard",
@@ -87,7 +89,11 @@ def structural_profile(items=None):
         "base_snapshot": snapshot,
         "edits": [],
         "final_snapshot": {**snapshot, "stages": [final_stage]},
-        "asset_manifest": [],
+        "asset_manifest": [{
+            "registry": "team_skill", "id": "notify-test",
+            "version": "pkg-v2", "digest": "sha256:" + "b" * 64,
+            "state": "available",
+        }],
         "diagnostics": [],
     }
     source = json.dumps(
@@ -267,7 +273,41 @@ class ExecutionPlanContractTests(unittest.TestCase):
         self.assertIn("已固定的最终执行方案", guidance)
         self.assertIn("工作流定制", guidance)
         self.assertIn("先覆盖失败与重试路径", guidance)
+        self.assertIn("固定 Skill：notify-test@pkg-v2", guidance)
         self.assertNotIn("通用测试", guidance)
+
+    def test_workflow_asset_snapshot_path_is_safe_and_visible_not_inlined(self):
+        workflow = structural_profile()
+        ref = {"registry": "business_knowledge", "id": "diagnosis",
+               "business_module_id": "notify", "version": "3",
+               "digest": "sha256:" + "c" * 64}
+        item = {"id": "notify-diagnosis", "kind": "knowledge",
+                "title": "通知问题定位", "locked": False,
+                "editable": True, "source": "workflow",
+                "asset_ref": ref, "use": {"mode": "when_needed"}}
+        workflow["final_snapshot"]["stages"][0]["items"].append(item)
+        workflow["asset_manifest"].append({
+            **ref, "state": "available",
+            "snapshot_path": ".mae-flow-work/business-modules/notify/diagnosis.md",
+        })
+        source = json.dumps(
+            {key: value for key, value in workflow.items()
+             if key not in ("schema", "revision")},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        workflow["revision"] = "sha256:" + hashlib.sha256(
+            source.encode("utf-8")).hexdigest()
+        self.assertEqual([], workflow_profile_errors(workflow))
+        plan = build_execution_plan(
+            self.flow, {"current": "build"}, self.catalog,
+            workflow_profile=workflow)
+        guidance = render_agent_execution_plan(plan)
+        self.assertIn("正文按需读取：.mae-flow-work/business-modules/notify/diagnosis.md",
+                      guidance)
+        self.assertNotIn("问题定位正文", guidance)
+
+        workflow["asset_manifest"][-1]["snapshot_path"] = "../../secret"
+        self.assertTrue(any("unsafe snapshot path" in error
+                            for error in workflow_profile_errors(workflow)))
 
     def test_structural_profile_cannot_tamper_with_locked_floor(self):
         workflow = structural_profile()

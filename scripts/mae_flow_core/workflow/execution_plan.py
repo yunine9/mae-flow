@@ -75,6 +75,21 @@ def _use_text(item):
     return result
 
 
+def _resolved_asset_text(item):
+    asset = item.get("resolved_asset") or {}
+    if not asset:
+        return ""
+    if asset.get("state") != "available":
+        return "固定资产不可用（已由最终方案降级记录说明）"
+    path = str(asset.get("snapshot_path") or "").strip()
+    if path:
+        return "正文按需读取：%s" % path
+    if asset.get("registry") in ("team_skill", "repository_skill"):
+        return "固定 Skill：%s@%s（从任务 Skill 索引读取）" % (
+            asset.get("id"), asset.get("version"))
+    return ""
+
+
 def _render_structural_items(plan):
     lines = []
     for item in plan.get("workflow_items") or ():
@@ -82,6 +97,7 @@ def _render_structural_items(plan):
             str(item.get("description") or "").strip(),
             str(item.get("instructions") or "").strip(),
             _use_text(item),
+            _resolved_asset_text(item),
         ) if value)
         lines.append("- [%s] %s%s" % (
             _structural_marker(item), item["title"],
@@ -128,15 +144,20 @@ def _render_stage_layers(plan):
     return lines
 
 
+def _render_resource(item):
+    detail = _resolved_asset_text(item)
+    return "- [%s%s] %s%s" % (
+        _RESOURCE_USAGE_LABELS.get(item.get("usage"), "按情况"),
+        " · 定制优先" if item.get("preferred") else "", item["name"],
+        "：" + detail if detail else "")
+
+
 def _render_resources(plan):
     resources = plan.get("resources") or ()
     if not resources:
         return []
     return ["能力索引（列出不等于把正文注入上下文）："] + [
-        "- [%s%s] %s" % (
-            _RESOURCE_USAGE_LABELS.get(item.get("usage"), "按情况"),
-            " · 定制优先" if item.get("preferred") else "", item["name"])
-        for item in resources]
+        _render_resource(item) for item in resources]
 
 
 def _render_diagnostics(plan):

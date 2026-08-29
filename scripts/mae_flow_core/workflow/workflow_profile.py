@@ -12,6 +12,7 @@ WORKFLOW_PROFILE_PATH = os.path.join(
 _ITEM_KINDS = {
     "activity", "knowledge", "skill", "agent", "tool", "instruction",
 }
+_ASSET_STATES = {"available", "unavailable", "incompatible"}
 
 
 def _workflow_profile_revision(profile):
@@ -158,6 +159,31 @@ def _profile_field_errors(profile):
     return errors
 
 
+def _safe_snapshot_path(path):
+    if not path or not isinstance(path, str) or os.path.isabs(path):
+        return False
+    normalized = os.path.normpath(path)
+    return (normalized == ".mae-flow-work" or
+            normalized.startswith(".mae-flow-work" + os.sep))
+
+
+def _asset_manifest_errors(profile):
+    errors = []
+    for index, asset in enumerate(profile.get("asset_manifest") or ()):
+        label = "workflow asset manifest item %s" % (index + 1)
+        if not isinstance(asset, dict):
+            errors.append("%s must be an object" % label)
+            continue
+        errors.extend(_identity_errors(
+            asset, label, ("registry", "id", "version", "digest", "state")))
+        if asset.get("state") not in _ASSET_STATES:
+            errors.append("%s has invalid state" % label)
+        path = asset.get("snapshot_path")
+        if path is not None and not _safe_snapshot_path(path):
+            errors.append("%s has unsafe snapshot path" % label)
+    return errors
+
+
 def workflow_profile_errors(profile):
     if not isinstance(profile, dict):
         return ["workflow profile must be an object"]
@@ -171,6 +197,7 @@ def workflow_profile_errors(profile):
         errors.extend(_snapshot_identity_match_errors(base, final))
         errors.extend(_locked_floor_errors(base, final))
     errors.extend(_profile_field_errors(profile))
+    errors.extend(_asset_manifest_errors(profile))
     if profile.get("revision") != _workflow_profile_revision(profile):
         errors.append("workflow profile revision does not match its snapshot")
     return errors
@@ -240,7 +267,29 @@ def _resource(item):
     }
     if item.get("instructions"):
         result["instructions"] = item["instructions"]
+    if item.get("resolved_asset"):
+        result["resolved_asset"] = copy.deepcopy(item["resolved_asset"])
     return result
+
+
+def _asset_identity(asset):
+    return tuple(asset.get(key) for key in (
+        "registry", "id", "version", "digest", "business_module_id",
+        "repository", "revision", "relative_path"))
+
+
+def _attach_resolved_assets(items, workflow_profile):
+    manifest = {_asset_identity(asset): asset
+                for asset in workflow_profile.get("asset_manifest") or ()
+                if isinstance(asset, dict)}
+    for item in items:
+        ref = item.get("asset_ref")
+        if not isinstance(ref, dict):
+            continue
+        asset = manifest.get(_asset_identity(ref))
+        if asset:
+            item["resolved_asset"] = copy.deepcopy(asset)
+    return items
 
 
 def structural_selection(playbook, workflow_profile):
@@ -250,7 +299,8 @@ def structural_selection(playbook, workflow_profile):
     if stage is None:
         raise ValueError("workflow final snapshot has no stage %s" %
                          selected.get("id"))
-    items = copy.deepcopy(stage.get("items") or [])
+    items = _attach_resolved_assets(
+        copy.deepcopy(stage.get("items") or []), workflow_profile)
     selected["workflow_items"] = items
     selected["activities"] = [_activity(item) for item in items
                               if item.get("kind") == "activity"]

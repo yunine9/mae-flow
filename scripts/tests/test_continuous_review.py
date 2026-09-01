@@ -197,6 +197,31 @@ class DeliveryCommandTests(TempProject):
             delivery.cmd_delivery({"steps": {}}, value, SimpleNamespace(
                 delivery_action="feedback-result", file=result_path))
 
+    def test_red_feedback_replaces_awaiting_writer_and_later_pass_closes_both(self):
+        value = self.live_state("external_verify")
+        value["delivery_loop"] = {
+            "schema": delivery.STATE_SCHEMA,
+            "delivery_round": 1,
+            "active_batch_id": "fb-old",
+            "close_events": [],
+            "batches": [{
+                "batch_id": "fb-old", "status": "awaiting_verification",
+                "base_sha": self.head, "items": [],
+            }],
+        }
+        path = self.write_json("red.json", batch("fb-red", self.head))
+        delivery.cmd_delivery({"steps": {}}, value, SimpleNamespace(
+            delivery_action="feedback-open", file=path))
+        old, current = value["delivery_loop"]["batches"]
+        self.assertEqual("addressed", old["status"])
+        self.assertEqual("repairing", current["status"])
+        self.assertEqual("fb-red", value["delivery_loop"]["active_batch_id"])
+        self.assertEqual("feedback_triage", value["current"])
+        current["status"] = "awaiting_verification"
+        self.assertFalse(delivery.complete_verified_feedback(value, self.head))
+        self.assertEqual(["closed", "closed"],
+                         [item["status"] for item in value["delivery_loop"]["batches"]])
+
     def test_merged_close_is_the_only_terminal_transition_and_is_idempotent(self):
         value = self.live_state()
         args = SimpleNamespace(
@@ -278,6 +303,38 @@ class FeedbackAuthorizationTests(unittest.TestCase):
             eligible_repair_paths(value, HEAD,
                                   ("src/conflict.py", "user.txt")),
         )
+
+    def test_queued_batch_cannot_report_result_before_it_is_promoted(self):
+        value = state("feedback_triage")
+        value["delivery_loop"] = {
+            "schema": delivery.STATE_SCHEMA,
+            "active_batch_id": "fb-active",
+            "batches": [
+                {"batch_id": "fb-active", "status": "repairing", "items": []},
+                {"batch_id": "fb-queued", "status": "queued", "items": [
+                    {"id": "q-1"},
+                ]},
+            ],
+        }
+        payload = {
+            "schema": delivery.RESULT_SCHEMA,
+            "batch_id": "fb-queued",
+            "changed": False,
+            "results": [{
+                "id": "q-1", "status": "explained", "summary": "done",
+            }],
+        }
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8",
+                                         suffix=".json", delete=False) as out:
+            json.dump(payload, out)
+            path = out.name
+        try:
+            with self.assertRaises(SystemExit):
+                delivery._result({}, value, SimpleNamespace(file=path))
+            self.assertEqual("queued", value["delivery_loop"]["batches"][1]["status"])
+            self.assertNotIn("result_digest", value["delivery_loop"]["batches"][1])
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":

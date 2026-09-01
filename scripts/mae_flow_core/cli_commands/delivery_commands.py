@@ -205,7 +205,19 @@ def _open(flow, state, args):
     if len(ids) != len(set(ids)):
         _die("同一批次 items.id 不得重复")
     loop["delivery_round"] = int(loop.get("delivery_round") or 0) + 1
-    active = bool(loop.get("active_batch_id"))
+    active_batch = _batch(loop, str(loop.get("active_batch_id") or ""))
+    # A RED result for the code produced by the previous batch is itself new
+    # feedback. The previous receipts stay immutable/auditable, but it no
+    # longer owns the writer; otherwise the RED batch would queue behind a
+    # PASS that can never happen and Cloud would livelock on external_verify.
+    if active_batch and active_batch.get("status") == "awaiting_verification":
+        active_batch["status"] = "addressed"
+        active_batch["verification_failed_at"] = time.strftime(
+            "%Y-%m-%d %H:%M:%S")
+        loop["active_batch_id"] = ""
+        clear_feedback_authorization(state)
+        active_batch = None
+    active = bool(active_batch)
     status = "queued" if active else "repairing"
     record = {
         "batch_id": batch_id,
@@ -275,6 +287,11 @@ def complete_verified_feedback(state, verified_sha):
     batch["status"] = "closed"
     batch["verified_sha"] = str(verified_sha or "")
     batch["closed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    for previous in loop.get("batches", []):
+        if isinstance(previous, dict) and previous.get("status") == "addressed":
+            previous["status"] = "closed"
+            previous["verified_sha"] = str(verified_sha or "")
+            previous["closed_at"] = batch["closed_at"]
     _history(state, state.get("current", ""),
              "feedback-verified:" + batch["batch_id"],
              "权威验证通过 %s" % str(verified_sha or "")[:12])
@@ -323,6 +340,9 @@ def _result(flow, state, args):
             "current": state.get("current"),
         }, ensure_ascii=False))
         return
+    if batch_id != str(loop.get("active_batch_id") or ""):
+        _die("反馈批次 %s 尚未取得唯一 writer，不能提前登记处理结果"
+             % batch_id)
     head = _head()
     declared_changed = bool(payload.get("changed"))
     changed = declared_changed or head != batch.get("base_sha")

@@ -12,9 +12,9 @@ from mae_flow_core.quality.external_repair import (
     clear_feedback_authorization, issue_feedback_authorization)
 from mae_flow_core.workflow.execution_contract import continuous_review_enabled
 from .host_capability import (
-    external_facts, host_managed_continuous_review, save_with_host_proof,
-    trusted_active_batch, trusted_current_lifecycle, trusted_pipeline_projection,
-    verify_host_proof)
+    external_facts, has_host_receipt, host_managed_continuous_review,
+    save_with_host_proof, trusted_active_batch, trusted_current_lifecycle,
+    trusted_pipeline_projection, verify_host_proof)
 BATCH_SCHEMA = "mae-flow-feedback-batch/1"
 RESULT_SCHEMA = "mae-flow-feedback-result/1"
 STATE_SCHEMA = "mae-flow-delivery-loop/1"
@@ -188,7 +188,10 @@ def _open(flow, state, args):
             else trusted_current_lifecycle(state, (
                 "pipeline-record", "feedback-open", "feedback-result",
                 "intervention-reconcile")))
-        if not predecessor_ok:
+        # 有链才查链。一份收据都没有 = 这一单还没发生过宿主动作(老任务
+        # 升级、迁移前的现场),这条命令本身就是第一环;这时还要求"先有
+        # 前驱收据"等于宣布这单的反馈永远打不开,且无命令可补。
+        if not predecessor_ok and has_host_receipt(state):
             _die("打开反馈前的持续检视生命周期没有宿主收据，拒绝接着可篡改状态推进")
     loop = _loop(state)
     previous = _batch(loop, batch_id)

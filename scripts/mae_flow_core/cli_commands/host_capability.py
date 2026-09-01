@@ -449,6 +449,20 @@ def trusted_projection(state, action, projection):
     return False
 
 
+def has_host_receipt(state):
+    """Whether this task has ever produced a host receipt at all.
+
+    第一条宿主动作必须有权开链。收据落在 Agent 够不着的信任根里
+    (0600、工作区之外),"一份都没有"只可能是"这个任务还没发生过宿主
+    动作"——老任务升级、迁移前的现场、刚建的任务——不可能是 Agent 把
+    它们删干净了。要求"开链之前先有链"只会把宿主自己锁在门外:反馈
+    永远打不开,而且没有任何命令能补开第一环。
+    """
+    for _authority, _record in _scan_receipts(state):
+        return True
+    return False
+
+
 def trusted_current_lifecycle(state, actions):
     """Require an exact signed predecessor before another host transition."""
     return any(trusted_projection(

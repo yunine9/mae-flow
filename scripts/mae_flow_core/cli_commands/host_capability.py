@@ -314,8 +314,9 @@ def _valid_stored_receipt(state, record, action, projection, root):
                                 payload_digest)
             and hmac.compare_digest(str(record.get("projection_digest") or ""),
                                     projection_digest)
-            and hmac.compare_digest(_canonical(record.get("projection")),
-                                    _canonical(projection)))
+            and hmac.compare_digest(
+                _canonical(record.get("projection")).encode("utf-8"),
+                _canonical(projection).encode("utf-8")))
 
 
 def trusted_projection(state, action, projection):

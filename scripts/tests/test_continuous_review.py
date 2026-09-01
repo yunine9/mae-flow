@@ -27,6 +27,7 @@ from mae_flow_core.cli_commands.pipeline_commands import (  # noqa: E402
     _route_external_verification, cmd_pipeline,
 )
 from mae_flow_core.cli_commands.host_capability import verify_host_proof  # noqa: E402
+from mae_flow_core.cli_commands import host_capability  # noqa: E402
 from mae_flow_core.workflow.execution_contract import SCHEMA  # noqa: E402
 
 
@@ -393,6 +394,31 @@ class DeliveryHostProofTests(TempProject):
             cmd_pipeline({"steps": {}}, value, SimpleNamespace(
                 action="record", file=facts, host_proof=None))
         self.assertNotIn("pipeline", value.get("quality", {}))
+
+    def test_trusted_receipt_accepts_utf8_projection(self):
+        projection = {"summary": "流水线问题已修复", "status": "fixed"}
+        payload = {"batch_id": "fb-中文"}
+        proof = {
+            "schema": host_capability.PROOF_SCHEMA,
+            "task_id": "task-7", "action": "feedback-result",
+            "payload_digest": hashlib.sha256(
+                host_capability._canonical(payload).encode("utf-8")).hexdigest(),
+            "nonce": "utf8", "issued_at": int(delivery.time.time()),
+            "signature": "signed",
+        }
+        record = {
+            "schema": "mae-flow-host-receipt/1",
+            "proof": proof,
+            "payload": payload,
+            "projection": projection,
+            "projection_digest": hashlib.sha256(
+                host_capability._canonical(projection).encode("utf-8")).hexdigest(),
+        }
+        with mock.patch.object(
+                host_capability, "_trusted_authority", return_value={}), mock.patch.object(
+                host_capability, "_verify_rsa_sha256", return_value=True):
+            self.assertTrue(host_capability._valid_stored_receipt(
+                state(), record, "feedback-result", projection, "/host-only"))
 
 
 class PipelineRoutingTests(unittest.TestCase):

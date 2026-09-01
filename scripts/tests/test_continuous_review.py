@@ -130,6 +130,25 @@ class DeliveryCommandTests(TempProject):
         delivery.cmd_delivery({"steps": {}}, value, args)
         self.assertEqual(first, value)
 
+    def test_old_cloud_terminal_can_be_adopted_without_reinit_or_history_loss(self):
+        value = self.live_state("end")
+        value["execution_contract"]["continuous_review"] = False
+        before = list(value["history"])
+        path = self.write_json("migration.json", {
+            "schema": delivery.BATCH_SCHEMA,
+            "mode": "adopt-watch",
+            "batch_id": "migration:task-7",
+        })
+        args = SimpleNamespace(delivery_action="feedback-open", file=path)
+        delivery.cmd_delivery({"steps": {}}, value, args)
+        self.assertEqual("delivery_watch", value["current"])
+        self.assertTrue(value["execution_contract"]["continuous_review"])
+        self.assertEqual(before, value["history"])
+        self.assertFalse(os.path.exists(".mae-flow.json.last"))
+        first = json.loads(json.dumps(value, ensure_ascii=False))
+        delivery.cmd_delivery({"steps": {}}, value, args)
+        self.assertEqual(first, value)
+
     def test_feedback_open_rejects_wrong_base_and_disabled_contract(self):
         value = self.live_state()
         path = self.write_json("wrong.json", batch(base="b" * 40))

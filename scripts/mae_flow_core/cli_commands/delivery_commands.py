@@ -123,10 +123,54 @@ def _history(state, step, result, note):
     })
 
 
+def _adopt_watch(state, payload):
+    """One-way adoption for pre-contract Cloud tasks already awaiting merge."""
+    migration_id = _text(payload.get("batch_id"), "batch_id", 200)
+    contract = state.get("execution_contract") or {}
+    if contract.get("host") != "cloud":
+        _die("只有旧 Cloud 任务可以迁移到持续检视")
+    loop = _loop(state)
+    migrations = loop.setdefault("migrations", [])
+    previous = next((
+        item for item in migrations
+        if isinstance(item, dict) and item.get("migration_id") == migration_id
+    ), None)
+    if previous is not None:
+        print(json.dumps({
+            "schema": STATE_SCHEMA, "idempotent": True,
+            "migration_id": migration_id, "current": state.get("current"),
+        }, ensure_ascii=False))
+        return
+    if state.get("current") != "end":
+        _die("adopt-watch 只接受旧终态 end，当前是 %s"
+             % str(state.get("current") or "?"))
+    head = _head()
+    external = ((state.get("quality") or {}).get("external_verification") or {})
+    if external.get("verdict") != "PASS" or external.get("sha") != head:
+        _die("旧终态没有绑定当前 HEAD 的权威 PASS，不能安全迁移")
+    contract["continuous_review"] = True
+    state["execution_contract"] = contract
+    state["current"] = "delivery_watch"
+    state.setdefault("step_heads", {})["delivery_watch"] = head
+    migrations.append({
+        "migration_id": migration_id,
+        "kind": "terminal-to-delivery-watch",
+        "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "head": head,
+    })
+    api.save_state(state)
+    print(json.dumps({
+        "schema": STATE_SCHEMA, "idempotent": False,
+        "migration_id": migration_id, "current": "delivery_watch",
+    }, ensure_ascii=False))
+
+
 def _open(flow, state, args):
     del flow
-    _capability(state)
     payload = _payload(args.file, BATCH_SCHEMA)
+    if payload.get("mode") == "adopt-watch":
+        return _adopt_watch(state, payload)
+    _capability(state)
     batch_id = _text(payload.get("batch_id"), "batch_id", 200)
     loop = _loop(state)
     previous = _batch(loop, batch_id)

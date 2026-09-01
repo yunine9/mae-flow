@@ -18,7 +18,11 @@ from .wiring import api
 
 PROOF_SCHEMA = "mae-flow-host-proof/1"
 AUTHORITY_SCHEMA = "mae-flow-host-authority/1"
+LIFECYCLE_SCHEMA = "mae-flow-host-lifecycle/2"
+RECEIPT_SCHEMA = "mae-flow-host-receipt/1"
 _RSA_SHA256_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
+# 收据现在只封摘要,恒定几百字节;上限留给"写坏了/被人塞了别的东西"。
+_RECEIPT_LIMIT = 32 * 1024
 
 
 def _die(message):
@@ -164,7 +168,13 @@ def _read_json_file(path, label):
 
 def _proof_payload(path):
     root = _capability_root()
-    absolute = os.path.abspath(path)
+    # 只把**所在目录**解引用,末段保持原样:_secure_file 还要靠它识别
+    # "凭据本身是软链"。原来直接拿 abspath 和 realpath 化过的 root 比,
+    # 只要 <data> 经过任何一层软链就永远不相等——macOS 的 /var 就是
+    # (2026-09-01 实测:一条宿主命令都过不去,报"不在信任根内")。
+    absolute = os.path.join(
+        os.path.realpath(os.path.dirname(os.path.abspath(path))),
+        os.path.basename(path))
     if os.path.dirname(absolute) != root:
         _die("宿主凭据不在 Cloud 宿主信任根内")
     value = _read_json_file(absolute, "宿主凭据")
@@ -269,6 +279,26 @@ def verify_host_proof(state, proof_path, action, payload):
     }
 
 
+def _digest(value):
+    return hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def external_facts(state):
+    """The one normalization both writer and verifier must share."""
+    return ((state.get("quality") or {}).get("external_verification")) or {}
+
+
+def _active_batch(loop):
+    if not isinstance(loop, dict):
+        return None
+    active_id = str(loop.get("active_batch_id") or "")
+    if not active_id:
+        return None
+    return next((item for item in loop.get("batches", [])
+                 if isinstance(item, dict)
+                 and str(item.get("batch_id") or "") == active_id), None)
+
+
 def host_projection(state, action, payload):
     """Seal the complete lifecycle produced by one host mutation.
 
@@ -276,21 +306,28 @@ def host_projection(state, action, payload):
     Agent-written ``current``/``status``.  Every host action therefore seals the
     same indivisible lifecycle projection; later legitimate host actions simply
     emit a newer complete projection.
+
+    2026-09-01 勘误:投影原来把**整份 delivery_loop 与逐条意见正文**封进
+    收据。写盘不限体积、读回限 32 KiB,一轮 12 条 350 字的 MR 检视(内核
+    自己允许单条 4000 字)就越线;之后 feedback-open / feedback-result /
+    pipeline record 乃至 MR 合入后的 close 全部永久失败,而且**制造死锁
+    的那条命令自己报成功**,没有任何命令能救回来(实测复现)。改封摘要:
+    防篡改强度一个字节没松,体积从此恒定。
     """
     if action not in ("feedback-open", "feedback-result", "close",
                       "pipeline-record", "intervention-reconcile"):
         return None
     loop = state.get("delivery_loop")
+    loop = loop if isinstance(loop, dict) else None
     return {
-        "schema": "mae-flow-host-lifecycle/1",
+        "schema": LIFECYCLE_SCHEMA,
         "action": action,
         "current": state.get("current"),
-        "active_batch_id": ((loop or {}).get("active_batch_id")
-                            if isinstance(loop, dict) else None),
-        "delivery_loop": loop if isinstance(loop, dict) else None,
-        "external_verification": ((state.get("quality") or {})
-                                  .get("external_verification")),
-        "user_intervention": state.get("user_intervention"),
+        "active_batch_id": (loop or {}).get("active_batch_id") if loop else None,
+        "delivery_loop_digest": _digest(loop),
+        "active_batch_digest": _digest(_active_batch(loop)),
+        "external_verification_digest": _digest(external_facts(state)),
+        "user_intervention_digest": _digest(state.get("user_intervention")),
     }
 
 
@@ -301,37 +338,93 @@ def _receipt_path(root, task_id, nonce):
     return os.path.join(root, "%s.receipt-%s.json" % (task_hash, nonce))
 
 
-def _write_receipt(context, projection):
+def _stage_receipt(context, projection):
+    """Durably stage the receipt **before** the state it seals is saved.
+
+    2026-09-01 勘误:原来是先 save_state 再落收据。中间失败一次就留下
+    "状态已推进、收据不存在"的账,而所有 trusted_* 都要求存在收据——
+    宿主从此被自己锁在门外。现在先把收据 fsync 到同目录临时文件,
+    状态存住了才原子改名;存不住就把临时文件删掉,不留孤儿收据
+    (孤儿收据会给 Agent 伪造状态提供现成背书)。
+    """
     proof = context["proof"]
     path = _receipt_path(context["root"], proof["task_id"], proof["nonce"])
     record = {
-        "schema": "mae-flow-host-receipt/1",
+        "schema": RECEIPT_SCHEMA,
         "proof": proof,
         "payload": context["payload"],
         "projection": projection,
-        "projection_digest": hashlib.sha256(
-            _canonical(projection).encode("utf-8")).hexdigest(),
+        "projection_digest": _digest(projection),
         "recorded_at": int(time.time()),
     }
+    staged = path + ".staged"
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(_canonical(record) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
     except OSError as exc:
         _die("无法落盘宿主权威收据: %s" % exc)
+    return staged, path
 
 
-def _valid_stored_receipt(state, record, action, projection, root):
-    if not isinstance(record, dict) or record.get("schema") != \
-            "mae-flow-host-receipt/1":
+def _readable_receipt(path):
+    """Read one historical receipt, or ``None`` when it cannot be trusted.
+
+    2026-09-01 勘误:这三个扫描函数原来对每一份历史收据都走严格
+    _read_json_file,权限被动过、体积超限、写坏了任何一条都会 SystemExit
+    掀掉整条宿主命令——反馈、流水线登记、连 MR 合入后的 close 一起永久
+    失败,且无命令可救。鉴权仍旧 fail-closed(签名、载荷摘要、投影逐字
+    比对一个都没松);松掉的只是"读不动的旧文件跳过去接着找"。
+    """
+    try:
+        absolute = os.path.abspath(path)
+        info = os.lstat(absolute)
+        if (stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode)
+                or os.path.realpath(absolute) != absolute
+                or info.st_size > _RECEIPT_LIMIT
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or (hasattr(os, "getuid") and info.st_uid != os.getuid())):
+            return None
+        with open(absolute, "r", encoding="utf-8") as stream:
+            value = json.load(stream)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _scan_receipts(state):
+    """Yield every readable receipt of the bound task, newest name first.
+
+    The authority is resolved once: it is the same public key for every receipt
+    of one task, and hoisting it keeps the per-record loop incapable of dying.
+    """
+    root = _capability_root()
+    task_id = _bound_task_id(root)
+    authority = _trusted_authority(state, {"task_id": task_id}, root)
+    prefix = hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".receipt-"
+    try:
+        names = sorted(os.listdir(root))
+    except OSError as exc:
+        _die("无法读取 Cloud 宿主信任根: %s" % exc)
+    for name in reversed(names):
+        if not name.startswith(prefix) or not name.endswith(".json"):
+            continue
+        record = _readable_receipt(os.path.join(root, name))
+        if record is not None:
+            yield authority, record
+
+
+def _valid_stored_receipt(authority, record, action, projection):
+    if record.get("schema") != RECEIPT_SCHEMA:
         return False
     proof = record.get("proof")
     payload = record.get("payload")
     if not isinstance(proof, dict) or proof.get("action") != action:
         return False
-    authority = _trusted_authority(state, proof, root)
+    if str(proof.get("task_id") or "") != str(authority.get("task_id") or ""):
+        return False
     unsigned = {key: proof.get(key) for key in (
         "schema", "task_id", "action", "payload_digest", "nonce", "issued_at")}
     signature = str(proof.get("signature") or "")
@@ -339,14 +432,10 @@ def _valid_stored_receipt(state, record, action, projection, root):
             or not _verify_rsa_sha256(
                 authority, _canonical(unsigned).encode("utf-8"), signature)):
         return False
-    payload_digest = hashlib.sha256(
-        _canonical(payload).encode("utf-8")).hexdigest()
-    projection_digest = hashlib.sha256(
-        _canonical(projection).encode("utf-8")).hexdigest()
     return (hmac.compare_digest(str(unsigned.get("payload_digest") or ""),
-                                payload_digest)
+                                _digest(payload))
             and hmac.compare_digest(str(record.get("projection_digest") or ""),
-                                    projection_digest)
+                                    _digest(projection))
             and hmac.compare_digest(
                 _canonical(record.get("projection")).encode("utf-8"),
                 _canonical(projection).encode("utf-8")))
@@ -354,19 +443,9 @@ def _valid_stored_receipt(state, record, action, projection, root):
 
 def trusted_projection(state, action, projection):
     """Verify a state projection against a host-only durable receipt."""
-    root = _capability_root()
-    task_id = _bound_task_id(root)
-    prefix = hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".receipt-"
-    for name in reversed(sorted(os.listdir(root))):
-        if not name.startswith(prefix) or not name.endswith(".json"):
-            continue
-        try:
-            record = _read_json_file(
-                os.path.join(root, name), "宿主权威收据")
-            if _valid_stored_receipt(state, record, action, projection, root):
-                return True
-        except SystemExit:
-            raise
+    for authority, record in _scan_receipts(state):
+        if _valid_stored_receipt(authority, record, action, projection):
+            return True
     return False
 
 
@@ -385,25 +464,15 @@ def trusted_pipeline_projection(state, projection):
     projection, while ready/terminal attestations still require a separate
     full-lifecycle receipt for their current state.
     """
-    root = _capability_root()
-    task_id = _bound_task_id(root)
-    prefix = hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".receipt-"
-    for name in reversed(sorted(os.listdir(root))):
-        if not name.startswith(prefix) or not name.endswith(".json"):
-            continue
-        try:
-            record = _read_json_file(
-                os.path.join(root, name), "宿主权威收据")
-            stored = record.get("projection") if isinstance(record, dict) else None
-            if (isinstance(stored, dict)
-                    and _valid_stored_receipt(
-                        state, record, "pipeline-record", stored, root)
-                    and hmac.compare_digest(
-                        _canonical(stored.get("external_verification")).encode("utf-8"),
-                        _canonical(projection).encode("utf-8"))):
-                return True
-        except SystemExit:
-            raise
+    wanted = _digest(projection or {})
+    for authority, record in _scan_receipts(state):
+        stored = record.get("projection")
+        if (isinstance(stored, dict)
+                and hmac.compare_digest(
+                    str(stored.get("external_verification_digest") or ""), wanted)
+                and _valid_stored_receipt(
+                    authority, record, "pipeline-record", stored)):
+            return True
     return False
 
 
@@ -415,41 +484,23 @@ def trusted_active_batch(state, actions):
     """
     loop = state.get("delivery_loop") or {}
     active_id = str(loop.get("active_batch_id") or "")
-    active = next((item for item in loop.get("batches", [])
-                   if isinstance(item, dict)
-                   and str(item.get("batch_id") or "") == active_id), None)
+    active = _active_batch(loop)
     if not active_id or active is None:
         return False
-    root = _capability_root()
-    task_id = _bound_task_id(root)
-    prefix = hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".receipt-"
-    for name in reversed(sorted(os.listdir(root))):
-        if not name.startswith(prefix) or not name.endswith(".json"):
+    wanted = _digest(active)
+    for authority, record in _scan_receipts(state):
+        stored = record.get("projection")
+        if not isinstance(stored, dict):
             continue
-        try:
-            record = _read_json_file(
-                os.path.join(root, name), "宿主权威收据")
-            proof = record.get("proof") if isinstance(record, dict) else None
-            action = str((proof or {}).get("action") or "")
-            stored = record.get("projection") if isinstance(record, dict) else None
-            stored_loop = ((stored or {}).get("delivery_loop")
-                           if isinstance(stored, dict) else None)
-            stored_active = next((
-                item for item in (stored_loop or {}).get("batches", [])
-                if isinstance(item, dict)
-                and str(item.get("batch_id") or "") == active_id
-            ), None) if isinstance(stored_loop, dict) else None
-            if (action in actions
-                    and (stored or {}).get("active_batch_id") == active_id
-                    and stored_active is not None
-                    and hmac.compare_digest(
-                        _canonical(stored_active).encode("utf-8"),
-                        _canonical(active).encode("utf-8"))
-                    and _valid_stored_receipt(
-                        state, record, action, stored, root)):
-                return True
-        except SystemExit:
-            raise
+        proof = record.get("proof")
+        action = str((proof or {}).get("action") or "") \
+            if isinstance(proof, dict) else ""
+        if (action in actions
+                and stored.get("active_batch_id") == active_id
+                and hmac.compare_digest(
+                    str(stored.get("active_batch_digest") or ""), wanted)
+                and _valid_stored_receipt(authority, record, action, stored)):
+            return True
     return False
 
 
@@ -461,9 +512,20 @@ def save_with_host_proof(state, context):
     # prevents the task state growing forever during a long-lived MR.
     if len(consumed) > 256:
         del consumed[:-256]
-    api.save_state(state)
     projection = host_projection(
         state, context["proof"]["action"], context["payload"])
     if projection is None:
         _die("宿主命令没有形成可核对的权威投影")
-    _write_receipt(context, projection)
+    staged, path = _stage_receipt(context, projection)
+    try:
+        api.save_state(state)
+    except BaseException:
+        try:
+            os.unlink(staged)
+        except OSError:
+            pass
+        raise
+    try:
+        os.rename(staged, path)
+    except OSError as exc:
+        _die("无法落盘宿主权威收据: %s" % exc)

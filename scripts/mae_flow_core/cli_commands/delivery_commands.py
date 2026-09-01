@@ -12,9 +12,9 @@ from mae_flow_core.quality.external_repair import (
     clear_feedback_authorization, issue_feedback_authorization)
 from mae_flow_core.workflow.execution_contract import continuous_review_enabled
 from .host_capability import (
-    host_managed_continuous_review, save_with_host_proof,
+    external_facts, host_managed_continuous_review, save_with_host_proof,
     trusted_active_batch, trusted_current_lifecycle, trusted_pipeline_projection,
-    trusted_projection, verify_host_proof)
+    verify_host_proof)
 BATCH_SCHEMA = "mae-flow-feedback-batch/1"
 RESULT_SCHEMA = "mae-flow-feedback-result/1"
 STATE_SCHEMA = "mae-flow-delivery-loop/1"
@@ -435,13 +435,12 @@ def _close(flow, state, args):
         save_with_host_proof(state, proof_nonce)
         print(json.dumps({**previous, "idempotent": True}, ensure_ascii=False))
         return
-    verified = ((state.get("quality") or {}).get("external_verification") or {})
+    verified = external_facts(state)
     verified_sha = str(verified.get("sha") or "")
-    pipeline_trusted = (trusted_pipeline_projection(state, verified)
-                        if host_managed_continuous_review()
-                        else trusted_projection(
-                            state, "pipeline-record", verified))
-    if not pipeline_trusted:
+    # 两条分支原来走的是两个语义不同的函数:else 分支拿"外部验证事实"
+    # 去和"生命周期投影"逐字比对,永远不可能相等——只要走到那条路就是
+    # 必死的 close。收据校验只有一种正确形态,不再留第二条。
+    if not trusted_pipeline_projection(state, verified):
         _die("当前流水线 PASS 没有 Cloud 宿主权威收据，拒绝 close")
     if verified.get("verdict") != "PASS" or args.sha != verified_sha:
         _die("合入源 SHA %s 没有当前权威 PASS 背书（最近验证 %s）"

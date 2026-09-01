@@ -571,8 +571,8 @@ class DeliveryHostProofTests(TempProject):
             value = state("delivery_watch")
             projection = host_capability.host_projection(
                 value, "pipeline-record", {})
-            task_hash = hashlib.sha256(b"task-7").hexdigest()
-            good = os.path.join(trust, "%s.receipt-good.json" % task_hash)
+            prefix = host_capability._receipt_prefix("task-7")
+            good = os.path.join(trust, "%sgood.json" % prefix)
             with open(good, "w", encoding="utf-8") as stream:
                 stream.write(host_capability._canonical({
                     "schema": host_capability.RECEIPT_SCHEMA,
@@ -588,15 +588,15 @@ class DeliveryHostProofTests(TempProject):
                 }))
             os.chmod(good, 0o600)
             # 一份写坏的、一份超限的、一份权限被动过的历史收据。
-            broken = os.path.join(trust, "%s.receipt-broken.json" % task_hash)
+            broken = os.path.join(trust, "%sbroken.json" % prefix)
             with open(broken, "w", encoding="utf-8") as stream:
                 stream.write("{ not json")
             os.chmod(broken, 0o600)
-            huge = os.path.join(trust, "%s.receipt-huge.json" % task_hash)
+            huge = os.path.join(trust, "%shuge.json" % prefix)
             with open(huge, "w", encoding="utf-8") as stream:
                 stream.write("x" * (host_capability._RECEIPT_LIMIT + 1))
             os.chmod(huge, 0o600)
-            loose = os.path.join(trust, "%s.receipt-loose.json" % task_hash)
+            loose = os.path.join(trust, "%sloose.json" % prefix)
             with open(loose, "w", encoding="utf-8") as stream:
                 stream.write("{}")
             os.chmod(loose, 0o644)

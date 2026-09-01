@@ -331,11 +331,21 @@ def host_projection(state, action, payload):
     }
 
 
+def _receipt_prefix(task_id):
+    """Receipts belong to (task, workspace), not to a bare task id.
+
+    信任根是按部署共享的目录:同一个任务号在另一份代码仓里(重建、
+    夹具、诊断克隆)会读到不属于它的历史收据,于是"生命周期投影对不上"
+    ——一单被另一单的陈账挡死。把工作区一起算进归属,串味从此不可能。
+    """
+    identity = "%s\0%s" % (task_id, os.path.realpath(os.getcwd()))
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".receipt-"
+
+
 def _receipt_path(root, task_id, nonce):
     if not all(char.isalnum() or char in "-_" for char in nonce):
         _die("宿主凭据 nonce 格式不合法")
-    task_hash = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
-    return os.path.join(root, "%s.receipt-%s.json" % (task_hash, nonce))
+    return os.path.join(root, "%s%s.json" % (_receipt_prefix(task_id), nonce))
 
 
 def _stage_receipt(context, projection):
@@ -403,7 +413,7 @@ def _scan_receipts(state):
     root = _capability_root()
     task_id = _bound_task_id(root)
     authority = _trusted_authority(state, {"task_id": task_id}, root)
-    prefix = hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".receipt-"
+    prefix = _receipt_prefix(task_id)
     try:
         names = sorted(os.listdir(root))
     except OSError as exc:
@@ -445,6 +455,18 @@ def trusted_projection(state, action, projection):
     """Verify a state projection against a host-only durable receipt."""
     for authority, record in _scan_receipts(state):
         if _valid_stored_receipt(authority, record, action, projection):
+            return True
+    return False
+
+
+def has_receipt_for(state, action):
+    """Whether this task ever produced a valid receipt for one host action."""
+    for authority, record in _scan_receipts(state):
+        proof = record.get("proof")
+        stored = record.get("projection")
+        if (isinstance(proof, dict) and proof.get("action") == action
+                and isinstance(stored, dict)
+                and _valid_stored_receipt(authority, record, action, stored)):
             return True
     return False
 

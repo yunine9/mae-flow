@@ -12,10 +12,11 @@ from mae_flow_core.quality.external_repair import (
     clear_feedback_authorization, issue_feedback_authorization)
 from mae_flow_core.workflow.execution_contract import continuous_review_enabled
 from .host_capability import (
-    external_facts, has_host_receipt, has_receipt_for,
-    host_managed_continuous_review,
-    save_with_host_proof, trusted_active_batch, trusted_current_lifecycle,
-    trusted_pipeline_projection, verify_host_proof)
+    host_managed_continuous_review, verify_host_proof)
+from .host_receipts import (
+    external_facts, has_host_receipt, has_receipt_for, save_with_host_proof,
+    trusted_active_batch, trusted_current_lifecycle,
+    trusted_pipeline_projection)
 BATCH_SCHEMA = "mae-flow-feedback-batch/1"
 RESULT_SCHEMA = "mae-flow-feedback-result/1"
 STATE_SCHEMA = "mae-flow-delivery-loop/1"

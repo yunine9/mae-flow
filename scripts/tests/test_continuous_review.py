@@ -28,6 +28,7 @@ from mae_flow_core.cli_commands.pipeline_commands import (  # noqa: E402
 )
 from mae_flow_core.cli_commands.host_capability import verify_host_proof  # noqa: E402
 from mae_flow_core.cli_commands import host_capability  # noqa: E402
+from mae_flow_core.cli_commands import host_receipts  # noqa: E402
 from mae_flow_core.workflow.execution_contract import SCHEMA  # noqa: E402
 
 
@@ -438,9 +439,9 @@ class DeliveryHostProofTests(TempProject):
         value["quality"] = {"external_verification": {
             "verdict": "PASS", "sha": HEAD,
         }}
-        projection = host_capability.host_projection(
+        projection = host_receipts.host_projection(
             value, "pipeline-record", {})
-        self.assertEqual(host_capability.LIFECYCLE_SCHEMA, projection["schema"])
+        self.assertEqual(host_receipts.LIFECYCLE_SCHEMA, projection["schema"])
         self.assertEqual("delivery_watch", projection["current"])
         self.assertEqual("fb-1", projection["active_batch_id"])
         # 封的是摘要不是正文,但每一处篡改仍然照样翻脸。
@@ -458,7 +459,7 @@ class DeliveryHostProofTests(TempProject):
             mutate(tampered)
             self.assertNotEqual(
                 projection,
-                host_capability.host_projection(tampered, "pipeline-record", {}))
+                host_receipts.host_projection(tampered, "pipeline-record", {}))
 
     def test_receipt_size_stays_constant_under_heavy_feedback(self):
         """一轮量大但完全合法的检视不得把收据撑过读取上限。
@@ -489,10 +490,10 @@ class DeliveryHostProofTests(TempProject):
         }
         raw = len(host_capability._canonical(
             value["delivery_loop"]).encode("utf-8"))
-        projection = host_capability.host_projection(
+        projection = host_receipts.host_projection(
             value, "feedback-result", {})
         sealed = len(host_capability._canonical(projection).encode("utf-8"))
-        self.assertGreater(raw, host_capability._RECEIPT_LIMIT,
+        self.assertGreater(raw, host_receipts._RECEIPT_LIMIT,
                            "夹具本身必须真的超过读取上限才算复现")
         self.assertLess(sealed, 2048,
                         "投影体积必须与反馈数量无关，否则收据迟早读不回来")
@@ -517,11 +518,11 @@ class DeliveryHostProofTests(TempProject):
                 host_capability._canonical(projection).encode("utf-8")).hexdigest(),
         }
         with mock.patch.object(
-                host_capability, "_verify_rsa_sha256", return_value=True):
-            self.assertTrue(host_capability._valid_stored_receipt(
+                host_receipts, "_verify_rsa_sha256", return_value=True):
+            self.assertTrue(host_receipts._valid_stored_receipt(
                 {"task_id": "task-7"}, record, "feedback-result", projection))
             # 收据绑的是这一把公钥所属的任务，换个任务立刻不认。
-            self.assertFalse(host_capability._valid_stored_receipt(
+            self.assertFalse(host_receipts._valid_stored_receipt(
                 {"task_id": "task-8"}, record, "feedback-result", projection))
 
     def test_proof_reaching_the_trust_root_through_a_symlink_is_accepted(self):
@@ -569,22 +570,22 @@ class DeliveryHostProofTests(TempProject):
         root, old, trust, _authority = self.trusted_layout()
         try:
             value = state("delivery_watch")
-            projection = host_capability.host_projection(
+            projection = host_receipts.host_projection(
                 value, "pipeline-record", {})
-            prefix = host_capability._receipt_prefix("task-7")
+            prefix = host_receipts._receipt_prefix("task-7")
             good = os.path.join(trust, "%sgood.json" % prefix)
             with open(good, "w", encoding="utf-8") as stream:
                 stream.write(host_capability._canonical({
-                    "schema": host_capability.RECEIPT_SCHEMA,
+                    "schema": host_receipts.RECEIPT_SCHEMA,
                     "proof": {
                         "schema": host_capability.PROOF_SCHEMA,
                         "task_id": "task-7", "action": "pipeline-record",
-                        "payload_digest": host_capability._digest({}),
+                        "payload_digest": host_receipts._digest({}),
                         "nonce": "good", "issued_at": 0, "signature": "signed",
                     },
                     "payload": {},
                     "projection": projection,
-                    "projection_digest": host_capability._digest(projection),
+                    "projection_digest": host_receipts._digest(projection),
                 }))
             os.chmod(good, 0o600)
             # 一份写坏的、一份超限的、一份权限被动过的历史收据。
@@ -594,22 +595,22 @@ class DeliveryHostProofTests(TempProject):
             os.chmod(broken, 0o600)
             huge = os.path.join(trust, "%shuge.json" % prefix)
             with open(huge, "w", encoding="utf-8") as stream:
-                stream.write("x" * (host_capability._RECEIPT_LIMIT + 1))
+                stream.write("x" * (host_receipts._RECEIPT_LIMIT + 1))
             os.chmod(huge, 0o600)
             loose = os.path.join(trust, "%sloose.json" % prefix)
             with open(loose, "w", encoding="utf-8") as stream:
                 stream.write("{}")
             os.chmod(loose, 0o644)
             with mock.patch.object(
-                    host_capability, "_verify_rsa_sha256", return_value=True):
-                self.assertTrue(host_capability.trusted_projection(
+                    host_receipts, "_verify_rsa_sha256", return_value=True):
+                self.assertTrue(host_receipts.trusted_projection(
                     value, "pipeline-record", projection))
-                self.assertTrue(host_capability.trusted_pipeline_projection(
-                    value, host_capability.external_facts(value)))
+                self.assertTrue(host_receipts.trusted_pipeline_projection(
+                    value, host_receipts.external_facts(value)))
                 # 跳过坏件不等于放行伪证:签名不过照样是 False。
                 with mock.patch.object(
-                        host_capability, "_verify_rsa_sha256", return_value=False):
-                    self.assertFalse(host_capability.trusted_projection(
+                        host_receipts, "_verify_rsa_sha256", return_value=False):
+                    self.assertFalse(host_receipts.trusted_projection(
                         value, "pipeline-record", projection))
         finally:
             os.chdir(old)

@@ -107,7 +107,11 @@ def _stage_receipt(context, projection):
     record = {
         "schema": RECEIPT_SCHEMA,
         "proof": proof,
-        "payload": context["payload"],
+        # 只留摘要。原来这里逐字存整份 payload——一批 12 条 350 字的
+        # 检视意见就把收据顶到 16 KiB,和当初封整份 delivery_loop 是
+        # 同一个体积漏口。摘要够用:proof 已被签名绑住 payload_digest,
+        # 载荷原文本来就在任务状态与事实文件里。
+        "payload_digest": _digest(context["payload"]),
         "projection": projection,
         "projection_digest": _digest(projection),
         "recorded_at": int(time.time()),
@@ -175,7 +179,6 @@ def _valid_stored_receipt(authority, record, action, projection):
     if record.get("schema") != RECEIPT_SCHEMA:
         return False
     proof = record.get("proof")
-    payload = record.get("payload")
     if not isinstance(proof, dict) or proof.get("action") != action:
         return False
     if str(proof.get("task_id") or "") != str(authority.get("task_id") or ""):
@@ -187,8 +190,10 @@ def _valid_stored_receipt(authority, record, action, projection):
             or not _verify_rsa_sha256(
                 authority, _canonical(unsigned).encode("utf-8"), signature)):
         return False
-    return (hmac.compare_digest(str(unsigned.get("payload_digest") or ""),
-                                _digest(payload))
+    # 载荷摘要以**被签名的那份**为准;收据里那份只是同一事实的副本,
+    # 两者必须一致,谁也不能单独改。
+    return (hmac.compare_digest(str(record.get("payload_digest") or ""),
+                                str(unsigned.get("payload_digest") or ""))
             and hmac.compare_digest(str(record.get("projection_digest") or ""),
                                     _digest(projection))
             and hmac.compare_digest(

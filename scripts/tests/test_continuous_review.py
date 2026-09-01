@@ -512,7 +512,7 @@ class DeliveryHostProofTests(TempProject):
         record = {
             "schema": "mae-flow-host-receipt/1",
             "proof": proof,
-            "payload": payload,
+            "payload_digest": host_receipts._digest(payload),
             "projection": projection,
             "projection_digest": hashlib.sha256(
                 host_capability._canonical(projection).encode("utf-8")).hexdigest(),
@@ -583,7 +583,7 @@ class DeliveryHostProofTests(TempProject):
                         "payload_digest": host_receipts._digest({}),
                         "nonce": "good", "issued_at": 0, "signature": "signed",
                     },
-                    "payload": {},
+                    "payload_digest": host_receipts._digest({}),
                     "projection": projection,
                     "projection_digest": host_receipts._digest(projection),
                 }))

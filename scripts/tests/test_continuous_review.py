@@ -259,6 +259,26 @@ class FeedbackAuthorizationTests(unittest.TestCase):
         self.assertIn("extra.py", messages[0])
         self.assertNotIn("target/a.o", messages[0])
 
+    def test_named_conflict_path_can_cross_baseline_dirty_but_neighbors_cannot(self):
+        value = state("feedback_triage")
+        value["delivery_loop"] = {
+            "schema": delivery.STATE_SCHEMA,
+            "active_batch_id": "fb-conflict",
+            "batches": [{"batch_id": "fb-conflict", "status": "repairing"}],
+        }
+        value["delivery_repair_authorization"] = {
+            "schema": "mae-flow-feedback-repair/1", "status": "ready",
+            "batch_id": "fb-conflict", "base_sha": HEAD,
+            "baseline_dirty": ["src/conflict.py", "user.txt"],
+            "allowed_paths": ["src/conflict.py"],
+        }
+        from mae_flow_core.quality.external_repair import eligible_repair_paths
+        self.assertEqual(
+            ("src/conflict.py",),
+            eligible_repair_paths(value, HEAD,
+                                  ("src/conflict.py", "user.txt")),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

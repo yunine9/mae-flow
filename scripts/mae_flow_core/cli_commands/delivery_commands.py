@@ -223,7 +223,8 @@ def _open(flow, state, args):
         loop["active_batch_id"] = batch_id
         issue_feedback_authorization(
             state, batch_id=batch_id, base_sha=base_sha,
-            at=record["opened_at"], dirty_paths=api._dirty_paths())
+            at=record["opened_at"], dirty_paths=api._dirty_paths(),
+            allowed_paths=(item.get("file", "") for item in items))
         if old in _WAITING:
             state["current"] = "feedback_triage"
             state.setdefault("step_heads", {})["feedback_triage"] = head
@@ -259,7 +260,9 @@ def _promote(state, loop):
     loop["active_batch_id"] = queued["batch_id"]
     issue_feedback_authorization(
         state, batch_id=queued["batch_id"], base_sha=queued["base_sha"],
-        at=queued.get("opened_at", ""), dirty_paths=api._dirty_paths())
+        at=queued.get("opened_at", ""), dirty_paths=api._dirty_paths(),
+        allowed_paths=(item.get("file", "")
+                       for item in queued.get("items", [])))
     return queued
 
 

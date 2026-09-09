@@ -341,11 +341,13 @@ def _result(flow, state, args):
     payload = _payload(args.file, RESULT_SCHEMA)
     proof_nonce = _verify_host_proof(state, args, "feedback-result", payload)
     _capability(state)
-    if (host_managed_continuous_review()
-            and not trusted_active_batch(state, (
-                "feedback-open", "pipeline-record", "feedback-result",
-                "selection-reconcile"))):
-        _die("登记结果前的反馈生命周期没有宿主收据，拒绝接着可篡改状态推进")
+    if host_managed_continuous_review():
+        # A successfully closed batch has no active writer. Its signed final
+        # lifecycle is the predecessor for replay, not a missing active batch.
+        checker = (trusted_active_batch if (state.get("delivery_loop") or {}).get("active_batch_id")
+                   else trusted_current_lifecycle)
+        if not checker(state, ("feedback-open", "pipeline-record", "feedback-result", "selection-reconcile")):
+            _die("登记结果前的反馈生命周期没有宿主收据，拒绝接着可篡改状态推进")
     batch_id = _text(payload.get("batch_id"), "batch_id", 200)
     loop = _loop(state)
     batch = _batch(loop, batch_id)

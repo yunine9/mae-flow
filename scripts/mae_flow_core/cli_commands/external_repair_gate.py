@@ -37,13 +37,10 @@ def gate_repair_commit(state, candidate_snapshot, die_rule):
     # file contents. The actual commit snapshot must still be deletion-only.
     deleted = {api._repo_path_identity(path)
                for path in candidate_snapshot.get("deleted_paths", ())}
-    working = {api._repo_path_identity(path)
-               for path in candidate_snapshot.get("working_paths", ())}
-    if any(is_process_document(path) and (path not in deleted or path in working)
-           for path in actual):
+    if any(is_process_document(path) and path not in deleted for path in actual):
         die_rule("bash-external-repair-process",
                  "过程文件修复只允许撤出 Git 跟踪，不允许新增或修改其入库内容。"
-                 "请先 git rm --cached -- <精确路径>，再单独提交已暂存的删除。")
+                 "本次授权要求撤出文件，请保留其从 Git 跟踪中删除的结果。")
     if not allowed:
         die_rule(
             "bash-external-repair-empty",

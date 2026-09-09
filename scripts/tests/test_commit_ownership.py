@@ -163,6 +163,8 @@ class CommitOwnershipTests(unittest.TestCase):
         command = 'git commit -m "[REQ123][fix]remove runtime tracking" 2>&1 | head'
         result = self.gate_bash(command)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        result = self.gate_bash('git commit -am "[REQ123][fix]remove runtime tracking"')
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         git(self.repo, "commit", "-qm", "[REQ123][fix]remove runtime tracking")
         self.assertTrue(os.path.isfile(os.path.join(self.repo, path)))
         self.assertEqual("", git(self.repo, "ls-files", "--", path))

@@ -382,7 +382,8 @@ class NativeGuidanceLoaderTests(unittest.TestCase):
 
         text = native_module(self).load_native_guidance("review")
         prompt = text.split("### 检视子 Agent 提示\n", 1)[1].strip()
-        task = {"subagent_type": "general-purpose",
+        self.assertIn("subagent_type: design-consistency-review", text)
+        task = {"subagent_type": "design-consistency-review",
                 "description": "设计与实现一致性检视", "prompt": prompt}
         self.assertEqual("", agent_kind(task),
                          "实际检视提示不能误触已退役角色的任务卡要求")
